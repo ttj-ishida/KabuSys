@@ -1,158 +1,169 @@
 # KabuSys
 
-KabuSys は日本株の自動売買システム向けに設計された Python パッケージの骨組み（スキャフォールド）です。モジュール構成を分離しているため、データ取得、売買ロジック（ストラテジー）、注文実行、監視の各機能を独立して実装・テストできます。
+日本株自動売買システムのための軽量パッケージ（骨組み）。  
+このリポジトリはシステムを構成する主要コンポーネント（データ取得、戦略、注文実行、モニタリング）の雛形を提供します。
 
-現在のバージョン: 0.1.0
+バージョン: 0.1.0
+
+---
+
+## プロジェクト概要
+
+KabuSys は日本株の自動売買システム構築のためのモジュール化されたパッケージ雛形です。  
+各機能（データ取得、戦略、注文実行、モニタリング）を分離して実装できるように設計されており、具体的なブローカーAPIや戦略ロジックは各モジュール内で実装します。
+
+目的：
+- 自動売買アルゴリズムの開発／テストを容易にする雛形を提供する
+- コンポーネントを分離して保守性を高める
+- 実装例を各チーム・個人に合わせて拡張しやすくする
 
 ---
 
 ## 機能一覧（想定）
 
-このリポジトリは基本的なパッケージ構成のみを提供します。以下は各サブパッケージに期待される機能例です：
+- data: 市場データの取得・整形（板情報、約定履歴、日次/分次OHLC 等）
+- strategy: 売買戦略の定義とシグナル生成
+- execution: ブローカーAPIを通した注文送信・約定管理（成行/指値/キャンセル 等）
+- monitoring: ログ、パフォーマンス指標、アラート、ダッシュボード連携
 
-- data
-  - 市場データの取得（ティック・板・OHLC 等）
-  - 歴史データ（CSV / DB からのロード）
-  - データ前処理（リサンプリング、欠損処理）
-- strategy
-  - 売買ロジックの実装（シグナル生成）
-  - パラメータ管理・バックテスト用インターフェース
-- execution
-  - 注文送信（API 実装、発注・取消・約定管理）
-  - 発注ルール（成行・指値・注文サイズ管理）
-- monitoring
-  - ログ・メトリクス収集
-  - ダッシュボードやアラートの統合
-
-※ 現状のコードベースでは各サブパッケージは空のプレースホルダになっています。ここを拡張して実装してください。
+※ 現状はモジュールの雛形のみです。各モジュール内部に具体的な実装（APIクライアント、戦略クラスなど）を追加してください。
 
 ---
 
 ## セットアップ手順
 
-推奨環境: Python 3.8 以上
+前提
+- Python 3.8 以上を推奨
+- 仮想環境の利用を推奨（venv / conda 等）
+
+手順例（Unix 系 / Windows PowerShell での一般的な流れ）:
 
 1. リポジトリをクローン
-   ```
-   git clone <このリポジトリのURL>
-   cd <リポジトリ名>
-   ```
+   - git clone <REPO_URL>
+   - cd <repo>
 
-2. 仮想環境の作成（任意だが推奨）
-   - macOS / Linux
-     ```
-     python -m venv .venv
-     source .venv/bin/activate
-     ```
-   - Windows (PowerShell)
-     ```
-     python -m venv .venv
-     .\.venv\Scripts\Activate.ps1
-     ```
+2. 仮想環境作成・有効化（例: venv）
+   - python -m venv .venv
+   - Unix/macOS: source .venv/bin/activate
+   - Windows(PowerShell): .venv\Scripts\Activate.ps1
 
-3. 開発インストール
-   ```
-   pip install -e .
-   ```
-   - 依存パッケージがあれば `requirements.txt` を追加して `pip install -r requirements.txt` を実行してください。
+3. 依存関係のインストール
+   - requirements.txt があれば: pip install -r requirements.txt
+   - （現状では依存ファイルが含まれていないため、必要なライブラリをプロジェクトに応じて追加してください）
 
-4. （任意）ビルドやパッケージ作成
-   ```
-   pip install build
-   python -m build
-   ```
+4. ローカルで使う方法（パッケージとして扱う / 開発モード）
+   - プロジェクトをパッケージ化している場合:
+     - pip install -e .
+   - パッケージ化していない場合（簡易）:
+     - PYTHONPATH を設定して src を参照させる
+       - Unix/macOS: export PYTHONPATH=$(pwd)/src:$PYTHONPATH
+       - Windows(PowerShell): $env:PYTHONPATH = (Resolve-Path .\src).Path + ";" + $env:PYTHONPATH
 
 ---
 
-## 使い方（簡単な例）
+## 使い方（基本例）
 
-インストール後、パッケージのバージョンやサブパッケージをインポートできます。
+まずはパッケージを import してバージョンやモジュールが読み込めることを確認します。
+
+Python シェルやスクリプトで:
 
 ```python
 import kabusys
-
 print(kabusys.__version__)   # 0.1.0
 
-# サブパッケージ（現状はプレースホルダ）
 import kabusys.data
 import kabusys.strategy
 import kabusys.execution
 import kabusys.monitoring
 ```
 
-開発者が実装する際の基本的なフローの例（擬似コード）:
+各モジュールは雛形として存在するため、以下のような役割でクラスや関数を実装してください（例は設計例）:
 
-- データ取得
-  - kabusys.data で価格・板情報を取得
-- シグナル生成
-  - kabusys.strategy にて売買シグナルを生成
-- 注文実行
-  - kabusys.execution を通じて証券会社 API へ注文送信
-- 監視
-  - kabusys.monitoring でログやアラートを集約
+- data モジュールの例（擬似コード）
+  - MarketDataClient クラス: get_ohlc(symbol, timeframe), get_ticker(symbol) など
 
-各サブパッケージにクラスやインターフェースを定義して、依存を最小化する設計を推奨します（例えば StrategyInterface、ExecutionClientInterface など）。
+- strategy モジュールの例
+  - BaseStrategy クラス: on_bar(bar)、generate_signals() などを実装し、派生クラスでロジック実装
+
+- execution モジュールの例
+  - ExecutionClient クラス: send_order(order)、cancel_order(order_id)、get_positions() などを実装（kabuステーション等のAPIラッパー）
+
+- monitoring モジュールの例
+  - Monitor クラス: log_trade(trade)、export_metrics()、raise_alert() など
+
+サンプルワークフロー（擬似コード）:
+
+```python
+# 1. データ取得
+md = kabusys.data.MarketDataClient(...)
+bars = md.get_ohlc("7203.T", timeframe="1m", count=100)
+
+# 2. 戦略実行
+strategy = MyStrategy(...)
+signals = strategy.generate_signals(bars)
+
+# 3. 注文実行
+exec_client = kabusys.execution.ExecutionClient(...)
+for sig in signals:
+    exec_client.send_order(sig)
+
+# 4. モニタリング
+monitor = kabusys.monitoring.Monitor(...)
+monitor.log_trade(...)
+```
+
+注: 上記クラスはサンプルであり、実装は本リポジトリの各モジュールに追加してください。
 
 ---
 
 ## ディレクトリ構成
 
-リポジトリ内の主要ファイル・ディレクトリ構成（現状）
+現状の主要ファイル/ディレクトリ構成（抜粋）:
 
 - src/
   - kabusys/
-    - __init__.py
+    - __init__.py        # パッケージのエントリ（version, __all__）
     - data/
-      - __init__.py
+      - __init__.py      # data モジュール（市場データ取得）
     - strategy/
-      - __init__.py
+      - __init__.py      # strategy モジュール（戦略ロジック）
     - execution/
-      - __init__.py
+      - __init__.py      # execution モジュール（注文送信）
     - monitoring/
-      - __init__.py
+      - __init__.py      # monitoring モジュール（ログ・監視）
 
-ファイル一覧（抜粋）:
-- src/kabusys/__init__.py
-  - パッケージメタ情報（__version__、__all__）
-- src/kabusys/data/__init__.py
-  - データ取得・管理用モジュール（実装場所）
-- src/kabusys/strategy/__init__.py
-  - ストラテジー実装用モジュール（実装場所）
-- src/kabusys/execution/__init__.py
-  - 注文実行・API ラッパー（実装場所）
-- src/kabusys/monitoring/__init__.py
-  - 監視・ロギング（実装場所）
+（ルートに README.md やライセンス、セットアップファイル等を置くことを推奨します）
 
----
+ツリー（テキスト表現）:
 
-## 拡張ガイド（実装のヒント）
-
-- 各サブパッケージにインターフェースを用意する
-  - 例: data.Provider, strategy.Strategy, execution.Client, monitoring.Backend
-- テストを充実させる
-  - 単体テスト（pytest など）で各コンポーネントを分離して検証
-- シークレット（APIキー等）は環境変数や Vault で管理
-- 本番運用では以下を考慮
-  - 再接続・リトライロジック
-  - 注文の冪等性・二重発注防止
-  - フェイルセーフ（全ポジション強制クローズの仕組み）
+src/
+└─ kabusys/
+   ├─ __init__.py
+   ├─ data/
+   │  └─ __init__.py
+   ├─ strategy/
+   │  └─ __init__.py
+   ├─ execution/
+   │  └─ __init__.py
+   └─ monitoring/
+      └─ __init__.py
 
 ---
 
-## 貢献
+## 開発ガイド（短く）
 
-バグ報告や機能追加の提案、プルリクエストは歓迎します。README の充実、テスト追加、ドキュメント整備などでも貢献できます。
-
-提案フロー:
-1. Issue を立てる（目的・変更点を明記）
-2. フォーク -> ブランチ作成 -> 変更 -> テスト -> PR
-
----
-
-## ライセンス
-
-デフォルトでは明記していません。公開する場合は適切な OSS ライセンス（MIT、Apache-2.0 等）を選んで LICENSE ファイルを追加してください。
+- 各モジュールは責務を分離して実装する（例: API 呼び出しは data/execution、アルゴリズムは strategy、状態管理や可視化は monitoring）
+- 単体テストを作成して戦略ロジックや注文処理の重要部分を検証する
+- 実際の資金を動かす前に、バックテスト・フォワードテスト・ペーパートレードで十分に検証する
+- 機密情報（APIキー等）は環境変数や安全なシークレット管理に格納する
 
 ---
 
-この README は現状の最小構成パッケージをもとにしたガイドラインです。各サブパッケージに具体的な実装を追加してプロジェクトを完成させてください。
+## 貢献・連絡
+
+- バグ報告や改善提案は Issue を立ててください
+- プルリクエスト歓迎（実装内容にはテストとドキュメントを添えてください）
+
+---
+
+作成済みの雛形から実際の自動売買システムに拡張する際は、取引所／ブローカーのAPI仕様やリスク管理、法令遵守（金融商品取引法等）を必ず確認してください。
