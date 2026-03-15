@@ -11,6 +11,8 @@ permissions:
 jobs:
   testgen:
 
+    if: github.event_name == 'pull_request'
+
     runs-on: ubuntu-latest
 
     steps:
@@ -18,11 +20,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GH_PAT }}
-          ref: ${{ github.head_ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - run: pip install openai
 
@@ -34,9 +42,14 @@ jobs:
           python .github/scripts/ai_testgen.py
 
       - name: Commit tests
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          git config user.name "ai-bot"
+          git config user.name "ai-testgen[bot]"
           git config user.email "bot@example.com"
           git add tests/test_generated.py
-          git commit -m "AI generated tests" || echo "no changes"
-          git push origin HEAD:${{ github.head_ref }}
+          git diff --cached --quiet && echo "no changes" && exit 0
+          git commit -m "AI generated tests [skip ci]"
+          git fetch origin "$HEAD_REF"
+          git rebase origin/"$HEAD_REF" || true
+          git push --force-with-lease origin HEAD:"$HEAD_REF"
