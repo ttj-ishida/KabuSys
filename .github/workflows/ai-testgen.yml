@@ -42,7 +42,7 @@ jobs:
       - name: Generate tests
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL_TEST || 'gpt-4o-mini' }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL_TEST || 'gpt-5-mini' }}
         run: |
           python .github/scripts/ai_testgen.py
 
