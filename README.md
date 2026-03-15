@@ -1,165 +1,144 @@
 # KabuSys
 
-KabuSys は日本株の自動売買システム向けの軽量な Python パッケージの雛形です。モジュールを分割しており、データ取得、売買戦略、注文実行、監視（モニタリング）をそれぞれの責務として設計できます。本リポジトリはシステム設計の出発点（ボイラープレート）を提供します。
+KabuSys は日本株の自動売買システムのための軽量な Python パッケージの雛形です。  
+（現バージョン: 0.1.0）
 
-バージョン: 0.1.0
+このリポジトリは、データ取得、売買戦略、注文実行、監視の4 つの主要コンポーネントに分割された構造を提供します。実運用用のロジックは各モジュールを拡張して実装してください。
 
 ---
 
-## 機能一覧
+## 主な機能
 
-現在のリポジトリはパッケージ構成のみを提供します。各モジュールは拡張して実装することを想定しています。
-
-- パッケージ分割（モジュール）
-  - data: 市場データの取得・キャッシュ・前処理を行う場所
-  - strategy: 売買戦略（シグナル生成）を実装する場所
-  - execution: ブローカーや証券会社APIと連携して注文を発行する場所
-  - monitoring: ログ、アラート、ダッシュボード等の監視機能を実装する場所
-- パッケージメタ情報（バージョン情報）
-- 拡張しやすいプロジェクト構成（開発・テスト用のベース）
-
-注意: 現時点では各モジュールに具体実装は含まれていません。実際の売買ロジックや外部API連携はユーザが実装してください。
+- モジュール分割されたアーキテクチャ
+  - data: 市場データの取得・整形を担当
+  - strategy: 売買シグナルの生成を担当
+  - execution: 注文の送信・管理を担当
+  - monitoring: ログ、メトリクス、状態監視を担当
+- パッケージ化された構造（src配下）
+- 拡張・テストしやすい設計の雛形
 
 ---
 
 ## セットアップ手順
 
-1. リポジトリをクローン（ローカルにコピー）
-   ```
-   git clone <REPO_URL>
-   cd <REPO_DIR>
+以下はローカル開発環境での基本的なセットアップ手順の例です。
+
+1. Python 環境を準備（例: venv）
+
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate   # macOS / Linux
+   .venv\Scripts\activate      # Windows
    ```
 
-2. Python 仮想環境の作成・有効化（例: venv）
-   - macOS / Linux
-     ```
-     python3 -m venv .venv
-     source .venv/bin/activate
-     ```
-   - Windows (PowerShell)
-     ```
-     python -m venv .venv
-     .\.venv\Scripts\Activate.ps1
-     ```
+2. 必要なパッケージがあれば `requirements.txt`／`pyproject.toml` に従ってインストールします。現状は依存関係の定義がないため空でも問題ありません。
 
-3. 開発インストール
+   ```bash
+   pip install -U pip setuptools
+   # 例: pip install -r requirements.txt
    ```
+
+3. 開発中はパッケージを editable モードでインストールすると便利です（プロジェクトに pyproject.toml / setup.py がある前提）。
+
+   ```bash
    pip install -e .
    ```
-   依存パッケージがある場合は `requirements.txt` または `pyproject.toml` / `setup.cfg` に記載してインストールしてください。
 
-4. （任意）テスト用パッケージのインストール
-   ```
-   pip install pytest
-   ```
+   もしパッケージ化していない場合は、プロジェクトのルートから Python のパスに `src` を追加して import できるようにしてください。
 
 ---
 
 ## 使い方（基本例）
 
-パッケージは次のようにインポートして使用します。まずはバージョンの確認やモジュールの存在確認から始めます。
+パッケージをインストールすると、Python から次のように利用できます。
 
 ```python
 import kabusys
 
-print(kabusys.__version__)  # "0.1.0"
+print(kabusys.__version__)  # 0.1.0
+
+# サブパッケージを参照
+import kabusys.data
+import kabusys.strategy
+import kabusys.execution
+import kabusys.monitoring
 ```
 
-モジュールの雛形を拡張して使う例（擬似コード）:
+各モジュールは現状は空のパッケージですが、以下のようなインターフェースを実装することを想定しています。
 
-- data モジュールにデータ取得クラスを実装する
-  ```python
-  # src/kabusys/data/market.py
-  class MarketDataClient:
-      def __init__(self, api_key):
-          self.api_key = api_key
+- data
+  - 例: fetch_price(symbol, start, end) -> pandas.DataFrame
+- strategy
+  - 例: class Strategy: def generate_signals(df) -> signals
+- execution
+  - 例: class Broker: def place_order(order) / def cancel_order(id)
+- monitoring
+  - 例: metrics, ログ出力, ヘルスチェック
 
-      def fetch_price(self, symbol):
-          # 外部API呼び出しやデータ整形を実装
-          return 1000.0
-  ```
+簡単な利用例（擬似コード）：
 
-- strategy モジュールに戦略を実装する
-  ```python
-  # src/kabusys/strategy/simple.py
-  class SimpleStrategy:
-      def generate_signal(self, price):
-          # シンプルな売買シグナルの例
-          if price < 900:
-              return "BUY"
-          elif price > 1100:
-              return "SELL"
-          return "HOLD"
-  ```
+```python
+from kabusys.data import PriceFetcher
+from kabusys.strategy import MyStrategy
+from kabusys.execution import Broker
+from kabusys.monitoring import Monitor
 
-- execution モジュールに注文実行処理を実装する
-  ```python
-  # src/kabusys/execution/client.py
-  class ExecutionClient:
-      def place_order(self, symbol, side, qty):
-          # ブローカーAPIへ注文を送信する実装
-          return {"order_id": "abc123", "status": "accepted"}
-  ```
+# 1) データ取得
+prices = PriceFetcher().fetch_price("7203.T", "2023-01-01", "2023-03-01")
 
-- monitoring モジュールにログやアラート処理を実装する
-  ```python
-  # src/kabusys/monitoring/logger.py
-  import logging
-  logger = logging.getLogger("kabusys")
-  ```
+# 2) シグナル作成
+signals = MyStrategy().generate_signals(prices)
 
-これらを組み合わせて、メインのトレードループやワークフローを実装します。
+# 3) 注文実行
+broker = Broker()
+for sig in signals:
+    broker.place_order(sig)
 
-注意: 実際にプロダクションで売買を行う場合は、APIキー管理、リスク管理、フェールセーフ、注文の冪等性、ログ保存、監査、テストを必ず導入してください。
+# 4) モニタリング
+Monitor().report()
+```
+
+（上記クラスは実装例です。用途に合わせて実装してください。）
 
 ---
 
 ## ディレクトリ構成
 
-本リポジトリの主要ファイルとフォルダは次の通りです。
+現在の主要ファイル構成は以下の通りです。
 
-- src/
-  - kabusys/
-    - __init__.py         : パッケージ宣言（バージョン等）
-    - data/
-      - __init__.py       : データ取得周りのモジュール配置場所
-    - strategy/
-      - __init__.py       : 戦略実装の配置場所
-    - execution/
-      - __init__.py       : 注文実行ロジックの配置場所
-    - monitoring/
-      - __init__.py       : 監視・ロギング・メトリクスの配置場所
+```
+.
+├─ src/
+│  └─ kabusys/
+│     ├─ __init__.py            # パッケージ定義、バージョン情報
+│     ├─ data/
+│     │  └─ __init__.py
+│     ├─ strategy/
+│     │  └─ __init__.py
+│     ├─ execution/
+│     │  └─ __init__.py
+│     └─ monitoring/
+│        └─ __init__.py
+```
 
-ファイルの現在の最小構成（抜粋）:
-```
-src/kabusys/__init__.py         # "KabuSys - 日本株自動売買システム"
-src/kabusys/data/__init__.py
-src/kabusys/strategy/__init__.py
-src/kabusys/execution/__init__.py
-src/kabusys/monitoring/__init__.py
-```
+- src/kabusys/__init__.py にパッケージのメタ情報（__version__ 等）が定義されています。
+- 各サブパッケージは現状空のテンプレートです。ここに機能を実装していきます。
 
 ---
 
-## 開発ガイドライン（簡易）
+## 開発・拡張のヒント
 
-- 新しいモジュールやクラスを作る場合は、それぞれのサブパッケージ（data, strategy, execution, monitoring）に追加してください。
-- 単体テストは pytest 等を用いて `tests/` フォルダに配置して実行してください。
-- APIキーや機密情報は環境変数やシークレットマネージャーで管理し、コードやリポジトリに直書きしないでください。
-- 実際の注文発行はテスト環境やペーパートレードで十分に検証した上で有効化してください。
-
-例: ローカルテスト実行
-```
-pytest tests/
-```
+- 各サブパッケージは単一責任に従って実装してください（データ取得・戦略・実行・監視の分離）。
+- テストを追加する際は、各モジュールごとにユニットテストを用意すると保守が楽になります（pytest を推奨）。
+- 実運用で外部ブローカーへ接続する場合は、API キーやシークレットなどの機密情報を設定ファイルや環境変数で管理してください。
+- ロギングと例外処理を適切に実装し、モニタリングツールやアラートと連携することを推奨します。
 
 ---
 
-## 貢献・ライセンス
+## ライセンス・貢献
 
-- 貢献歓迎します。プルリクエストや Issue を通じて機能追加やバグ修正を送ってください。
-- ライセンスはプロジェクトに合わせて追加してください（例: MIT, Apache-2.0）。現状 README にライセンスは含まれていません。
+本リポジトリは雛形です。実際に利用する際はライセンスの追加、README の整備、実装とテストの充実を行ってください。貢献や改良は Pull Request を歓迎します。
 
 ---
 
-不明点や追加してほしい機能（例: サンプル実装、外部API連携テンプレート、CI 設定など）があれば教えてください。README を拡張して具体的な実装例やワークフローを追記できます。
+以上。必要があれば、具体的なクラス設計、サンプル実装、テストテンプレートなどの追加ドキュメントを作成します。どの部分を優先して欲しいか教えてください。
