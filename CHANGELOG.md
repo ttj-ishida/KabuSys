@@ -1,54 +1,73 @@
+Keep a Changelog 準拠の CHANGELOG.md（日本語）を以下に作成しました。
+
+CHANGELOG.md
+
+Unreleased セクションは空にしておらず、本リリースを v0.1.0（初回リリース）として記載しています。必要に応じて日付やバージョン名は変更してください。
+
+---
 # Changelog
 
-すべての重要な変更点をこのファイルに記録します。  
-フォーマットは「Keep a Changelog」に準拠します。
+全ての変更はこのファイルで記録します。本ファイルは Keep a Changelog（https://keepachangelog.com/ja/1.0.0/）の指針に従います。
 
 ## [0.1.0] - 2026-03-15
-
 ### 追加
-- 初期リリース: パッケージ `kabusys` バージョン 0.1.0 を追加。
-  - パッケージのトップレベルでのエクスポート: `data`, `strategy`, `execution`, `monitoring`（各サブパッケージは初期スタブとして配置）。
-- 環境変数・設定管理モジュール (`kabusys.config`) を実装。
-  - プロジェクトルート検出:
-    - カレントワーキングディレクトリに依存せず、`__file__` を起点に親ディレクトリを探索して `.git` または `pyproject.toml` を基準にプロジェクトルートを特定。
-    - ルートが特定できない場合は自動ロードをスキップ。
-  - 自動 .env 読み込み:
-    - 読み込み順は OS 環境変数 > `.env.local` > `.env`（`.env.local` は上書き許可）。
-    - OS 環境変数を保護するため、既存の OS 環境変数は保護セットとして扱い、`.env` / `.env.local` による上書きを制御。
-    - 自動ロードを無効化するためのフラグ: `KABUSYS_DISABLE_AUTO_ENV_LOAD=1`（テスト等で利用可能）。
-  - `.env` パーサの実装（堅牢な構文処理）:
-    - 空行・コメント行（`#` で始まる行）を無視。
-    - `export KEY=val` 形式に対応。
-    - クォートされた値（シングル・ダブル両対応）をサポートし、バックスラッシュによるエスケープを正しく処理。
-    - クォートなし値のインラインコメントは「直前がスペース/タブ」の場合のみコメントとみなす処理。
-  - `.env` 読み込み関数の挙動:
-    - `override=False` の場合は未設定キーのみを設定。
-    - `override=True` の場合は protected（OS 環境変数）に含まれるキーを除き上書き。
-    - ファイル読み込み失敗時は警告を発行して処理を継続。
-- 設定ラッパー `Settings` クラスを実装（`kabusys.config.settings`）。
-  - 必須設定を取得する `_require()` を用意し、未設定時は `ValueError` を送出（ユーザーに `.env.example` を参考に `.env` の作成を促すメッセージ）。
-  - J-Quants / kabuステーション / Slack / データベース等の設定プロパティを提供:
-    - jquants_refresh_token: JQUANTS_REFRESH_TOKEN（必須）
-    - kabu_api_password: KABU_API_PASSWORD（必須）
-    - kabu_api_base_url: KABU_API_BASE_URL（デフォルト: http://localhost:18080/kabusapi）
-    - slack_bot_token: SLACK_BOT_TOKEN（必須）
-    - slack_channel_id: SLACK_CHANNEL_ID（必須）
-    - duckdb_path: DUCKDB_PATH（デフォルト: data/kabusys.duckdb、展開済みパスを返す）
-    - sqlite_path: SQLITE_PATH（デフォルト: data/monitoring.db、展開済みパスを返す）
-  - システム設定およびバリデーション:
-    - KABUSYS_ENV の許容値: "development", "paper_trading", "live"（不正な値は `ValueError`）
-    - LOG_LEVEL の許容値: "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"（不正な値は `ValueError`、デフォルトは "INFO"）
-    - 環境判定用のヘルパープロパティ: `is_live`, `is_paper`, `is_dev`。
-- ドキュメント的な使用例をコード内に記載（`from kabusys.config import settings` など）。
+- 初回リリース: KabuSys — 日本株自動売買システムのベースパッケージを追加。
+  - パッケージのエントリポイント:
+    - src/kabusys/__init__.py
+      - __version__ = "0.1.0"
+      - __all__ = ["data", "strategy", "execution", "monitoring"]
+  - モジュール雛形:
+    - src/kabusys/data/__init__.py
+    - src/kabusys/strategy/__init__.py
+    - src/kabusys/execution/__init__.py
+    - src/kabusys/monitoring/__init__.py
+
+- 環境設定管理（src/kabusys/config.py）を実装:
+  - Settings クラスおよびグローバル settings オブジェクトを提供。以下のプロパティを通じて環境変数にアクセス可能:
+    - jquants_refresh_token (JQUANTS_REFRESH_TOKEN: 必須)
+    - kabu_api_password (KABU_API_PASSWORD: 必須)
+    - kabu_api_base_url (既定値: "http://localhost:18080/kabusapi")
+    - slack_bot_token (SLACK_BOT_TOKEN: 必須)
+    - slack_channel_id (SLACK_CHANNEL_ID: 必須)
+    - duckdb_path (既定値: "data/kabusys.duckdb")
+    - sqlite_path (既定値: "data/monitoring.db")
+    - env (KABUSYS_ENV; 有効値: "development", "paper_trading", "live")
+    - log_level (LOG_LEVEL; 有効値: "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+    - ヘルパー: is_live, is_paper, is_dev
+
+  - 必須環境変数が未設定の場合、_require() が ValueError を送出し、.env.example を参照するよう促すメッセージを含む。
+
+- .env 自動読み込み機能:
+  - プロジェクトルートの検出:
+    - __file__ を基準に親ディレクトリを上向き探索し、.git または pyproject.toml を見つけたディレクトリをプロジェクトルートとして認識。
+    - プロジェクトルートが見つからない場合は自動読み込みをスキップ（配布後やテスト環境でも安全）。
+  - 読み込み順序:
+    - OS 環境変数 > .env.local > .env
+    - .env の先に .env.local を読み込み（.env.local は override=True のため .env の値を上書きできる）。
+  - OS 環境変数の保護:
+    - 初期ロード時の os.environ のキー集合を protected として扱い、protected に含まれるキーは .env ファイル読み込み中に上書きされない。
+  - 自動ロード無効化フラグ:
+    - 環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定すると自動ロードを無効化可能（テスト用途など）。
+
+- .env パーサの強化:
+  - export KEY=val 形式に対応。
+  - クォート付き値のサポート（シングル/ダブルクォート）、バックスラッシュによるエスケープ処理。
+  - クォート付きの場合、対応する終端クォート以前の全てを値として扱い、その後のインラインコメント等は無視。
+  - クォートなし値では、'#' をコメントの開始とみなす条件を厳密化（直前がスペースまたはタブの場合のみコメントと認識）。
+  - 無効行（空行、コメント行、キーなしの行等）はスキップ。
 
 ### 変更
-- 該当なし（初期リリースのため）。
+- （初版のため該当なし）
 
 ### 修正
-- 該当なし（初期リリースのため）。
+- （初版のため該当なし）
 
 ### セキュリティ
-- 該当なし（初期リリースのため）。
+- （初版のため該当なし）
 
-注意:
-- 必須の環境変数が未設定の場合、実行時に `ValueError` が発生します。CI/デプロイ環境やローカル実行前に `.env`（あるいは環境変数）を適切に設定してください。
+---
+
+付記（開発者向け）
+- Settings を通じてアプリケーション全体で環境設定にアクセスできます。自動ロードを行わない場合やテストで環境を細かく制御したい場合は KABUSYS_DISABLE_AUTO_ENV_LOAD を設定してください。
+- .env の取り扱いに関する仕様（クォートやエスケープ、コメントの取り扱いなど）は、既存の .env ファイルとの互換性を考慮して実装されていますが、複雑なケースはテストしてから利用してください。
+- 必須環境変数が不足した場合は即時 ValueError を発生させるため、起動前に .env または OS 環境の設定を確認してください。

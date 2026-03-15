@@ -1,185 +1,149 @@
 # KabuSys
 
-日本株の自動売買システム向けライブラリ（軽量ベース）。  
-このリポジトリは、設定管理やデータ/戦略/実行/監視用のパッケージ構成を提供します。コアの取引ロジックや各モジュールの実装はこの上に構築していきます。
+日本株の自動売買システム（KabuSys）の軽量なコアパッケージです。  
+このリポジトリは設定読み込みとパッケージ骨組み（データ取得、売買ロジック、注文実行、監視）を含みます。
 
 バージョン: 0.1.0
 
----
-
 ## 概要
+- Pythonパッケージとして提供される日本株自動売買システムの基盤モジュール群。
+- 環境変数や .env ファイルから設定を安全に読み込む設定管理モジュールを含みます。
+- 将来的にデータ取得（data）、ストラテジー（strategy）、注文実行（execution）、監視（monitoring）を実装するための名前空間を提供します。
 
-KabuSys は日本株の自動売買システムの基礎となる Python パッケージです。  
-- 環境変数や .env ファイルからの設定読み込み（自動ロード機能）  
-- J-Quants / kabuステーション / Slack / データベースなどの標準的な設定項目を提供  
-- data / strategy / execution / monitoring といったサブパッケージ構成により、実装を分離して拡張しやすく設計
+## 機能一覧
+- プロジェクトルート自動検出（.git または pyproject.toml を基準）
+- .env / .env.local の自動読み込み（OS 環境 > .env.local > .env の優先順位）
+- export プレフィックスやクォート/エスケープに対応した .env パース
+- 必須設定を取得するときの検証（未設定時は ValueError を送出）
+- 環境（development / paper_trading / live）とログレベルのバリデーション
+- settings オブジェクト経由でのシンプルな設定アクセス
 
-このリポジトリはフレームワーク／スケルトンとして利用し、独自の戦略や実行ロジックを追加して運用します。
+## 必要条件
+- Python 3.10+
+  - 型注釈で `Path | None` などの構文を使用しているため Python 3.10 以上を推奨します。
 
----
+（実際に DuckDB や SQLite を利用する場合はそれらのパッケージを別途インストールしてください）
 
-## 主な機能
+## セットアップ手順（開発向け）
+1. リポジトリをクローン
+   ```
+   git clone <リポジトリURL>
+   cd <リポジトリ>
+   ```
 
-- 環境変数および .env ファイルの自動読み込み（プロジェクトルートを .git または pyproject.toml から検出）
-- .env パーサ（export 形式、シングル/ダブルクォート、エスケープ、コメント処理に対応）
-- 設定アクセスのための Settings クラス（プロパティ経由で安全に取得）
-  - J-Quants リフレッシュトークン
-  - kabuステーション API (パスワード・ベースURL)
-  - Slack トークン / チャネル
-  - データベースファイルパス（DuckDB / SQLite）
-  - 環境（development / paper_trading / live）とログレベル検証
-- 簡単に拡張できるパッケージ構成 (data, strategy, execution, monitoring)
+2. 仮想環境の作成と有効化（例: venv）
+   ```
+   python -m venv .venv
+   # macOS / Linux
+   source .venv/bin/activate
+   # Windows (PowerShell)
+   .\.venv\Scripts\Activate.ps1
+   ```
 
----
+3. パッケージをインストール（開発モード）
+   ```
+   pip install -e .
+   ```
 
-## セットアップ手順
+4. 設定ファイルの準備
+   - プロジェクトルートに `.env`（および必要なら `.env.local`）を作成してください。
+   - サンプルは下記「.env の例」を参照。
 
-前提:
-- Python 3.10 以上（型アノテーションで `X | Y` を使用しているため）
-- 必要に応じて DuckDB／SQLite 等の外部ライブラリを導入
+## 環境変数 (.env) の例
+以下は最低限必要となる主要変数の例です。プロジェクトのルートに `.env` を置いてください。
 
-開発環境へのインストール（リポジトリルートで実行）:
-```bash
-python -m pip install --upgrade pip
-python -m pip install -e .
 ```
-
-.env の準備:
-- プロジェクトルートに `.env` または `.env.local` を作成してください。
-- `.env.local` は `.env` を上書きする優先度で読み込まれます。
-
-自動ロードの制御:
-- デフォルトでは、OS環境変数 > .env.local > .env の順で設定が反映されます。
-- 自動ロードを無効化するには、環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定してください（テスト時などに利用）。
-
----
-
-## 必要な環境変数
-
-以下は Settings クラスから参照される主な環境変数です。必須のものは未設定時に例外が発生します。
-
-必須:
-- JQUANTS_REFRESH_TOKEN — J-Quants API のリフレッシュトークン
-- KABU_API_PASSWORD — kabuステーション API のパスワード
-- SLACK_BOT_TOKEN — Slack bot token
-- SLACK_CHANNEL_ID — Slack の投稿先チャネルID
-
-任意（デフォルトあり）:
-- KABU_API_BASE_URL — kabuステーションのベースURL（デフォルト: "http://localhost:18080/kabusapi"）
-- DUCKDB_PATH — DuckDB ファイルパス（デフォルト: data/kabusys.duckdb）
-- SQLITE_PATH — SQLite（監視用）ファイルパス（デフォルト: data/monitoring.db）
-- KABUSYS_ENV — 実行環境（有効値: development, paper_trading, live。デフォルト: development）
-- LOG_LEVEL — ログレベル（有効値: DEBUG, INFO, WARNING, ERROR, CRITICAL。デフォルト: INFO）
-
-.env の例（テンプレート）:
-```
-# .env (例)
+# J-Quants
 JQUANTS_REFRESH_TOKEN="your_jquants_refresh_token"
-KABU_API_PASSWORD="your_kabu_password"
+
+# kabuステーション API
+KABU_API_PASSWORD="your_kabu_api_password"
+# (省略可能) デフォルト: http://localhost:18080/kabusapi
 KABU_API_BASE_URL="http://localhost:18080/kabusapi"
 
-SLACK_BOT_TOKEN="xoxb-xxxxxxxxxx"
+# Slack
+SLACK_BOT_TOKEN="xoxb-..."
 SLACK_CHANNEL_ID="C01234567"
 
-# データベースパス（任意）
+# データベースファイルパス（省略可）
 DUCKDB_PATH="data/kabusys.duckdb"
 SQLITE_PATH="data/monitoring.db"
 
-# 環境（development|paper_trading|live）
-KABUSYS_ENV=development
+# 実行環境: development | paper_trading | live
+KABUSYS_ENV="development"
 
-# ログレベル
-LOG_LEVEL=INFO
+# ログレベル: DEBUG | INFO | WARNING | ERROR | CRITICAL
+LOG_LEVEL="INFO"
 ```
 
-.env パーサの挙動（主なポイント）:
-- 行頭の `export ` を許可（例: export KEY=val）
-- シングル/ダブルクォート内のエスケープ（バックスラッシュ）に対応
-- クォートがない値では、`#` の直前が空白/タブならコメントとみなす（通常の inline comment 処理）
-- 読み込み順と上書きルール: OS 環境変数（保護） > .env > .env.local（.env.local は override=True）
+.env に関する注意:
+- `export KEY=val` 形式に対応します。
+- 値が引用符で囲まれている場合、エスケープ文字（\）を解釈します。
+- 引用符なしの値では、`#` の直前にスペースまたはタブがある場合にコメントとして認識します。
 
----
-
-## 使い方
-
-基本的な設定の取得例:
-```python
-from kabusys.config import settings
-
-# 必須項目を取得（未設定なら ValueError）
-jquants_token = settings.jquants_refresh_token
-kabu_password = settings.kabu_api_password
-
-# オプション（デフォルトを持つ）
-kabu_base = settings.kabu_api_base_url
-duckdb_path = settings.duckdb_path
-
-# 環境判定
-if settings.is_live:
-    print("LIVE 環境です")
-elif settings.is_paper:
-    print("ペーパートレード環境です")
-else:
-    print("開発環境です")
-
-# ログレベル
-print("LOG_LEVEL =", settings.log_level)
-```
-
-パッケージ情報:
-```python
-import kabusys
-print(kabusys.__version__)
-```
-
-開発時のワークフロー例:
-- strategy モジュールに 独自の戦略クラスを実装
-- execution モジュールに売買 API 呼び出しの実装を追加
-- monitoring モジュールで監視・アラート（例: Slack 送信）を実装
-- data モジュールで市場データ取得や DB 保存処理を実装
-
----
-
-## ディレクトリ構成
-
-リポジトリの主要ファイル構成（src 配下）:
-```
-src/
-└─ kabusys/
-   ├─ __init__.py         # パッケージのエントリ（__version__ 等）
-   ├─ config.py           # 環境変数 / 設定読み込みロジック（Settings）
-   ├─ data/               # (将来的に) データ取得・格納関連
-   │  └─ __init__.py
-   ├─ strategy/           # (将来的に) 売買戦略
-   │  └─ __init__.py
-   ├─ execution/          # (将来的に) 注文実行ロジック
-   │  └─ __init__.py
-   └─ monitoring/         # (将来的に) 監視/アラート処理
-      └─ __init__.py
-```
-
----
-
-## 開発・テストのヒント
-
-- 自動環境読み込みを無効化してテストする場合:
-  ```bash
+自動読み込みの挙動:
+- 自動ロードの優先順位: OS 環境変数 > .env.local > .env
+- 自動ロードを無効化したい場合（テスト等）は環境変数を設定:
+  ```
   export KABUSYS_DISABLE_AUTO_ENV_LOAD=1
   ```
-- OS 環境変数は .env の内容より優先されます。テスト用に一時的な値を上書きしたい場合は、OS 側で環境変数を設定してください。
-- .env ファイルの読み込みはプロジェクトルートの検出に依存します（.git または pyproject.toml が見つかる親ディレクトリ）。パッケージ配布後に CWD が変わっても安定して動作するよう設計されています。
+
+## 重要な環境変数（必須）
+- JQUANTS_REFRESH_TOKEN — J-Quants API 用トークン（必須）
+- KABU_API_PASSWORD — kabuステーション API へのパスワード（必須）
+- SLACK_BOT_TOKEN — Slack 通知の Bot トークン（必須）
+- SLACK_CHANNEL_ID — 通知先の Slack チャンネル ID（必須）
+
+これらは settings を経由してアクセスした際、未設定だと ValueError が発生します。
+
+## 使い方（設定アクセス例）
+Python コード内で設定を参照する例:
+
+```py
+from kabusys.config import settings
+
+token = settings.jquants_refresh_token
+base_url = settings.kabu_api_base_url
+is_live = settings.is_live
+db_path = settings.duckdb_path
+```
+
+- settings.env: "development" / "paper_trading" / "live"
+- settings.log_level: "DEBUG" / "INFO" / "WARNING" / "ERROR" / "CRITICAL"
+
+自動ロードを無効にしてテスト等で手動設定する場合:
+```bash
+export KABUSYS_DISABLE_AUTO_ENV_LOAD=1
+```
+
+## 実装上のポイント
+- プロジェクトルートの検出は、現在ファイルの位置（__file__）から親を上がって `.git` または `pyproject.toml` の存在で行います。これにより作業ディレクトリに依存せずに .env を読み込みます。
+- .env の読み込みでは既存の OS 環境変数を保護するために `protected` セットを使用し、.env.local は .env より優先して上書きします（ただし OS 環境変数は上書きされません）。
+
+## ディレクトリ構成
+リポジトリの主要ファイル/ディレクトリ構成（抜粋）:
+
+- src/
+  - kabusys/
+    - __init__.py              — パッケージ初期化（__version__ = 0.1.0）
+    - config.py                — 環境変数・設定管理モジュール（自動 .env ロード、Settings）
+    - data/
+      - __init__.py            — データ取得名前空間
+    - strategy/
+      - __init__.py            — ストラテジー名前空間
+    - execution/
+      - __init__.py            — 注文実行名前空間
+    - monitoring/
+      - __init__.py            — 監視/モニタリング名前空間
+- .env.example (任意で追加すると親切)
+- pyproject.toml / setup.cfg / setup.py (プロジェクト管理ファイル、存在する想定)
+
+## 今後の拡張
+- data: 市場データフェッチャー、ヒストリカルデータ保存
+- strategy: 売買ロジックのプラグイン化
+- execution: 注文管理（kabuステーション連携）、リスク管理
+- monitoring: 取引ログ、Slack通知、メトリクス収集
 
 ---
 
-## 拡張について（ガイド）
-
-- data: マーケットデータ取得、キャッシュ、DB 永続化（DuckDB 想定）
-- strategy: エントリ/イグジットの判定ロジック、リスク管理
-- execution: kabuAPI 等を用いた注文処理、注文管理（リトライ・エラーハンドリング）
-- monitoring: Slack 通知、ロギング、取引結果の集計
-
-これらのモジュールを分離することで、テストやCI/CD、実運用（ペーパートレード→本番切り替え）を容易にします。
-
----
-
-必要に応じて README をプロジェクトの実装状況に合わせて更新してください（.env.example の追加、サンプル戦略・実行スクリプト、テスト手順など）。
+問題や機能追加の要望があれば issue を立ててください。
