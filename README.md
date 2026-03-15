@@ -1,163 +1,127 @@
 # KabuSys
 
-KabuSys は日本株向けの自動売買システムの骨組み（テンプレート）です。モジュール化された設計により、データ取得、売買戦略、注文実行、モニタリングの各コンポーネントを分離して開発できます。
+KabuSys は、日本株の自動売買システム構築を想定した軽量な Python パッケージのベースです。データ取得（data）、売買戦略（strategy）、注文実行（execution）、監視・ログ（monitoring）をそれぞれのモジュールで分離しており、カスタム戦略や実行ロジックを実装して拡張できるように設計されています。
 
-現在のバージョン: 0.1.0
-
----
-
-## 目次
-- プロジェクト概要
-- 機能一覧
-- 要求環境
-- セットアップ手順
-- 使い方
-- 開発ガイド（簡易）
-- ディレクトリ構成
+バージョン: 0.1.0
 
 ---
 
-## プロジェクト概要
-KabuSys は教育用／開発用の自動売買フレームワークの雛形です。各サブパッケージを実装することで、実際のデータ取得や売買ロジック、ブローカー API への発注、運用時の監視機能を追加できます。
+## 主な機能
 
-メインパッケージ:
-- kabusys.data: 市場データ取得・整形
-- kabusys.strategy: 売買戦略（シグナル生成、ポジション管理）
-- kabusys.execution: 注文発注・約定管理
-- kabusys.monitoring: ログ、メトリクス、アラート
+- モジュール分割による責務の明確化
+  - data: 市場データ取得・整形用のインターフェース
+  - strategy: 売買ロジック（シグナル生成）
+  - execution: 注文送信やポジション管理の実装箇所
+  - monitoring: ログ出力・監視・アラート用の補助機能
+- パッケージ化（src レイアウト）による容易なインストールと開発
+- 拡張しやすい軽量な骨組み（テンプレート）
 
----
-
-## 機能一覧
-現状（テンプレート段階）で提供するもの:
-- プロジェクトのパッケージ骨組み（モジュール分割）
-- バージョン情報（__version__ = "0.1.0"）
-- 各サブパッケージのプレースホルダ
-
-想定して拡張する機能（今後の実装例）:
-- リアルタイム／過去データ取得モジュール（API クライアント）
-- テクニカル指標、シグナル生成
-- 注文管理（成行／指値／取消）
-- 監視ダッシュボード、アラート（メール／Slack 等）
-- バックテスト機能
+> 注: 現在のリポジトリはフレームワークの骨組みのみを提供しており、実際の API クライアントや戦略実装、取引所接続のコードは含まれていません。実運用前に必ず必要な実装・テスト・リスク管理を行ってください。
 
 ---
 
-## 要求環境
-- Python 3.8 以上（プロジェクトポリシーに応じて調整）
-- 依存パッケージは現状なし。外部 API や追加機能を実装する場合はそれに応じたライブラリを追加してください（例: requests, pandas, numpy, websockets など）。
+## セットアップ手順
+
+以下はローカルで開発を始めるための基本手順です。
+
+1. リポジトリをクローン
+   - git clone <リポジトリURL>
+   - cd <リポジトリフォルダ>
+
+2. Python 仮想環境の作成（推奨）
+   - python -m venv .venv
+   - Windows: .venv\Scripts\activate
+   - macOS/Linux: source .venv/bin/activate
+
+3. パッケージのインストール（開発モード）
+   - pip install -e .
+
+   ※ requirements.txt や pyproject.toml に依存関係がある場合は、そちらも参照して追加ライブラリをインストールしてください。
+
+4. 環境変数（任意）
+   - 実際の取引 API を利用する場合は API キーやエンドポイントを環境変数で設定するのが一般的です（例: KABUSYS_API_KEY, KABUSYS_API_SECRET, KABUSYS_BASE_URL）。
+   - 実装側で環境変数名を決め、ドキュメントに明記してください。
 
 ---
 
-## セットアップ手順（開発環境）
-1. リポジトリをクローン:
-   ```
-   git clone <リポジトリURL>
-   cd <リポジトリ名>
-   ```
+## 使い方（基本例）
 
-2. 仮想環境を作成・有効化（例: venv）:
-   ```
-   python -m venv .venv
-   # Windows
-   .venv\Scripts\activate
-   # macOS / Linux
-   source .venv/bin/activate
-   ```
+パッケージの確認や簡単な利用例：
 
-3. 必要なら依存をインストール（requirements.txt があれば）:
-   ```
-   pip install -r requirements.txt
-   ```
-   現状は依存がないためこのステップは不要です。
+Python REPL またはスクリプト内で:
 
-4. 開発モードでインストール（プロジェクトに pyproject.toml / setup.py / setup.cfg を用意している場合）:
-   ```
-   pip install -e .
-   ```
-   もしパッケージ化ファイルがない場合は、開発中はプロジェクトルートの `src` を PYTHONPATH に追加するか、エディタの設定で参照してください。
+- バージョン確認:
+  ```python
+  import kabusys
+  print(kabusys.__version__)  # -> "0.1.0"
+  ```
 
----
+- サブパッケージのインポート:
+  ```python
+  from kabusys import data, strategy, execution, monitoring
+  ```
 
-## 使い方（簡単な例）
-パッケージがインポート可能な状態であれば、下記のように利用します。
+- 実際のワークフロー（概念例）:
+  1. data モジュールで市場データを取得・整形
+  2. strategy モジュールでシグナルを生成
+  3. execution モジュールで注文送信とポジション管理
+  4. monitoring モジュールでログやアラートを記録
 
-Python インタプリタまたはスクリプト内で:
-```python
-import kabusys
+  上記を繋いだ簡易的な疑似コード例:
+  ```python
+  # data.py の get_price() を想定
+  prices = data.get_price("7203")  # 銘柄コードトヨタ(例)
+  sig = strategy.generate_signal(prices)
+  if sig == "BUY":
+      execution.place_order(symbol="7203", side="BUY", qty=100)
+  monitoring.log_trade(...)
+  ```
 
-# バージョン確認
-print(kabusys.__version__)  # => "0.1.0"
-
-# サブパッケージ参照（現状はプレースホルダ）
-import kabusys.data
-import kabusys.strategy
-import kabusys.execution
-import kabusys.monitoring
-
-print(kabusys.__all__)  # => ["data", "strategy", "execution", "monitoring"]
-```
-
-各サブパッケージに機能を実装したら、実際のデータ取得→シグナル生成→発注→監視のフローを組み立ててください。
-
-簡単なフロー（擬似コード）:
-```python
-from kabusys.data import DataFetcher
-from kabusys.strategy import Strategy
-from kabusys.execution import Executor
-from kabusys.monitoring import Monitor
-
-data = DataFetcher(...)
-strategy = Strategy(...)
-executor = Executor(...)
-monitor = Monitor(...)
-
-prices = data.get_history("7203.T")
-signal = strategy.generate_signal(prices)
-
-if signal == "BUY":
-    executor.place_order(symbol="7203.T", side="BUY", qty=100)
-    monitor.notify("Bought 7203.T")
-```
-（上記クラスはテンプレートのため、実装が必要です）
-
----
-
-## 開発ガイド（どこに実装するか）
-- ロジックはそれぞれのサブパッケージ内に実装してください。
-  - src/kabusys/data: API クライアント、データクレンジング、キャッシュ
-  - src/kabusys/strategy: 戦略クラス、バックテスト用インターフェース
-  - src/kabusys/execution: ブローカー／証券会社 API ラッパー、注文管理
-  - src/kabusys/monitoring: ロギング、アラート、メトリクス収集
-
-- 各モジュールはテスト可能な小さな部品（関数／クラス）に分割すると良いです。
+- カスタム戦略の作成:
+  strategy パッケージ内にクラスや関数を実装し、generate_signal のような統一インターフェースを用意すると、後の組み合わせが楽になります。
 
 ---
 
 ## ディレクトリ構成
-現状の最小構成:
-```
-.
-├─ src/
-│  └─ kabusys/
-│     ├─ __init__.py           # パッケージ定義（バージョン、__all__）
-│     ├─ data/
-│     │  └─ __init__.py        # データ関連モジュールを置く
-│     ├─ strategy/
-│     │  └─ __init__.py        # 戦略関連モジュールを置く
-│     ├─ execution/
-│     │  └─ __init__.py        # 注文実行関連モジュールを置く
-│     └─ monitoring/
-│        └─ __init__.py        # 監視関連モジュールを置く
-```
 
-将来的には各ディレクトリ配下に以下のようなファイルを追加することが考えられます:
-- src/kabusys/data/client.py
-- src/kabusys/strategy/base.py
-- src/kabusys/execution/broker.py
-- src/kabusys/monitoring/logger.py
-- tests/（テストケース）
+現状の主な構成（抜粋）:
+
+- src/
+  - kabusys/
+    - __init__.py         （パッケージのメタ情報、__version__ など）
+    - data/
+      - __init__.py       （データ取得・整形のためのエントリ）
+    - strategy/
+      - __init__.py       （戦略ロジックのためのエントリ）
+    - execution/
+      - __init__.py       （注文送信、ブローカー接続等のエントリ）
+    - monitoring/
+      - __init__.py       （ログ・監視のためのエントリ）
+
+README やドキュメント、テスト、CI 設定ファイル等はリポジトリのルートに配置することを推奨します。
 
 ---
 
-必要であれば、README に含めるサンプル実装や pyproject.toml / setup.cfg のテンプレートも作成します。どのように拡張したいか教えてください。
+## 開発と拡張のヒント
+
+- 各モジュールはインターフェース（抽象クラスやプロトコル）を定義し、テスト可能な実装を複数用意すると良いです（例: 実際の API クライアントとモッククライアント）。
+- 注文実行部分は必ずサンドボックス環境やステージングで十分に検証してください。
+- ロギング・監視は取引の可視性と障害対応のために重要です。エラーや約定情報は永続化して遡れるようにしましょう。
+- バックテストやフォワードテスト用のモジュールを用意して、戦略の検証プロセスを整備してください。
+
+---
+
+## 注意事項
+
+- 本リポジトリは取引の自動化をサポートするための骨組みを提供するものであり、実際の資金運用で使用する前に十分なテストと法令遵守、リスク管理が必要です。
+- 実際の取引 API を用いる場合は各証券会社やサービスが定める利用規約や注文制限を確認してください。
+
+---
+
+必要があれば、README に以下の追加情報も追記できます：
+- 実際にサポートする API のサンプル設定（環境変数名・フォーマット）
+- 具体的な戦略テンプレート（サンプルコード）
+- テスト実行方法（pytest 等）
+- CI/CD の設定例
+
+必要な追記があれば、どの項目を詳しく書くか教えてください。
