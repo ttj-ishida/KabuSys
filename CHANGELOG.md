@@ -1,68 +1,86 @@
 # Changelog
 
-すべての注目すべき変更をここに記録します。  
-このファイルは Keep a Changelog の形式に準拠します。
+すべての注記は [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) に準拠しています。  
 
-なお、この CHANGELOG は与えられたコードベースの内容から推測して作成しています。
-
-## [Unreleased]
+既知の互換性方針はセマンティックバージョニングに従います。
 
 ## [0.1.0] - 2026-03-15
-初回公開リリース
 
-### Added
-- パッケージ基盤
-  - kabusys パッケージを追加。パッケージバージョンは 0.1.0。
-  - パッケージの公開 API として data, strategy, execution, monitoring モジュールを明示的にエクスポート（src/kabusys/__init__.py）。
+初回公開リリース。以下の主要機能を実装しています。
 
-- 環境変数・設定管理（src/kabusys/config.py）
-  - .env ファイルまたは OS 環境変数から設定を読み込む自動ロード機能を実装。
-    - プロジェクトルートを検出するために .git または pyproject.toml を上位ディレクトリから探索する実装を追加（__file__ を起点に探索するため CWD に依存しない）。
-    - 自動ロードは環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 により無効化可能（テスト用途等の配慮）。
-    - 読み込み優先順位は OS 環境変数 > .env.local > .env。
-    - OS 環境変数は protected として扱い、.env の上書きを防止。
-  - .env のパース機能を実装（_parse_env_line）
-    - コメント行（#）や空行を無視。
-    - export KEY=val 形式に対応。
-    - シングル/ダブルクォートで囲まれた値の解析に対応し、バックスラッシュによるエスケープを解釈。
-    - クォートなし値では、スペース/タブの直前にある '#' をコメント開始とみなすロジックを実装（一般的な .env の取り扱いに近づける挙動）。
-    - 無効行（キーなし、等）はスキップ。
-  - .env 読み込み時の例外を警告として処理（ファイル読み込み失敗時に warnings.warn）。
-  - 設定取得用 Settings クラスを実装（settings インスタンスを公開）
-    - J-Quants, kabuステーション API, Slack, DB パスなど主要設定をプロパティとして提供。
-    - 必須設定は _require 関数により未設定時に ValueError を送出（利用者へ明示的に通知）。
-    - デフォルト値を持つ設定（KABUS_API_BASE_URL, DUCKDB_PATH, SQLITE_PATH, KABUSYS_ENV, LOG_LEVEL 等）をサポート。
-    - KABUSYS_ENV 値の検証（development, paper_trading, live のいずれかのみ許容）と補助プロパティ（is_live, is_paper, is_dev）を追加。
-    - LOG_LEVEL の検証（DEBUG/INFO/WARNING/ERROR/CRITICAL）。
+### 追加 (Added)
+- パッケージ初期構成
+  - top-level パッケージ `kabusys` を追加し、公開モジュールとして `data`, `strategy`, `execution`, `monitoring` を定義。
+  - パッケージバージョン: `0.1.0`（src/kabusys/__init__.py）。
 
-- DuckDB スキーマと初期化（src/kabusys/data/schema.py）
-  - 3 層（Raw / Processed / Feature）に加え Execution レイヤーを含むデータスキーマを定義。
-    - Raw レイヤー: raw_prices, raw_financials, raw_news, raw_executions
-    - Processed レイヤー: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
-    - Feature レイヤー: features, ai_scores
-    - Execution レイヤー: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
-  - 各テーブルに対して適切な型・制約（PRIMARY KEY、CHECK、FOREIGN KEY）を定義：
-    - 例: prices_daily の low <= high チェック、orders/trades といったテーブル間の外部キー制約等。
-  - パフォーマンス向上のためのインデックス定義を追加（銘柄×日付スキャン、ステータス検索等の想定クエリパターンに対応）。
-  - DB 初期化ユーティリティを提供
-    - init_schema(db_path): 指定 DuckDB ファイルに対してスキーマとインデックスを作成。冪等（既存テーブルはスキップ）。
-      - db_path がファイルの場合、親ディレクトリが存在しなければ自動作成。
-      - ":memory:" を指定するとインメモリ DB を使用。
-    - get_connection(db_path): 既存の DuckDB への接続を返す（スキーマ初期化は行わないため、初回は init_schema を推奨）。
+- 環境設定管理 (`kabusys.config`)
+  - .env ファイルおよび環境変数から設定値をロードする自動ローダーを実装。
+    - 読み込み順序: OS環境変数 > .env.local > .env。プロジェクトルートが検出できない場合は自動ロードをスキップ。
+    - 自動ロードを無効化するためのフラグ: `KABUSYS_DISABLE_AUTO_ENV_LOAD=1`。
+    - ロード時、OS側に既に存在する環境変数は保護（`.env.local` を除く）される。
+  - .env パーサーの実装（`_parse_env_line`）
+    - コメント行、`export KEY=VAL` 形式、クォート（シングル/ダブル）の扱い、バックスラッシュによるエスケープ処理、インラインコメント処理を考慮。
+  - .env ファイル読み込み時の I/O エラーに対して警告を出す挙動を追加。
+  - プロジェクトルート検出関数（`.git` または `pyproject.toml` を親ディレクトリから探索）を追加（CWD に依存しない挙動）。
+  - 環境取得のユーティリティ `Settings` を追加（`settings` インスタンスを提供）。
+    - J-Quants: `jquants_refresh_token`（必須）
+    - kabuステーション: `kabu_api_password`（必須）、`kabu_api_base_url`（デフォルト: `http://localhost:18080/kabusapi`）
+    - Slack: `slack_bot_token`（必須）、`slack_channel_id`（必須）
+    - データベース: `duckdb_path`（デフォルト: `data/kabusys.duckdb`）、`sqlite_path`（デフォルト: `data/monitoring.db`）
+    - システム設定:
+      - `KABUSYS_ENV`（`development`, `paper_trading`, `live` のいずれか、デフォルト `development`）の検証
+      - `LOG_LEVEL`（`DEBUG, INFO, WARNING, ERROR, CRITICAL` の検証、デフォルト `INFO`）
+      - `is_live`, `is_paper`, `is_dev` のブールプロパティ
 
-### Documentation
-- ソースコード内にモジュールの簡単な説明コメントや DataSchema.md 参照の記述を追加（スキーマ設計に関する外部ドキュメント参照が示されている）。
+- DuckDB スキーマ管理 (`kabusys.data.schema`)
+  - 投資自動売買システム向けの多層スキーマを定義（Raw / Processed / Feature / Execution レイヤー）。
+  - 生データ (raw) テーブル:
+    - `raw_prices`, `raw_financials`, `raw_news`, `raw_executions`
+  - 加工済み (processed) テーブル:
+    - `prices_daily`, `market_calendar`, `fundamentals`, `news_articles`, `news_symbols`
+  - 特徴量 (feature) テーブル:
+    - `features`, `ai_scores`
+  - 実行 (execution) テーブル:
+    - `signals`, `signal_queue`, `portfolio_targets`, `orders`, `trades`, `positions`, `portfolio_performance`
+  - 各テーブルに対する制約（PRIMARY KEY、CHECK、FOREIGN KEY）を定義し、クエリ効率を考慮したインデックスを追加。
+  - テーブル作成の順序は外部キー依存を考慮して決定。
+  - 公開 API:
+    - `init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection`
+      - 指定 DB を初期化して全テーブルとインデックスを作成。親ディレクトリがない場合は自動作成。":memory:" 対応。
+    - `get_connection(db_path: str | Path) -> duckdb.DuckDBPyConnection`
+      - 既存の DuckDB へ接続（スキーマ初期化は行わない）。
 
-### Notes / Design decisions
-- .env 自動ロードはプロジェクトルート検出に依存するため、パッケージ配布後でも適切に動作するように設計されている（作業ディレクトリに依存しない）。
-- OS 環境変数の上書きを防ぐ protected 設計によりローカル .env による意図しない上書きを回避。
-- スキーマは運用上の整合性を保つため多くのチェック制約を備え、実運用でのデータ品質を想定した設計になっている。
+### 変更 (Changed)
+- 初回リリースにつき該当なし。
 
-## 未対応（今後検討）
-- マイグレーション機構（スキーマ変更履歴の管理）は未実装。スキーマ更新時は init_schema のみに依存しているため、将来的にマイグレーション戦略を追加することが望まれる。
-- settings のユニットテストおよび .env パースロジックの細かいエッジケース検証（複雑なエスケープや改行を含む値等）。
-- strategy、execution、monitoring モジュールの具体的な実装（現在はパッケージ構造のみ用意）。
+### 修正 (Fixed)
+- 初回リリースにつき該当なし。
+
+### セキュリティ (Security)
+- 初回リリースにつき該当なし。
 
 ---
 
-追記: 本 CHANGELOG はコードベースから推測して作成したものであり、実際の変更履歴やリリースノートとは差異が生じる可能性があります。必要であれば、変更点の詳細（コミット単位や作者、チケット番号など）を含めて更新できます。
+利用と移行メモ
+- 初回セットアップ
+  1. 必須環境変数（例: `JQUANTS_REFRESH_TOKEN`, `KABU_API_PASSWORD`, `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID`）を設定してください。未設定の場合は `Settings` のプロパティアクセスで `ValueError` が発生します。
+  2. DuckDB スキーマを作成するには:
+     - Python から: 
+       - from kabusys.data.schema import init_schema
+       - conn = init_schema("data/kabusys.duckdb")
+  3. 自動で .env を読み込みたくないテスト環境などでは `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定してください。
+- .env の書式
+  - `KEY=VALUE`、`export KEY=VALUE`、クォート、エスケープ、インラインコメント等に対応しています。詳細は実装の挙動に従ってください。
+- デフォルト値
+  - Kabu API base URL: `http://localhost:18080/kabusapi`
+  - DuckDB path: `data/kabusys.duckdb`
+  - SQLite path (monitoring): `data/monitoring.db`
+  - 環境: `development`、ログレベル: `INFO`
+
+既知の制約 / 今後の改善予定（例）
+- schema 定義は現在 DDL を直書きで管理しているため、将来的にバージョン管理（マイグレーション機構）の追加を検討。
+- strategy, execution, monitoring モジュールはパッケージ雛形として存在（今後具体的機能追加予定）。
+
+--- 
+
+署名: kabusys コードベース（初回リリース: 0.1.0）
