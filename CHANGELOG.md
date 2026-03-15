@@ -1,43 +1,40 @@
-# CHANGELOG
+# Changelog
 
-このファイルは「Keep a Changelog」規約に準拠しています。  
-すべての日付は YYYY-MM-DD 形式で記載しています。
+すべての注目すべき変更点はこのファイルに記録します。
+このプロジェクトは [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) の形式に準拠しています。
+セマンティックバージョニングを採用します。
 
-## Unreleased
-
-（未リリースの変更はここに記載してください）
+## [Unreleased]
 
 ## [0.1.0] - 2026-03-15
+初回リリース。プロジェクトの骨組み（パッケージスケルトン）を追加しました。
 
 ### 追加
-- 初期リリース（スケルトン実装）
-  - パッケージルートを追加: `src/kabusys/__init__.py`
-    - パッケージドキュメンテーション文字列を追加: "KabuSys - 日本株自動売買システム"
-    - バージョン識別子を追加: `__version__ = "0.1.0"`
-    - パッケージ外部公開インターフェースを定義: `__all__ = ["data", "strategy", "execution", "monitoring"]`
-  - サブパッケージのスケルトンを追加（空の初期化モジュール）
-    - `src/kabusys/data/__init__.py`
-    - `src/kabusys/strategy/__init__.py`
-    - `src/kabusys/execution/__init__.py`
-    - `src/kabusys/monitoring/__init__.py`
-  - プロジェクトの名前および目的を明示（日本株向け自動売買システムの基盤構成）
+- パッケージの初期構成を追加
+  - パッケージ名: `kabusys`
+  - バージョン: `0.1.0`（`src/kabusys/__init__.py` の `__version__` にて設定）
+  - モジュール説明（docstring）: "KabuSys - 日本株自動売買システム"
+- サブパッケージ（プレースホルダ）を追加
+  - `kabusys.data`（`src/kabusys/data/__init__.py`）
+  - `kabusys.strategy`（`src/kabusys/strategy/__init__.py`）
+  - `kabusys.execution`（`src/kabusys/execution/__init__.py`）
+  - `kabusys.monitoring`（`src/kabusys/monitoring/__init__.py`）
+- パッケージ外部公開 API を定義
+  - `__all__ = ["data", "strategy", "execution", "monitoring"]` により上記サブパッケージを公開
 
 ### 変更
-- 該当なし（初期リリース）
+- なし
 
 ### 修正
-- 該当なし（初期リリース）
-
-### 廃止予定（Deprecated）
-- 該当なし
+- なし
 
 ### 削除
-- 該当なし
+- なし
 
 ### セキュリティ
-- 該当なし
+- なし
 
 ---
 
-補足（開発メモ）
-- 現状はパッケージ構造の骨組みのみを含み、各サブパッケージ（data, strategy, execution, monitoring）は実装を含みません。今後のリリースで各モジュールの具体的な機能・API・テスト・ドキュメントを追加予定です。
+備考:
+- 現時点では各サブパッケージは初期ファイル（空の `__init__.py`）のみで、実装は含まれていません。今後、データ取得/管理（data）、取引戦略（strategy）、注文実行（execution）、監視/ロギング（monitoring）などの機能を順次実装する予定です。
