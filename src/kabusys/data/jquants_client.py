@@ -8,10 +8,11 @@ J-Quants API から以下のデータを取得する。
 
 設計原則:
   - APIレート制限（120 req/min）を厳守する（RateLimiter による制御）
-  - リトライロジック付き（指数バックオフ、最大 3 回）
-  - Look-ahead Bias 防止: 取得日時（fetched_at）を記録し、
+  - リトライロジック付き（指数バックオフ、最大 3 回、対象: 408/429/5xx）
+  - 401 受信時はトークンを自動リフレッシュして 1 回リトライ
+  - Look-ahead Bias 防止: 取得日時（fetched_at）を UTC で記録し、
     「いつシステムがそのデータを知り得たか」をトレース可能にする
-  - 冪等性: DuckDB への INSERT は INSERT OR REPLACE で重複を排除する
+  - 冪等性: DuckDB への INSERT は ON CONFLICT DO UPDATE で重複を排除する
 """
 
 from __future__ import annotations
@@ -22,8 +23,8 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import json
-from datetime import date, datetime, timedelta
-from pathlib import Path
+from datetime import datetime, timezone
+from datetime import date
 from typing import Any
 
 import duckdb
@@ -37,18 +38,19 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _BASE_URL = "https://api.jquants.com/v1"
-_RATE_LIMIT_PER_MIN = 120          # J-Quants APIレート上限
-_MIN_INTERVAL_SEC = 60.0 / _RATE_LIMIT_PER_MIN  # リクエスト間最小間隔
+_RATE_LIMIT_PER_MIN = 120
+_MIN_INTERVAL_SEC = 60.0 / _RATE_LIMIT_PER_MIN
 _MAX_RETRIES = 3
 _RETRY_BACKOFF_BASE = 2.0          # 指数バックオフ係数（秒）
+_RETRY_STATUS_CODES = {408, 429}   # ネットワーク起因の 4xx + 5xx 系
 
 
 # ---------------------------------------------------------------------------
-# レート制限
+# レート制限（固定間隔スロットリング）
 # ---------------------------------------------------------------------------
 
 class _RateLimiter:
-    """トークンバケット方式でAPIレート制限を制御する。"""
+    """固定間隔スロットリングで API レート制限（120 req/min）を制御する。"""
 
     def __init__(self, min_interval: float = _MIN_INTERVAL_SEC) -> None:
         self._min_interval = min_interval
@@ -74,13 +76,17 @@ def _request(
     path: str,
     params: dict[str, str] | None = None,
     id_token: str | None = None,
+    method: str = "GET",
+    json_body: dict[str, Any] | None = None,
 ) -> Any:
-    """J-Quants API へ GET リクエストを送り、JSON を返す。
+    """J-Quants API へリクエストを送り、JSON を返す。
 
     Args:
         path: APIパス（例: "/prices/daily_quotes"）
         params: クエリパラメータ
-        id_token: 認証トークン（省略時は refresh_token から自動取得）
+        id_token: 認証トークン
+        method: HTTP メソッド（"GET" または "POST"）
+        json_body: POST 時のリクエストボディ（dict）
 
     Returns:
         レスポンスの JSON データ。
@@ -92,20 +98,41 @@ def _request(
     if params:
         url += "?" + urllib.parse.urlencode(params)
 
-    headers: dict[str, str] = {"Content-Type": "application/json"}
-    if id_token:
-        headers["Authorization"] = f"Bearer {id_token}"
+    headers: dict[str, str] = {"Accept": "application/json"}
+    data_bytes: bytes | None = None
+    if json_body is not None:
+        headers["Content-Type"] = "application/json"
+        data_bytes = json.dumps(json_body).encode("utf-8")
+
+    def _do_call(token: str | None) -> Any:
+        h = dict(headers)
+        if token:
+            h["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(
+            url, headers=h, method=method, data=data_bytes
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
 
     last_exc: Exception = RuntimeError("未初期化")
+    token = id_token
     for attempt in range(_MAX_RETRIES):
         _rate_limiter.wait()
         try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+            return _do_call(token)
         except urllib.error.HTTPError as e:
             status = e.code
-            if status == 429 or status >= 500:
+            # 401: トークン期限切れ → 1 回だけリフレッシュしてリトライ
+            if status == 401:
+                logger.warning("401 Unauthorized on %s, refreshing id_token", path)
+                try:
+                    token = get_id_token()
+                    continue
+                except Exception as refresh_exc:
+                    raise RuntimeError(
+                        "id_token のリフレッシュに失敗しました"
+                    ) from refresh_exc
+            if status in _RETRY_STATUS_CODES or status >= 500:
                 wait = _RETRY_BACKOFF_BASE ** attempt
                 logger.warning(
                     "HTTP %d on %s, retry %d/%d in %.1fs",
@@ -134,7 +161,7 @@ def _request(
 # ---------------------------------------------------------------------------
 
 def get_id_token(refresh_token: str | None = None) -> str:
-    """リフレッシュトークンから ID トークンを取得する。
+    """リフレッシュトークンから ID トークンを取得する（POST）。
 
     Args:
         refresh_token: J-Quants リフレッシュトークン。
@@ -144,9 +171,13 @@ def get_id_token(refresh_token: str | None = None) -> str:
         ID トークン文字列。
     """
     token = refresh_token or settings.jquants_refresh_token
-    url = _BASE_URL + "/token/auth_refresh"
-    params = {"refreshtoken": token}
-    data = _request("/token/auth_refresh", params=params)
+    if not token:
+        raise ValueError("refresh_token が指定されていません")
+    data = _request(
+        "/token/auth_refresh",
+        method="POST",
+        json_body={"refreshtoken": token},
+    )
     return data["idToken"]
 
 
@@ -160,16 +191,16 @@ def fetch_daily_quotes(
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> list[dict[str, Any]]:
-    """株価日足（OHLCV）を取得する。
+    """株価日足（OHLCV）を取得する（ページネーション対応）。
 
     Args:
         id_token: 認証トークン。
         code: 銘柄コード（省略時は全銘柄）。
-        date_from: 取得開始日（省略時は当日）。
-        date_to: 取得終了日（省略時は当日）。
+        date_from: 取得開始日。
+        date_to: 取得終了日。
 
     Returns:
-        株価レコードのリスト。各レコードは dict。
+        株価レコードのリスト。
     """
     params: dict[str, str] = {}
     if code:
@@ -198,7 +229,7 @@ def fetch_financial_statements(
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> list[dict[str, Any]]:
-    """財務データ（四半期 BS/PL）を取得する。
+    """財務データ（四半期 BS/PL）を取得する（ページネーション対応）。
 
     Args:
         id_token: 認証トークン。
@@ -273,7 +304,7 @@ def save_daily_quotes(
     if not records:
         return 0
 
-    fetched_at = datetime.utcnow().isoformat(timespec="seconds")
+    fetched_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
     rows = [
         (
             r.get("Date"),
@@ -282,8 +313,8 @@ def save_daily_quotes(
             _to_float(r.get("High")),
             _to_float(r.get("Low")),
             _to_float(r.get("Close")),
-            _to_float(r.get("Volume")),
-            _to_float(r.get("TurnoverValue")),
+            _to_int(r.get("Volume")),
+            _to_int(r.get("TurnoverValue")),
             fetched_at,
         )
         for r in records
@@ -291,9 +322,17 @@ def save_daily_quotes(
 
     conn.executemany(
         """
-        INSERT OR REPLACE INTO raw_prices
+        INSERT INTO raw_prices
             (date, code, open, high, low, close, volume, turnover, fetched_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (date, code) DO UPDATE SET
+            open       = excluded.open,
+            high       = excluded.high,
+            low        = excluded.low,
+            close      = excluded.close,
+            volume     = excluded.volume,
+            turnover   = excluded.turnover,
+            fetched_at = excluded.fetched_at
         """,
         rows,
     )
@@ -317,7 +356,7 @@ def save_financial_statements(
     if not records:
         return 0
 
-    fetched_at = datetime.utcnow().isoformat(timespec="seconds")
+    fetched_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
     rows = [
         (
             str(r.get("LocalCode", "")),
@@ -335,10 +374,17 @@ def save_financial_statements(
 
     conn.executemany(
         """
-        INSERT OR REPLACE INTO raw_financials
+        INSERT INTO raw_financials
             (code, report_date, period_type, revenue, operating_profit,
              net_income, eps, roe, fetched_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (code, report_date, period_type) DO UPDATE SET
+            revenue          = excluded.revenue,
+            operating_profit = excluded.operating_profit,
+            net_income       = excluded.net_income,
+            eps              = excluded.eps,
+            roe              = excluded.roe,
+            fetched_at       = excluded.fetched_at
         """,
         rows,
     )
@@ -351,6 +397,10 @@ def save_market_calendar(
     records: list[dict[str, Any]],
 ) -> int:
     """カレンダーデータを market_calendar テーブルに保存する（冪等）。
+
+    HolidayDivision の意味:
+      "0" = 全日営業、"2" = SQ 日（全日取引あり）、"3" = 半日取引、
+      その他 = 休場
 
     Args:
         conn: DuckDB 接続。
@@ -365,9 +415,9 @@ def save_market_calendar(
     rows = [
         (
             r.get("Date"),
-            r.get("HolidayDivision") == "0",     # "0" = 営業日
-            r.get("HolidayDivision") == "3",     # "3" = 半日
-            r.get("HolidayDivision") == "2",     # "2" = SQ日
+            r.get("HolidayDivision") in {"0", "2", "3"},  # 取引あり
+            r.get("HolidayDivision") == "3",               # 半日
+            r.get("HolidayDivision") == "2",               # SQ 日
             r.get("HolidayName") or None,
         )
         for r in records
@@ -375,9 +425,14 @@ def save_market_calendar(
 
     conn.executemany(
         """
-        INSERT OR REPLACE INTO market_calendar
+        INSERT INTO market_calendar
             (date, is_trading_day, is_half_day, is_sq_day, holiday_name)
         VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (date) DO UPDATE SET
+            is_trading_day = excluded.is_trading_day,
+            is_half_day    = excluded.is_half_day,
+            is_sq_day      = excluded.is_sq_day,
+            holiday_name   = excluded.holiday_name
         """,
         rows,
     )
@@ -390,10 +445,20 @@ def save_market_calendar(
 # ---------------------------------------------------------------------------
 
 def _to_float(value: Any) -> float | None:
-    """文字列または None を float に変換する。変換失敗時は None を返す。"""
+    """値を float に変換する。変換失敗または空値は None を返す。"""
     if value is None or value == "":
         return None
     try:
         return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _to_int(value: Any) -> int | None:
+    """値を int に変換する。変換失敗または空値は None を返す。"""
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
     except (ValueError, TypeError):
         return None
