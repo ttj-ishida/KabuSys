@@ -1,182 +1,148 @@
-# KabuSys
+KabuSys
+=======
 
-日本株自動売買システム用のライブラリ基盤（プロトタイプ）。  
-マーケットデータの保存・加工・特徴量生成から発注・モニタリングまでを想定したモジュール群と、DuckDB スキーマ・環境設定管理を提供します。
+KabuSys は日本株向けの自動売買基盤のコアライブラリです。本リポジトリは環境変数管理、データ層（DuckDB）スキーマ定義、戦略／実行／モニタリングのためのパッケージ骨組みを提供します（現状は主に設定と DB 初期化部分が実装されています）。
 
-バージョン: 0.1.0
+主な特徴
+--------
+- 環境変数／設定管理
+  - .env / .env.local をプロジェクトルートから自動ロード（.git または pyproject.toml を基準に探索）
+  - 自動ロードは環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で無効化可能
+  - 複雑な .env のパース（export プレフィックス、シングル/ダブルクォート、エスケープ、インラインコメント処理）に対応
+  - 必須設定を取得すると ValueError を投げる簡易 Settings クラスを提供
 
----
+- DuckDB ベースのデータスキーマ（初期化機能）
+  - Raw / Processed / Feature / Execution の多層スキーマを定義
+  - テーブル群（価格、財務、ニュース、シグナル、オーダー、トレード、ポジション、ポートフォリオ等）を表現
+  - 必要なインデックスも作成（頻出クエリを想定）
+  - init_schema(db_path) で冪等にスキーマを初期化し接続を返す API、get_connection() で既存 DB への接続取得
 
-## 概要
+- 設定値のバリデーション
+  - KABUSYS_ENV（development / paper_trading / live）
+  - LOG_LEVEL（DEBUG / INFO / WARNING / ERROR / CRITICAL）
 
-KabuSys は日本株の自動売買プラットフォーム構築を支援する Python パッケージです。  
-現在の実装では以下を中心に提供します：
+機能一覧
+--------
+- 自動 .env ロード（プロジェクトルート検出）
+- .env の堅牢なパースロジック
+- Settings クラス経由での設定取得（J-Quants、kabu API、Slack、データベースパス、ランタイム設定 など）
+- DuckDB スキーマ定義と初期化（init_schema）
+- get_connection による接続取得
+- スキーマは以下の層とテーブルを含む（主なもの）
+  - Raw Layer: raw_prices, raw_financials, raw_news, raw_executions
+  - Processed Layer: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
+  - Feature Layer: features, ai_scores
+  - Execution Layer: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
 
-- 環境変数と .env ファイルからの設定読み込み（自動ロード）
-- DuckDB におけるデータスキーマ定義（Raw / Processed / Feature / Execution レイヤ）
-- スキーマ初期化ユーティリティ
-- モジュール構成（data / strategy / execution / monitoring の骨組み）
+セットアップ手順
+--------------
+1. Python 環境を用意
+   - 推奨: Python 3.9+（プロジェクトの pyproject.toml があればそちらに合わせてください）
 
-将来的に戦略（strategy）・発注（execution）・監視（monitoring）モジュールを拡張していくことを想定しています。
+2. 仮想環境作成（任意）
+   - python -m venv .venv
+   - source .venv/bin/activate  (macOS/Linux)
+   - .venv\Scripts\activate     (Windows)
 
----
+3. 依存ライブラリをインストール
+   - まず最低限 duckdb が必要です:
+     - pip install duckdb
+   - その他、kabu API や Slack 連携の実装を追加する場合はそれらのクライアントを追加してください。
 
-## 主な機能一覧
+4. 環境変数の準備
+   - プロジェクトルート（.git または pyproject.toml がある場所）に .env または .env.local を配置します。
+   - 自動ロードを無効にする場合は環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください。
 
-- 環境設定管理（kabusys.config.Settings）
-  - .env / .env.local の自動読み込み（プロジェクトルートを .git または pyproject.toml で検出）
-  - 必須環境変数の取得とバリデーション
-  - KABUSYS_ENV（development / paper_trading / live）や LOG_LEVEL の検証
-  - 自動ロード無効化（KABUSYS_DISABLE_AUTO_ENV_LOAD=1）
+.example の .env テンプレート（例）
+---------------------------------
+以下は必要なキーの例です（実際の値は各自で設定してください）。
 
-- データスキーマ（kabusys.data.schema）
-  - Raw、Processed、Feature、Execution 各レイヤーのテーブル定義
-  - インデックス定義
-  - init_schema(db_path) による冪等なスキーマ初期化
-  - get_connection(db_path) による既存 DB への接続
-
-- パッケージ骨組み
-  - strategy、execution、monitoring モジュールのプレースホルダ
-
----
-
-## セットアップ手順
-
-前提:
-- Python 3.10 以降（typing の | などを使用）
-- pip が利用可能
-
-1. リポジトリをクローン/配置
-   (プロジェクトルートには .git または pyproject.toml があることを推奨)
-
-2. 仮想環境を作成・有効化（任意だが推奨）
-   ```
-   python -m venv .venv
-   # Windows
-   .venv\Scripts\activate
-   # macOS / Linux
-   source .venv/bin/activate
-   ```
-
-3. 依存パッケージをインストール
-   最低限 DuckDB が必要です：
-   ```
-   pip install duckdb
-   ```
-   将来的に他の依存がある場合、requirements.txt または pyproject.toml を参照してください。
-
-4. パッケージを開発モードでインストール（任意）
-   プロジェクトに setup.py / pyproject.toml がある場合:
-   ```
-   pip install -e .
-   ```
-
-5. 環境変数設定
-   プロジェクトルートに `.env` または `.env.local` を置くと、自動で読み込まれます（デフォルト）。  
-   自動ロードを無効化したい場合は環境変数を設定します:
-   ```
-   export KABUSYS_DISABLE_AUTO_ENV_LOAD=1
-   ```
-
----
-
-## 環境変数一覧（主なもの）
-
-必須:
-- JQUANTS_REFRESH_TOKEN
-- KABU_API_PASSWORD
-- SLACK_BOT_TOKEN
-- SLACK_CHANNEL_ID
-
-任意 / デフォルト値:
-- KABUSYS_ENV: "development"（有効値: development, paper_trading, live）
-- LOG_LEVEL: "INFO"（DEBUG, INFO, WARNING, ERROR, CRITICAL）
-- KABU_API_BASE_URL: "http://localhost:18080/kabusapi"
-- DUCKDB_PATH: "data/kabusys.duckdb"
-- SQLITE_PATH: "data/monitoring.db"
-- KABUSYS_DISABLE_AUTO_ENV_LOAD: "1" にすると自動 .env ロードを無効化
-
-サンプル .env（例）
-```
 JQUANTS_REFRESH_TOKEN=your_jquants_refresh_token
-KABU_API_PASSWORD=your_kabu_password
+KABU_API_PASSWORD=your_kabu_api_password
+# KABU_API_BASE_URL は省略可能（デフォルト: http://localhost:18080/kabusapi）
 SLACK_BOT_TOKEN=xoxb-...
-SLACK_CHANNEL_ID=C0123456789
-KABUSYS_ENV=development
-LOG_LEVEL=DEBUG
+SLACK_CHANNEL_ID=C01234567
+
+# DB パス（省略時のデフォルト）
 DUCKDB_PATH=data/kabusys.duckdb
-```
+SQLITE_PATH=data/monitoring.db
 
-注意: 自動ロードはプロジェクトルート（.git または pyproject.toml のある場所）を基準に行われます。
+# 実行環境: development | paper_trading | live
+KABUSYS_ENV=development
 
----
+# ログレベル: DEBUG | INFO | WARNING | ERROR | CRITICAL
+LOG_LEVEL=INFO
 
-## 使い方（簡単な例）
+使い方（簡単な例）
+-----------------
 
-- 設定取得:
-```python
+- Settings を使う（環境変数の取得）
+
+Python:
+
 from kabusys.config import settings
 
-print(settings.jquants_refresh_token)  # 必須: 未設定なら例外
-print(settings.kabu_api_base_url)
-print(settings.is_dev)
-```
+print(settings.jquants_refresh_token)  # 必須: 未設定なら ValueError
+print(settings.kabu_api_base_url)      # デフォルト http://localhost:18080/kabusapi
+print(settings.duckdb_path)            # Path オブジェクトを返す
 
-- DuckDB スキーマ初期化:
-```python
-from kabusys.data.schema import init_schema
-from pathlib import Path
+- DuckDB スキーマを初期化して接続を取得する
 
-db_path = Path("data/kabusys.duckdb")
-conn = init_schema(db_path)  # files の親ディレクトリを自動作成し、全テーブルを作成
-# conn は duckdb connection（使用例）
-conn.execute("SELECT count(*) FROM prices_daily").fetchall()
-```
+from kabusys.data.schema import init_schema, get_connection
+from kabusys.config import settings
 
-- 既存DBへ接続（スキーマ初期化は行わない）:
-```python
-from kabusys.data.schema import get_connection
-conn = get_connection("data/kabusys.duckdb")
-```
+# スキーマを作成（ファイルがなければディレクトリを自動作成）
+conn = init_schema(settings.duckdb_path)
 
-- 自動 .env ロードの挙動を制御
-  - デフォルト: OS 環境変数 > .env.local > .env の順で読み込む
-  - テスト時などに自動ロードを無効化する場合:
-    ```
-    export KABUSYS_DISABLE_AUTO_ENV_LOAD=1
-    ```
+# 以後 conn を使って SQL を実行
+with conn:
+    rows = conn.execute("SELECT count(*) FROM prices_daily").fetchall()
+    print(rows)
 
----
+# 既存 DB に接続するだけなら
+conn2 = get_connection(settings.duckdb_path)
 
-## ディレクトリ構成
+- 自動 .env ロードの無効化（テストなどで）
+  - 環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してからパッケージを読み込むと .env 読み込みを行いません。
 
-主要ファイル/ディレクトリ（省略可能な空 __init__.py を含む）:
+注意点・実装メモ
+----------------
+- .env のパースは次のようなケースに対応しています:
+  - export KEY=val
+  - KEY='value with spaces and \'escaped\' chars'
+  - KEY="value with \"escaped\" chars"
+  - VALUE # comment（直前にスペースまたはタブがある場合のみコメントとして扱う）
+- Settings のプロパティは必須値を _require() で取得します。必須環境変数が未設定だと ValueError を投げます。
+- DuckDB のスキーマ初期化は冪等です（既存テーブルは上書きされません）。
+- init_schema は ":memory:" を指定するとインメモリ DB を使用します。
 
-- src/
-  - kabusys/
-    - __init__.py                # パッケージ定義（__version__ = "0.1.0"）
-    - config.py                  # 環境変数 / 設定管理
-    - data/
-      - __init__.py
-      - schema.py                # DuckDB スキーマ定義・初期化 (init_schema, get_connection)
-    - strategy/
-      - __init__.py              # 戦略モジュール（拡張ポイント）
-    - execution/
-      - __init__.py              # 発注/実行モジュール（拡張ポイント）
-    - monitoring/
-      - __init__.py              # 監視モジュール（拡張ポイント）
+ディレクトリ構成
+---------------
+リポジトリ内の主要なファイル構成（抜粋）:
 
-プロジェクトルートに .env / .env.local を置くと自動読み込みされます（条件: プロジェクトルートが .git または pyproject.toml で検出されること）。
+src/
+  kabusys/
+    __init__.py               # パッケージ公開 (version, __all__)
+    config.py                 # 環境変数・設定管理
+    data/
+      __init__.py
+      schema.py               # DuckDB スキーマ定義と init_schema / get_connection
+    strategy/
+      __init__.py             # 戦略関連モジュール（骨組み）
+    execution/
+      __init__.py             # 発注・実行関連モジュール（骨組み）
+    monitoring/
+      __init__.py             # モニタリング関連（骨組み）
 
----
+その他
+-----
+- スキーマの詳細（DataSchema.md）に基づいてテーブル定義をしています。DataSchema.md があれば参照してください。
+- 本パッケージは骨組み段階の実装が中心です。実際の取引ロジック、API クライアント、Slack 通知などは別途実装・統合してください。
 
-## 開発メモ / 注意点
+貢献
+----
+バグ報告、改善提案や機能追加のプルリクエスト歓迎です。まず Issue を作成してください。
 
-- Python の型ヒントで |（ユニオン記法）や Path | None を使っているため Python 3.10 以上が必要です。
-- init_schema は冪等（既存テーブルがある場合はスキップ）なので安心して何度でも実行できます。
-- .env ファイルパーサはシンプルに実装されていますが、クォートやエスケープ、コメントの扱いに配慮しています。特殊ケースはパーサ挙動に従ってください。
-- config.Settings は実行時に必須の環境変数が不足していると ValueError を投げます。運用時は必須値を確実に設定してください。
-
----
-
-必要であれば、README に加えて .env.example、開発セットアップ（tox / pre-commit 等）、テストコードの追加なども作成します。どうしますか？
+ライセンス
+----------
+（プロジェクトに合わせて適宜記載してください）
