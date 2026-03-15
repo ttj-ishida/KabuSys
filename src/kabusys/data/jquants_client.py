@@ -67,6 +67,17 @@ class _RateLimiter:
 
 _rate_limiter = _RateLimiter()
 
+# モジュールレベルの ID トークンキャッシュ（ページネーション間でトークンを共有）
+_ID_TOKEN_CACHE: str | None = None
+
+
+def _get_cached_token(force_refresh: bool = False) -> str:
+    """キャッシュ済み ID トークンを返す。未取得または force_refresh=True 時は再取得する。"""
+    global _ID_TOKEN_CACHE
+    if force_refresh or not _ID_TOKEN_CACHE:
+        _ID_TOKEN_CACHE = get_id_token()
+    return _ID_TOKEN_CACHE
+
 
 # ---------------------------------------------------------------------------
 # HTTP ユーティリティ
@@ -122,7 +133,8 @@ def _request(
             ) from exc
 
     last_exc: Exception = RuntimeError("未初期化")
-    token = id_token
+    # id_token 未指定時はキャッシュを使用（ページネーション間でトークンを共有）
+    token = id_token or (_get_cached_token() if allow_refresh else None)
     _token_refreshed = False  # 401 リフレッシュは 1 回のみ保証
     for attempt in range(_MAX_RETRIES):
         _rate_limiter.wait()
@@ -135,7 +147,7 @@ def _request(
             if status == 401 and allow_refresh and not _token_refreshed:
                 logger.warning("401 Unauthorized on %s, refreshing id_token", path)
                 try:
-                    token = get_id_token()
+                    token = _get_cached_token(force_refresh=True)  # キャッシュも更新
                     _token_refreshed = True
                     continue
                 except Exception as refresh_exc:
@@ -209,7 +221,7 @@ def get_id_token(refresh_token: str | None = None) -> str:
 # ---------------------------------------------------------------------------
 
 def fetch_daily_quotes(
-    id_token: str,
+    id_token: str | None = None,
     code: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
@@ -217,7 +229,7 @@ def fetch_daily_quotes(
     """株価日足（OHLCV）を取得する（ページネーション対応）。
 
     Args:
-        id_token: 認証トークン。
+        id_token: 認証トークン。省略時はモジュールキャッシュを使用（自動リフレッシュ対応）。
         code: 銘柄コード（省略時は全銘柄）。
         date_from: 取得開始日。
         date_to: 取得終了日。
@@ -247,7 +259,7 @@ def fetch_daily_quotes(
 
 
 def fetch_financial_statements(
-    id_token: str,
+    id_token: str | None = None,
     code: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
@@ -255,7 +267,7 @@ def fetch_financial_statements(
     """財務データ（四半期 BS/PL）を取得する（ページネーション対応）。
 
     Args:
-        id_token: 認証トークン。
+        id_token: 認証トークン。省略時はモジュールキャッシュを使用（自動リフレッシュ対応）。
         code: 銘柄コード（省略時は全銘柄）。
         date_from: 取得開始日。
         date_to: 取得終了日。
@@ -285,13 +297,13 @@ def fetch_financial_statements(
 
 
 def fetch_market_calendar(
-    id_token: str,
+    id_token: str | None = None,
     holiday_division: str | None = None,
 ) -> list[dict[str, Any]]:
     """JPX マーケットカレンダー（祝日・半日・SQ）を取得する。
 
     Args:
-        id_token: 認証トークン。
+        id_token: 認証トークン。省略時はモジュールキャッシュを使用（自動リフレッシュ対応）。
         holiday_division: 祝日区分フィルタ（省略時は全件）。
 
     Returns:
