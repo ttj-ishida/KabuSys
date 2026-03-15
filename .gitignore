@@ -23,8 +23,9 @@ build/
 .ruff_cache/
 .pytest_cache/
 
-# データファイル
-data/
+# データファイル（.gitkeepのみ追跡）
+data/*
+!data/.gitkeep
 *.duckdb
 *.db
 *.parquet
