@@ -1,84 +1,71 @@
 # Changelog
 
-すべての注目すべき変更はこのファイルに記録します。  
-このファイルは「Keep a Changelog」仕様に準拠しています。
+すべての変更は Keep a Changelog のガイドライン（https://keepachangelog.com/ja/1.0.0/）に従って記載します。
 
-※リリース日はコードベースから推測して記載しています。
+現在のバージョン: 0.1.0
+
+## [Unreleased]
+（なし）
 
 ## [0.1.0] - 2026-03-15
+初回リリース。パッケージの基本構成、環境設定管理、DuckDB スキーマ定義と初期化の実装を追加。
 
-初回リリース。以下の主要機能・構成を追加しました。
+### Added
+- パッケージ基盤
+  - Python パッケージ `kabusys` を追加。
+  - バージョンを `__version__ = "0.1.0"` に設定。
+  - サブパッケージの公開インターフェースを定義（data, strategy, execution, monitoring）。各サブパッケージの __init__.py を配置（将来の拡張用に空実装）。
 
-### 追加
-- パッケージ基本情報
-  - パッケージ名: kabusys
-  - バージョン: `0.1.0` をトップレベルで定義
-  - export: `__all__ = ["data", "strategy", "execution", "monitoring"]`
-
-- 環境変数 / 設定管理（kabusys.config）
-  - Settings クラスを導入し、アプリケーション設定を環境変数から取得する共通インターフェースを追加。
-  - 必須設定検証関数 `_require()` を追加。未設定時は `ValueError` を送出。
-  - 主なプロパティ:
-    - J-Quants: `jquants_refresh_token`（必須）
-    - kabuステーション API: `kabu_api_password`（必須）、`kabu_api_base_url`（デフォルト: `http://localhost:18080/kabusapi`）
-    - Slack: `slack_bot_token`（必須）、`slack_channel_id`（必須）
-    - データベースパス: `duckdb_path`（デフォルト: `data/kabusys.duckdb`）、`sqlite_path`（デフォルト: `data/monitoring.db`）
-    - 実行環境判定: `env`（許容値: `development`, `paper_trading`, `live`）、`is_live`、`is_paper`、`is_dev`
-    - ログレベル: `log_level`（許容値: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`）
-  - .env ファイルの自動読み込み機能
-    - プロジェクトルート（.git または pyproject.toml を基準）から `.env` / `.env.local` を自動読み込み（OS環境変数が優先）。
-    - 読み込みを無効化するには環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定。
-    - `.env.local` は `.env` の値を上書きできるが、プロセス開始時の OS 環境変数は保護（上書きされない）。
-  - .env パーサ
+- 環境変数・設定管理（src/kabusys/config.py）
+  - .env ファイルまたは環境変数から設定を読み込む自動ローダーを実装。
+    - 読み込み優先順位: OS 環境変数 > .env.local > .env
+    - プロジェクトのルート検出: __file__ を起点に `.git` または `pyproject.toml` を探索してプロジェクトルートを特定（CWD 非依存）。
+    - 自動ロードを無効化するためのフラグ: `KABUSYS_DISABLE_AUTO_ENV_LOAD=1`
+    - .env ファイル読み込み時、OS 環境変数を保護するための `protected` キー集合をサポートし、必要に応じて上書きを制御。
+  - .env パース機能を実装
+    - 空行・コメント行（`#` で始まる）を無視。
     - `export KEY=val` 形式に対応。
-    - シングル/ダブルクォート内のバックスラッシュエスケープを考慮して値を復元。
-    - クォート無しの値では、`#` がコメント開始と判定される条件（直前がスペース/タブ）を考慮。
-    - 無効行やコメント行を適切に無視。
+    - クォートされた値（シングルクォート／ダブルクォート）に対してバックスラッシュエスケープを処理し、対応する閉じクォートまでを値として扱う。
+    - クォートなしの値では、`#` の直前がスペースまたはタブであれば以降をコメントとして扱う（インラインコメントの取り扱い）。
+    - 無効な行・キーに対してはスキップ。
+  - Settings クラスを提供（環境変数からの値取得とバリデーション）
+    - J-Quants / kabuステーション / Slack / データベースパスなどの設定プロパティを実装。
+    - 必須設定が未設定の場合は ValueError を投げる `_require()` を用意。
+    - `duckdb_path` / `sqlite_path` は Path 型で返す（デフォルトパスを持つ）。
+    - 環境種別 `KABUSYS_ENV` とログレベル `LOG_LEVEL` に対する許容値チェックを実装（許容値はそれぞれ `development|paper_trading|live`, `DEBUG|INFO|WARNING|ERROR|CRITICAL`）。
+    - 利便性プロパティ `is_live`, `is_paper`, `is_dev` を実装。
 
-- データベーススキーマ定義（kabusys.data.schema）
-  - DuckDB 用のスキーマ定義を追加（3〜4 層構造を想定: Raw / Processed / Feature / Execution）。
-  - テーブル DDL を文字列として定義し、初期化関数 `init_schema(db_path)` で全テーブル・インデックスを作成。
-    - DB ファイルの親ディレクトリが存在しない場合は自動作成。
-    - ":memory:" を指定してインメモリ DB の利用が可能。
-    - 初期化は冪等（すでに存在するテーブルはスキップ）。
-  - 既存 DB へ単に接続する `get_connection(db_path)` を提供（スキーマ初期化は行わない）。
-  - 定義済みテーブル（一部抜粋）:
-    - Raw Layer: `raw_prices`, `raw_financials`, `raw_news`, `raw_executions`
-    - Processed Layer: `prices_daily`, `market_calendar`, `fundamentals`, `news_articles`, `news_symbols`
-    - Feature Layer: `features`, `ai_scores`
-    - Execution Layer: `signals`, `signal_queue`, `portfolio_targets`, `orders`, `trades`, `positions`, `portfolio_performance`
-  - 制約とデータ整合性:
-    - 適切な PRIMARY KEY と FOREIGN KEY（例: `news_symbols.news_id` → `news_articles.id`, `orders.signal_id` → `signal_queue.signal_id`, `trades.order_id` → `orders.order_id` 等）
-    - CHECK 制約で列値のバリデーション（価格 >= 0、サイズ > 0、列に許可される列挙値チェック等）
-  - インデックス
-    - 検索頻度の高いパターンを想定したインデックスを作成（例: `prices_daily(code, date)`, `features(code, date)`, `signal_queue(status)`, `orders(status)` 等）
+- DuckDB スキーマ定義と初期化（src/kabusys/data/schema.py）
+  - DataLayer 構成に従うテーブル群を追加（Raw / Processed / Feature / Execution の 4 層）。
+    - Raw Layer:
+      - raw_prices, raw_financials, raw_news, raw_executions
+    - Processed Layer:
+      - prices_daily, market_calendar, fundamentals, news_articles, news_symbols
+    - Feature Layer:
+      - features, ai_scores
+    - Execution Layer:
+      - signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
+  - 各テーブルに対して型・チェック制約・PRIMARY KEY・外部キーを適切に設定
+    - 例: prices_daily の low カラムに low <= high の CHECK 制約、orders と signal_queue の外部キー関係、trades の order_id による ON DELETE CASCADE など
+  - インデックス定義を追加（頻出クエリパターンを想定したインデックス）
+    - 例: idx_prices_daily_code_date, idx_features_code_date, idx_signal_queue_status など
+  - スキーマ初期化 API
+    - init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection
+      - 指定したパスに対して親ディレクトリを自動作成し、全テーブル・インデックスを作成（冪等）。
+      - ":memory:" をサポート（インメモリ DB）。
+    - get_connection(db_path: str | Path) -> duckdb.DuckDBPyConnection
+      - 既存 DB への接続を返す（スキーマの初期化は行わない）。
+  - 実装上の注意
+    - DuckDB に対して複数 DDL を順次実行し、外部キー依存を考慮したテーブル作成順序を管理。
 
-- パッケージ構成（スキャフォールド）
-  - サブパッケージの雛形を追加:
-    - `kabusys.data`（schema モジュールを含む）
-    - `kabusys.strategy`（未実装の初期化）
-    - `kabusys.execution`（未実装の初期化）
-    - `kabusys.monitoring`（未実装の初期化）
-  - 将来的な戦略、発注、監視機能の拡張を想定した構成。
+### Notes
+- 現在はコアのスケルトン（設定管理・スキーマ）を実装した段階で、戦略ロジックや発注実行の具体実装は未実装（サブパッケージの雛形のみ配置）。
+- .env パーサーや自動ロードはテストや CI 環境で挙動を制御できるよう配慮（KABUSYS_DISABLE_AUTO_ENV_LOAD、protected 機構）。
+- DuckDB スキーマは将来的に拡張可能な設計（特徴量テーブルや AI スコア、注文/約定の履歴管理を考慮）。
 
-### 変更
-- （初回リリースのため該当なし）
+--- 
 
-### 修正
-- （初回リリースのため該当なし）
-
-### 既知の制限 / 注意点
-- duckdb パッケージが必須です。環境にインストールされていることを確認してください。
-- `get_connection()` はスキーマ初期化を行いません。初回利用時は `init_schema()` を呼び出してください。
-- 現時点で `strategy` / `execution` / `monitoring` パッケージは実装の骨組みのみで、実働ロジックは含まれていません。
-- .env パーサは一般的な形式に対応していますが、極端に複雑なシェル式展開などはサポートしていません。
-
-### 今後の予定（例）
-- 戦略（strategy）モジュールの実装（特徴量計算、シグナル生成）
-- execution モジュールでの発注処理（kabu API との統合）
-- monitoring の充実（Slack 通知、DB 監視、メトリクス収集）
-- マイグレーション機構（スキーマ変更時のデータ移行サポート）
-
----
-
-（以上）
+今後のリリース候補例（想定）
+- 0.2.0: データ取得モジュール（価格取得、財務データ、ニュースのフェッチ）を追加、定期実行ジョブの追加。
+- 0.3.0: 戦略実装（シグナル生成）、注文送信・監視モジュール（kabu ステーション連携）を追加。
+- 1.0.0: ライブ運用対応（安全性・リトライ・ロギング・メトリクス）とドキュメント整備。
