@@ -1,0 +1,55 @@
+name: AI Bug Fix
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  fix:
+
+    if: contains(github.event.comment.body, '/ai-fix')
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install openai
+
+      - name: Run AI Fix
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python .github/scripts/ai_bugfix.py
+
+      - name: Create fix branch and PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          BRANCH="ai-fix/issue-${{ github.event.issue.number }}"
+          git config user.name "ai-bot"
+          git config user.email "bot@example.com"
+          git checkout -b "$BRANCH"
+          git add .
+          git commit -m "AI bug fix for issue #${{ github.event.issue.number }}" || echo "no changes"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "AI Bug Fix: Issue #${{ github.event.issue.number }}" \
+            --body "Closes #${{ github.event.issue.number }}" \
+            --base main \
+            --head "$BRANCH"

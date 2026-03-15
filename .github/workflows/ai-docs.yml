@@ -1,0 +1,41 @@
+name: AI Docs
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+
+  docs:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install openai
+
+      - name: Generate docs
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+        run: |
+          python .github/scripts/ai_docs.py
+
+      - name: Commit docs
+        run: |
+          git config user.name "ai-bot"
+          git config user.email "bot@example.com"
+          git add README.md CHANGELOG.md
+          git commit -m "AI docs update" || echo "no change"
+          git push

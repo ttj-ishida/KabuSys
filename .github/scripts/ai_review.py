@@ -3,6 +3,7 @@ import requests
 from openai import OpenAI
 
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+model = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
 with open("diff.txt") as f:
     diff = f.read()
@@ -28,7 +29,7 @@ diff:
 """
 
 response = client.chat.completions.create(
-    model="gpt-4o",
+    model=model,
     messages=[
         {"role": "system", "content": "You are a senior software engineer."},
         {"role": "user", "content": prompt}

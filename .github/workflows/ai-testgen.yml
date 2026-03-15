@@ -1,0 +1,41 @@
+name: AI Test Generator
+
+on:
+  pull_request:
+    types: [opened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  testgen:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install openai
+
+      - name: Generate tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+        run: |
+          python .github/scripts/ai_testgen.py
+
+      - name: Commit tests
+        run: |
+          git config user.name "ai-bot"
+          git config user.email "bot@example.com"
+          git add tests/test_generated.py
+          git commit -m "AI generated tests" || echo "no changes"
+          git push
