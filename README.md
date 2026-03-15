@@ -1,109 +1,140 @@
 # KabuSys
 
-KabuSys は日本株向けの自動売買システムの骨格（ライブラリ）です。データ取得、売買戦略、注文実行、モニタリングの各機能ごとにモジュールを分割しており、独自のアルゴリズムや取引インフラに合わせて拡張できる設計になっています。
-
-現状はプロジェクトのスケルトン（雛形）で、各モジュールは実装の出発点を提供します。
+日本株自動売買システム（KabuSys）の骨組みパッケージです。  
+本リポジトリは、データ取得・ストラテジー実装・注文実行・モニタリングの4つの責務に分割された構成を提供します。各コンポーネントを実装・拡張して、自動売買ロジックを構築するための出発点となります。
 
 バージョン: 0.1.0
 
 ---
 
+## プロジェクト概要
+
+KabuSys は日本株向けの自動売買フレームワークの雛形です。以下の主要コンポーネントを想定しています。
+
+- data: 市場データ（株価、板情報、約定履歴など）の取得と前処理
+- strategy: 売買戦略（シグナル生成、ポジション管理）
+- execution: 注文発行・約定管理（ブローカーAPI連携／モック）
+- monitoring: ログ・メトリクス・稼働状況の可視化、アラート
+
+このリポジトリ自体は最小構成であり、各モジュールの具体的な実装（APIクライアントや具体的な戦略）は含まれていません。利用者は自分の取引ルールや接続先APIに合わせて拡張して使います。
+
+---
+
 ## 機能一覧（想定）
 
-- data: 市場データの取得・加工（ティック、板情報、過去データなど）
-- strategy: 売買戦略（シグナル生成、ポジション管理など）
-- execution: 注文送信・約定管理・注文監視
-- monitoring: ログ、パフォーマンス計測、アラート送信
+現在のリポジトリはパッケージ構造のみを提供します。実装例として期待される機能は次の通りです。
 
-※各機能は現状ではモジュールの雛形のみです。実際のAPI接続やアルゴリズムはプロジェクトに合わせて実装してください。
+- データ取得
+  - 株価（始値・高値・安値・終値・出来高）の取得
+  - リアルタイムティッカー / 板情報の取得
+  - CSV / DB からのヒストリカルデータ読み込み
+- ストラテジー
+  - ローソク足、テクニカル指標（移動平均、RSI など）
+  - シグナル生成とポジション管理
+  - バックテストのインターフェース
+- 注文実行
+  - ブローカーAPI（例: Kabutan / kabuステーション / その他）との接続
+  - 注文登録・取消・注文状態の監視
+  - 注文のフェイルセーフ／再試行処理
+- モニタリング
+  - ログ出力（ファイル／標準出力）
+  - メトリクス収集（Prometheus 等）
+  - 異常時の通知（メール／Slack 等）
 
 ---
 
 ## 要件
 
 - Python 3.8+
-- 推奨（使用する機能に応じて追加）
-  - pandas, numpy（データ処理）
-  - requests / aiohttp（外部APIとの通信）
-  - websocket-client / websockets（リアルタイムデータ）
-  - logging / structlog（ログ管理）
+- 仮想環境の利用を推奨
+- 実際にブローカーに接続する場合は当該ブローカーのAPIキーなどの資格情報が必要
 
-依存パッケージはプロジェクトで必要に応じて pyproject.toml / requirements.txt に追加してください。
+（依存パッケージは本テンプレートには明記されていません。実装時に requirements.txt を追加してください）
 
 ---
 
 ## セットアップ手順
 
-1. リポジトリをクローン
+ローカルで開発・実行するための基本手順です。
+
+1. リポジトリをクローンする
    ```
-   git clone <your-repo-url>
-   cd <your-repo-directory>
+   git clone <リポジトリURL>
+   cd <リポジトリディレクトリ>
    ```
 
-2. 仮想環境を作成・有効化（例: venv）
-   ```
-   python -m venv .venv
-   source .venv/bin/activate  # macOS / Linux
-   .venv\Scripts\activate     # Windows
-   ```
-
-3. パッケージを編集可能インストール
-   ```
-   pip install -e .
-   ```
-
-4. 必要な追加パッケージをインストール
-   ```
-   pip install pandas numpy requests
-   ```
-
-5. 設定・認証情報を用意
-   - 実際の取引API（例: 証券会社のAPI）を利用する場合、APIキーやアクセストークン、接続設定を環境変数や設定ファイルで管理してください。
-   - 例（環境変数）
+2. 仮想環境を作成して有効化する（例: venv）
+   - macOS / Linux:
      ```
-     export KABUSYS_API_KEY="your_api_key"
-     export KABUSYS_ENDPOINT="https://api.example.com"
+     python3 -m venv .venv
+     source .venv/bin/activate
+     ```
+   - Windows (PowerShell):
+     ```
+     python -m venv .venv
+     .\.venv\Scripts\Activate.ps1
+     ```
+
+3. 開発用依存関係をインストールする
+   - 依存ファイルがない場合は個別に追加してください。例:
+     ```
+     pip install -r requirements.txt
+     ```
+   - 開発中は editable install を使うと便利です:
+     ```
+     pip install -e .
+     ```
+
+4. 環境変数や設定ファイルを準備する
+   - ブローカーAPIキー、エンドポイント、ログ設定などを環境変数や YAML/JSON の設定ファイルで管理してください。
+   - 例（環境変数）:
+     ```
+     export KABU_API_KEY="your_api_key"
+     export KABU_API_SECRET="your_api_secret"
      ```
 
 ---
 
-## 使い方（サンプル）
+## 使い方（基本例）
 
-以下は KabuSys の各モジュールを組み合わせる際の雛形です。実際には各モジュール内に具体的なクラス・関数を実装してください。
+このパッケージはモジュール群を提供します。ここではテンプレート的な利用例を示します。実際の関数名・引数はプロジェクトで実装してください。
 
-例: シンプルな実行フローのイメージ
+1. パッケージをインポートする
+   ```python
+   import kabusys
+   from kabusys import data, strategy, execution, monitoring
+   ```
 
-```python
-from kabusys import data, strategy, execution, monitoring
+2. データ取得（実装例）
+   ```python
+   # data モジュールに get_historical_prices を実装した場合
+   prices = data.get_historical_prices(symbol="7203", start="2024-01-01", end="2024-03-31")
+   ```
 
-# 1) データフィードを初期化（実装は各自）
-# data.DataFeed を実装して利用する想定
-feed = data.DataFeed(source="your_data_source")
+3. ストラテジーでシグナル生成（実装例）
+   ```python
+   # strategy モジュールでシグナル生成関数を実装
+   signals = strategy.generate_signals(prices)
+   ```
 
-# 2) 戦略を初期化（実装は各自）
-# strategy.BaseStrategy を継承してシグナル生成を行う想定
-my_strategy = strategy.MyStrategy(params={"window": 20})
+4. 注文実行（実装例）
+   ```python
+   # execution モジュールに place_order を実装
+   for sig in signals:
+       if sig.action == "BUY":
+           execution.place_order(symbol=sig.symbol, side="BUY", qty=sig.qty, price=sig.price)
+       elif sig.action == "SELL":
+           execution.place_order(symbol=sig.symbol, side="SELL", qty=sig.qty, price=sig.price)
+   ```
 
-# 3) 実行エンジンを初期化（実装は各自）
-executor = execution.Executor(api_key="...", endpoint="...")
+5. モニタリング（実装例）
+   ```python
+   # monitoring モジュールでログやメトリクスを送る
+   monitoring.log_trade(trade_info)
+   monitoring.report_metrics(metrics)
+   ```
 
-# 4) モニタリング/ログを初期化（実装は各自）
-monitor = monitoring.Monitor(log_level="INFO")
-
-# 5) 実行ループ（単純化）
-for tick in feed.stream():
-    signal = my_strategy.on_tick(tick)
-    if signal is not None:
-        order = executor.send_order(signal)
-        monitor.record_order(order)
-```
-
-各モジュールには次のような責務を持たせることを想定しています。
-
-- data: DataFeed クラス（stream() や get_historical() 等）
-- strategy: BaseStrategy（on_tick(), on_bar(), reset() 等を定義）
-- execution: Executor（send_order(), cancel_order(), get_positions() 等）
-- monitoring: Monitor（ログ出力、メトリクス集計、通知送信）
+注: 上記はあくまでインターフェースの例です。各モジュールの詳細実装（関数名／返り値／例外処理）はプロジェクトで定義してください。
 
 ---
 
@@ -111,45 +142,50 @@ for tick in feed.stream():
 
 現在の主要ファイル/ディレクトリ構成は以下の通りです。
 
-```
-.
-├── README.md
-└── src
-    └── kabusys
-        ├── __init__.py           # __version__ = "0.1.0", __all__ = ["data","strategy","execution","monitoring"]
-        ├── data
-        │   └── __init__.py       # データ取得ロジックを実装
-        ├── strategy
-        │   └── __init__.py       # 戦略ロジックを実装
-        ├── execution
-        │   └── __init__.py       # 注文送信・接続ロジックを実装
-        └── monitoring
-            └── __init__.py       # ログ・監視ロジックを実装
-```
+- src/
+  - kabusys/
+    - __init__.py         (パッケージ初期化、バージョン情報等)
+    - data/
+      - __init__.py       (データ取得・前処理モジュール)
+    - strategy/
+      - __init__.py       (ストラテジーモジュール)
+    - execution/
+      - __init__.py       (注文実行モジュール)
+    - monitoring/
+      - __init__.py       (モニタリングモジュール)
+- README.md              (本ファイル)
+- setup.cfg / pyproject.toml / setup.py (プロジェクト設定ファイルは必要に応じて追加)
+
+※ 実装を進める場合は、各モジュール内にサブモジュールや util、tests ディレクトリ等を追加してください。
+
+例（拡張案）:
+- src/kabusys/data/clients.py (API クライアント)
+- src/kabusys/strategy/backtest.py
+- src/kabusys/execution/broker.py
+- tests/ (ユニットテスト)
 
 ---
 
-## 実装ガイド（簡単な提案）
+## 開発メモ / ベストプラクティス
 
-- まずは各サブパッケージにベースクラスを実装しましょう。
-  - data.BaseFeed、strategy.BaseStrategy、execution.BaseExecutor、monitoring.BaseMonitor
-- ユニットテストを用意して、各コンポーネントの入出力仕様を明確にしておくと安全です。
-- 実際の注文実行はリスクが高いので、エミュレーション環境やドライラン（paper trading）で十分に検証してください。
-- ロギング／例外ハンドリングを整備し、重要なイベントは永続化（ファイル、DB）しておくことを推奨します。
-
----
-
-## 貢献
-
-- Issue や Pull Request を歓迎します。
-- 実装方針や API 仕様については Issue で事前に相談してください。
+- ブローカーAPIに接続する部分はテストしやすいようにインターフェースを抽象化し、モックを用意することを推奨します。
+- 実取引を行う前にバックテスト・ペーパートレードで十分に検証してください。
+- リスク管理（最大ドローダウン、1トレードあたりの最大ポジション、取引時間の制限など）をコードに組み込んでください。
+- 機密情報（APIキー等）は環境変数やシークレットストアで管理し、リポジトリに含めないでください。
 
 ---
 
-## ライセンス
+## 貢献・拡張
 
-このリポジトリに明示的なライセンスが含まれていない場合は、使用前にライセンスを追加してください（例: MIT, Apache-2.0 等）。
+- イシューやプルリクエスト歓迎です。新しいデータプロバイダ、戦略、エグゼキューションバックエンドを追加する際は、既存のモジュール構成に沿って行ってください。
+- README に記載のテンプレート関数名やインターフェースを実際の実装に合わせて更新してください。
 
 ---
 
-README はプロジェクトの出発点を示すためのテンプレートです。必要に応じて API の仕様、設定ファイル例、テスト手順、デプロイ方法などを追記してください。
+## 注意事項（免責事項）
+
+本リポジトリは教育・開発目的のテンプレートです。実際の金融取引に用いる場合、法令、ブローカーの利用規約、税務上の取り扱い等を十分に理解した上で自己責任で行ってください。取引による損失について作者・配布者は一切の責任を負いません。
+
+---
+
+もし具体的に実装したい機能（例: 「kabuステーションAPI で板情報を取得するクライアント」や「単純移動平均クロスの戦略実装」）があれば、用途に合わせたテンプレート実装例やサンプルコードを提示します。どの部分から実装を始めたいか教えてください。
