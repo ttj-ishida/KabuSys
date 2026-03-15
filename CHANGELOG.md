@@ -1,86 +1,78 @@
-# CHANGELOG
+Keep a Changelog 準拠 — CHANGELOG.md
+※コードベースから推測して作成しています
 
-すべての重要な変更はここに記録します。本ファイルは「Keep a Changelog」規約に従っています。
+All notable changes to this project will be documented in this file.
 
-フォーマットの規約: https://keepachangelog.com/ja/1.0.0/
-
-※この CHANGELOG は、提供されたコードベースの内容から推測して作成した初期の変更履歴です。
+フォーマット: https://keepachangelog.com/ja/1.0.0/
 
 ## [Unreleased]
 
 ## [0.1.0] - 2026-03-15
-初期リリース。
+初回リリース
 
-### 追加 (Added)
-- パッケージ初期化
-  - kabusys パッケージの公開バージョンを 0.1.0 に設定。
-  - __all__ に `data`, `strategy`, `execution`, `monitoring` を追加し、主要サブパッケージを公開。
+### Added
+- パッケージ基盤を追加
+  - パッケージ名: kabusys
+  - バージョン: 0.1.0 (src/kabusys/__init__.py)
+  - public モジュール: data, strategy, execution, monitoring
 
-- 環境設定 (src/kabusys/config.py)
-  - .env ファイルおよび環境変数から設定値を読み込む設定モジュールを追加。
-  - プロジェクトルート検出機能を実装（.git または pyproject.toml を探索）。
-  - .env ファイルの自動読み込みを実装（優先順位: OS環境変数 > .env.local > .env）。
-  - 自動ロードを無効化するためのフラグ `KABUSYS_DISABLE_AUTO_ENV_LOAD` をサポート。
-  - .env パーサを実装:
-    - 空行・コメント行のスキップ。
-    - `export KEY=val` 形式に対応。
-    - シングルクォート／ダブルクォートのサポート（バックスラッシュエスケープ対応、閉じクォート以降は無視）。
-    - クォート無し値でのインラインコメント判定ルール（'#' の直前が空白／タブの場合にコメントと認識）。
-  - .env 読み込み時の挙動:
-    - override=False: 未設定のキーのみ設定。
-    - override=True: OS 環境変数（保護されたキー）を上書きしない形で上書き。
-    - 読み込み失敗時は警告を発行（例外は送出しない）。
-  - Settings クラスを追加し、以下のプロパティを提供:
-    - J-Quants: jquants_refresh_token（必須）
-    - kabuステーション API: kabu_api_password（必須）、kabu_api_base_url（デフォルト: http://localhost:18080/kabusapi）
-    - Slack: slack_bot_token（必須）、slack_channel_id（必須）
-    - データベースパス: duckdb_path（デフォルト: data/kabusys.duckdb）、sqlite_path（デフォルト: data/monitoring.db）
-    - システム設定: env（KABUSYS_ENV。許可値: development, paper_trading, live）、log_level（LOG_LEVEL。許可値: DEBUG, INFO, WARNING, ERROR, CRITICAL）
-    - 環境判定プロパティ: is_live, is_paper, is_dev
-  - 必須環境変数未設定時は ValueError を送出するユーティリティを追加。
+- 環境設定/読み込みモジュールを追加 (src/kabusys/config.py)
+  - .env ファイルおよび環境変数から設定を読み込む自動ローダーを実装
+    - 読み込み優先順位: OS 環境変数 > .env.local > .env
+    - プロジェクトルートは .git または pyproject.toml を基準に探索（CWD 非依存）
+    - 自動読み込みを無効化するためのフラグ: KABUSYS_DISABLE_AUTO_ENV_LOAD=1
+    - OS の既存環境変数は保護（protected）して .env.local の上書きを制御
+  - .env パーサーの機能
+    - 空行・コメント行（# で始まる）を無視
+    - export KEY=val 形式に対応
+    - シングル/ダブルクォートされた値のエスケープ処理をサポート（バックスラッシュエスケープ）
+    - クォートなし値のインラインコメント扱いは、'#' の直前がスペース/タブ の場合のみ考慮
+  - 設定取得用 Settings クラスを提供（settings インスタンスを公開）
+    - J-Quants, kabuステーション, Slack, DB パスなどのプロパティを用意
+    - 必須設定未定義時は ValueError を送出（_require）
+    - 環境タイプ (KABUSYS_ENV) とログレベル (LOG_LEVEL) の値検証を実装
+    - デフォルトの DB パス:
+      - DUCKDB_PATH: data/kabusys.duckdb
+      - SQLITE_PATH: data/monitoring.db
+    - 利便性プロパティ: is_live / is_paper / is_dev
 
-- データスキーマ (src/kabusys/data/schema.py)
-  - DuckDB 用のデータベーススキーマ定義を追加。3 層構造（Raw / Processed / Feature）と Execution 層を想定したテーブルを含む。
-  - Raw レイヤー（例）:
-    - raw_prices, raw_financials, raw_news, raw_executions（基本の生データ保存テーブル）
-  - Processed レイヤー（例）:
-    - prices_daily, market_calendar, fundamentals, news_articles, news_symbols
-  - Feature レイヤー:
-    - features, ai_scores
-  - Execution レイヤー:
-    - signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
-  - 各テーブルに対して適切な型制約、NULL 制約、チェック制約、主キー、外部キー制約を定義（例: side カラムの CHECK、size の正値チェック等）。
-  - 頻出クエリ向けのインデックスを定義（例: idx_prices_daily_code_date, idx_signal_queue_status, idx_orders_status など）。
-  - テーブル作成順を依存関係に配慮して定義（外部キー制約を考慮）。
-  - スキーマ初期化関数を提供:
+- DuckDB スキーマ定義と初期化を実装 (src/kabusys/data/schema.py)
+  - 3層構造（Raw / Processed / Feature）+ Execution 層に基づくテーブル群を定義
+    - Raw Layer: raw_prices, raw_financials, raw_news, raw_executions
+    - Processed Layer: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
+    - Feature Layer: features, ai_scores
+    - Execution Layer: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
+  - 各テーブルに対して主キー、外部キー、CHECK 制約などを設定（データ整合性を強化）
+    - 例: side 列は 'buy'/'sell' に限定、size は正の整数、価格は負数不可 など
+    - news_symbols による news_articles への外部キーと ON DELETE CASCADE を設定
+    - orders.signal_id に対して ON DELETE SET NULL を使用
+  - 頻出クエリを想定したインデックスを作成
+    - 例: idx_prices_daily_code_date, idx_features_code_date, idx_signal_queue_status など
+  - DB 初期化 API:
     - init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection
-      - ファイルシステムの親ディレクトリを自動作成（:memory: をサポート）。
-      - 全 DDL とインデックスを実行し、冪等にテーブルを作成。
+      - 指定パスの親ディレクトリを自動作成（:memory: はそのままインメモリ）
+      - 全テーブルとインデックスを冪等に作成して接続を返す
     - get_connection(db_path: str | Path) -> duckdb.DuckDBPyConnection
-      - 既存 DB への接続を返す（スキーマ初期化は行わない旨を明記）。
+      - 既存 DB への接続を返す（スキーマ初期化は行わない）
+  - ドキュメント注記: DataSchema.md に基づく想定
 
-- 空のパッケージモジュールを追加
-  - src/kabusys/execution/__init__.py
-  - src/kabusys/strategy/__init__.py
+- モジュールスケルトンを追加
   - src/kabusys/data/__init__.py
+  - src/kabusys/strategy/__init__.py
+  - src/kabusys/execution/__init__.py
   - src/kabusys/monitoring/__init__.py
-  - （今後の拡張ポイントとしてプレースホルダ）
+  - これらは現時点でパッケージ構成のためのプレースホルダーとして存在
 
-### 変更 (Changed)
-- なし（初回リリース）
+### Changed
+- 初版のため該当なし
 
-### 修正 (Fixed)
-- なし（初回リリース）
+### Fixed
+- 初版のため該当なし
 
-### 廃止 (Deprecated)
-- なし
+### Security
+- 初版のため該当なし
 
-### 削除 (Removed)
-- なし
-
-### セキュリティ (Security)
-- なし
-
----
-
-[0.1.0]: -
+補足
+- エラーメッセージは日本語で整備されており、.env.example を参考に設定を整えるよう案内する実装になっています。
+- 実際の運用環境では、機密情報（API トークン等）の取り扱いに注意してください（.env.local などローカル専用の取り扱いを推奨）。
+- 今後のリリースでは各モジュール（strategy, execution, monitoring）の具象実装、テスト、運用向け機能（例: 発注実行フロー、Slack 通知、監視ジョブ）を追加予定です。
