@@ -1,36 +1,30 @@
 # Changelog
 
-この CHANGELOG は「Keep a Changelog」の形式に準拠しています。  
-安定したリリースからの重要な変更を時系列で記録します。
+All notable changes to this project will be documented in this file.
 
-全般的なルール：
-- バージョン番号はセマンティックバージョニングに従います。
-- 日付はリリース日を表します。
+このプロジェクトのすべての重要な変更はこのファイルに記録されます。  
+このファイルは "Keep a Changelog" の形式に準拠し、セマンティックバージョニングを採用しています。
 
-## Unreleased
+## [Unreleased]
 
-- なし
+（現在未リリースの変更はここに記載します）
 
 ## [0.1.0] - 2026-03-15
 
-初回リリース。日本株自動売買システム「KabuSys」の基本パッケージ構成を追加しました。
-
 ### Added
-- パッケージの初期実装を追加
-  - `src/kabusys/__init__.py`
-    - パッケージのドキュメンテーション文字列を追加（"KabuSys - 日本株自動売買システム"）。
-    - パッケージバージョンを `__version__ = "0.1.0"` として定義。
-    - パブリック API としてのサブパッケージを `__all__ = ["data", "strategy", "execution", "monitoring"]` で明示。
-  - サブパッケージのスケルトンを追加（機能は今後実装予定）
-    - `src/kabusys/data/__init__.py`（データ取得・管理用の名前空間）
-    - `src/kabusys/strategy/__init__.py`（売買戦略実装用の名前空間）
-    - `src/kabusys/execution/__init__.py`（注文発行・約定処理用の名前空間）
-    - `src/kabusys/monitoring/__init__.py`（監視・ログ・アラート用の名前空間）
+- 初回公開（ベース実装）
+  - パッケージメタ情報を追加
+    - `src/kabusys/__init__.py` にパッケージドキュメント文字列とバージョン定義 `__version__ = "0.1.0"` を追加。
+    - `__all__ = ["data", "strategy", "execution", "monitoring"]` を定義し、公開APIとして主要サブパッケージを明示。
+  - 基本的なパッケージ構成を作成
+    - サブパッケージのプレースホルダを追加：
+      - `src/kabusys/data/__init__.py`（データ取得・管理用）
+      - `src/kabusys/strategy/__init__.py`（売買戦略用）
+      - `src/kabusys/execution/__init__.py`（注文実行用）
+      - `src/kabusys/monitoring/__init__.py`（モニタリング・ロギング用）
+  - 日本株自動売買システム（KabuSys）の初期骨格を整備し、今後の実装拡張の土台を準備。
 
 ### Changed
-- なし（初回リリースのため）
-
-### Fixed
 - なし
 
 ### Deprecated
@@ -39,9 +33,16 @@
 ### Removed
 - なし
 
+### Fixed
+- なし
+
 ### Security
 - なし
 
 ---
 
-注：本リリースはパッケージ構成と公開 API の骨組みを整えた段階です。各サブパッケージ内の具体的な実装（データ取得インターフェース、戦略の定義、注文実行ロジック、監視ツール等）は今後のリリースで追加・拡張されます。
+注意・補足
+- 現在のリポジトリは基本的なパッケージ構造（モジュールのプレースホルダ）を整えた段階です。各サブパッケージ内に具体的な機能（API呼び出し、注文ロジック、データ取得、監視機能など）を実装することで機能が追加されます。
+- パッケージの利用例（インポート）：
+  - from kabusys import data, strategy, execution, monitoring
+- バージョニングはセマンティックバージョニングに従います。将来的に機能追加はマイナーバージョン、破壊的変更はメジャーバージョンの更新として扱います。
