@@ -1,85 +1,78 @@
 # CHANGELOG
 
-すべての重要な変更を記録します。フォーマットは Keep a Changelog に準拠しています。
+すべての注目すべき変更はこのファイルに記録します。本プロジェクトは Keep a Changelog の慣習に従います。  
+現在のリリース情報は下記の通りです。
 
 ## [0.1.0] - 2026-03-15
 初回リリース。
 
-### Added
-- パッケージ初期化
-  - src/kabusys/__init__.py にパッケージメタ情報を追加（バージョン "0.1.0"、公開モジュール指定: data, strategy, execution, monitoring）。
+### 追加
+- パッケージ基盤
+  - パッケージ名: kabusys
+  - バージョン: 0.1.0（src/kabusys/__init__.py に定義）
+  - エクスポート対象モジュール: data, strategy, execution, monitoring（将来的な拡張のためのサブパッケージを含む空の __init__ を用意）
 
-- 環境変数／設定管理モジュールを追加（src/kabusys/config.py）
-  - .env ファイルまたは環境変数から設定を読み込む自動ローダーを実装。
-    - 自動読み込みの優先順位: OS 環境変数 > .env.local > .env
-    - プロジェクトルートは .git または pyproject.toml を基準に自動検出（ファイル位置起点の探索により CWD に依存しない）。
-    - 自動ロードを無効化するためのフラグ: KABUSYS_DISABLE_AUTO_ENV_LOAD=1
-    - OS 環境変数は保護（.env による上書きを防止）。.env.local は override=True で上書き可能（保護キーを除く）。
-  - .env パーサーの実装
-    - 空行、コメント（先頭#）の無視
-    - export KEY=val 形式に対応
-    - 単一/二重クォートを含む値のエスケープ解釈（バックスラッシュエスケープを考慮）
-    - クォートなしの場合、コメント（#）は直前がスペース/タブの場合のみコメントとして扱う（値中の#を尊重）
-  - Settings クラスを提供（settings = Settings()）
-    - J-Quants / kabuステーション / Slack / DB / システム設定（env, log_level 等）をプロパティとして取得
-    - 必須設定が未設定の場合は ValueError を送出する _require() を利用
-    - デフォルト値:
-      - KABUS_API_BASE_URL: "http://localhost:18080/kabusapi"
-      - DUCKDB_PATH: "data/kabusys.duckdb"
-      - SQLITE_PATH: "data/monitoring.db"
-      - KABUSYS_ENV デフォルト: "development"
-      - LOG_LEVEL デフォルト: "INFO"
-    - env 値の検証（許可値: development, paper_trading, live）
-    - log_level 値の検証（DEBUG, INFO, WARNING, ERROR, CRITICAL）
-    - ヘルパープロパティ: is_live, is_paper, is_dev
+- 環境変数 / 設定管理（src/kabusys/config.py）
+  - Settings クラスを追加し、アプリケーション設定を環境変数から取得する統一 API を提供（settings インスタンスを公開）。
+  - サポートする設定例:
+    - JQUANTS_REFRESH_TOKEN（必須）
+    - KABU_API_PASSWORD（必須）
+    - KABU_API_BASE_URL（デフォルト: http://localhost:18080/kabusapi）
+    - SLACK_BOT_TOKEN（必須）
+    - SLACK_CHANNEL_ID（必須）
+    - DUCKDB_PATH（デフォルト: data/kabusys.duckdb）
+    - SQLITE_PATH（デフォルト: data/monitoring.db）
+    - KABUSYS_ENV（有効値: development, paper_trading, live。デフォルト: development）
+    - LOG_LEVEL（有効値: DEBUG, INFO, WARNING, ERROR, CRITICAL。デフォルト: INFO）
+  - Settings に利便性プロパティを追加:
+    - is_live, is_paper, is_dev（環境判定用ブール）
+  - 環境変数が未設定の場合は _require 関数が ValueError を送出する挙動を定義（必須変数の明示的チェック）。
 
-- DuckDB スキーマ定義／初期化モジュールを追加（src/kabusys/data/schema.py）
-  - DataSchema.md に基づく 3 層（Raw / Processed / Feature）＋ Execution 層のテーブル定義を実装
-    - Raw レイヤー: raw_prices, raw_financials, raw_news, raw_executions
-    - Processed レイヤー: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
-    - Feature レイヤー: features, ai_scores
-    - Execution レイヤー: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
-  - 各テーブルに制約（NOT NULL、CHECK、PRIMARY KEY、外部キー等）を設定
-  - 頻出クエリ向けインデックス定義を追加（例: prices_daily(code, date), signal_queue(status), orders(status) など）
-  - テーブル作成順を外部キー依存に合わせて定義（冪等性を確保）
+- .env ファイル自動読み込み機能
+  - プロジェクトルート検出: カレントワークディレクトリに依存せず、実ファイル位置（__file__）から親ディレクトリを辿って .git または pyproject.toml を探す実装（_find_project_root）。
+  - 読み込み順序: OS 環境変数 > .env.local > .env（.env.local は .env を上書きする）。
+  - 自動ロード無効化: 環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 により自動読み込みを抑止可能（テスト時等の用途を想定）。
+  - .env パーサ: export プレフィックス対応、シングル/ダブルクォート内のバックスラッシュエスケープ処理、インラインコメントの取り扱い（クォートありの場合はコメント無視、クォートなしは '#' が直前スペース/タブのときコメント扱い）など堅牢なパース処理を実装（_parse_env_line）。
+  - .env 読み込み時の保護機能: OS 環境変数のキーセットを protected として扱い、必要に応じて上書きを防止。
+
+- DuckDB スキーマ定義・初期化（src/kabusys/data/schema.py）
+  - データレイヤー設計に基づくテーブル定義を追加（Raw / Processed / Feature / Execution の 4 層）。
+  - 主なテーブル（抜粋）:
+    - Raw Layer: raw_prices, raw_financials, raw_news, raw_executions
+    - Processed Layer: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
+    - Feature Layer: features, ai_scores
+    - Execution Layer: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
+  - 各テーブルに対して型・CHECK 制約・PRIMARY KEY を設計:
+    - 価格関連カラムに対する非負チェック、orders/trades/position に対するサイズ/価格の整合性チェック、signals/signal_queue/orders における side/order_type/status の列挙チェックなどを含む。
+    - news_symbols における外部キー（news_articles）や orders/trades の外部キー制約も定義。
+  - インデックス定義を追加（頻出クエリパターンに最適化）:
+    - 例: idx_prices_daily_code_date, idx_features_code_date, idx_signal_queue_status, idx_orders_status, idx_news_symbols_code 等
   - 公開 API:
     - init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection
-      - 指定 DB を初期化して全テーブル／インデックスを作成。親ディレクトリが無ければ自動作成。":memory:" をサポート。
+      - 指定パスの DuckDB を初期化して全テーブル・インデックスを作成（冪等）。
+      - db_path の親ディレクトリが存在しない場合は自動作成。
+      - ":memory:" を指定してインメモリ DB を使用可能。
     - get_connection(db_path: str | Path) -> duckdb.DuckDBPyConnection
-      - 既存 DB へ接続（スキーマ初期化は行わない。初回は init_schema を推奨）
+      - 既存 DB への接続を返す（スキーマ初期化は行わない。初回は init_schema を使用すること）。
 
-- モジュールプレースホルダ（空パッケージ）を追加
-  - src/kabusys/execution/__init__.py
-  - src/kabusys/strategy/__init__.py
-  - src/kabusys/data/__init__.py
-  - src/kabusys/monitoring/__init__.py
+- ドキュメント参照
+  - schema モジュール内から DataSchema.md を参照する旨の記載（設計ドキュメントへの参照）。
 
-### Changed
-- なし（初回リリース）
+### 変更
+- （初回リリースのため該当なし）
 
-### Fixed
-- なし（初回リリース）
+### 修正
+- （初回リリースのため該当なし）
 
-### Removed
-- なし（初回リリース）
+### セキュリティ
+- （初回リリースのため該当なし）
 
-### Security
-- なし（初回リリース）
+### 既知の注意点 / 移行メモ
+- Settings の必須項目が未設定の場合は起動時に ValueError が発生します。運用前に .env（または OS 環境）を正しく設定してください。.env.example を参照することを推奨します。
+- 自動 .env ロードをテスト環境等で無効化する場合は KABUSYS_DISABLE_AUTO_ENV_LOAD を設定してください。
+- init_schema は初回のスキーマ作成を行いますが、既存 DB に対するスキーマ変更（マイグレーション）機能は現状含まれていません。将来的にマイグレーション機構を追加予定です。
+- strategy, execution, monitoring サブパッケージはプレースホルダとして存在します。実ロジックは今後追加予定です。
 
 ---
 
-使用メモ / 移行ガイド
-- 初回セットアップ
-  - .env をプロジェクトルートに配置（.env.example を参考に必要な環境変数を設定）。
-  - 必須環境変数（例: JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID）が未設定だと Settings の対応プロパティ呼び出し時に例外が発生します。
-- DB 初期化例
-  - from kabusys.data.schema import init_schema
-  - conn = init_schema("data/kabusys.duckdb")
-- 自動 .env ロード無効化
-  - テスト等で自動ロードを無効にしたい場合は環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください。
-- .env の取り扱いに関する挙動
-  - 値にクォートを含める場合、エスケープ (\) を使用して内部のクォート等を表現できます。
-  - クォートなしの値内の # は、直前がスペース/タブでない限りコメントとみなされません（値の一部として扱われます）。
-
-貢献者 / 著者
-- 初回実装（コードベースより推測）
+（変更ログは今後のリリースで逐次更新してください）
