@@ -1,7 +1,7 @@
 # KabuSys
 
-KabuSys は日本株向けの自動売買システムの骨組みとなる Python パッケージです。  
-本リポジトリは設定読み込み、環境変数管理、各種モジュール（データ取得、ストラテジ、注文実行、監視）の基盤を提供します。
+日本株の自動売買システム向けライブラリ（軽量ベース）。  
+このリポジトリは、設定管理やデータ/戦略/実行/監視用のパッケージ構成を提供します。コアの取引ロジックや各モジュールの実装はこの上に構築していきます。
 
 バージョン: 0.1.0
 
@@ -9,144 +9,177 @@ KabuSys は日本株向けの自動売買システムの骨組みとなる Pytho
 
 ## 概要
 
-- 日本株自動売買の基盤ライブラリ。
-- 環境変数／.env ファイルの柔軟な読み込みと検証を行う `kabusys.config.Settings` を提供。
-- J-Quants API、kabuステーション API、Slack、ローカル DB（DuckDB / SQLite）などを想定した設定項目を定義。
-- モジュール構成（data / strategy / execution / monitoring）の雛形を含む。
+KabuSys は日本株の自動売買システムの基礎となる Python パッケージです。  
+- 環境変数や .env ファイルからの設定読み込み（自動ロード機能）  
+- J-Quants / kabuステーション / Slack / データベースなどの標準的な設定項目を提供  
+- data / strategy / execution / monitoring といったサブパッケージ構成により、実装を分離して拡張しやすく設計
+
+このリポジトリはフレームワーク／スケルトンとして利用し、独自の戦略や実行ロジックを追加して運用します。
 
 ---
 
 ## 主な機能
 
-- .env ファイル自動読み込み（プロジェクトルートを自動検出）
-  - 読み込み順序: OS 環境変数 > .env.local > .env
-  - OS 環境変数は保護され、.env で上書きされない
-  - `.env.local` は `.env` の上書きとして読み込まれる
-  - 自動ロードを無効化する: `KABUSYS_DISABLE_AUTO_ENV_LOAD=1`
-- 高度な .env パーサ
-  - 空行／コメント行を無視
-  - export プレフィックスに対応（`export KEY=val`）
-  - シングル・ダブルクォート内のエスケープ処理対応
-  - クォート無し値の行末コメント処理（直前が空白/タブの場合のみ）
-- 設定プロパティ（`kabusys.config.Settings`）
-  - J-Quants: `jquants_refresh_token`（必須）
-  - kabuステーション: `kabu_api_password`（必須）、`kabu_api_base_url`（デフォルトあり）
-  - Slack: `slack_bot_token`（必須）、`slack_channel_id`（必須）
-  - DB: `duckdb_path`（デフォルト: `data/kabusys.duckdb`）、`sqlite_path`（デフォルト: `data/monitoring.db`）
-  - 実行環境: `env`（`development` / `paper_trading` / `live` のいずれか）、`log_level`（`DEBUG`等）
-  - 利便性プロパティ: `is_live`, `is_paper`, `is_dev`
-- 設定値の未設定・不正値は早期に例外で通知（ValueError）
-
----
-
-## 必要条件
-
-- Python 3.10 以上（型ヒントの union 演算子 `X | Y` を使用しているため）
-- 推奨: 仮想環境（venv / conda 等）
+- 環境変数および .env ファイルの自動読み込み（プロジェクトルートを .git または pyproject.toml から検出）
+- .env パーサ（export 形式、シングル/ダブルクォート、エスケープ、コメント処理に対応）
+- 設定アクセスのための Settings クラス（プロパティ経由で安全に取得）
+  - J-Quants リフレッシュトークン
+  - kabuステーション API (パスワード・ベースURL)
+  - Slack トークン / チャネル
+  - データベースファイルパス（DuckDB / SQLite）
+  - 環境（development / paper_trading / live）とログレベル検証
+- 簡単に拡張できるパッケージ構成 (data, strategy, execution, monitoring)
 
 ---
 
 ## セットアップ手順
 
-1. リポジトリをクローン / チェックアウト
-   ```
-   git clone <リポジトリ URL>
-   cd <リポジトリ>
-   ```
+前提:
+- Python 3.10 以上（型アノテーションで `X | Y` を使用しているため）
+- 必要に応じて DuckDB／SQLite 等の外部ライブラリを導入
 
-2. 仮想環境を作成・有効化（例: venv）
-   ```
-   python -m venv .venv
-   source .venv/bin/activate   # Unix/macOS
-   .venv\Scripts\activate      # Windows
-   ```
+開発環境へのインストール（リポジトリルートで実行）:
+```bash
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
 
-3. パッケージをインストール（編集可能インストール）
-   ```
-   pip install -e .
-   ```
+.env の準備:
+- プロジェクトルートに `.env` または `.env.local` を作成してください。
+- `.env.local` は `.env` を上書きする優先度で読み込まれます。
 
-4. 環境変数の設定
-   - プロジェクトルート（.git や pyproject.toml があるディレクトリ）に `.env` または `.env.local` を置くと自動で読み込まれます。
-   - 自動読み込みを抑止する場合:
-     ```
-     export KABUSYS_DISABLE_AUTO_ENV_LOAD=1   # Unix/macOS
-     set KABUSYS_DISABLE_AUTO_ENV_LOAD=1      # Windows (cmd)
-     ```
+自動ロードの制御:
+- デフォルトでは、OS環境変数 > .env.local > .env の順で設定が反映されます。
+- 自動ロードを無効化するには、環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定してください（テスト時などに利用）。
 
-5. 必須環境変数の例（.env）
-   以下は最低限必要なキーの例です（実際の値は各自で設定してください）:
-   ```
-   JQUANTS_REFRESH_TOKEN="your_jquants_refresh_token"
-   KABU_API_PASSWORD="your_kabu_api_password"
-   SLACK_BOT_TOKEN="xoxb-..."
-   SLACK_CHANNEL_ID="C01234567"
-   KABUSYS_ENV=development
-   LOG_LEVEL=INFO
-   DUCKDB_PATH=data/kabusys.duckdb
-   SQLITE_PATH=data/monitoring.db
-   KABUS_API_BASE_URL=http://localhost:18080/kabusapi  # 必要に応じて変更
-   ```
+---
 
-   注意: 必須キーが未設定の場合、`kabusys.config.Settings` の該当プロパティ呼び出し時に ValueError が発生します。
+## 必要な環境変数
+
+以下は Settings クラスから参照される主な環境変数です。必須のものは未設定時に例外が発生します。
+
+必須:
+- JQUANTS_REFRESH_TOKEN — J-Quants API のリフレッシュトークン
+- KABU_API_PASSWORD — kabuステーション API のパスワード
+- SLACK_BOT_TOKEN — Slack bot token
+- SLACK_CHANNEL_ID — Slack の投稿先チャネルID
+
+任意（デフォルトあり）:
+- KABU_API_BASE_URL — kabuステーションのベースURL（デフォルト: "http://localhost:18080/kabusapi"）
+- DUCKDB_PATH — DuckDB ファイルパス（デフォルト: data/kabusys.duckdb）
+- SQLITE_PATH — SQLite（監視用）ファイルパス（デフォルト: data/monitoring.db）
+- KABUSYS_ENV — 実行環境（有効値: development, paper_trading, live。デフォルト: development）
+- LOG_LEVEL — ログレベル（有効値: DEBUG, INFO, WARNING, ERROR, CRITICAL。デフォルト: INFO）
+
+.env の例（テンプレート）:
+```
+# .env (例)
+JQUANTS_REFRESH_TOKEN="your_jquants_refresh_token"
+KABU_API_PASSWORD="your_kabu_password"
+KABU_API_BASE_URL="http://localhost:18080/kabusapi"
+
+SLACK_BOT_TOKEN="xoxb-xxxxxxxxxx"
+SLACK_CHANNEL_ID="C01234567"
+
+# データベースパス（任意）
+DUCKDB_PATH="data/kabusys.duckdb"
+SQLITE_PATH="data/monitoring.db"
+
+# 環境（development|paper_trading|live）
+KABUSYS_ENV=development
+
+# ログレベル
+LOG_LEVEL=INFO
+```
+
+.env パーサの挙動（主なポイント）:
+- 行頭の `export ` を許可（例: export KEY=val）
+- シングル/ダブルクォート内のエスケープ（バックスラッシュ）に対応
+- クォートがない値では、`#` の直前が空白/タブならコメントとみなす（通常の inline comment 処理）
+- 読み込み順と上書きルール: OS 環境変数（保護） > .env > .env.local（.env.local は override=True）
 
 ---
 
 ## 使い方
 
-- 設定の取得例:
-  ```python
-  from kabusys.config import settings
+基本的な設定の取得例:
+```python
+from kabusys.config import settings
 
-  token = settings.jquants_refresh_token
-  is_live = settings.is_live
-  duckdb_file = settings.duckdb_path
-  ```
+# 必須項目を取得（未設定なら ValueError）
+jquants_token = settings.jquants_refresh_token
+kabu_password = settings.kabu_api_password
 
-- パッケージ基本情報:
-  ```python
-  import kabusys
-  print(kabusys.__version__)
-  ```
+# オプション（デフォルトを持つ）
+kabu_base = settings.kabu_api_base_url
+duckdb_path = settings.duckdb_path
 
-- 自動環境読み込みの動作確認:
-  - プロジェクトルートに `.env` を置くと、プロセス起動時に自動で読み込まれます。
-  - テストなどで自動ロードを無効化したい場合は環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定してください。
+# 環境判定
+if settings.is_live:
+    print("LIVE 環境です")
+elif settings.is_paper:
+    print("ペーパートレード環境です")
+else:
+    print("開発環境です")
 
-- .env の書き方（補足）
-  - 値にスペースや `#` を含めたい場合はクォートで囲んでください。例: `KEY="value with # hash"`
-  - クォート内ではバックスラッシュでエスケープ可能（例: `KEY="a\"b"` → a"b）
-  - `export KEY=val` 形式も許容します。
+# ログレベル
+print("LOG_LEVEL =", settings.log_level)
+```
+
+パッケージ情報:
+```python
+import kabusys
+print(kabusys.__version__)
+```
+
+開発時のワークフロー例:
+- strategy モジュールに 独自の戦略クラスを実装
+- execution モジュールに売買 API 呼び出しの実装を追加
+- monitoring モジュールで監視・アラート（例: Slack 送信）を実装
+- data モジュールで市場データ取得や DB 保存処理を実装
 
 ---
 
 ## ディレクトリ構成
 
-リポジトリ内の主要ファイル / ディレクトリ（抜粋）:
-
-- src/
-  - kabusys/
-    - __init__.py            — パッケージ初期化（バージョン指定）
-    - config.py              — 環境変数・設定管理（自動 .env ロード、Settings クラス）
-    - data/
-      - __init__.py          — データ取得関連の雛形モジュール
-    - strategy/
-      - __init__.py          — ストラテジ関連の雛形モジュール
-    - execution/
-      - __init__.py          — 注文実行関連の雛形モジュール
-    - monitoring/
-      - __init__.py          — 監視・ロギング関連の雛形モジュール
-
-README や .env.example 等の補助ファイルはプロジェクトルートに配置してください（本コードベースでは .env.example は参照されていますが、実ファイルは含まれていません）。
-
----
-
-## 開発上の注意点 / 補足
-
-- 設定値の妥当性チェックは `Settings` 側で行われるため、呼び出し側では未設定や不正値による例外に備えてください（例えば起動時にキャッチしてログ出力し停止する等）。
-- DB パス（DuckDB / SQLite）はデフォルトで `data/` 以下を指すため、実行前にディレクトリ作成が必要な場合があります。
-- 現状はモジュールの雛形が中心です。具体的なデータ取得・ストラテジ・実行ロジックは各自実装してください。
+リポジトリの主要ファイル構成（src 配下）:
+```
+src/
+└─ kabusys/
+   ├─ __init__.py         # パッケージのエントリ（__version__ 等）
+   ├─ config.py           # 環境変数 / 設定読み込みロジック（Settings）
+   ├─ data/               # (将来的に) データ取得・格納関連
+   │  └─ __init__.py
+   ├─ strategy/           # (将来的に) 売買戦略
+   │  └─ __init__.py
+   ├─ execution/          # (将来的に) 注文実行ロジック
+   │  └─ __init__.py
+   └─ monitoring/         # (将来的に) 監視/アラート処理
+      └─ __init__.py
+```
 
 ---
 
-必要であれば、.env.example のテンプレート、実行スクリプト例（モジュール呼び出し例）、CI 用設定、あるいは各モジュールの実装例（kabu API 呼び出し、Slack 通知等）も作成します。どれを優先してほしいか教えてください。
+## 開発・テストのヒント
+
+- 自動環境読み込みを無効化してテストする場合:
+  ```bash
+  export KABUSYS_DISABLE_AUTO_ENV_LOAD=1
+  ```
+- OS 環境変数は .env の内容より優先されます。テスト用に一時的な値を上書きしたい場合は、OS 側で環境変数を設定してください。
+- .env ファイルの読み込みはプロジェクトルートの検出に依存します（.git または pyproject.toml が見つかる親ディレクトリ）。パッケージ配布後に CWD が変わっても安定して動作するよう設計されています。
+
+---
+
+## 拡張について（ガイド）
+
+- data: マーケットデータ取得、キャッシュ、DB 永続化（DuckDB 想定）
+- strategy: エントリ/イグジットの判定ロジック、リスク管理
+- execution: kabuAPI 等を用いた注文処理、注文管理（リトライ・エラーハンドリング）
+- monitoring: Slack 通知、ロギング、取引結果の集計
+
+これらのモジュールを分離することで、テストやCI/CD、実運用（ペーパートレード→本番切り替え）を容易にします。
+
+---
+
+必要に応じて README をプロジェクトの実装状況に合わせて更新してください（.env.example の追加、サンプル戦略・実行スクリプト、テスト手順など）。
