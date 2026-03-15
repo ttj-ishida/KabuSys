@@ -1,0 +1,4 @@
+# オプション依存（監視ダッシュボード用）
+# インストール: pip install -r requirements-extras.txt
+-r requirements.txt
+streamlit>=1.35,<2
