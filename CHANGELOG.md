@@ -1,71 +1,73 @@
-Changelog
-=========
-すべての変更は Keep a Changelog (https://keepachangelog.com/ja/1.0.0/) に準拠しています。  
-このプロジェクトはセマンティックバージョニングを使用します。
+# Changelog
 
-Unreleased
-----------
-（未リリースの変更はここに記載）
+すべての注目すべき変更を記録します。フォーマットは Keep a Changelog に準拠し、セマンティックバージョニングを採用します。
 
-0.1.0 - 2026-03-15
------------------
-Added
-- 初期リリース。
-- パッケージのメタ情報を追加
-  - パッケージバージョン: `kabusys.__version__ = "0.1.0"`
-  - パッケージ公開 API: `__all__ = ["data", "strategy", "execution", "monitoring"]`
-  - 空のサブパッケージ初期化ファイルを配置（strategy / execution / data / monitoring の枠組みを準備）。
+## [Unreleased]
+
+特になし。
+
+## [0.1.0] - 2026-03-15
+
+初回公開リリース。
+
+### 追加 (Added)
+- パッケージの基本構成を追加
+  - パッケージ名: kabusys、バージョン: 0.1.0（src/kabusys/__init__.py にて定義）
+  - サブパッケージの雛形を追加: data, strategy, execution, monitoring（各 __init__.py を配置）
+
 - 環境変数・設定管理モジュールを追加（src/kabusys/config.py）
-  - .env ファイルまたはシステム環境変数から設定を読み込む機能を実装。
-  - プロジェクトルート検出: パッケージ内部の __file__ を起点に親ディレクトリを探索し、.git または pyproject.toml を検出してルートを特定。
-  - 自動ロードの順序: OS 環境変数 > .env.local > .env。
-  - 自動ロード無効化フラグ: `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` で自動ロードを停止可能（テスト等で利用）。
-  - .env パーサーの強化:
-    - 空行/コメント（先頭 #）を無視。
-    - `export KEY=value` 形式を受け付ける。
-    - シングル/ダブルクォートで囲まれた値のエスケープ（バックスラッシュ）に対応し、インラインコメントを無視して正しく値を抜き出す。
-    - クォートなし値のコメント解釈は、`#` の直前がスペースまたはタブの場合にのみコメントとみなす実装。
-  - .env 読み込み時の挙動:
-    - override=False: 未設定のキーのみ設定。
-    - override=True: protected（元の OS 環境変数）に含まれるキーは上書きせず、それ以外は上書き。
-  - .env ファイルの読み込みに失敗した場合は warnings.warn で警告を出力。
-  - 必須環境変数取得ヘルパー `_require()` を用意（未設定時は ValueError を送出）。
-  - Settings クラスを公開（settings = Settings()）:
-    - J-Quants、kabuステーション API、Slack、データベースパス等のプロパティを提供。
-    - デフォルト値: `KABUSYS_ENV` → "development"、`KABUS_API_BASE_URL` のデフォルト、`LOG_LEVEL` デフォルトなどを実装。
-    - 値検証: `KABUSYS_ENV` は ("development","paper_trading","live") のみ許可、`LOG_LEVEL` は標準ログレベルのみ許可。無効な場合は ValueError を送出。
-    - ヘルパー: `is_live`, `is_paper`, `is_dev` を提供。
-- DuckDB スキーマ定義と初期化モジュールを追加（src/kabusys/data/schema.py）
-  - データレイヤー設計（ドキュメント: DataSchema.md 想定）に基づく 3+1 層のテーブル定義を提供:
+  - .env ファイルまたは OS 環境変数から設定を読み込む自動ロード機能を実装
+    - 自動ロードはプロジェクトルート（.git または pyproject.toml を探索）を基準に行うため、CWD に依存しない設計
+    - 自動ロードを無効化するためのフラグ: KABUSYS_DISABLE_AUTO_ENV_LOAD
+    - 読み込み優先順位: OS 環境変数 > .env.local > .env
+    - OS の既存環境変数は保護（.env の上書きを防止）する仕組み
+  - .env パーサーを実装（_parse_env_line）
+    - コメント行、空行の無視
+    - export KEY=val 形式のサポート
+    - シングル/ダブルクォート対応（バックスラッシュによるエスケープ処理を考慮）
+    - クォート無し値に対するインラインコメント処理（直前が空白/タブの場合に # をコメントと判断）
+  - .env 読み込み関数（_load_env_file）
+    - ファイル読み込み失敗時に警告を出す（例外ではなく警告）
+    - override / protected オプションによる挙動制御
+  - Settings クラスでアプリケーション設定を公開
+    - J-Quants, kabuステーション API, Slack, データベースパス等のプロパティを提供
+    - 必須値取得時は未設定なら ValueError を送出する _require 関数
+    - デフォルト値:
+      - KABUS_API_BASE_URL: "http://localhost:18080/kabusapi"
+      - DUCKDB_PATH: "data/kabusys.duckdb"
+      - SQLITE_PATH: "data/monitoring.db"
+      - KABUSYS_ENV のデフォルト: "development"
+      - LOG_LEVEL のデフォルト: "INFO"
+    - KABUSYS_ENV と LOG_LEVEL に対する入力検証（許容値セットを定義）
+    - is_live / is_paper / is_dev の便利プロパティを提供
+
+- DuckDB ベースのデータスキーマと初期化モジュールを追加（src/kabusys/data/schema.py）
+  - データ層を 3+1 層で定義:
     - Raw Layer: raw_prices, raw_financials, raw_news, raw_executions
     - Processed Layer: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
     - Feature Layer: features, ai_scores
     - Execution Layer: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
-  - 各テーブルに適切な型・CHECK 制約・PRIMARY KEY を定義（例: price >= 0、size > 0、side は 'buy'/'sell' 等）。
-  - 外部キー制約を定義（news_symbols → news_articles、orders → signal_queue、trades → orders 等）。
-  - 頻出クエリに対するインデックスを複数定義（code/date に対するインデックス、status 検索用など）。
-  - 公開 API:
-    - init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection
-      - 指定したパスに対してディレクトリを自動作成（":memory:" の場合はメモリ DB を使用）。
-      - 全 DDL を実行してテーブルとインデックスを冪等的に作成し、接続を返す。
-    - get_connection(db_path: str | Path) -> duckdb.DuckDBPyConnection
-      - 既存の DuckDB へ接続（スキーマ初期化は行わない。初回は init_schema を推奨）。
-- ドキュメント的注釈・実装上の配慮
-  - init_schema は既存テーブルの存在時にスキップする（冪等性確保）。
-  - スキーマ作成順は外部キー依存を考慮して定義。
-  - 各テーブルに対して PRIMARY KEY・CHECK 等の制約を設定してデータ整合性を高める。
+  - 各テーブルに適切な型チェック、主キー、外部キー制約を設定
+    - 例: side カラムの CHECK 制約 ('buy'/'sell'), 数値に対する非負チェック、サイズに対する正数チェック など
+  - パフォーマンス目的のインデックスを複数定義（頻出クエリを想定したインデックス）
+    - 例: prices_daily(code, date), features(code, date), signal_queue(status), orders(status) など
+  - スキーマ初期化関数 init_schema(db_path)
+    - 指定したパスに対してディレクトリを自動作成し、DDL とインデックスを実行
+    - 冪等性を確保（既存テーブルはスキップ）
+    - ":memory:" によるインメモリ DB 対応
+  - 既存 DB への接続取得用ユーティリティ get_connection(db_path) を提供（スキーマ初期化は行わない）
 
-Changed
-- （初回リリースのため該当なし）
+### 変更 (Changed)
+- 初回リリースのため該当なし。
 
-Fixed
-- （初回リリースのため該当なし）
+### 修正 (Fixed)
+- 初回リリースのため該当なし。
 
-Deprecated
-- （初回リリースのため該当なし）
+### 削除 (Removed)
+- 初回リリースのため該当なし。
 
-Removed
-- （初回リリースのため該当なし）
+### セキュリティ (Security)
+- 環境変数が未設定の場合の挙動を明示（必須設定は例外を発生させる）により、誤った動作を未然に防止。
 
-Security
-- （初回リリースのため該当なし）
+補足:
+- これはソースコードの内容に基づいて推測した変更履歴（初期リリースの記述）です。将来のリリースでは機能追加や仕様変更に合わせてこの CHANGELOG を更新してください。
