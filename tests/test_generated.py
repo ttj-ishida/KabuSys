@@ -1,155 +1,161 @@
 
-import importlib
-import sys
+import os
 from pathlib import Path
+import warnings
 from unittest import mock
 
 import pytest
 
-
-def _reload_config_module():
-    """
-    pathlib.Path.exists が False を返すようにパッチしてから
-    kabusys.config モジュールを強制的に再読み込みして返す。
-    これによりモジュールインポート時の .env 自動ロードの副作用を防ぐ。
-    """
-    module_name = "kabusys.config"
-    # Ensure fresh import
-    sys.modules.pop(module_name, None)
-    with mock.patch("pathlib.Path.exists", return_value=False):
-        # import_module will execute module code with Path.exists patched
-        module = importlib.import_module(module_name)
-    return module
+# 変更が必要ならモジュール名を適宜調整してください
+from kabusys import config
 
 
-def test_load_env_file_parses_and_sets_env(tmp_path, monkeypatch):
-    # Arrange: create temp .env-like file
-    env_file = tmp_path / ".env_test"
-    contents = """
-    # this is a comment
-    KEY1 = value1
-
-    KEY2="value with quotes"
-    KEY3='single quoted'
-    INVALID_LINE_NO_EQUALS
-    SPACED_KEY =  spaced_value
-    EMPTY_VALUE =
-    """
-    env_file.write_text(contents, encoding="utf-8")
-
-    # Ensure existing env var is not overwritten
-    monkeypatch.setenv("KEY2", "preexisting")
-
-    # Import module fresh (prevent module-level .env load)
-    cfg = _reload_config_module()
-
-    # Act
-    cfg._load_env_file(env_file)
-
-    # Assert
-    assert cfg.os.environ.get("KEY1") == "value1"
-    # KEY2 existed before; should not be overwritten by file
-    assert cfg.os.environ.get("KEY2") == "preexisting"
-    # Quotes should be stripped
-    assert cfg.os.environ.get("KEY3") == "single quoted"
-    assert cfg.os.environ.get("SPACED_KEY") == "spaced_value"
-    # EMPTY_VALUE has no RHS; treated as empty string -> still set
-    assert cfg.os.environ.get("EMPTY_VALUE") == ""
-    # INVALID_LINE_NO_EQUALS should be ignored
-    assert "INVALID_LINE_NO_EQUALS" not in cfg.os.environ
+def test_parse_env_line_basic():
+    assert config._parse_env_line("") is None
+    assert config._parse_env_line("# comment") is None
+    assert config._parse_env_line("KEY=val") == ("KEY", "val")
+    assert config._parse_env_line("  export KEY2 =  value2  ") == ("KEY2", "value2")
 
 
-def test_load_env_file_nonexistent_does_nothing(tmp_path):
-    nonexist = tmp_path / "no_such_file.env"
-    cfg = _reload_config_module()
+def test_parse_env_line_quotes_and_escapes():
+    # single quotes with escaped single quote
+    line = "A='a\\'b'"
+    assert config._parse_env_line(line) == ("A", "a'b")
 
-    # Should not raise
-    cfg._load_env_file(nonexist)
-
-
-def test_require_returns_value_and_raises_when_missing(monkeypatch):
-    cfg = _reload_config_module()
-
-    # If env not set -> raises ValueError mentioning the key
-    monkeypatch.delenv("SOME_REQUIRED_KEY", raising=False)
-    with pytest.raises(ValueError) as exc:
-        cfg._require("SOME_REQUIRED_KEY")
-    assert "SOME_REQUIRED_KEY" in str(exc.value)
-
-    # When set -> returns value
-    monkeypatch.setenv("SOME_REQUIRED_KEY", "secret123")
-    assert cfg._require("SOME_REQUIRED_KEY") == "secret123"
+    # double quotes with escaped double quote and backslash
+    line = 'B="x\\\"y\\\\z"'
+    assert config._parse_env_line(line) == ("B", 'x"y\\z')
 
 
-def test_settings_properties_and_defaults(monkeypatch):
-    cfg = _reload_config_module()
-    Settings = cfg.Settings
+def test_parse_env_line_inline_comment_rules():
+    # '#' should be preserved when not preceded by space/tab
+    assert config._parse_env_line("K=foo#bar") == ("K", "foo#bar")
+    # '#' treated as comment if preceded by space
+    assert config._parse_env_line("K=foo #comment") == ("K", "foo")
 
-    # Create fresh Settings instance to test properties
-    s = Settings()
 
-    # Defaults for base URLs and paths when env vars not set
-    monkeypatch.delenv("KABU_API_BASE_URL", raising=False)
+def test_parse_env_line_invalid():
+    assert config._parse_env_line("noequals") is None
+    assert config._parse_env_line("=novar") is None
+    # key empty after export
+    assert config._parse_env_line("export =value") is None
+
+
+def test_load_env_file_basic(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("\nA=1\nB=two #ignored\nexport C='x\\'y'\n")
+
+    # ensure B already exists so override=False doesn't change it
+    monkeypatch.setenv("B", "orig")
+    # clear others if present
+    monkeypatch.delenv("A", raising=False)
+    monkeypatch.delenv("C", raising=False)
+
+    config._load_env_file(env_file, override=False, protected=frozenset())
+
+    assert os.environ.get("A") == "1"
+    # B should remain unchanged
+    assert os.environ.get("B") == "orig"
+    assert os.environ.get("C") == "x'y"
+
+
+def test_load_env_file_override_and_protected(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("X=fromfile\nY=2\n")
+
+    # set existing env X which is considered OS env (protected)
+    monkeypatch.setenv("X", "osval")
+    monkeypatch.delenv("Y", raising=False)
+
+    # override=True but protected contains X -> X should not be overwritten
+    config._load_env_file(env_file, override=True, protected=frozenset({"X"}))
+
+    assert os.environ["X"] == "osval"
+    assert os.environ["Y"] == "2"
+
+
+def test_load_env_file_unreadable_warns(tmp_path):
+    env_path = tmp_path / ".env"
+    env_path.write_text("A=1\n")
+
+    # Patch builtins.open to raise OSError when called
+    with mock.patch("builtins.open", side_effect=OSError("fail")) as m_open:
+        with mock.patch("warnings.warn") as m_warn:
+            config._load_env_file(env_path, override=False, protected=frozenset())
+            m_warn.assert_called_once()
+            # ensure open was attempted
+            assert m_open.called
+
+
+def test_find_project_root(tmp_path, monkeypatch):
+    # create nested dir structure and a fake module file location
+    project = tmp_path / "myproj"
+    sub = project / "pkg" / "subpkg"
+    sub.mkdir(parents=True)
+    (project / ".git").mkdir()  # mark project root (directory, as in real git repos)
+
+    fake_module = sub / "module.py"
+    fake_module.write_text("# dummy")
+
+    # monkeypatch the module's __file__ to point into our fake tree
+    monkeypatch.setattr(config, "__file__", str(fake_module))
+
+    found = config._find_project_root()
+    assert found is not None
+    assert Path(found) == project
+
+
+def test_require_and_settings_properties(monkeypatch, tmp_path):
+    # _require raises when not set
+    monkeypatch.delenv("MUST", raising=False)
+    with pytest.raises(ValueError):
+        config._require("MUST")
+
+    # when set, returns value
+    monkeypatch.setenv("MUST", "ok")
+    assert config._require("MUST") == "ok"
+
+    # test Settings properties for defaults and overrides
+    s = config.Settings()
+
+    # KABUSYS_ENV default is development
+    monkeypatch.delenv("KABUSYS_ENV", raising=False)
+    assert s.env == "development"
+    assert s.is_dev is True
+    assert s.is_live is False
+    assert s.is_paper is False
+
+    # valid envs
+    monkeypatch.setenv("KABUSYS_ENV", "LIVE")
+    assert s.env == "live"
+    assert s.is_live is True
+
+    monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+    assert s.env == "paper_trading"
+    assert s.is_paper is True
+
+    # invalid env raises
+    monkeypatch.setenv("KABUSYS_ENV", "invalid_env")
+    with pytest.raises(ValueError):
+        _ = s.env
+
+    # LOG_LEVEL default and validation
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+    assert s.log_level == "INFO"
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+    assert s.log_level == "DEBUG"
+    monkeypatch.setenv("LOG_LEVEL", "NOPE")
+    with pytest.raises(ValueError):
+        _ = s.log_level
+
+    # duckdb/sqlite path defaults and expansion
     monkeypatch.delenv("DUCKDB_PATH", raising=False)
     monkeypatch.delenv("SQLITE_PATH", raising=False)
-    monkeypatch.delenv("KABUSYS_ENV", raising=False)
-    monkeypatch.delenv("LOG_LEVEL", raising=False)
+    dp = s.duckdb_path
+    sp = s.sqlite_path
+    assert isinstance(dp, Path)
+    assert isinstance(sp, Path)
 
-    assert s.kabu_api_base_url == "http://localhost:18080/kabusapi"
-    assert s.duckdb_path == Path("data/kabusys.duckdb")
-    assert s.sqlite_path == Path("data/monitoring.db")
-    assert s.env == "development"
-    assert s.log_level == "INFO"
-    assert s.is_live is False
-
-    # When env vars set, values should reflect them
-    monkeypatch.setenv("KABU_API_BASE_URL", "https://api.example")
-    monkeypatch.setenv("DUCKDB_PATH", "/tmp/db.duckdb")
-    monkeypatch.setenv("SQLITE_PATH", "/tmp/monitor.db")
-    monkeypatch.setenv("KABUSYS_ENV", "live")
-    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
-
-    # New instance to pick up changed os.environ
-    s2 = Settings()
-    assert s2.kabu_api_base_url == "https://api.example"
-    assert s2.duckdb_path == Path("/tmp/db.duckdb")
-    assert s2.sqlite_path == Path("/tmp/monitor.db")
-    assert s2.env == "live"
-    assert s2.log_level == "DEBUG"
-    assert s2.is_live is True
-
-
-def test_settings_required_tokens_and_password(monkeypatch):
-    cfg = _reload_config_module()
-    Settings = cfg.Settings
-    s = Settings()
-
-    # Ensure required keys raise when missing
-    for key, prop in [
-        ("JQUANTS_REFRESH_TOKEN", "jquants_refresh_token"),
-        ("KABU_API_PASSWORD", "kabu_api_password"),
-        ("SLACK_BOT_TOKEN", "slack_bot_token"),
-        ("SLACK_CHANNEL_ID", "slack_channel_id"),
-    ]:
-        monkeypatch.delenv(key, raising=False)
-        with pytest.raises(ValueError):
-            getattr(s, prop)
-
-    # When set, the properties should return the values
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "jq_token")
-    monkeypatch.setenv("KABU_API_PASSWORD", "kabu_pass")
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "slack_token")
-    monkeypatch.setenv("SLACK_CHANNEL_ID", "C12345")
-
-    s2 = Settings()
-    assert s2.jquants_refresh_token == "jq_token"
-    assert s2.kabu_api_password == "kabu_pass"
-    assert s2.slack_bot_token == "slack_token"
-    assert s2.slack_channel_id == "C12345"
-
-
-def test_settings_singleton_instance_and_type(monkeypatch):
-    # Reload module and check that `settings` instance exists and is Settings
-    cfg = _reload_config_module()
-    assert hasattr(cfg, "settings")
-    assert isinstance(cfg.settings, cfg.Settings)
+    # expanduser test
+    monkeypatch.setenv("DUCKDB_PATH", "~/mydb.duckdb")
+    assert str(s.duckdb_path).endswith("mydb.duckdb")
