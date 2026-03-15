@@ -25,12 +25,12 @@ _RAW_PRICES = """
 CREATE TABLE IF NOT EXISTS raw_prices (
     date        DATE        NOT NULL,
     code        VARCHAR     NOT NULL,
-    open        DOUBLE,
-    high        DOUBLE,
-    low         DOUBLE,
-    close       DOUBLE,
-    volume      DOUBLE,
-    turnover    DOUBLE,
+    open        DECIMAL(18,4),
+    high        DECIMAL(18,4),
+    low         DECIMAL(18,4),
+    close       DECIMAL(18,4),
+    volume      BIGINT,
+    turnover    DECIMAL(18,2),
     fetched_at  TIMESTAMP   NOT NULL DEFAULT current_timestamp,
     PRIMARY KEY (date, code)
 )
@@ -41,11 +41,11 @@ CREATE TABLE IF NOT EXISTS raw_financials (
     code            VARCHAR     NOT NULL,
     report_date     DATE        NOT NULL,
     period_type     VARCHAR,
-    revenue         DOUBLE,
-    operating_profit DOUBLE,
-    net_income      DOUBLE,
-    eps             DOUBLE,
-    roe             DOUBLE,
+    revenue         DECIMAL(20,4),
+    operating_profit DECIMAL(20,4),
+    net_income      DECIMAL(20,4),
+    eps             DECIMAL(18,4),
+    roe             DECIMAL(10,6),
     fetched_at      TIMESTAMP   NOT NULL DEFAULT current_timestamp,
     PRIMARY KEY (code, report_date, period_type)
 )
@@ -70,8 +70,8 @@ CREATE TABLE IF NOT EXISTS raw_executions (
     datetime        TIMESTAMP   NOT NULL,
     code            VARCHAR     NOT NULL,
     side            VARCHAR     NOT NULL,
-    price           DOUBLE      NOT NULL,
-    size            INTEGER     NOT NULL,
+    price           DECIMAL(18,4) NOT NULL,
+    size            BIGINT      NOT NULL,
     fetched_at      TIMESTAMP   NOT NULL DEFAULT current_timestamp
 )
 """
@@ -82,12 +82,12 @@ _PRICES_DAILY = """
 CREATE TABLE IF NOT EXISTS prices_daily (
     date        DATE        NOT NULL,
     code        VARCHAR     NOT NULL,
-    open        DOUBLE      NOT NULL,
-    high        DOUBLE      NOT NULL,
-    low         DOUBLE      NOT NULL,
-    close       DOUBLE      NOT NULL,
-    volume      DOUBLE      NOT NULL,
-    turnover    DOUBLE,
+    open        DECIMAL(18,4) NOT NULL,
+    high        DECIMAL(18,4) NOT NULL,
+    low         DECIMAL(18,4) NOT NULL,
+    close       DECIMAL(18,4) NOT NULL,
+    volume      BIGINT      NOT NULL,
+    turnover    DECIMAL(18,2),
     PRIMARY KEY (date, code)
 )
 """
@@ -107,11 +107,11 @@ CREATE TABLE IF NOT EXISTS fundamentals (
     code                VARCHAR     NOT NULL,
     report_date         DATE        NOT NULL,
     period_type         VARCHAR,
-    revenue             DOUBLE,
-    operating_profit    DOUBLE,
-    net_income          DOUBLE,
-    eps                 DOUBLE,
-    roe                 DOUBLE,
+    revenue             DECIMAL(20,4),
+    operating_profit    DECIMAL(20,4),
+    net_income          DECIMAL(20,4),
+    eps                 DECIMAL(18,4),
+    roe                 DECIMAL(10,6),
     PRIMARY KEY (code, report_date, period_type)
 )
 """
@@ -185,11 +185,11 @@ CREATE TABLE IF NOT EXISTS signal_queue (
     date            DATE        NOT NULL,
     code            VARCHAR     NOT NULL,
     side            VARCHAR     NOT NULL CHECK (side IN ('buy', 'sell')),
-    size            INTEGER     NOT NULL,
+    size            BIGINT      NOT NULL,
     order_type      VARCHAR     NOT NULL,
-    price           DOUBLE,
+    price           DECIMAL(18,4),
     status          VARCHAR     NOT NULL DEFAULT 'pending'
-                                CHECK (status IN ('pending','processing','executed','cancelled','error')),
+                                CHECK (status IN ('pending','processing','filled','cancelled','error')),
     created_at      TIMESTAMP   NOT NULL DEFAULT current_timestamp,
     processed_at    TIMESTAMP
 )
@@ -200,7 +200,7 @@ CREATE TABLE IF NOT EXISTS portfolio_targets (
     date            DATE        NOT NULL,
     code            VARCHAR     NOT NULL,
     target_weight   DOUBLE,
-    target_size     INTEGER,
+    target_size     BIGINT,
     PRIMARY KEY (date, code)
 )
 """
@@ -212,8 +212,8 @@ CREATE TABLE IF NOT EXISTS orders (
     datetime    TIMESTAMP   NOT NULL,
     code        VARCHAR     NOT NULL,
     side        VARCHAR     NOT NULL CHECK (side IN ('buy', 'sell')),
-    size        INTEGER     NOT NULL,
-    price       DOUBLE,
+    size        BIGINT      NOT NULL,
+    price       DECIMAL(18,4),
     status      VARCHAR     NOT NULL DEFAULT 'created'
                             CHECK (status IN ('created','sent','filled','cancelled','rejected'))
 )
@@ -225,8 +225,8 @@ CREATE TABLE IF NOT EXISTS trades (
     order_id    VARCHAR     NOT NULL,
     datetime    TIMESTAMP   NOT NULL,
     code        VARCHAR     NOT NULL,
-    price       DOUBLE      NOT NULL,
-    size        INTEGER     NOT NULL
+    price       DECIMAL(18,4) NOT NULL,
+    size        BIGINT      NOT NULL
 )
 """
 
@@ -234,9 +234,9 @@ _POSITIONS = """
 CREATE TABLE IF NOT EXISTS positions (
     date            DATE        NOT NULL,
     code            VARCHAR     NOT NULL,
-    position_size   INTEGER     NOT NULL,
-    avg_price       DOUBLE      NOT NULL,
-    market_value    DOUBLE,
+    position_size   BIGINT      NOT NULL,
+    avg_price       DECIMAL(18,4) NOT NULL,
+    market_value    DECIMAL(20,4),
     PRIMARY KEY (date, code)
 )
 """
@@ -244,8 +244,8 @@ CREATE TABLE IF NOT EXISTS positions (
 _PORTFOLIO_PERFORMANCE = """
 CREATE TABLE IF NOT EXISTS portfolio_performance (
     date            DATE        NOT NULL PRIMARY KEY,
-    equity          DOUBLE      NOT NULL,
-    cash            DOUBLE      NOT NULL,
+    equity          DECIMAL(20,4) NOT NULL,
+    cash            DECIMAL(20,4) NOT NULL,
     drawdown        DOUBLE,
     daily_return    DOUBLE
 )
@@ -289,6 +289,7 @@ def init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection:
     """DuckDB データベースを初期化し、全テーブルを作成して接続を返す。
 
     既にテーブルが存在する場合はスキップ（冪等）。
+    db_path の親ディレクトリが存在しない場合は自動作成する。
 
     Args:
         db_path: DuckDB ファイルパス。":memory:" でインメモリ DB を使用可能。
@@ -296,9 +297,13 @@ def init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection:
     Returns:
         初期化済みの DuckDB 接続。
     """
-    conn = duckdb.connect(str(db_path))
-    for ddl in _ALL_DDL:
-        conn.execute(ddl)
+    db_path_str = str(db_path)
+    if db_path_str != ":memory:":
+        Path(db_path_str).parent.mkdir(parents=True, exist_ok=True)
+    conn = duckdb.connect(db_path_str)
+    with conn:
+        for ddl in _ALL_DDL:
+            conn.execute(ddl)
     return conn
 
 
