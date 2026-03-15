@@ -78,6 +78,7 @@ def _request(
     id_token: str | None = None,
     method: str = "GET",
     json_body: dict[str, Any] | None = None,
+    allow_refresh: bool = True,
 ) -> Any:
     """J-Quants API へリクエストを送り、JSON を返す。
 
@@ -124,7 +125,8 @@ def _request(
         except urllib.error.HTTPError as e:
             status = e.code
             # 401: トークン期限切れ → 1 回だけリフレッシュしてリトライ
-            if status == 401 and not _token_refreshed:
+            # allow_refresh=False の場合（get_id_token からの呼び出し等）は無限再帰を防ぐ
+            if status == 401 and allow_refresh and not _token_refreshed:
                 logger.warning("401 Unauthorized on %s, refreshing id_token", path)
                 try:
                     token = get_id_token()
@@ -155,6 +157,7 @@ def _request(
                     "Network error on %s, retry %d/%d in %.1fs: %s",
                     path, attempt + 1, _MAX_RETRIES, wait, e,
                 )
+                time.sleep(wait)
 
     raise RuntimeError(
         f"J-Quants API リクエスト失敗 ({_MAX_RETRIES} 回リトライ済み): {path}"
@@ -182,6 +185,7 @@ def get_id_token(refresh_token: str | None = None) -> str:
         "/token/auth_refresh",
         method="POST",
         json_body={"refreshtoken": token},
+        allow_refresh=False,  # 無限再帰防止
     )
     return data["idToken"]
 
