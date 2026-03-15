@@ -1,152 +1,162 @@
 # KabuSys
 
-KabuSys は日本株の自動売買を目的とした軽量なパッケージの骨組みです。データ収集、売買戦略、約定実行、監視の各コンポーネントを分離して実装できるように設計されています。このリポジトリはプロジェクトの初期構成（パッケージ/モジュールの骨組み）を提供します。
+日本株自動売買システム（KabuSys）の軽量な骨組みです。  
+このリポジトリはパッケージ構成のみを提供しており、各サブパッケージ（データ取得、戦略、注文実行、監視）に具体的な実装を追加していくことを想定しています。
 
 バージョン: 0.1.0
 
 ---
 
-## 機能一覧（想定/設計）
-現在のコードベースはパッケージ構成のみですが、想定している主要機能は以下です。
+## プロジェクト概要
 
-- data: 市場データの取得・整形（板情報、歩み値、OHLCV 等）
-- strategy: 売買ロジック・シグナル生成（バックテスト用のインターフェース含む）
-- execution: 注文送信、約定管理、リスク制御
-- monitoring: ログ収集、アラート、稼働状況の可視化（Web UIや通知連携）
+KabuSys は日本株の自動売買システムを構築するためのモジュール構成を提供します。  
+以下のサブパッケージを通じて、データ取得 → 売買戦略 → 注文実行 → 監視・ログ といったワークフローを実装できます。
 
-各機能は独立したサブパッケージとして実装し、必要に応じて外部 API（証券会社 API）や DB、メッセージングを組み合わせます。
+- data: 市場データの取得や前処理
+- strategy: 売買ロジック（シグナル生成）
+- execution: 注文の発行・約定処理
+- monitoring: ログ、メトリクス、アラート
+
+現在のリポジトリはパッケージのスケルトンのみを含み、各モジュールの中身は実装を追加する必要があります。
 
 ---
 
-## 必要条件
-- Python 3.8 以上（プロジェクトポリシーに合わせて変更してください）
-- 仮想環境の利用を推奨
-- 実際の取引を行う場合は、証券会社が提供する API アクセス情報（API key / secret）やテスト環境の準備が必要
+## 機能一覧
 
-依存ライブラリはまだ定義されていません。実装に合わせて `requirements.txt` または `pyproject.toml` に追加してください。一般的に使われるライブラリ例：
-- requests / aiohttp
-- pandas / numpy
-- websocket-client / websockets
-- pydantic / pyyaml（設定管理）
-- loguru / structlog（ログ）
+このコードベースで提供する基本的な機能（設計上想定しているもの）
+
+- パッケージ分割（モジュール化）により責務を明確化
+  - data: 履歴データ、リアルタイムデータの取得インターフェース
+  - strategy: シグナル生成、テスト用バックテストフレームワークのフック
+  - execution: 証券会社API（例: kabuステーション等）への注文ラッパー
+  - monitoring: 取引ログの記録、例外通知、メトリクス出力
+- 簡易な初期化・バージョン管理（パッケージバージョンは __version__ に定義）
+- 拡張しやすい構造（ユーザーが各サブパッケージに実装を追加）
+
+※ 実際の売買ロジック、API認証、実注文処理等は本スケルトンには含まれていません。安全対策（例: サンドボックス環境、注文制限、リスク管理）は利用者が実装してください。
 
 ---
 
 ## セットアップ手順
 
+このパッケージは Python プロジェクトとして使用します。以下は推奨のセットアップ手順です。
+
+必要条件
+- Python 3.8 以上（プロジェクトの実装方針に応じて適宜変更）
+- git, pip
+
+手順
+
 1. リポジトリをクローン
    ```
-   git clone <リポジトリ URL>
-   cd <リポジトリ>
+   git clone <this-repo-url>
+   cd <repo-directory>
    ```
 
-2. 仮想環境を作成して有効化（例: venv）
-   - macOS / Linux:
+2. 仮想環境の作成（推奨）
+   - venv を使う例:
      ```
      python -m venv .venv
-     source .venv/bin/activate
-     ```
-   - Windows (PowerShell):
-     ```
-     python -m venv .venv
-     .\.venv\Scripts\Activate.ps1
+     source .venv/bin/activate    # macOS / Linux
+     .venv\Scripts\activate       # Windows
      ```
 
-3. 必要パッケージをインストール
-   - まだ requirements.txt が用意されていない場合は、実装に応じて作成してください。
-   - 開発中は編集を反映しやすいようにローカルインストール（編集可能）を推奨:
+3. 開発インストール（`setup.py` または `pyproject.toml` がある場合）
+   - プロジェクトにビルド設定がある場合:
      ```
      pip install -e .
      ```
-     （setup.py / pyproject.toml がある場合）
+   - もしビルド設定がない場合は、簡易的にルートを PYTHONPATH に含めるか、開発編集用に sys.path を使ってインポートしてください。
 
-4. （任意）Lint / フォーマットのセットアップ
-   ```
-   pip install black flake8 isort
-   ```
+4. 依存パッケージのインストール
+   - 必要な依存は実装によって変わります。まずは最低限 pytest や linter などを入れるとよいでしょう:
+     ```
+     pip install pytest flake8
+     ```
 
 ---
 
-## 使い方（簡易例）
+## 使い方（基本例）
 
-このパッケージはモジュールの骨組みのみ提供しています。まずは基本的な確認例を示します。
+パッケージの基本的な使い方例を示します。現状はモジュールのみなので、まずはパッケージのバージョンやサブモジュールにアクセスする例です。
 
-- バージョン確認:
-  ```python
-  import kabusys
-  print(kabusys.__version__)  # -> "0.1.0"
-  ```
+Python REPL またはスクリプトで:
 
-- サブパッケージの参照例（各サブパッケージは実装次第で利用可能）
-  ```python
-  from kabusys import data, strategy, execution, monitoring
+```python
+import kabusys
 
-  # 各モジュール内に実装を追加して呼び出します
-  # 例: data.fetch_ohlcv("7203.T")
-  # 例: strategy.MyStrategy(config).generate_signals(df)
-  # 例: execution.send_order(order)
-  # 例: monitoring.start_dashboard()
-  ```
+# バージョン確認
+print(kabusys.__version__)  # 0.1.0
 
-- 設定ファイル（例: config.yaml）
-  ```yaml
-  api:
-    kabucom:
-      api_key: "<YOUR_API_KEY>"
-      secret: "<YOUR_SECRET>"
-      base_url: "https://api.kabu.example"
-  trading:
-    account: "1234567"
-    default_qty: 100
-  logging:
-    level: INFO
-  ```
+# サブパッケージ参照（各サブパッケージに実装を追加して利用）
+import kabusys.data as data
+import kabusys.strategy as strategy
+import kabusys.execution as execution
+import kabusys.monitoring as monitoring
 
-- 実装のヒント
-  - data パッケージ: データ取得は非同期（async）/同期どちらでも良いが、一貫性を保つ。
-  - strategy: 「シグナル生成」と「ポジション管理」を分離するインターフェースを設計する。
-  - execution: 注文送信時は冪等性・注文状態管理（未約定/一部約定/約定）を確実に実装する。
-  - monitoring: 稼働監視、注文/約定ログ、アラート（Slack/メール）を設ける。
+# 例: 各サブパッケージに initialize() 関数等を実装している場合
+# data.initialize(...)
+# strategy.load_strategy(...)
+# execution.connect(...)
+# monitoring.start(...)
+```
+
+各サブパッケージに実際の機能（クラス・関数）を追加して、以下のようなワークフローを実装します。
+1. data で過去データや価格ストリームを取得
+2. strategy で売買シグナルを生成
+3. execution で注文を発行／状態を管理
+4. monitoring でログやアラートを記録
+
+実装のヒント
+- data: 抽象クラス（インターフェース）を定義し、実データソース（ファイル、API、WebSocket）ごとに具象クラスを作成する
+- strategy: 入力は統一されたデータフォーマット（DataFrame など）にし、テスト容易性を高める
+- execution: 注文の前に確認（サンドボックスモード）やリスク管理を挟む
+- monitoring: ローカルログ、外部監視（Slack, Email）を切り替えられるようにする
 
 ---
 
 ## ディレクトリ構成
 
-このリポジトリの現状の最小構成は以下の通りです。
+このリポジトリの現状の主要ファイル構成:
 
-- src/
-  - kabusys/
-    - __init__.py            # パッケージ初期化、バージョン等
-    - data/
-      - __init__.py          # データ取得モジュール（実装場所）
-    - strategy/
-      - __init__.py          # 戦略実装モジュール（実装場所）
-    - execution/
-      - __init__.py          # 注文・約定処理モジュール（実装場所）
-    - monitoring/
-      - __init__.py          # 監視／ログ／アラート（実装場所）
+```
+<project-root>/
+└─ src/
+   └─ kabusys/
+      ├─ __init__.py         # パッケージ本体（__version__ など）
+      ├─ data/
+      │  └─ __init__.py      # データ取得関連モジュールを配置
+      ├─ strategy/
+      │  └─ __init__.py      # 売買戦略関連モジュールを配置
+      ├─ execution/
+      │  └─ __init__.py      # 注文実行関連モジュールを配置
+      └─ monitoring/
+         └─ __init__.py      # 監視・ログ関連モジュールを配置
+```
 
-（将来的にテスト、サンプル、ドキュメント等のディレクトリを追加することを推奨します）
-例:
-- tests/
-- examples/
-- docs/
-- requirements.txt
-- pyproject.toml / setup.cfg / setup.py
+現状では各サブパッケージの __init__.py は空のスケルトンです。必要に応じて以下のようにファイルを追加してください。
 
----
-
-## 開発・貢献
-- まずは README とこの構成に沿って各モジュールを実装してください。
-- テスト（ユニット・統合）を追加し、CI（GitHub Actions など）で自動実行することを推奨します。
-- 実取引に接続する場合は、必ずテスト/サンドボックス環境で十分に検証してください。金銭的リスクが伴います。
+- src/kabusys/data/fetcher.py
+- src/kabusys/strategy/basic.py
+- src/kabusys/execution/api_client.py
+- src/kabusys/monitoring/logger.py
 
 ---
 
-必要であれば、以下の追加ドキュメントを作成します:
-- 実際のデータ取得/注文 API のサンプル実装
-- サンプル戦略（例: 単純移動平均クロス戦略）のコード
-- テストケースと CI 設定
-- デプロイ/運用手順（コンテナ化 / systemd / supervisor）
+## 拡張・実装ガイド（簡潔）
 
-どの部分の詳細が必要か教えてください。具体的な実装例やサンプルコードも作成できます。
+- テストを先に書く（TDD を推奨）
+- 外部 API キー等の秘密情報は環境変数または別の設定ファイルで管理する
+- 実運用前に必ずサンドボックス/ペーパートレードで動作検証する
+- 注文処理には冪等性や再試行ロジック、エラーハンドリングを実装する
+
+---
+
+## 貢献
+
+バグ報告や機能提案は Issue を作成してください。プルリクエストは歓迎します。  
+実装の際はコードスタイル、テスト、ドキュメントを整備してください。
+
+---
+
+以上。必要であれば README に実際の使用例（サンプルスクリプト）や、pyproject.toml / setup.py のテンプレート、CI 設定なども追加できます。どの情報がさらに欲しいか教えてください。
