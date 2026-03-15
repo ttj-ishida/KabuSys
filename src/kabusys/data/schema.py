@@ -40,7 +40,7 @@ _RAW_FINANCIALS = """
 CREATE TABLE IF NOT EXISTS raw_financials (
     code            VARCHAR     NOT NULL,
     report_date     DATE        NOT NULL,
-    period_type     VARCHAR,
+    period_type     VARCHAR     NOT NULL,
     revenue         DECIMAL(20,4),
     operating_profit DECIMAL(20,4),
     net_income      DECIMAL(20,4),
@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS raw_executions (
     order_id        VARCHAR     NOT NULL,
     datetime        TIMESTAMP   NOT NULL,
     code            VARCHAR     NOT NULL,
-    side            VARCHAR     NOT NULL,
+    side            VARCHAR     NOT NULL CHECK (side IN ('buy', 'sell')),
     price           DECIMAL(18,4) NOT NULL,
     size            BIGINT      NOT NULL,
     fetched_at      TIMESTAMP   NOT NULL DEFAULT current_timestamp
@@ -106,7 +106,7 @@ _FUNDAMENTALS = """
 CREATE TABLE IF NOT EXISTS fundamentals (
     code                VARCHAR     NOT NULL,
     report_date         DATE        NOT NULL,
-    period_type         VARCHAR,
+    period_type         VARCHAR     NOT NULL,
     revenue             DECIMAL(20,4),
     operating_profit    DECIMAL(20,4),
     net_income          DECIMAL(20,4),
@@ -131,7 +131,8 @@ _NEWS_SYMBOLS = """
 CREATE TABLE IF NOT EXISTS news_symbols (
     news_id     VARCHAR     NOT NULL,
     code        VARCHAR     NOT NULL,
-    PRIMARY KEY (news_id, code)
+    PRIMARY KEY (news_id, code),
+    FOREIGN KEY (news_id) REFERENCES news_articles(id) ON DELETE CASCADE
 )
 """
 
@@ -186,7 +187,7 @@ CREATE TABLE IF NOT EXISTS signal_queue (
     code            VARCHAR     NOT NULL,
     side            VARCHAR     NOT NULL CHECK (side IN ('buy', 'sell')),
     size            BIGINT      NOT NULL,
-    order_type      VARCHAR     NOT NULL,
+    order_type      VARCHAR     NOT NULL CHECK (order_type IN ('market', 'limit', 'stop')),
     price           DECIMAL(18,4),
     status          VARCHAR     NOT NULL DEFAULT 'pending'
                                 CHECK (status IN ('pending','processing','filled','cancelled','error')),
@@ -252,6 +253,19 @@ CREATE TABLE IF NOT EXISTS portfolio_performance (
 """
 
 # ---------------------------------------------------------------------------
+# インデックス定義（頻出クエリパターン: 銘柄×日付範囲スキャン、ステータス検索）
+# ---------------------------------------------------------------------------
+
+_INDEXES: list[str] = [
+    "CREATE INDEX IF NOT EXISTS idx_prices_daily_code_date ON prices_daily(code, date)",
+    "CREATE INDEX IF NOT EXISTS idx_features_code_date ON features(code, date)",
+    "CREATE INDEX IF NOT EXISTS idx_ai_scores_code_date ON ai_scores(code, date)",
+    "CREATE INDEX IF NOT EXISTS idx_signal_queue_status ON signal_queue(status)",
+    "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)",
+    "CREATE INDEX IF NOT EXISTS idx_news_symbols_code ON news_symbols(code)",
+]
+
+# ---------------------------------------------------------------------------
 # テーブル作成順（外部キー依存を考慮）
 # ---------------------------------------------------------------------------
 
@@ -304,6 +318,8 @@ def init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection:
     with conn:
         for ddl in _ALL_DDL:
             conn.execute(ddl)
+        for idx in _INDEXES:
+            conn.execute(idx)
     return conn
 
 
