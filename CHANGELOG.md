@@ -1,43 +1,33 @@
 # CHANGELOG
 
-すべての重要な変更をこのファイルに記録します。
-形式は「Keep a Changelog」（https://keepachangelog.com/ja/1.0.0/）準拠です。
-このプロジェクトはセマンティックバージョニングを使用します。
+すべての注目すべき変更はこのファイルに記録します。  
+書式は "Keep a Changelog" のガイドラインに準拠します。
 
 ## [Unreleased]
-- 開発中の変更や機能追加はここに記載してください。
 
 ## [0.1.0] - 2026-03-15
-最初の公開リリース。
-
 ### 追加
-- 新規パッケージ "kabusys" を追加。
-  - パッケージ説明: "KabuSys - 日本株自動売買システム"（src/kabusys/__init__.py のモジュールドキュメンテーション文字列）。
-  - パッケージバージョンを定義: `__version__ = "0.1.0"`。
-  - パッケージの公開 API を定義: `__all__ = ["data", "strategy", "execution", "monitoring"]`。
-- 基本モジュール構成を追加（いずれも初期プレースホルダファイルとして作成）。
-  - src/kabusys/data/__init__.py
-  - src/kabusys/strategy/__init__.py
-  - src/kabusys/execution/__init__.py
-  - src/kabusys/monitoring/__init__.py
+- 初回リリース: KabuSys - 日本株自動売買システムを公開。
+  - パッケージ名: `kabusys`
+  - パッケージ説明（モジュールの docstring に基づく）: 日本株自動売買システム
+- 基本モジュール構成を追加:
+  - `kabusys.data` — データ取得・管理用モジュール（雛形）
+  - `kabusys.strategy` — 売買ロジック（ストラテジ）用モジュール（雛形）
+  - `kabusys.execution` — 注文発行・取引実行用モジュール（雛形）
+  - `kabusys.monitoring` — 監視・ログ・状態可視化用モジュール（雛形）
+- パッケージメタ情報:
+  - `__version__` = "0.1.0"
+  - `__all__` により外部公開 API として `["data", "strategy", "execution", "monitoring"]` を定義
 
 ### 変更
-- 該当なし（新規作成のため）。
+- 該当なし
 
 ### 修正
-- 該当なし。
-
-### 非推奨
-- 該当なし。
+- 該当なし
 
 ### 削除
-- 該当なし。
-
-### セキュリティ
-- 該当なし。
+- 該当なし
 
 ---
 
-備考:
-- 現状の各サブパッケージ（data、strategy、execution、monitoring）は初期プレースホルダで、今後具体的な機能（データ取得／前処理、売買戦略、注文実行、監視・ロギング等）を実装していく予定です。
-- 次回リリースでは各サブパッケージの実装詳細・APIをCHANGELOGの「Added」や「Changed」に追記してください。
+注: 現時点の各サブモジュールはパッケージ構成の初期プレースホルダ（空の __init__.py）として配置されています。以降のバージョンで各モジュールに具体的な実装・機能追加・バグ修正を行っていく予定です。
