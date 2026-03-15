@@ -137,23 +137,24 @@ def _request(
             if status == 401:
                 raise  # リフレッシュ済みで再度 401 → 即座に失敗
             if status in _RETRY_STATUS_CODES or status >= 500:
-                wait = _RETRY_BACKOFF_BASE ** attempt
-                logger.warning(
-                    "HTTP %d on %s, retry %d/%d in %.1fs",
-                    status, path, attempt + 1, _MAX_RETRIES, wait,
-                )
-                time.sleep(wait)
                 last_exc = e
+                if attempt < _MAX_RETRIES - 1:  # 最終試行では sleep しない
+                    wait = _RETRY_BACKOFF_BASE ** attempt
+                    logger.warning(
+                        "HTTP %d on %s, retry %d/%d in %.1fs",
+                        status, path, attempt + 1, _MAX_RETRIES, wait,
+                    )
+                    time.sleep(wait)
                 continue
             raise
         except (urllib.error.URLError, OSError) as e:
-            wait = _RETRY_BACKOFF_BASE ** attempt
-            logger.warning(
-                "Network error on %s, retry %d/%d in %.1fs: %s",
-                path, attempt + 1, _MAX_RETRIES, wait, e,
-            )
-            time.sleep(wait)
             last_exc = e
+            if attempt < _MAX_RETRIES - 1:  # 最終試行では sleep しない
+                wait = _RETRY_BACKOFF_BASE ** attempt
+                logger.warning(
+                    "Network error on %s, retry %d/%d in %.1fs: %s",
+                    path, attempt + 1, _MAX_RETRIES, wait, e,
+                )
 
     raise RuntimeError(
         f"J-Quants API リクエスト失敗 ({_MAX_RETRIES} 回リトライ済み): {path}"
@@ -308,7 +309,7 @@ def save_daily_quotes(
     if not records:
         return 0
 
-    fetched_at = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    fetched_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     rows = [
         (
             r.get("Date"),
@@ -322,7 +323,11 @@ def save_daily_quotes(
             fetched_at,
         )
         for r in records
+        if r.get("Date") and r.get("Code")  # PK 欠損行はスキップ
     ]
+    skipped = len(records) - len(rows)
+    if skipped:
+        logger.warning("save_daily_quotes: %d 件を PK 欠損によりスキップ", skipped)
 
     conn.executemany(
         """
@@ -360,7 +365,7 @@ def save_financial_statements(
     if not records:
         return 0
 
-    fetched_at = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    fetched_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     rows = [
         (
             str(r.get("LocalCode", "") or ""),
@@ -374,7 +379,11 @@ def save_financial_statements(
             fetched_at,
         )
         for r in records
+        if r.get("LocalCode") and r.get("DisclosedDate") and r.get("TypeOfDocument")  # PK 欠損行はスキップ
     ]
+    skipped = len(records) - len(rows)
+    if skipped:
+        logger.warning("save_financial_statements: %d 件を PK 欠損によりスキップ", skipped)
 
     conn.executemany(
         """
@@ -425,7 +434,11 @@ def save_market_calendar(
             r.get("HolidayName") or None,
         )
         for r in records
+        if r.get("Date")  # PK 欠損行はスキップ
     ]
+    skipped = len(records) - len(rows)
+    if skipped:
+        logger.warning("save_market_calendar: %d 件を PK 欠損によりスキップ", skipped)
 
     conn.executemany(
         """
@@ -459,10 +472,17 @@ def _to_float(value: Any) -> float | None:
 
 
 def _to_int(value: Any) -> int | None:
-    """値を int に変換する。変換失敗または空値は None を返す。"""
+    """値を int に変換する。変換失敗または空値は None を返す。
+
+    "1.0" のような float 文字列は float 経由で変換する。
+    """
     if value is None or value == "":
         return None
     try:
         return int(value)
+    except (ValueError, TypeError):
+        pass
+    try:
+        return int(float(value))
     except (ValueError, TypeError):
         return None
