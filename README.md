@@ -1,7 +1,6 @@
 # KabuSys
 
-日本株自動売買システムのベースパッケージ。  
-モジュール設計はデータ取得（data）、戦略（strategy）、売買執行（execution）、監視（monitoring）を分離しており、拡張しやすい構成になっています。
+日本株自動売買システム（スケルトン実装）
 
 バージョン: 0.1.0
 
@@ -9,154 +8,154 @@
 
 ## 概要
 
-KabuSys は日本株の自動売買システムを構築するための骨組み（フレームワーク）です。個別のデータ取り込み・戦略ロジック・注文実行・監視機能をそれぞれモジュールとして分離しているため、各コンポーネントを独立して開発・テスト・差し替えできます。
+KabuSys は、日本株の自動売買システムのための軽量なパッケージ構成（スキャフォールド）です。データ取得、売買戦略、注文実行、モニタリングの4つの主要コンポーネントを想定したモジュール分割を提供します。現状は骨組みのみの実装ですので、各モジュールに具体的なロジックを実装して拡張して利用してください。
 
-このリポジトリは最小限のパッケージ構成を提供しており、独自のデータソースやブローカーAPI、監視ロジックを実装して拡張することを想定しています。
+目的:
+- 自動売買システム開発のためのディレクトリ構成と基本インターフェースを提供
+- 各機能を独立して実装・テストできる設計にすること
 
 ---
 
-## 機能一覧（想定/ベース）
+## 機能一覧（想定）
 
-- プロジェクト構成（data / strategy / execution / monitoring）
-- パッケージング済み（pip でのインストールやソースからの利用に対応）
-- バージョン管理（`__version__` によるバージョン指定）
-- 拡張しやすいモジュール設計
+現在のリポジトリはモジュール構成を提供するのみです。各モジュールに対して任意の実装を追加して利用します。
 
-※現状は骨組み（スケルトン）であり、実際のデータ取得や注文実行の実装は含まれていません。各ディレクトリに実装を追加して利用してください。
+- data: 市場データ取得（リアルタイム/履歴）
+- strategy: 売買戦略ロジックの実装・管理
+- execution: 注文発注・約定管理・APIラッパー
+- monitoring: ログ、メトリクス、ダッシュボード用の監視処理
+
+注: 上記は想定される責務であり、現状はモジュールのパッケージ定義のみが含まれます。各機能は利用者が実装してください。
+
+---
+
+## 要件
+
+- Python 3.8+
+- 必要に応じて各種外部APIクライアントやライブラリ（requests、pandas、numpy など）を追加してください
 
 ---
 
 ## セットアップ手順
 
-1. 必要要件
-   - Python 3.8 以上（推奨: 3.8〜3.11）
-   - pip
+ローカル開発環境でのセットアップ例:
 
-2. リポジトリをクローン
+1. リポジトリをクローン
    ```
-   git clone <リポジトリのURL>
-   cd <リポジトリ名>
+   git clone <repository-url>
+   cd <repository-directory>
    ```
 
-3. 仮想環境の作成（推奨）
-   ```
-   python -m venv .venv
-   source .venv/bin/activate   # macOS / Linux
-   .venv\Scripts\activate      # Windows
-   ```
-
-4. 依存パッケージのインストール
-   - 現在は依存ファイルがありません。必要に応じて `requirements.txt` を作成して追加してください。
-   - 開発用にインストールする例:
+2. 仮想環境を作成して有効化
+   - macOS / Linux:
      ```
-     pip install -e .
+     python3 -m venv .venv
+     source .venv/bin/activate
+     ```
+   - Windows (PowerShell):
+     ```
+     python -m venv .venv
+     .\.venv\Scripts\Activate.ps1
      ```
 
-5. インストール確認
+3. パッケージを開発モードでインストール
+   ```
+   pip install -e .
+   ```
+
+4. インストール確認
    ```
    python -c "import kabusys; print(kabusys.__version__)"
    ```
-   0.1.0 が表示されれば成功です。
+   上記で `0.1.0` が表示されればインストール成功です。
 
 ---
 
-## 使い方
+## 使い方（開始ガイド）
 
-このパッケージはモジュールごとに責務を分けているため、以下の流れで実装・利用します。
+このパッケージは現状モジュールのスケルトンのみを提供します。以下は、各モジュールに独自実装を追加して利用する際の簡単なテンプレート例です。
 
-基本的な想定ワークフロー:
-1. data モジュールでマーケットデータや銘柄情報を取得
-2. strategy モジュールで売買判定ロジックを実装
-3. execution モジュールでブローカーAPI等に注文を送信
-4. monitoring モジュールで稼働状況やログ・アラートを管理
+1. strategy に戦略クラスを追加する例
+   - ファイル: `src/kabusys/strategy/simple.py`
+   ```python
+   class SimpleStrategy:
+       def on_market_data(self, data):
+           # data を解析してシグナルを生成
+           # シグナルに基づき execution モジュールに注文を依頼する
+           pass
+   ```
 
-サンプル（概念例）:
+2. execution に注文実行クラスを追加する例
+   - ファイル: `src/kabusys/execution/executor.py`
+   ```python
+   class OrderExecutor:
+       def send_order(self, symbol, side, size, price=None):
+           # ブローカーAPIへ注文を送信するロジックを実装
+           pass
+   ```
 
-```
-# sample_usage.py
-from kabusys import data, strategy, execution, monitoring
+3. アプリケーションの組み立て例
+   ```python
+   from kabusys.strategy.simple import SimpleStrategy
+   from kabusys.execution.executor import OrderExecutor
 
-# 1. データ取得（実装を追加する必要あり）
-prices = data.fetch_price("7203")  # 例: 銘柄コード7203（トヨタ）
+   strategy = SimpleStrategy()
+   executor = OrderExecutor()
 
-# 2. 戦略判定（ユーザが実装）
-signal = strategy.simple_moving_average_signal(prices)
+   # 市場データ受信ループ（擬似）
+   for data in market_data_stream():
+       signal = strategy.on_market_data(data)
+       if signal:
+           executor.send_order(**signal)
+   ```
 
-# 3. 注文実行（実装を追加）
-if signal == "BUY":
-    execution.place_order(symbol="7203", side="BUY", qty=100)
-
-# 4. 監視（実装を追加）
-monitoring.notify("Order placed for 7203")
-```
-
-注意:
-- 上記関数（fetch_price, simple_moving_average_signal, place_order, notify）はサンプルのため、実際の関数は各モジュールに実装してください。
-- 実際の売買を行う場合は十分な検証（バックテスト、紙トレード）と例外処理、金銭リスク管理を行ってください。
-
-開発ガイドライン（推奨）
-- data: 外部APIクライアント、キャッシュ、データ整形を担当
-- strategy: 入力データ（時系列等）からシグナル（BUY/SELL/HOLD）を返す純粋関数を基本とする
-- execution: 注文送信、注文状態の取得、エラーハンドリング、再送処理
-- monitoring: ログ集約、アラート（メール/Slack等）、稼働メトリクスの出力
+重要:
+- 各モジュールで例外処理や再接続ロジック、レート制限対策を実装してください。
+- 実運用前にバックテストやペーパートレードで十分に検証してください。
 
 ---
 
 ## ディレクトリ構成
 
-プロジェクトの主要ファイル・ディレクトリ構成（抜粋）:
+現状のディレクトリ構成（主要ファイル）:
 
 ```
 .
 ├─ src/
 │  └─ kabusys/
-│     ├─ __init__.py           # パッケージ定義、__version__ = "0.1.0"
+│     ├─ __init__.py           # パッケージ初期化、__version__ 定義
 │     ├─ data/
-│     │  └─ __init__.py        # データ取得用モジュール（実装を追加）
+│     │  └─ __init__.py
 │     ├─ strategy/
-│     │  └─ __init__.py        # 戦略ロジック（実装を追加）
+│     │  └─ __init__.py
 │     ├─ execution/
-│     │  └─ __init__.py        # 注文実行（実装を追加）
+│     │  └─ __init__.py
 │     └─ monitoring/
-│        └─ __init__.py        # 監視・通知（実装を追加）
-├─ README.md
-└─ setup.cfg / pyproject.toml  # （必要に応じて追加）
+│        └─ __init__.py
+├─ setup.cfg / pyproject.toml   # （プロジェクトに応じて存在）
+├─ setup.py                     # （存在する場合）
+└─ README.md
 ```
 
-なお、上記の src レイアウトは一般的な Python のソース配置に従っています。パッケージ配布やテスト設定はプロジェクトの運用方針に合わせて追加してください。
+ソースのエントリポイント:
+- `src/kabusys/__init__.py` でパッケージのバージョンや `__all__` を定義しています。
 
 ---
 
-## 拡張例（実装例のアイデア）
+## 開発ガイドライン・拡張ポイント
 
-- data:
-  - 株価データをREST APIやWebSocketから取得
-  - CSV/Parquetからの履歴データ読み込み
-  - 前処理（欠損値補完、リサンプリング）
-- strategy:
-  - 移動平均クロス、RSI、ブレイクアウトなどの戦略モジュール
-  - バックテスト用のインターフェース
-- execution:
-  - ブローカー（各社API）ごとのアダプタ実装
-  - 注文管理、約定通知、ポジション管理
-- monitoring:
-  - ログ集約（ELK、Prometheus）
-  - Slack/メール通知、異常検知アラート
+- 各サブパッケージに対して明確なインターフェース（メソッド名・引数・戻り値）を設計してください。
+- 単体テスト、統合テストを充実させ、CI 環境で自動実行することを推奨します。
+- ログは structured logging（JSON など）やメトリクス（Prometheus など）に出力すると運用が楽になります。
+- ブローカーAPIキーや機密情報は環境変数やVault等で安全に管理してください。
 
 ---
 
 ## 貢献・ライセンス
 
-- 貢献: プルリクエスト歓迎。機能追加やバグ修正、ドキュメントの改善を受け付けます。
-- ライセンス: 必要に応じて LICENSE ファイルを追加してください（例: MIT 等）。
+- このリポジトリはスケルトンです。機能追加・修正のプルリクエストを歓迎します。
+- ライセンスはプロジェクト規約に従って設定してください（ここでは未指定です）。
 
 ---
 
-## 注意事項
-
-- 実運用での自動売買は金銭リスクを伴います。本リポジトリはテンプレート／フレームワークであり、実際の売買ロジックやブローカー接続はユーザ自身の実装・責任で行ってください。
-- APIキーや秘密情報はソース管理に含めず、環境変数やシークレット管理サービスを利用してください。
-
----
-
-以上。必要であれば、README に含める具体的な実装例（データ取得や注文送信のサンプル）を作成します。どのブローカーAPIやデータソースを想定するか教えてください。
+以上。何か特定の機能のサンプル実装や、データソース／証券会社APIのラッパー実装例が必要であればお知らせください。具体的なコード例を作成します。
