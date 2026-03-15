@@ -34,10 +34,12 @@ def _parse_env_line(line: str) -> tuple[str, str] | None:
     key = key.strip()
     value = value.strip()
     # インラインコメント対応（クォートなしの場合のみ）
+    # '#' の直前がスペースまたはタブの場合のみコメントと認識
     if value and value[0] not in ("'", '"'):
-        hash_idx = value.find(" #")
-        if hash_idx != -1:
-            value = value[:hash_idx].rstrip()
+        for i, ch in enumerate(value):
+            if ch == "#" and (i == 0 or value[i - 1] in (" ", "\t")):
+                value = value[:i].rstrip()
+                break
     # クォート除去
     if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
         value = value[1:-1]
@@ -46,8 +48,18 @@ def _parse_env_line(line: str) -> tuple[str, str] | None:
     return key, value
 
 
-def _load_env_file(path: Path) -> None:
-    """指定した .env ファイルを読み込む。OS環境変数は上書きしない。"""
+def _load_env_file(
+    path: Path,
+    override: bool = False,
+    protected: frozenset[str] = frozenset(),
+) -> None:
+    """指定した .env ファイルを読み込む。
+
+    Args:
+        path: 読み込む .env ファイルのパス
+        override: True の場合、既存の環境変数を上書きする（protected に含まれるキーは除く）
+        protected: 上書き禁止のキーセット（OS環境変数を保護するために使用）
+    """
     if not path.exists():
         return
     with open(path, encoding="utf-8") as f:
@@ -56,15 +68,22 @@ def _load_env_file(path: Path) -> None:
             if result is None:
                 continue
             key, value = result
-            if key not in os.environ:
-                os.environ[key] = value
+            if not override:
+                # override=False: 未設定のキーのみセット
+                if key not in os.environ:
+                    os.environ[key] = value
+            else:
+                # override=True: protected（OS環境変数）以外は上書き
+                if key not in protected:
+                    os.environ[key] = value
 
 
-# プロジェクトルートの .env → .env.local の順に読み込む
-# OS環境変数が最優先（override=False 相当）
+# 読み込み優先順位: OS環境変数 > .env.local > .env
+# OS環境変数を protected として保持し、どちらのファイルも上書き不可にする
 _root = _find_project_root()
-_load_env_file(_root / ".env")
-_load_env_file(_root / ".env.local")  # ローカル上書き用（gitignore対象）
+_os_keys = frozenset(os.environ.keys())
+_load_env_file(_root / ".env", override=False, protected=_os_keys)
+_load_env_file(_root / ".env.local", override=True, protected=_os_keys)
 
 
 def _require(key: str) -> str:
@@ -78,8 +97,8 @@ def _require(key: str) -> str:
     return value
 
 
-_VALID_ENVS = {"development", "paper_trading", "live"}
-_VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+_VALID_ENVS = frozenset({"development", "paper_trading", "live"})
+_VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
 
 class Settings:
