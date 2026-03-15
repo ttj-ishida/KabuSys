@@ -1,104 +1,136 @@
 # KabuSys
 
-日本株の自動売買システム（スケルトン実装）
+日本株自動売買システムの骨格ライブラリです。  
+このリポジトリはシステムを機能別に分割したパッケージ構成（データ取得、売買ロジック、注文実行、監視）を提供します。現状はプロジェクトの初期スケルトンで、各モジュールの実装を追加していくことを想定しています。
 
 バージョン: 0.1.0
 
-概要
-- KabuSys は日本株の自動売買システムを構築するためのコアパッケージのスケルトンです。
-- データ取得、売買戦略、注文実行、監視（ログ・メトリクス）を役割ごとに分離したモジュール構成になっています。
-- ここに含まれるのは基本的なパッケージ骨格で、各モジュールに実際の実装（API クライアント、戦略ロジック、注文フロー、監視機能）を追加していきます。
+---
 
-主な機能（予定／想定）
-- 株価や板情報などのマーケットデータ取得（data）
-- 売買戦略の実装・評価（strategy）
-- 注文送信、注文管理（execution）
-- 実行状況やアラートの監視・記録（monitoring）
-- 各機能は独立しており、テストや差し替えがしやすい設計を想定
+## プロジェクト概要
 
-セットアップ手順
+KabuSys は、日本株の自動売買システムを構築するためのモジュール群のひな形です。主要な役割を責務ごとに分割し、拡張・テスト・保守がしやすい構造を目指しています。
 
-前提
-- Python 3.8 以上を推奨
-- 実際の運用では証券会社の API（例：kabuステーション等）情報や API キーが必要になります。ここではその取得手順は含みません。
+主要パッケージ:
+- data: 市場データの取得・整形（ティック、板、OHLC 等）
+- strategy: 売買戦略・シグナル生成
+- execution: 注文送信・約定管理
+- monitoring: ログ、メトリクス、ダッシュボードやアラート
 
-ローカルでの開発・動作確認手順（推奨）
-1. リポジトリをクローン
-   git clone <リポジトリURL>
-   cd <リポジトリ>
+---
 
-2. 仮想環境の作成（例）
-   python -m venv .venv
-   source .venv/bin/activate  # macOS / Linux
-   .venv\Scripts\activate     # Windows (PowerShell では .venv\Scripts\Activate.ps1)
+## 機能一覧（想定・骨子）
 
-3. 依存パッケージをインストール
-   - requirements.txt がある場合:
-     pip install -r requirements.txt
-   - パッケージとして編集可能にインストールする場合（pyproject.toml / setup.py がある場合）:
-     pip install -e .
-   - まだパッケージ設定が無い場合は、開発中はプロジェクトの src ディレクトリを PYTHONPATH に追加して利用できます:
-     export PYTHONPATH="$(pwd)/src:$PYTHONPATH"  # macOS / Linux
-     set PYTHONPATH=%cd%\src;%PYTHONPATH%         # Windows（cmd）
+- データ取得インターフェース（証券会社APIやCSV読み込み等の抽象化）
+- 戦略モジュール（シグナル生成の基底クラスを想定）
+- 注文実行モジュール（注文送信、注文状態の追跡）
+- 監視モジュール（トレードログ、ポートフォリオ、アラート出力）
+- パッケージ化済み（Pythonパッケージとして利用可能な構成の開始点）
 
-4. 環境変数 / 設定
-   - 実際の API キーやエンドポイントは環境変数や設定ファイルで管理してください（例: KABU_API_KEY, KABU_API_ENDPOINT）。
-   - サンプル:
-     export KABU_API_KEY="あなたのAPIキー"
-     export KABU_API_ENDPOINT="https://api.example.com"
+> 注: 現時点のソースはモジュールのパッケージ構成のみで、具体的な実装は含まれていません。各モジュールにクラスや機能を実装していくことを想定しています。
 
-使い方（最小例）
-- パッケージは以下の名前空間を提供します:
-  from kabusys import __version__, data, strategy, execution, monitoring
+---
 
-- 開発時には各モジュールに実際のクラスや関数を実装します。例（概念的なサンプル）:
+## セットアップ手順
 
-  - data モジュール
-    - MarketDataClient クラスを実装して株価や板情報を取得
+1. Python 環境（推奨: 3.8 以上）を準備します。
 
-  - strategy モジュール
-    - Strategy 抽象クラスを定義し、シグナル生成メソッド（generate_signal）などを実装
+2. 仮想環境の作成（推奨）
+   - macOS / Linux:
+     - python -m venv .venv
+     - source .venv/bin/activate
+   - Windows:
+     - python -m venv .venv
+     - .\.venv\Scripts\activate
 
-  - execution モジュール
-    - ExecutionClient を実装して注文送信、約定確認、注文取消などを行う
+3. pip を最新化
+   - pip install --upgrade pip
 
-  - monitoring モジュール
-    - ロギングやメトリクス送信、アラート通知を実装
+4. リポジトリから利用する方法（2通り）
 
-- 簡単な実行フロー（擬似コード）
-  1. data.MarketDataClient で市場データを取得
-  2. strategy.MyStrategy にデータを渡して売買シグナルを生成
-  3. execution.ExecutionClient で注文を送信
-  4. monitoring でログ・ステータスを記録
+   a) パッケージが setuptools/pyproject で構成されている場合（将来的な方法）:
+   - プロジェクトルートで:
+     - pip install -e .
 
-ディレクトリ構成
-（このリポジトリの現状）
+   b) 現状の最小構成で実行する場合:
+   - 簡易的に src を PYTHONPATH に追加して利用:
+     - PYTHONPATH=src python -c "import kabusys; print(kabusys.__version__)"
+     - Windows (PowerShell): $env:PYTHONPATH = "src"; python -c "import kabusys; print(kabusys.__version__)"
+
+5. 依存ライブラリが増えた場合は requirements.txt を追加して:
+   - pip install -r requirements.txt
+
+---
+
+## 使い方（例・骨組み）
+
+以下はパッケージを利用する最小の例（実装を追加することで動作します）:
+
+- バージョン確認
+  - python -c "import kabusys; print(kabusys.__version__)"
+
+- モジュールの基本的な利用イメージ（擬似コード）:
+
+  ```python
+  from kabusys import data, strategy, execution, monitoring
+
+  # データ取得（実装を追加）
+  # datasource = data.YourDataSource(api_key=..., symbols=[...])
+  # price_df = datasource.get_ohlcv(...)
+
+  # 戦略（実装を追加）
+  # strat = strategy.YourStrategy(param1=..., param2=...)
+  # signals = strat.generate_signals(price_df)
+
+  # 注文実行（実装を追加）
+  # executor = execution.OrderExecutor(api_client=...)
+  # for sig in signals:
+  #     executor.send_order(sig)
+
+  # 監視（実装を追加）
+  # monitor = monitoring.Monitor()
+  # monitor.record_trade(...)
+  # monitor.report()
+  ```
+
+- 実装のヒント
+  - data パッケージ: 抽象基底クラス（BaseDataSource）を用意し、証券会社APIやCSV/DBからの取得クラスを派生。
+  - strategy パッケージ: 戦略基底（BaseStrategy）で入力（価格等）→ 出力（買い/売り/ホールド）を統一。
+  - execution パッケージ: OrderExecutor 等で送信・キャンセル・注文状態管理を実装。
+  - monitoring パッケージ: ログ出力・メトリクス収集・通知（メール/Slack）などを実装。
+
+---
+
+## ディレクトリ構成
+
+現状のファイル構成:
+
 - src/
   - kabusys/
-    - __init__.py            # パッケージメタ（バージョン、公開 API）
+    - __init__.py          — パッケージ初期化（バージョン情報: 0.1.0）
     - data/
-      - __init__.py          # データ取得関連モジュールを配置
+      - __init__.py        — データ関連モジュール（未実装）
     - strategy/
-      - __init__.py          # 戦略ロジックを配置
+      - __init__.py        — 戦略関連モジュール（未実装）
     - execution/
-      - __init__.py          # 注文実行関連を配置
+      - __init__.py        — 注文実行関連モジュール（未実装）
     - monitoring/
-      - __init__.py          # 監視・ログ関連を配置
+      - __init__.py        — 監視関連モジュール（未実装）
 
-開発ノート / 実装のヒント
-- 各モジュールはインターフェース（抽象クラスやプロトコル）を定義して実装を差し替えやすくすることを推奨します（単体テストの容易化）。
-- 実運用を考慮する場合は、以下を検討してください：
-  - 冪等な注文管理と障害復旧（リトライ、トランザクション的な注文処理）
-  - リアルタイム監視とアラート（Slack、メール等）
-  - 履歴データの保存（時系列 DB、パラquetなど）
-  - バックテスト用のインターフェース（戦略の検証）
+各パッケージの役割:
+- kabusys/__init__.py
+  - __version__ = "0.1.0"
+  - __all__ = ["data", "strategy", "execution", "monitoring"]
 
-ライセンス / 責任
-- 本リポジトリは自動売買のスケルトンです。実際に資金を投入して取引を行う前に徹底したテストとレビューを行ってください。
-- 金融取引に伴うリスクはユーザーに帰属します。実運用前に法的・規制面の確認も行ってください。
+---
 
-貢献
-- Issue / PR は歓迎します。機能追加（データコネクタ、戦略テンプレート、実行バックエンド）、ドキュメント改善などをお願いします。
+## 開発・拡張ガイド（簡潔）
 
-お問い合わせ
-- 実装や拡張の相談、設計レビューなどが必要な場合は issue を立ててください。
+- 新しい機能を追加する際は、該当するサブパッケージ（data/ strategy/ execution/ monitoring）にモジュールを追加してください。
+- テストは tests/ ディレクトリに配置し、pytest 等で実行することを推奨します。
+- パブリックAPI（外部に公開するクラス・関数）はサブパッケージの __all__ に明記してください。
+- 外部API（証券会社など）と連携する際は API キー等の機密情報を直接ソースに書かず、環境変数や設定ファイル（.env）で管理してください。
+
+---
+
+README はこのリポジトリの初期ドキュメントです。さらに具体的な実装（クラス、関数、例）を追加した際に、使用例や API リファレンスを拡充してください。必要があれば、サンプル戦略や統合テストのテンプレートも作成することをおすすめします。
