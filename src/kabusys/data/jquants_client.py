@@ -116,6 +116,7 @@ def _request(
 
     last_exc: Exception = RuntimeError("未初期化")
     token = id_token
+    _token_refreshed = False  # 401 リフレッシュは 1 回のみ保証
     for attempt in range(_MAX_RETRIES):
         _rate_limiter.wait()
         try:
@@ -123,15 +124,18 @@ def _request(
         except urllib.error.HTTPError as e:
             status = e.code
             # 401: トークン期限切れ → 1 回だけリフレッシュしてリトライ
-            if status == 401:
+            if status == 401 and not _token_refreshed:
                 logger.warning("401 Unauthorized on %s, refreshing id_token", path)
                 try:
                     token = get_id_token()
+                    _token_refreshed = True
                     continue
                 except Exception as refresh_exc:
                     raise RuntimeError(
                         "id_token のリフレッシュに失敗しました"
                     ) from refresh_exc
+            if status == 401:
+                raise  # リフレッシュ済みで再度 401 → 即座に失敗
             if status in _RETRY_STATUS_CODES or status >= 500:
                 wait = _RETRY_BACKOFF_BASE ** attempt
                 logger.warning(
@@ -304,11 +308,11 @@ def save_daily_quotes(
     if not records:
         return 0
 
-    fetched_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+    fetched_at = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     rows = [
         (
             r.get("Date"),
-            str(r.get("Code", "")),
+            str(r.get("Code", "") or ""),
             _to_float(r.get("Open")),
             _to_float(r.get("High")),
             _to_float(r.get("Low")),
@@ -356,10 +360,10 @@ def save_financial_statements(
     if not records:
         return 0
 
-    fetched_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+    fetched_at = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     rows = [
         (
-            str(r.get("LocalCode", "")),
+            str(r.get("LocalCode", "") or ""),
             r.get("DisclosedDate"),
             r.get("TypeOfDocument", ""),
             _to_float(r.get("NetSales")),
@@ -415,9 +419,9 @@ def save_market_calendar(
     rows = [
         (
             r.get("Date"),
-            r.get("HolidayDivision") in {"0", "2", "3"},  # 取引あり
-            r.get("HolidayDivision") == "3",               # 半日
-            r.get("HolidayDivision") == "2",               # SQ 日
+            str(r.get("HolidayDivision", "")) in {"0", "2", "3"},  # 取引あり（型安全）
+            str(r.get("HolidayDivision", "")) == "3",               # 半日
+            str(r.get("HolidayDivision", "")) == "2",               # SQ 日
             r.get("HolidayName") or None,
         )
         for r in records
