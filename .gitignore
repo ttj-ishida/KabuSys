@@ -1,2 +1,38 @@
-Keys
-OrderLogs
+# 秘密情報
+.env
+.env.local
+.env.*.local
+Keys/
+
+# ログ・作業ファイル
+OrderLogs/
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# データファイル（.gitkeepのみ追跡）
+data/*
+!data/.gitkeep
+*.duckdb
+*.db
+*.parquet
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
