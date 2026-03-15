@@ -1,162 +1,138 @@
-# KabuSys
+KabuSys
+=======
 
-日本株の自動売買システムの骨組み（テンプレート）です。  
-モジュール分割（データ収集、売買戦略、注文実行、監視）を想定したパッケージ構成になっており、実運用向けの機能を追加して拡張していくことを想定しています。
+KabuSys は日本株自動売買システムの骨組み（スキャフォールド）です。  
+このリポジトリは、データ取得、売買戦略、注文実行、監視の4つの主要コンポーネントを持つ Python パッケージとして構成されています。現在は基本的なパッケージ構造と初期メタ情報のみが含まれており、各モジュールの実装はこれから行う想定です。
 
-バージョン: 0.1.0
+バージョン
+---------
+0.1.0
 
----
+概要
+----
+KabuSys は次のような自動売買システムの要素を分離して開発・テストできるように設計されています。
 
-## 概要
+- data: 市場データの取得・前処理を行うモジュール
+- strategy: 売買ロジック（シグナル生成）を定義するモジュール
+- execution: ブローカーや API を通じた注文発行を行うモジュール
+- monitoring: システムの稼働状況／取引状況の監視・ログ出力を行うモジュール
 
-KabuSys は日本株の自動売買を目的とした Python パッケージの雛形です。  
-各責務を分離したサブパッケージを持ち、以下の主要コンポーネントを提供・拡張できます。
+機能一覧
+--------
+現状（スキャフォールド段階）での想定機能（実装は各モジュールにて追加してください）:
 
-- データ収集（market data / historical）
-- 売買戦略（シグナル生成）
-- 注文実行（ブローカー/API 連携）
-- 監視・ロギング（稼働状況、通知）
+- 市場データ取得インターフェース（リアルタイム / 過去データ）
+- 戦略インターフェース（シグナル生成用の基本クラス）
+- 注文実行インターフェース（成行・指値・キャンセル 等）
+- モニタリング／ロギング（稼働状態、注文履歴、パフォーマンス指標）
 
-現在はパッケージ構成のみを用意しており、各モジュールの具体実装はプロジェクトごとに追加してください。
+セットアップ手順
+----------------
 
----
+前提
+- Python 3.8 以上を推奨
+- Git が利用可能
 
-## 機能一覧（想定）
-
-- market data の取得・キャッシュ（拡張）
-- 戦略モジュールによる売買シグナル生成
-- 注文発注・約定管理（ブローカーAPIラッパー）
-- 稼働監視・ログ出力・アラート（メール/Slack 等へ通知）
-- バックテスト基盤（将来的な拡張）
-
-（注）本リポジトリは雛形のため、上記機能は実装例を追加していく必要があります。
-
----
-
-## 要件
-
-- Python 3.8+
-- pip
-
-（実際に使うライブラリ（requests、pandas、websocket-client など）は実装に応じて requirements.txt に追加してください）
-
----
-
-## セットアップ手順
-
+ローカル開発環境の例
 1. リポジトリをクローン
    ```
    git clone <リポジトリURL>
-   cd <リポジトリ>
+   cd <リポジトリ名>
    ```
 
-2. 仮想環境を作成・有効化
-   - macOS / Linux
+2. 仮想環境の作成と有効化（例: venv）
+   - macOS / Linux:
      ```
      python3 -m venv .venv
      source .venv/bin/activate
      ```
-   - Windows (PowerShell)
+   - Windows (PowerShell):
      ```
      python -m venv .venv
      .\.venv\Scripts\Activate.ps1
      ```
 
-3. 開発インストール（編集を反映させながら使う場合）
+3. 開発用インストール（セットアップツールや依存パッケージがある場合）
    ```
    pip install -e .
    ```
+   依存関係は現状 requirements.txt / pyproject.toml に定義されていないため、実装に応じて必要なパッケージ（例: requests, pandas, websocket-client 等）を追加してください。
 
-4. 依存パッケージ（必要に応じて）
-   ```
-   pip install <必要なライブラリ>
-   ```
+4. 環境変数 / 設定
+   実際のブローカー API を使う場合は API キーや認証情報を設定する必要があります。config.yaml や環境変数で管理するのが一般的です（本リポジトリには実装例は含まれていません）。
 
-5. API キー等の設定  
-   ブローカーやデータプロバイダと接続する場合は API キー等の設定が必要です。環境変数または設定ファイルを利用してください（例）：
-   - 環境変数
-     - KABUSYS_API_KEY
-     - KABUSYS_API_SECRET
-   - 設定ファイル（config.json 等）
-     ```json
-     {
-       "api_key": "あなたのAPIキー",
-       "api_secret": "あなたのシークレット"
-     }
-     ```
+使い方（例）
+------------
 
----
+以下は本パッケージを使った典型的な流れの擬似コード例です。各モジュールは現在空のインターフェースなので、実際の使用前に実装を追加してください。
 
-## 使い方（サンプル）
-
-現在はパッケージの骨組みのみ提供します。以下は利用例（各モジュールを実装した場合の典型的な流れ）です。
-
-```python
+1) パッケージ情報の確認
+```
 import kabusys
-
-print("KabuSys version:", kabusys.__version__)
-
-# 仮に各モジュールにクラスを実装した場合の例
-from kabusys.data import DataClient      # 実装を追加
-from kabusys.strategy import Strategy    # 実装を追加
-from kabusys.execution import Executor   # 実装を追加
-from kabusys.monitoring import Monitor   # 実装を追加
-
-# クライアント初期化（実装に応じて）
-data_client = DataClient(api_key="...")
-strategy = Strategy(params={})
-executor = Executor(api_key="...")
-monitor = Monitor()
-
-# メインループ（概念例）
-while True:
-    market = data_client.fetch_latest("7203")      # 銘柄コード例: トヨタ
-    signal = strategy.generate_signal(market)
-    if signal == "BUY":
-        executor.place_order(symbol="7203", side="BUY", size=100)
-    elif signal == "SELL":
-        executor.place_order(symbol="7203", side="SELL", size=100)
-    monitor.record(market, signal)
-    # 適切な待機/スケジューリングを行う
+print(kabusys.__version__)  # 0.1.0
 ```
 
-上記はあくまでサンプルです。実際にはエラーハンドリング、リトライ、レート制限対策、注文の確認・管理、バックテスト機能などを実装してください。
+2) ワークフローの擬似例
+```
+# 例: 各モジュールの仮想的な利用方法（実装はこれから）
+from kabusys.data import DataClient        # 市場データ取得用クラス（未実装）
+from kabusys.strategy import StrategyBase  # 戦略の基底クラス（未実装）
+from kabusys.execution import ExecutionClient  # 注文実行用クラス（未実装）
+from kabusys.monitoring import Monitor     # 監視用クラス（未実装）
 
----
+# 1. データ取得
+data_client = DataClient(api_key="YOUR_API_KEY")
+price_series = data_client.get_historical("7203.T", start="2023-01-01", end="2023-12-31")
 
-## ディレクトリ構成
+# 2. 戦略（シグナル生成）
+class MyStrategy(StrategyBase):
+    def generate_signals(self, price_data):
+        # シグナル生成ロジックを実装
+        return signals
 
-プロジェクトの現状ディレクトリ構成（主要ファイルのみ）:
+strategy = MyStrategy()
+signals = strategy.generate_signals(price_series)
+
+# 3. 注文実行
+exec_client = ExecutionClient(api_key="YOUR_API_KEY")
+for sig in signals:
+    exec_client.place_order(sig)
+
+# 4. 監視 / ロギング
+monitor = Monitor()
+monitor.log_trade_history(exec_client.get_trade_history())
+monitor.alert_if_needed()
+```
+
+注: 上記は設計イメージの例です。実際に使うためには各クラス・メソッドを実装してください。
+
+ディレクトリ構成
+----------------
+現在の主要なファイル構成は以下の通りです。
 
 - src/
   - kabusys/
-    - __init__.py          (バージョンと __all__ 設定)
+    - __init__.py            # パッケージのメタ情報（バージョン等）
     - data/
-      - __init__.py        (データ取得モジュール用)
+      - __init__.py          # データ取得モジュール（未実装）
     - strategy/
-      - __init__.py        (戦略モジュール用)
+      - __init__.py          # 戦略モジュール（未実装）
     - execution/
-      - __init__.py        (注文実行モジュール用)
+      - __init__.py          # 注文実行モジュール（未実装）
     - monitoring/
-      - __init__.py        (監視・ロギング用)
+      - __init__.py          # 監視モジュール（未実装）
 
-README.md、setup.cfg / pyproject.toml、requirements.txt、LICENSE などの管理ファイルはプロジェクトルートに追加してください。
+開発上の注意点 / 今後の実装ガイド
+-------------------------------
+- 各サブモジュールはインターフェース（抽象基底クラス）を定義し、具体実装をプラグインのように差し替えられる設計にすると拡張しやすくなります。
+- 実取引を行う場合はテスト環境（ペーパートレード）での十分な検証と、例外処理・レート制限・再接続・ロギングの強化が必須です。
+- API キーや認証情報はコードに直書きせず、環境変数やシークレットマネージャ、暗号化された設定ファイルで管理してください。
+- 取引に関する法規制や証券会社の規約を遵守してください。
 
----
+ライセンス / コントリビュート
+------------------------------
+リポジトリに LICENSE や CONTRIBUTING がない場合、プロジェクト方針に合わせて追記してください。貢献や Issue の提出、Pull Request は歓迎します。
 
-## 開発・貢献
-
-- 新しい機能や修正はブランチを切ってプルリクエストで提出してください。
-- 重大な変更を加える場合は事前に Issue を立てて議論してください。
-- 単体テスト、静的解析（flake8/black/isort 等）の導入を推奨します。
-
----
-
-## 注意事項
-
-- 自動売買は資金リスクを伴います。実運用前に十分な検証（バックテスト、ペーパートレード）を行ってください。
-- ブローカーの API 利用規約、金融商品取引法等の法規制に従ってください。
-
----
-
-必要であれば、サンプル実装（DataClient/Strategy/Executor/Monitor のテンプレート）や CI 設定、バックテストの雛形を追加した README の拡張版を作成します。どの部分を具体的に実装したいか教えてください。
+最後に
+------
+この README は現在のコードベース（パッケージ骨組み）に合わせて作成しています。各モジュールの具体実装（データソース接続、戦略ロジック、注文 API 実装、監視ダッシュボード等）を追加することで本格的な自動売買システムとして完成します。必要であれば、各モジュールのテンプレート実装やサンプル戦略の例も作成します。希望があれば教えてください。
