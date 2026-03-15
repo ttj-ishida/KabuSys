@@ -1,73 +1,77 @@
 # Changelog
 
-すべての重要な変更はこのファイルに記録します。  
-このプロジェクトは Keep a Changelog の規約に従います。  
-フォーマット: https://keepachangelog.com/ja/1.0.0/
-
-## [Unreleased]
-
-（現在未リリースの変更はここに記載します）
+すべての変更は Keep a Changelog のガイドラインに従っています。  
+このファイルでは、利用者に影響のある機能追加・変更・修正を日本語でまとめています。
 
 ## [0.1.0] - 2026-03-15
 
-初回リリース。日本株の自動売買システム基盤となる以下の機能を追加しました。
+### 追加
+- 初回リリース。KabuSys パッケージの基本機能を提供します。
+  - パッケージメタ情報
+    - バージョン: `__version__ = "0.1.0"`
+    - パッケージ公開 API: `__all__ = ["data", "strategy", "execution", "monitoring"]`
+  - 環境変数・設定管理モジュール (kabusys.config)
+    - .env ファイルまたは環境変数から設定を読み込む仕組みを実装。
+    - 自動ロードの挙動:
+      - プロジェクトルートを `.git` または `pyproject.toml` を基準に探索して判定（CWD に依存しない）。
+      - 読み込み優先順位: OS 環境変数 > .env.local > .env
+      - OS 環境変数は保護され、.env(.local) による上書きを制御。
+      - 自動ロードは環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` で無効化可能（テスト用途など）。
+    - .env パーサーの詳細:
+      - 空行・コメント行（先頭が `#`）を無視。
+      - `export KEY=val` 形式に対応。
+      - シングル/ダブルクォート内のバックスラッシュエスケープを考慮して値を正しく復元。
+      - クォート外の `#` は、直前がスペース/タブであればコメント扱い。
+    - Settings クラスによるプロパティアクセスを提供（要求される/任意の設定を明確化）。
+      - 必須環境変数取得関数 `_require()` により未設定時は `ValueError` を送出。
+      - 必須 (例):
+        - `JQUANTS_REFRESH_TOKEN`
+        - `KABU_API_PASSWORD`
+        - `SLACK_BOT_TOKEN`
+        - `SLACK_CHANNEL_ID`
+      - データベースパスのデフォルト:
+        - DuckDB: `data/kabusys.duckdb`（`DUCKDB_PATH` で上書き可）
+        - SQLite: `data/monitoring.db`（`SQLITE_PATH` で上書き可）
+      - 環境/ログレベルの検証:
+        - KABUSYS_ENV の有効値: `development`, `paper_trading`, `live`
+        - LOG_LEVEL の有効値: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
+      - 利便性プロパティ:
+        - `is_live`, `is_paper`, `is_dev`
+  - DuckDB スキーマ定義・初期化モジュール (kabusys.data.schema)
+    - DataSchema.md に基づく 3 層（Raw / Processed / Feature）＋ Execution レイヤーのテーブル定義を実装。
+    - 生データ（Raw Layer）テーブル:
+      - `raw_prices`, `raw_financials`, `raw_news`, `raw_executions`
+    - 整形済み（Processed Layer）テーブル:
+      - `prices_daily`, `market_calendar`, `fundamentals`, `news_articles`, `news_symbols`
+      - `news_symbols` は `news_articles(id)` への外部キー（ON DELETE CASCADE）
+    - 特徴量（Feature Layer）テーブル:
+      - `features`, `ai_scores`
+    - 実行（Execution Layer）テーブル:
+      - `signals`, `signal_queue`, `portfolio_targets`, `orders`, `trades`, `positions`, `portfolio_performance`
+      - 外部キー関係の整備（例: `orders.signal_id` → `signal_queue(signal_id)`、`trades.order_id` → `orders(order_id)` など）
+    - 各カラムに対する型・チェック制約（非負・範囲・列組み合わせの PRIMARY KEY 等）を定義。
+    - 頻出クエリを想定したインデックスを複数作成:
+      - 例: `idx_prices_daily_code_date`, `idx_features_code_date`, `idx_signal_queue_status`, `idx_orders_status` など
+    - 公開 API:
+      - `init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection`
+        - 指定した DuckDB ファイルの親ディレクトリを自動作成し、全テーブル・インデックスを作成（冪等）。
+        - `":memory:"` を指定するとインメモリ DB を使用。
+      - `get_connection(db_path: str | Path) -> duckdb.DuckDBPyConnection`
+        - 既存 DB へ接続を返す（スキーマ初期化は行わない。初回は `init_schema()` を使用すること）。
+  - パッケージ構造の雛形
+    - サブパッケージの初期化ファイルを配置（空の __init__ を配置）:
+      - `kabusys.execution`, `kabusys.strategy`, `kabusys.data`, `kabusys.monitoring`（今後の実装拡張用）
 
-### 追加 (Added)
-- パッケージ初期化情報
-  - パッケージバージョンを 0.1.0 に設定（src/kabusys/__init__.py）。
-  - パッケージの公開モジュールとして data, strategy, execution, monitoring をエクスポート。
+### 変更
+- 初回リリースのため該当なし。
 
-- 環境設定管理 (src/kabusys/config.py)
-  - .env ファイルまたは環境変数から設定値を読み込む Settings クラスを追加。
-  - 必須環境変数取得用のヘルパー _require() を提供し、未設定時は ValueError を送出。
-  - サポートされる設定項目（プロパティ）を実装:
-    - J-Quants: jquants_refresh_token (必須)
-    - kabuステーション: kabu_api_password (必須)、kabu_api_base_url（デフォルト: http://localhost:18080/kabusapi）
-    - Slack: slack_bot_token (必須)、slack_channel_id (必須)
-    - データベースパス: duckdb_path（デフォルト: data/kabusys.duckdb）、sqlite_path（デフォルト: data/monitoring.db）
-    - 実行環境: env (development, paper_trading, live)、log_level (DEBUG/INFO/WARNING/ERROR/CRITICAL)
-    - 環境チェック: is_live, is_paper, is_dev のヘルパープロパティ
-  - 環境変数自動ロード機能:
-    - プロジェクトルート（.git または pyproject.toml）を起点に .env と .env.local を自動読み込み。
-    - 読み込み優先順位: OS環境変数 > .env.local > .env
-    - OS の既存環境変数は保護され、.env/.env.local により上書きされない（ただし .env.local は override=True）。
-    - 自動ロードは環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で無効化可能（テスト用途等）。
-  - .env パーサーの強化:
-    - export KEY=val 形式に対応。
-    - シングル/ダブルクォート内のバックスラッシュエスケープ対応。
-    - クォートなしの場合はインラインコメントの判定（直前が空白またはタブの '#' をコメントとみなす）を実装。
-    - 無効行やコメント行を無視。
+### 修正
+- 初回リリースのため該当なし。
 
-- DuckDB スキーマ管理 (src/kabusys/data/schema.py)
-  - データレイク / データ層のスキーマを定義（Raw / Processed / Feature / Execution の4層構成）。
-  - 各種テーブルの DDL を実装（主なテーブル）:
-    - Raw Layer: raw_prices, raw_financials, raw_news, raw_executions
-    - Processed Layer: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
-    - Feature Layer: features, ai_scores
-    - Execution Layer: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
-  - 制約・チェックを各カラムに追加（NOT NULL / CHECK / PRIMARY KEY / FOREIGN KEY 等）。
-  - 利便性のためのインデックスを定義（例: idx_prices_daily_code_date, idx_signal_queue_status など）。
-  - 依存関係を考慮したテーブル作成順を管理。
-  - 公開 API:
-    - init_schema(db_path: str | Path) -> duckdb connection
-      - データベースファイルの親ディレクトリを自動作成し、必要な全テーブルとインデックスを作成（冪等）。
-      - ":memory:" によるインメモリ DB をサポート。
-    - get_connection(db_path: str | Path) -> duckdb connection
-      - 既存 DB へ接続（スキーマ初期化は行わない。初回は init_schema を推奨）。
+### 既知の注意点 / マイグレーション
+- DuckDB スキーマの初期化は `init_schema()` を明示的に呼び出すことを推奨。`get_connection()` はスキーマを作成しないため、初回実行時にテーブルが無いといった事象が発生します。
+- .env 自動読み込みはプロジェクトルート検出に依存するため、パッケージ配布後や特殊な実行環境で挙動を制御したい場合は `KABUSYS_DISABLE_AUTO_ENV_LOAD` を設定してください。
 
-### 変更 (Changed)
-- なし（初回リリースのため過去からの変更はないことを明記）
+--- 
 
-### 修正 (Fixed)
-- なし（初回リリース）
-
-### 注意事項 / マイグレーション
-- 初回起動時は必ず init_schema(settings.duckdb_path) を呼び出して DuckDB のスキーマを作成してください。  
-  例: from kabusys.data.schema import init_schema; init_schema(settings.duckdb_path)
-- .env の自動ロードはプロジェクトルートの検出に依存します。パッケージを配布・導入した環境でプロジェクトルートが検出できない場合は自動ロードはスキップされます（必要に応じて明示的に環境変数を設定してください）。
-- 機密情報（API トークン等）は OS 環境変数として設定することを推奨します。.env.local は開発用の上書きに使えますが、OS 環境変数が優先されます。
-
----
-
-署名:
-- 初版実装: 環境設定管理、.env パーシング強化、DuckDB ベースのスキーマ/初期化機能、およびパッケージの基本構成を提供しました。
+今後のリリースでは、戦略実装（strategy）、発注・実行エンジン（execution）、監視・アラート（monitoring）などの機能追加を予定しています。必要であれば CHANGELOG を英語版やより詳細な移行手順付きで作成します。
