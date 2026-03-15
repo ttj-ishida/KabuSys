@@ -1,80 +1,77 @@
-# Changelog
+CHANGELOG
+=========
 
-すべての注目すべき変更はここに記録します。本ファイルは Keep a Changelog の形式に準拠します。
+すべての重要な変更点を記録します。本ファイルは "Keep a Changelog" の形式に準拠しています。
 
-フォーマットの詳細: https://keepachangelog.com/ja/
+フォーマット:
+- 変更はカテゴリ別（Added, Changed, Fixed, Removed, Deprecated, Security）にまとめています。
+- バージョンと日付を併記しています。
 
-## [Unreleased]
+[Unreleased]
+------------
 
-（なし）
+- なし
 
-## [0.1.0] - 2026-03-15
+0.1.0 - 2026-03-15
+------------------
 
-初期リリース。日本株自動売買システムのコア基盤を実装。
+Added
+- 初期リリース。kabusys パッケージの基本構成と主要機能を追加。
+- パッケージメタ情報
+  - src/kabusys/__init__.py に __version__ = "0.1.0" を追加し、公開モジュール（data, strategy, execution, monitoring）を __all__ に設定。
+- 環境設定管理（src/kabusys/config.py）
+  - .env ファイルまたは環境変数からの設定読み込み機能を実装。
+  - プロジェクトルートの自動検出: .git または pyproject.toml を探索してプロジェクトルートを決定（CWD に依存しない実装）。
+  - .env パーサ実装: コメント行、export プレフィックス対応、シングル/ダブルクォート内のバックスラッシュエスケープ処理、インラインコメントの扱い（クォートなしの場合は '#' の直前がスペース/タブのときのみコメントとして扱う）を実装。
+  - .env 自動ロードの優先順位: OS 環境変数 > .env.local > .env。KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で自動ロードを無効化可能。
+  - _load_env_file による読み込み時に既存 OS 環境変数を保護する protected 機構を実装（override フラグあり）。
+  - Settings クラスを追加し、アプリケーション設定をプロパティで提供:
+    - J-Quants: jquants_refresh_token (必須)
+    - kabuステーション API: kabu_api_password (必須)、kabu_api_base_url（デフォルト "http://localhost:18080/kabusapi"）
+    - Slack: slack_bot_token, slack_channel_id（いずれも必須）
+    - データベース: duckdb_path（デフォルト data/kabusys.duckdb）、sqlite_path（デフォルト data/monitoring.db）
+    - システム設定: env (development/paper_trading/live の検証)、log_level（DEBUG/INFO/WARNING/ERROR/CRITICAL の検証）、is_live/is_paper/is_dev のヘルパー
+  - 必須環境変数未設定時は明示的に ValueError を送出し、.env.example を参照するよう案内。
+- DuckDB スキーマ管理（src/kabusys/data/schema.py）
+  - Raw / Processed / Feature / Execution の4層に対応するテーブル DDL を定義:
+    - Raw レイヤー: raw_prices, raw_financials, raw_news, raw_executions
+    - Processed レイヤー: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
+    - Feature レイヤー: features, ai_scores
+    - Execution レイヤー: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
+  - 各テーブルに対して適切な PRIMARY KEY、CHECK 制約、DEFAULT 値、外部キー制約を設定。
+  - パフォーマンスを考慮したインデックスを複数定義（銘柄×日付スキャンやステータス検索を想定）。
+  - init_schema(db_path) を実装:
+    - 指定した DuckDB ファイルを初期化し、DDL とインデックスを順次実行。既存テーブルはスキップ（冪等）。
+    - db_path の親ディレクトリを自動作成（":memory:" の場合はインメモリ DB を使用可能）。
+    - 初期化済みの duckdb 接続を返す。
+  - get_connection(db_path) を実装: 既存 DB への接続を返す（スキーマ初期化は行わない）。
+- パッケージ構造
+  - 空のサブパッケージ（プレースホルダ）を追加: src/kabusys/execution, src/kabusys/strategy, src/kabusys/data, src/kabusys/monitoring（将来的な実装箇所を明確化）。
 
-### 追加
-- パッケージの初期化
-  - パッケージ名: kabusys
-  - バージョン: 0.1.0
-  - __all__ として data, strategy, execution, monitoring を公開（これらのサブパッケージの雛形を用意）。
+Notes / Usage
+- 初回利用時は必須の環境変数（例: JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID）を設定してください。未設定時は Settings のプロパティ参照で ValueError が発生します。
+- DB を用いる場合は init_schema() を実行してスキーマを初期化してください。例:
+  - from kabusys.data.schema import init_schema
+  - conn = init_schema("data/kabusys.duckdb")
+- 自動 .env 読み込みを無効化したいテスト時などは KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください。
 
-- 環境変数 / 設定管理モジュール (kabusys.config)
-  - .env ファイルまたは環境変数から設定を読み込む自動ロード機能を実装。
-  - 自動ロードの無効化フラグ: KABUSYS_DISABLE_AUTO_ENV_LOAD をサポート。
-  - プロジェクトルート検出: 現在のファイル位置から親ディレクトリを辿り .git または pyproject.toml を基準にプロジェクトルートを特定する実装を追加（CWD に依存しない）。
-  - .env 解析の強化:
-    - 空行・コメント行の無視。
-    - export KEY=val 形式に対応。
-    - シングル／ダブルクォートされた値のエスケープ処理対応（バックスラッシュによるエスケープを考慮）。
-    - クォートなしの値におけるインラインコメント判定（'#' の直前が空白またはタブの場合のみコメントとして扱う）。
-  - .env 読み込みロジック:
-    - .env（優先度低） → .env.local（優先度高） の順で読み込み。既存の OS 環境変数は保護される（protected set）。
-    - override フラグにより既存値の上書き可否を制御。
-    - ファイル読み込み失敗時に警告を発行。
-  - Settings クラスを提供（settings インスタンスをモジュールレベルで公開）:
-    - 必須トークン/設定の取得（未設定時は ValueError を送出）: JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
-    - Kabu API の base URL のデフォルト ("http://localhost:18080/kabusapi")
-    - データベースパスのデフォルト:
-      - DUCKDB_PATH: data/kabusys.duckdb
-      - SQLITE_PATH: data/monitoring.db
-    - 環境（KABUSYS_ENV）の検証: 有効値は development / paper_trading / live（不正な値はエラー）
-    - ログレベル（LOG_LEVEL）の検証: DEBUG, INFO, WARNING, ERROR, CRITICAL
-    - is_live / is_paper / is_dev の便利プロパティ
+Known issues / Limitations
+- 現時点では strategy / execution / monitoring の具体実装は含まれておらず、各サブパッケージはプレースホルダです。
+- マイグレーションツール（スキーマ変更管理）は未実装のため、スキーマ変更時は手動対応が必要です。
+- 並列アクセスやトランザクション設計に関する運用上の指針は含まれていません（DuckDB の特性に依存）。
 
-- データベーススキーマ定義 (kabusys.data.schema)
-  - DuckDB 用のスキーマ定義と初期化機能を実装。
-  - 4 層アーキテクチャを意識したテーブル群を定義:
-    - Raw Layer: raw_prices, raw_financials, raw_news, raw_executions
-    - Processed Layer: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
-    - Feature Layer: features, ai_scores
-    - Execution Layer: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
-  - 各テーブルに対して適切な PRIMARY KEY / FOREIGN KEY / CHECK 制約を設定（負値チェック、列値の集合制約など）。
-    - 例: side は ('buy','sell')、order_type は ('market','limit','stop')、status 列は許容値をチェック。
-    - 各数値列に対する non-negative / positive の CHECK を多数導入。
-    - news_symbols による news_articles への外部キー（ON DELETE CASCADE）など、参照整合性を定義。
-  - パフォーマンスを考慮したインデックス群を定義・作成:
-    - 銘柄×日付検索用、ステータス検索用、orders/trades 関連検索用、news_symbols の code インデックス等。
-  - スキーマ初期化関数:
-    - init_schema(db_path): DB ファイル（または ":memory:"）を初期化し、テーブルとインデックスを作成。親ディレクトリがなければ自動作成。冪等性あり（既存テーブルはスキップ）。
-    - get_connection(db_path): 既存 DB へ接続（スキーマ初期化は行わない。初回は init_schema() を使用することを想定）。
+Changed
+- なし
 
-- パッケージ構成（雛形）
-  - strategy, execution, data, monitoring パッケージのモジュールファイルを用意（将来的な機能実装の土台）。
+Fixed
+- なし
 
-### 変更
-- （初版のため該当なし）
+Removed
+- なし
 
-### 修正
-- （初版のため該当なし）
-
-### 既知の制限 / 注意事項
-- Settings.require により必須環境変数が未設定だと ValueError を送出するため、起動前に .env の用意または環境変数設定が必要。
-- init_schema は DuckDB を対象としており、初回はスキーマ定義を適用するために必ず呼び出す必要がある（get_connection はスキーマ作成を行わない）。
-- strategy / execution / monitoring モジュールはまだ実装の土台のみのため、個別機能は未実装。
-
-### セキュリティ
-- シークレット類は環境変数経由での注入を想定（.env を利用する場合はローカルで安全に管理すること）。KABUSYS_DISABLE_AUTO_ENV_LOAD により自動読み込みをテスト時に無効化可能。
+Security
+- なし
 
 ---
 
-今後のリリースで、戦略実装（strategy）、注文実行のラッパー（execution）、監視・アラート（monitoring）、データ取得パイプライン（data.ingest）等を追加予定です。
+（補足）この CHANGELOG はコードベースから推測して作成した初期リリース記録です。実際のリリースノートや運用ドキュメントと差異がある場合はそちらを優先してください。
