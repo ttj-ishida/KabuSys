@@ -1,61 +1,86 @@
 Keep a Changelog
-=================
+================
 
-すべての変更は https://keepachangelog.com/ja/ に準拠して記載します。
+すべての重要な変更はこのファイルに記録します。  
+このプロジェクトは「Keep a Changelog」規約に準拠します。
 
-[Unreleased]
-------------
+フォーマット
+----------
+各リリースは日付とバージョンで記載しています。カテゴリは主に以下を使用します: Added, Changed, Fixed, Security, Removed, Deprecated, Breaking Changes。
 
-なし
+Unreleased
+----------
+- なし
 
-0.1.0 - 2026-03-15
-------------------
+[0.1.0] - 2026-03-15
+--------------------
 
 Added
 - 初期リリース。
-- パッケージ構成を追加:
-  - kabusys パッケージ (バージョン: 0.1.0)
-  - サブパッケージ: data, strategy, execution, monitoring を __all__ で公開
-- 環境変数・設定管理モジュールを追加 (src/kabusys/config.py)。
-  - Settings クラスを提供し、環境変数からアプリケーション設定を取得するプロパティを実装。
-    - JQUANTS_REFRESH_TOKEN (必須)
-    - KABU_API_PASSWORD (必須)
-    - KABU_API_BASE_URL (デフォルト: "http://localhost:18080/kabusapi")
-    - SLACK_BOT_TOKEN (必須)
-    - SLACK_CHANNEL_ID (必須)
-    - DUCKDB_PATH (デフォルト: "data/kabusys.duckdb", Path 型で返却)
-    - SQLITE_PATH (デフォルト: "data/monitoring.db", Path 型で返却)
-    - KABUSYS_ENV の検証（許容値: "development", "paper_trading", "live"。不正な値は ValueError）
-    - LOG_LEVEL の検証（許容値: "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"。不正な値は ValueError）
-    - is_live / is_paper / is_dev の便宜プロパティ
-  - 必須環境変数未設定時は _require が ValueError を投げ、.env.example を参考に .env を作成する旨のメッセージを含む。
-- .env 自動読み込み機能を実装（パッケージロード時に自動実行。無効化フラグあり）。
-  - プロジェクトルート検出: __file__ を基点に親ディレクトリを上へ探索し、.git または pyproject.toml を根拠に判定（CWD に依存しないためパッケージ配布後も安定）。
-  - 読み込み順序: OS 環境変数 > .env.local > .env
-  - 自動ロード無効化: 環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定すると自動読み込みをスキップ（テスト等で利用可能）。
-  - 読み込みの上書き制御:
-    - .env は既存の OS 環境変数を上書きしない（override=False）。
-    - .env.local は override=True で読み込み、ただしパッケージ起動時に既に存在する OS 環境変数（protected）を上書きしないよう保護。
-  - .env 読み込み時のエラーは例外を投げず warnings.warn で警告を出す実装。
-- .env パーサを実装（_parse_env_line）。
-  - 空行や先頭が "#" の行を無視。
-  - "export KEY=val" 形式に対応。
-  - クォートされた値に対するバックスラッシュエスケープ処理: 開始クォートに対応する閉じクォートまでを正しく抽出し、エスケープ（\）を処理。
-  - クォートなし値では、'#' をコメントの始まりとみなす条件を厳密化（直前がスペースまたはタブの場合のみコメントとする）して、値中の '#' を不適切に切らないよう配慮。
-- パッケージの __init__.py を追加し、パッケージ名・バージョン情報 (__version__ = "0.1.0") を定義。
+- パッケージ基盤
+  - パッケージメタ情報を追加（src/kabusys/__init__.py）。
+    - __version__ = "0.1.0"
+    - __all__ に "data", "strategy", "execution", "monitoring" を公開。
+  - サブパッケージのプレースホルダを追加（src/kabusys/{data,strategy,execution,monitoring}/__init__.py）。
+- 環境変数 / 設定管理モジュール（src/kabusys/config.py）
+  - .env ファイルまたは OS 環境変数から設定を読み込む機能を実装。
+  - プロジェクトルート自動検出
+    - 現在ファイル位置を起点に親ディレクトリを走査し、.git または pyproject.toml を見つけた場所をプロジェクトルートとして扱う（_find_project_root）。
+    - パッケージ配布後も現在ファイル位置を基準に探索するため、カレントワーキングディレクトリに依存しない実装。
+  - .env パーサーを実装（_parse_env_line）
+    - 空行やコメント行（#）のスキップ。
+    - "export KEY=val" 形式に対応。
+    - クォートを含む値の解析（シングル/ダブルクォート、バックスラッシュによるエスケープ対応）。クォートありの場合は対応する閉じクォートまでを値として扱い、その後のインラインコメントは無視。
+    - クォートなしの場合は、'#' の直前がスペース/タブであれば以降をコメントとして扱う。
+  - .env 読み込みロジック（_load_env_file）
+    - ファイルが存在しない場合は無視。
+    - ファイルオープン失敗時は警告を出力して読み込みをスキップ。
+    - override フラグにより既存の環境変数を上書きするかを制御。
+    - protected（frozenset）を指定して上書き禁止するキーを保護（OS 環境変数等の保護に利用）。
+  - 自動ロードの挙動
+    - 読み込み優先度は OS 環境変数 > .env.local > .env。
+    - KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定することで自動ロードを無効化可能（テスト等で利用）。
+    - プロジェクトルートが特定できない場合は自動ロードをスキップ。
+  - 必須/検証付き設定取得ヘルパー
+    - _require(key) により必須環境変数の取得。未設定時は ValueError を送出。
+    - Settings クラスを用意し、プロパティ経由で各種設定にアクセス可能にした（settings = Settings()）。
+      - J-Quants API: jquants_refresh_token（JQUANTS_REFRESH_TOKEN を必須）
+      - kabuステーション API:
+        - kabu_api_password（KABU_API_PASSWORD を必須）
+        - kabu_api_base_url（デフォルト: "http://localhost:18080/kabusapi"）
+      - Slack:
+        - slack_bot_token（SLACK_BOT_TOKEN を必須）
+        - slack_channel_id（SLACK_CHANNEL_ID を必須）
+      - データベース:
+        - duckdb_path（デフォルト: data/kabusys.duckdb、Path を返す）
+        - sqlite_path（デフォルト: data/monitoring.db、Path を返す）
+      - システム設定:
+        - env（KABUSYS_ENV、デフォルト "development"。許可値: "development", "paper_trading", "live"。無効値は ValueError）
+        - log_level（LOG_LEVEL、デフォルト "INFO"。有効値: DEBUG, INFO, WARNING, ERROR, CRITICAL。無効値は ValueError）
+        - is_live / is_paper / is_dev の便宜プロパティを提供
+  - ドキュメント的補助
+    - config モジュール冒頭に使用例を記載（from kabusys.config import settings ...）。
 
 Changed
-- 初版につき該当なし。
+- なし（初回リリース）
 
 Fixed
-- 初版につき該当なし。
-
-Removed
-- 初版につき該当なし。
+- なし（初回リリース）
 
 Security
-- 初版につき該当なし。
+- .env 読み込み時に protected キーセットを導入し、OS 環境変数などの上書きを防止する仕組みを実装。これにより外部 .env ファイルによる既存の安全な環境変数の誤上書きを回避。
 
-Notes
-- 現在サブパッケージ（data, strategy, execution, monitoring）の __init__ は存在するが、各サブパッケージ内部の実装は本リリース時点では未実装または空の初期ファイルに留まっています。
-- .env のパース挙動や自動ロードの仕様は将来的に変更される可能性があります。ユニットテスト等で確実な環境を再現する場合は KABUSYS_DISABLE_AUTO_ENV_LOAD を利用してください。
+Deprecated
+- なし
+
+Removed
+- なし
+
+Breaking Changes
+- なし（初回リリース）
+
+注意事項 / 補足
+- 必須の環境変数が未設定の場合、Settings の該当プロパティは ValueError を送出します。実行前に .env を用意するか OS 環境変数を設定してください。
+- .env のパース実装は一般的なケースに対応していますが、特殊なエスケープや複雑なシェル展開（変数展開やコマンド代入など）はサポートしていません。
+- 自動ロードをテストで無効化したい場合は環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください。
+- 将来的にサブパッケージ（data/strategy/execution/monitoring）に具体的な実装を追加する予定です。
