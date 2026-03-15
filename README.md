@@ -1,169 +1,137 @@
 # KabuSys
 
-日本株自動売買システムのための軽量パッケージ（骨組み）。  
-このリポジトリはシステムを構成する主要コンポーネント（データ取得、戦略、注文実行、モニタリング）の雛形を提供します。
+KabuSys は日本株の自動売買システムの骨組み（スケルトン）です。  
+データ取得、取引戦略、注文実行、監視の各コンポーネントに分割されたモジュール構成を提供し、独自のロジックを実装して自動売買システムを構築できるように設計されています。
 
 バージョン: 0.1.0
 
 ---
 
-## プロジェクト概要
+## 主な特徴
 
-KabuSys は日本株の自動売買システム構築のためのモジュール化されたパッケージ雛形です。  
-各機能（データ取得、戦略、注文実行、モニタリング）を分離して実装できるように設計されており、具体的なブローカーAPIや戦略ロジックは各モジュール内で実装します。
-
-目的：
-- 自動売買アルゴリズムの開発／テストを容易にする雛形を提供する
-- コンポーネントを分離して保守性を高める
-- 実装例を各チーム・個人に合わせて拡張しやすくする
-
----
-
-## 機能一覧（想定）
-
-- data: 市場データの取得・整形（板情報、約定履歴、日次/分次OHLC 等）
-- strategy: 売買戦略の定義とシグナル生成
-- execution: ブローカーAPIを通した注文送信・約定管理（成行/指値/キャンセル 等）
-- monitoring: ログ、パフォーマンス指標、アラート、ダッシュボード連携
-
-※ 現状はモジュールの雛形のみです。各モジュール内部に具体的な実装（APIクライアント、戦略クラスなど）を追加してください。
+- モジュール化された設計
+  - data: 市場データの取得・加工を行う層
+  - strategy: 売買戦略を実装する層
+  - execution: 注文発注・約定管理を行う層
+  - monitoring: 稼働状況やパフォーマンスの監視を行う層
+- 最小限の骨組みを提供し、拡張して独自の戦略や実行ロジックを組み込める
+- パッケージ化された Python モジュールとして利用可能
 
 ---
 
 ## セットアップ手順
 
-前提
-- Python 3.8 以上を推奨
-- 仮想環境の利用を推奨（venv / conda 等）
+1. 必要条件
+   - Python 3.8 以上を推奨
+   - （任意）実際の取引 API（例えば証券会社のAPI）や各種ライブラリは別途導入してください
 
-手順例（Unix 系 / Windows PowerShell での一般的な流れ）:
+2. リポジトリをクローン
+   ```bash
+   git clone <repository-url>
+   cd <repository-directory>
+   ```
 
-1. リポジトリをクローン
-   - git clone <REPO_URL>
-   - cd <repo>
+3. 仮想環境を作成・有効化（推奨）
+   ```bash
+   python -m venv .venv
+   # Linux / macOS
+   source .venv/bin/activate
+   # Windows (PowerShell)
+   .venv\Scripts\Activate.ps1
+   ```
 
-2. 仮想環境作成・有効化（例: venv）
-   - python -m venv .venv
-   - Unix/macOS: source .venv/bin/activate
-   - Windows(PowerShell): .venv\Scripts\Activate.ps1
-
-3. 依存関係のインストール
-   - requirements.txt があれば: pip install -r requirements.txt
-   - （現状では依存ファイルが含まれていないため、必要なライブラリをプロジェクトに応じて追加してください）
-
-4. ローカルで使う方法（パッケージとして扱う / 開発モード）
-   - プロジェクトをパッケージ化している場合:
-     - pip install -e .
-   - パッケージ化していない場合（簡易）:
-     - PYTHONPATH を設定して src を参照させる
-       - Unix/macOS: export PYTHONPATH=$(pwd)/src:$PYTHONPATH
-       - Windows(PowerShell): $env:PYTHONPATH = (Resolve-Path .\src).Path + ";" + $env:PYTHONPATH
+4. パッケージをインストール（開発モード）
+   ```bash
+   pip install -e .
+   ```
+   ※ 依存パッケージがある場合は `requirements.txt` を用意して `pip install -r requirements.txt` を実行してください。
 
 ---
 
-## 使い方（基本例）
+## 使い方（基本）
 
-まずはパッケージを import してバージョンやモジュールが読み込めることを確認します。
+このパッケージは現状「骨組み」なので、各モジュールに具体的な実装を追加して利用します。まずは簡単な利用例を示します。
 
-Python シェルやスクリプトで:
-
+- パッケージのインポートとバージョン確認
 ```python
 import kabusys
-print(kabusys.__version__)   # 0.1.0
-
-import kabusys.data
-import kabusys.strategy
-import kabusys.execution
-import kabusys.monitoring
+print(kabusys.__version__)  # "0.1.0"
 ```
 
-各モジュールは雛形として存在するため、以下のような役割でクラスや関数を実装してください（例は設計例）:
-
-- data モジュールの例（擬似コード）
-  - MarketDataClient クラス: get_ohlc(symbol, timeframe), get_ticker(symbol) など
-
-- strategy モジュールの例
-  - BaseStrategy クラス: on_bar(bar)、generate_signals() などを実装し、派生クラスでロジック実装
-
-- execution モジュールの例
-  - ExecutionClient クラス: send_order(order)、cancel_order(order_id)、get_positions() などを実装（kabuステーション等のAPIラッパー）
-
-- monitoring モジュールの例
-  - Monitor クラス: log_trade(trade)、export_metrics()、raise_alert() など
-
-サンプルワークフロー（擬似コード）:
-
+- モジュールをインポートして実装を追加する例
 ```python
-# 1. データ取得
-md = kabusys.data.MarketDataClient(...)
-bars = md.get_ohlc("7203.T", timeframe="1m", count=100)
+# src/kabusys/strategy/my_strategy.py
+# ここに戦略クラスや関数を実装する
 
-# 2. 戦略実行
-strategy = MyStrategy(...)
-signals = strategy.generate_signals(bars)
+# 実行時（ユーザー側コード）
+from kabusys import data, strategy, execution, monitoring
 
-# 3. 注文実行
-exec_client = kabusys.execution.ExecutionClient(...)
-for sig in signals:
-    exec_client.send_order(sig)
-
-# 4. モニタリング
-monitor = kabusys.monitoring.Monitor(...)
-monitor.log_trade(...)
+# 例: data モジュールの関数を呼び、strategy を使ってシグナル生成、
+# execution に渡して注文を出す、monitoring で状態を記録する
+# （実装は各モジュール内に追加してください）
 ```
 
-注: 上記クラスはサンプルであり、実装は本リポジトリの各モジュールに追加してください。
+実際の運用では以下を実装してください：
+- data: API クライアントやデータ取得関数（例: 株価取得、板情報、約定履歴など）
+- strategy: エントリー／イグジットのロジック、リスク管理、ポジション管理
+- execution: 注文作成、送信、注文監視（約定、キャンセル等）、取引ログ出力
+- monitoring: ログ、メトリクス、アラート（例: Slack/メール通知）
 
 ---
 
 ## ディレクトリ構成
 
-現状の主要ファイル/ディレクトリ構成（抜粋）:
+リポジトリの現状のファイル構成は以下の通りです。
 
 - src/
   - kabusys/
-    - __init__.py        # パッケージのエントリ（version, __all__）
+    - __init__.py              # パッケージ定義、バージョン情報
     - data/
-      - __init__.py      # data モジュール（市場データ取得）
+      - __init__.py            # データ取得関連の実装をここに追加
     - strategy/
-      - __init__.py      # strategy モジュール（戦略ロジック）
+      - __init__.py            # 戦略実装をここに追加
     - execution/
-      - __init__.py      # execution モジュール（注文送信）
+      - __init__.py            # 注文実行ロジックをここに追加
     - monitoring/
-      - __init__.py      # monitoring モジュール（ログ・監視）
+      - __init__.py            # 監視・ロギングをここに追加
 
-（ルートに README.md やライセンス、セットアップファイル等を置くことを推奨します）
+README やテスト、設定ファイル等はプロジェクトルートに配置してください（例: README.md, requirements.txt, setup.cfg など）。
 
-ツリー（テキスト表現）:
-
-src/
-└─ kabusys/
-   ├─ __init__.py
-   ├─ data/
-   │  └─ __init__.py
-   ├─ strategy/
-   │  └─ __init__.py
-   ├─ execution/
-   │  └─ __init__.py
-   └─ monitoring/
-      └─ __init__.py
-
----
-
-## 開発ガイド（短く）
-
-- 各モジュールは責務を分離して実装する（例: API 呼び出しは data/execution、アルゴリズムは strategy、状態管理や可視化は monitoring）
-- 単体テストを作成して戦略ロジックや注文処理の重要部分を検証する
-- 実際の資金を動かす前に、バックテスト・フォワードテスト・ペーパートレードで十分に検証する
-- 機密情報（APIキー等）は環境変数や安全なシークレット管理に格納する
+ツリー表記（簡易）
+```
+project-root/
+├─ src/
+│  └─ kabusys/
+│     ├─ __init__.py
+│     ├─ data/
+│     │  └─ __init__.py
+│     ├─ strategy/
+│     │  └─ __init__.py
+│     ├─ execution/
+│     │  └─ __init__.py
+│     └─ monitoring/
+│        └─ __init__.py
+└─ README.md
+```
 
 ---
 
-## 貢献・連絡
+## 開発ガイドライン（簡易）
 
-- バグ報告や改善提案は Issue を立ててください
-- プルリクエスト歓迎（実装内容にはテストとドキュメントを添えてください）
+- 各機能は該当サブパッケージ内に実装する（例: strategy 内に複数の戦略ファイルを追加）
+- 公開 API（ユーザが import する関数やクラス）はトップレベルの __init__.py で必要に応じてエクスポートする
+- 実際の取引を行う場合は、テスト用のシミュレーション環境（ペーパー取引）で十分に検証すること
+- 機密情報（APIキー等）は環境変数や安全なシークレット管理を利用し、ソース管理に含めないこと
 
 ---
 
-作成済みの雛形から実際の自動売買システムに拡張する際は、取引所／ブローカーのAPI仕様やリスク管理、法令遵守（金融商品取引法等）を必ず確認してください。
+## 今後の拡張案（例）
+
+- 取引所・ブローカー固有の API クライアント実装
+- シミュレーション（バックテスト）モジュールの追加
+- リアルタイム監視ダッシュボードや通知機能の強化
+- 戦略テンプレート／サンプルの追加
+
+---
+
+必要に応じてこの README をプロジェクトの実装に合わせて更新してください。質問や具体的な実装例が欲しい場合は、実装したい機能（例: どの証券会社APIを使うか、どんな戦略を作りたいか）を教えてください。
