@@ -106,7 +106,7 @@ def test_require_and_settings_env_handling(monkeypatch):
     # KABU_API_BASE_URL default
     monkeypatch.delenv("KABU_API_BASE_URL", raising=False)
 
-    s = config.settings
+    s = config.Settings()
     assert s.jquants_refresh_token == "tok"
     assert s.kabu_api_password == "pwd"
     assert s.slack_bot_token == "sbot"

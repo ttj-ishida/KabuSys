@@ -86,23 +86,25 @@ CREATE TABLE IF NOT EXISTS order_requests (
     error_message       VARCHAR,
     created_at          TIMESTAMP     NOT NULL DEFAULT current_timestamp,
     updated_at          TIMESTAMP     NOT NULL DEFAULT current_timestamp,
-    -- limit 注文は limit_price 必須
-    CHECK ((order_type <> 'limit') OR (limit_price IS NOT NULL)),
-    -- stop 注文は stop_price 必須
-    CHECK ((order_type <> 'stop') OR (stop_price IS NOT NULL)),
-    -- market 注文は limit_price 不要
-    CHECK ((order_type <> 'market') OR (limit_price IS NULL)),
+    -- limit 注文: limit_price 必須、stop_price は不要
+    CHECK ((order_type <> 'limit') OR (limit_price IS NOT NULL AND stop_price IS NULL)),
+    -- stop 注文: stop_price 必須、limit_price は不要
+    CHECK ((order_type <> 'stop') OR (stop_price IS NOT NULL AND limit_price IS NULL)),
+    -- market 注文: 両価格とも不要
+    CHECK ((order_type <> 'market') OR (limit_price IS NULL AND stop_price IS NULL)),
     FOREIGN KEY (signal_id) REFERENCES signal_events(signal_id) ON DELETE RESTRICT
 )
 """
 
 # 約定ログ
 # 証券会社から返された実際の約定情報を記録する。
+# broker_execution_id は証券会社提供の約定単位ID（冪等キー）。
 _EXECUTIONS = """
 CREATE TABLE IF NOT EXISTS executions (
     execution_id        VARCHAR       NOT NULL PRIMARY KEY,  -- UUID
     order_request_id    VARCHAR       NOT NULL,              -- order_requests.order_request_id
     broker_order_id     VARCHAR       NOT NULL,
+    broker_execution_id VARCHAR       NOT NULL UNIQUE,       -- 証券会社提供の約定ID（冪等キー）
     code                VARCHAR       NOT NULL CHECK (length(code) > 0),
     side                VARCHAR       NOT NULL CHECK (side IN ('buy', 'sell')),
     filled_qty          BIGINT        NOT NULL CHECK (filled_qty > 0),
@@ -129,9 +131,8 @@ _AUDIT_INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_order_requests_signal_id ON order_requests(signal_id)",
     # 日付・銘柄での発注検索
     "CREATE INDEX IF NOT EXISTS idx_order_requests_date_code ON order_requests(business_date, code)",
-    # broker_order_id での紐付け（外部コールバック用） - NULL を除くユニーク制約
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_order_requests_broker_order_id "
-    "ON order_requests(broker_order_id) WHERE broker_order_id IS NOT NULL",
+    # broker_order_id での紐付け（外部コールバック用） - DuckDB の UNIQUE は NULL を重複扱いしないため複数 NULL は許容
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_order_requests_broker_order_id ON order_requests(broker_order_id)",
     # order_request_id → executions の JOIN
     "CREATE INDEX IF NOT EXISTS idx_executions_order_request_id ON executions(order_request_id)",
     # broker_order_id での約定検索
