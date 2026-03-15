@@ -1,38 +1,50 @@
-# Changelog
+# Keep a Changelog
+すべての重要な変更はこのファイルに記録します。
+このプロジェクトは [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) の原則に従います。
+Semantic Versioning を採用しています（https://semver.org/）。
 
-すべての重要な変更はこのファイルに記録します。  
-このプロジェクトは Keep a Changelog の形式に従い、セマンティック バージョニング（SemVer）を採用します。
+## 変更履歴
 
-フォーマットの詳細: https://keepachangelog.com/（英語）
+### 未リリース
+- （現在のところ未公開の変更はありません）
 
-## [Unreleased]
-- 今後のリリースで予定している変更点や追加機能はここに記載します。
+### 0.1.0 - 2026-03-15
+初回リリース。パッケージの骨組み（スケルトン）を追加しました。
 
-## [0.1.0] - 2026-03-15
-初期リリース（アルファ）
+追加 (Added)
+- パッケージ "kabusys" を新規作成
+  - 概要: "KabuSys - 日本株自動売買システム"（パッケージのトップレベル docstring）
+  - バージョン情報を持つ: `__version__ = "0.1.0"`
+  - 公開 API を定義: `__all__ = ["data", "strategy", "execution", "monitoring"]`
+- サブパッケージ（空の初期化ファイルを含む）を追加
+  - `kabusys.data` - データ取得/管理用モジュール（将来的に株価・板情報・指標の取得処理を想定）
+  - `kabusys.strategy` - 売買戦略定義用モジュール（戦略の実装・評価を想定）
+  - `kabusys.execution` - 注文執行/API連携用モジュール（発注・約定管理を想定）
+  - `kabusys.monitoring` - 監視/ログ・メトリクス用モジュール（稼働監視やアラートを想定）
+- プロジェクトの最小構成（パッケージ初期化のみ）をコミット
+  - ファイル構成（主なファイル）
+    - src/kabusys/__init__.py
+    - src/kabusys/data/__init__.py
+    - src/kabusys/strategy/__init__.py
+    - src/kabusys/execution/__init__.py
+    - src/kabusys/monitoring/__init__.py
 
-### 追加
-- パッケージ "kabusys" を追加。
-  - パッケージ説明: "KabuSys - 日本株自動売買システム"
-  - バージョン定義: `__version__ = "0.1.0"`
-  - 明示的エクスポート: `__all__ = ["data", "strategy", "execution", "monitoring"]`
-- 基本モジュールの骨格を追加（空のサブパッケージとして提供）。
-  - src/kabusys/data/ (`data`): データ取得・管理に関するコンポーネント用の名前空間。
-  - src/kabusys/strategy/ (`strategy`): 取引戦略ロジック用の名前空間。
-  - src/kabusys/execution/ (`execution`): 注文送信や取引執行のための名前空間。
-  - src/kabusys/monitoring/ (`monitoring`): 監視・ロギング・アラート用の名前空間。
-- 各サブパッケージは現時点では初期化ファイル（__init__.py）を備えた骨組みのみを提供。
+変更 (Changed)
+- なし（初回リリースのため）
 
-### 変更
-- 該当なし（初回リリースのため）。
+修正 (Fixed)
+- なし
 
-### 修正
-- 該当なし（初回リリースのため）。
+削除 (Removed)
+- なし
 
-### 注意事項 / 補足
-- 本リリースはプロジェクトの初期骨格を提供するもので、具体的な機能実装（データ取得ロジック、戦略アルゴリズム、注文API連携、監視機能等）は今後のリリースで追加予定です。
-- 利用例（将来的な API に合わせた想定）:
-  - import kabusys
-  - from kabusys import data, strategy, execution, monitoring
+セキュリティ (Security)
+- なし
 
-今後のリリースでは、それぞれのサブパッケージに具体的な機能、型定義、エラーハンドリング、テスト、ドキュメントを追加していきます。
+備考 / 開発者向けメモ
+- 現時点では各サブパッケージは初期化ファイルのみで実装は未着手です。今後、次のような機能実装を予定しています:
+  - data: 市場データ取得、キャッシュ、前処理
+  - strategy: 戦略インターフェース、バックテスト用ユーティリティ
+  - execution: 証券会社/取引APIとの接続、注文管理、例外ハンドリング
+  - monitoring: ロギング、メトリクス収集、アラート送信
+- バージョンはパッケージ内部の `__version__` で管理しています。API互換性や機能追加に応じてセマンティックバージョニングに従って更新してください。
