@@ -1,7 +1,7 @@
 import os
 from openai import OpenAI
 
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"].strip())
 model = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
 code = ""
