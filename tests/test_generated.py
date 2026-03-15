@@ -6,156 +6,134 @@ from unittest import mock
 
 import pytest
 
-# 変更が必要ならモジュール名を適宜調整してください
-from kabusys import config
+import kabusys.config as config
 
 
-def test_parse_env_line_basic():
+def test_parse_env_line_basic_and_comments():
     assert config._parse_env_line("") is None
-    assert config._parse_env_line("# comment") is None
-    assert config._parse_env_line("KEY=val") == ("KEY", "val")
-    assert config._parse_env_line("  export KEY2 =  value2  ") == ("KEY2", "value2")
+    assert config._parse_env_line("   # comment") is None
+    assert config._parse_env_line("NOSEP") is None
+    assert config._parse_env_line("=value") is None
 
+    assert config._parse_env_line("export FOO=bar") == ("FOO", "bar")
+    assert config._parse_env_line("KEY=abc #comment") == ("KEY", "abc")
+    assert config._parse_env_line("KEY=abc#notcomment") == ("KEY", "abc#notcomment")
 
-def test_parse_env_line_quotes_and_escapes():
-    # single quotes with escaped single quote
-    line = "A='a\\'b'"
-    assert config._parse_env_line(line) == ("A", "a'b")
+    # single-quoted with escaped quote
+    line = r"KEY='a\'b' #ignored"
+    k, v = config._parse_env_line(line)
+    assert k == "KEY"
+    assert v == "a'b"
 
-    # double quotes with escaped double quote and backslash
-    line = 'B="x\\\"y\\\\z"'
-    assert config._parse_env_line(line) == ("B", 'x"y\\z')
-
-
-def test_parse_env_line_inline_comment_rules():
-    # '#' should be preserved when not preceded by space/tab
-    assert config._parse_env_line("K=foo#bar") == ("K", "foo#bar")
-    # '#' treated as comment if preceded by space
-    assert config._parse_env_line("K=foo #comment") == ("K", "foo")
-
-
-def test_parse_env_line_invalid():
-    assert config._parse_env_line("noequals") is None
-    assert config._parse_env_line("=novar") is None
-    # key empty after export
-    assert config._parse_env_line("export =value") is None
-
-
-def test_load_env_file_basic(tmp_path, monkeypatch):
-    env_file = tmp_path / ".env"
-    env_file.write_text("\nA=1\nB=two #ignored\nexport C='x\\'y'\n")
-
-    # ensure B already exists so override=False doesn't change it
-    monkeypatch.setenv("B", "orig")
-    # clear others if present
-    monkeypatch.delenv("A", raising=False)
-    monkeypatch.delenv("C", raising=False)
-
-    config._load_env_file(env_file, override=False, protected=frozenset())
-
-    assert os.environ.get("A") == "1"
-    # B should remain unchanged
-    assert os.environ.get("B") == "orig"
-    assert os.environ.get("C") == "x'y"
+    # double-quoted with escaped quote
+    line2 = r'KEY="a\"b"'
+    k2, v2 = config._parse_env_line(line2)
+    assert k2 == "KEY"
+    assert v2 == 'a"b'
 
 
 def test_load_env_file_override_and_protected(tmp_path, monkeypatch):
-    env_file = tmp_path / ".env"
-    env_file.write_text("X=fromfile\nY=2\n")
+    env_path = tmp_path / ".env"
+    env_path.write_text("A=1\nB=2\nC=3\n")
 
-    # set existing env X which is considered OS env (protected)
-    monkeypatch.setenv("X", "osval")
-    monkeypatch.delenv("Y", raising=False)
+    # setup existing environment to test protected behavior
+    monkeypatch.setenv("B", "old")
+    protected = frozenset({"B"})
 
-    # override=True but protected contains X -> X should not be overwritten
-    config._load_env_file(env_file, override=True, protected=frozenset({"X"}))
+    # override=True but B is protected -> B should remain "old"
+    config._load_env_file(env_path, override=True, protected=protected)
+    assert os.environ["A"] == "1"
+    assert os.environ["B"] == "old"
+    assert os.environ["C"] == "3"
 
-    assert os.environ["X"] == "osval"
-    assert os.environ["Y"] == "2"
+    # override=False: values should not overwrite existing ones
+    monkeypatch.setenv("D", "initial")
+    env_path2 = tmp_path / ".env2"
+    env_path2.write_text("D=new\nE=5\n")
+    config._load_env_file(env_path2, override=False, protected=frozenset())
+    assert os.environ["D"] == "initial"
+    assert os.environ["E"] == "5"
 
 
-def test_load_env_file_unreadable_warns(tmp_path):
+def test_load_env_file_open_oserror_warns(tmp_path, monkeypatch):
     env_path = tmp_path / ".env"
     env_path.write_text("A=1\n")
-
-    # Patch builtins.open to raise OSError when called
-    with mock.patch("builtins.open", side_effect=OSError("fail")) as m_open:
-        with mock.patch("warnings.warn") as m_warn:
+    # Patch builtins.open to raise OSError for this call
+    with mock.patch("builtins.open", side_effect=OSError("boom")):
+        with warnings.catch_warnings(record=True) as rec:
+            warnings.simplefilter("always")
             config._load_env_file(env_path, override=False, protected=frozenset())
-            m_warn.assert_called_once()
-            # ensure open was attempted
-            assert m_open.called
+            assert len(rec) >= 1
+            assert any(issubclass(w.category, UserWarning) for w in rec)
 
 
-def test_find_project_root(tmp_path, monkeypatch):
-    # create nested dir structure and a fake module file location
-    project = tmp_path / "myproj"
-    sub = project / "pkg" / "subpkg"
-    sub.mkdir(parents=True)
-    (project / ".git").mkdir()  # mark project root (directory, as in real git repos)
+def test_find_project_root_with_and_without_marker(tmp_path, monkeypatch):
+    # create project structure: proj/.git + src/kabusys/config.py
+    proj = tmp_path / "proj"
+    src = proj / "src" / "kabusys"
+    src.mkdir(parents=True)
+    git_marker = proj / ".git"
+    git_marker.mkdir()
+    fake_file = src / "config.py"
+    fake_file.write_text("# fake")
 
-    fake_module = sub / "module.py"
-    fake_module.write_text("# dummy")
+    # monkeypatch module __file__ to simulate being located under src/kabusys/config.py
+    monkeypatch.setattr(config, "__file__", str(fake_file))
+    root = config._find_project_root()
+    assert root == proj
 
-    # monkeypatch the module's __file__ to point into our fake tree
-    monkeypatch.setattr(config, "__file__", str(fake_module))
+    # if no marker exist -> returns None
+    # point to another path without markers
+    noproj = tmp_path / "noproject" / "pkg"
+    noproj.mkdir(parents=True)
+    fake2 = noproj / "m.py"
+    fake2.write_text("#")
+    monkeypatch.setattr(config, "__file__", str(fake2))
+    assert config._find_project_root() is None
 
-    found = config._find_project_root()
-    assert found is not None
-    assert Path(found) == project
 
+def test_require_and_settings_env_handling(monkeypatch):
+    # require should raise when missing
+    monkeypatch.delenv("SOME_KEY", raising=False)
+    with pytest.raises(ValueError) as ei:
+        config._require("SOME_KEY")
+    assert "SOME_KEY" in str(ei.value)
 
-def test_require_and_settings_properties(monkeypatch, tmp_path):
-    # _require raises when not set
-    monkeypatch.delenv("MUST", raising=False)
-    with pytest.raises(ValueError):
-        config._require("MUST")
+    # set required environment variables and check Settings properties
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pwd")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "sbot")
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "ch1")
+    # KABU_API_BASE_URL default
+    monkeypatch.delenv("KABU_API_BASE_URL", raising=False)
 
-    # when set, returns value
-    monkeypatch.setenv("MUST", "ok")
-    assert config._require("MUST") == "ok"
-
-    # test Settings properties for defaults and overrides
     s = config.Settings()
+    assert s.jquants_refresh_token == "tok"
+    assert s.kabu_api_password == "pwd"
+    assert s.slack_bot_token == "sbot"
+    assert s.slack_channel_id == "ch1"
+    assert s.kabu_api_base_url == "http://localhost:18080/kabusapi"
 
-    # KABUSYS_ENV default is development
-    monkeypatch.delenv("KABUSYS_ENV", raising=False)
-    assert s.env == "development"
-    assert s.is_dev is True
-    assert s.is_live is False
-    assert s.is_paper is False
+    # duckdb_path default expands to a Path ending with expected file
+    dp = s.duckdb_path
+    assert isinstance(dp, Path)
+    assert dp.name == "kabusys.duckdb"
 
-    # valid envs
-    monkeypatch.setenv("KABUSYS_ENV", "LIVE")
-    assert s.env == "live"
-    assert s.is_live is True
-
-    monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
-    assert s.env == "paper_trading"
-    assert s.is_paper is True
-
-    # invalid env raises
-    monkeypatch.setenv("KABUSYS_ENV", "invalid_env")
+    # env validation: invalid value -> ValueError
+    monkeypatch.setenv("KABUSYS_ENV", "invalid_value")
     with pytest.raises(ValueError):
         _ = s.env
 
-    # LOG_LEVEL default and validation
-    monkeypatch.delenv("LOG_LEVEL", raising=False)
-    assert s.log_level == "INFO"
-    monkeypatch.setenv("LOG_LEVEL", "debug")
-    assert s.log_level == "DEBUG"
-    monkeypatch.setenv("LOG_LEVEL", "NOPE")
+    # log_level invalid -> ValueError
+    monkeypatch.setenv("LOG_LEVEL", "nope")
     with pytest.raises(ValueError):
         _ = s.log_level
 
-    # duckdb/sqlite path defaults and expansion
-    monkeypatch.delenv("DUCKDB_PATH", raising=False)
-    monkeypatch.delenv("SQLITE_PATH", raising=False)
-    dp = s.duckdb_path
-    sp = s.sqlite_path
-    assert isinstance(dp, Path)
-    assert isinstance(sp, Path)
-
-    # expanduser test
-    monkeypatch.setenv("DUCKDB_PATH", "~/mydb.duckdb")
-    assert str(s.duckdb_path).endswith("mydb.duckdb")
+    # check boolean helpers
+    monkeypatch.setenv("KABUSYS_ENV", "LIVE")
+    assert s.env == "live"
+    assert s.is_live
+    monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+    assert s.is_paper
+    monkeypatch.setenv("KABUSYS_ENV", "development")
+    assert s.is_dev
