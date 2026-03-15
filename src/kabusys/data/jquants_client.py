@@ -113,7 +113,13 @@ def _request(
             url, headers=h, method=method, data=data_bytes
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            raw = resp.read().decode("utf-8")
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"J-Quants API: JSON デコード失敗 ({path}): {raw[:200]!r}"
+            ) from exc
 
     last_exc: Exception = RuntimeError("未初期化")
     token = id_token
@@ -141,7 +147,15 @@ def _request(
             if status in _RETRY_STATUS_CODES or status >= 500:
                 last_exc = e
                 if attempt < _MAX_RETRIES - 1:  # 最終試行では sleep しない
+                    # 429 は Retry-After ヘッダを優先、なければ指数バックオフ
                     wait = _RETRY_BACKOFF_BASE ** attempt
+                    if status == 429:
+                        retry_after = e.headers.get("Retry-After") if e.headers else None
+                        if retry_after:
+                            try:
+                                wait = float(retry_after)
+                            except ValueError:
+                                pass
                     logger.warning(
                         "HTTP %d on %s, retry %d/%d in %.1fs",
                         status, path, attempt + 1, _MAX_RETRIES, wait,
