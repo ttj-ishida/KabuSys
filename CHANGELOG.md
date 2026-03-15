@@ -1,71 +1,92 @@
-# Changelog
+CHANGELOG
+=========
 
-すべての変更は Keep a Changelog のガイドライン（https://keepachangelog.com/ja/1.0.0/）に従って記載します。
+すべての重要な変更を記録します。これは Keep a Changelog の形式に準拠しています。
+[詳細](https://keepachangelog.com/ja/1.0.0/)
 
-現在のバージョン: 0.1.0
+Unreleased
+----------
 
-## [Unreleased]
 （なし）
 
-## [0.1.0] - 2026-03-15
-初回リリース。パッケージの基本構成、環境設定管理、DuckDB スキーマ定義と初期化の実装を追加。
+0.1.0 - 2026-03-15
+-----------------
 
-### Added
-- パッケージ基盤
-  - Python パッケージ `kabusys` を追加。
-  - バージョンを `__version__ = "0.1.0"` に設定。
-  - サブパッケージの公開インターフェースを定義（data, strategy, execution, monitoring）。各サブパッケージの __init__.py を配置（将来の拡張用に空実装）。
+Added
+- 初回リリース。パッケージ名: `kabusys`、バージョン: `0.1.0`。
+- パッケージの基本構成を追加。
+  - モジュール群: `kabusys.data`、`kabusys.strategy`、`kabusys.execution`、`kabusys.monitoring`（各サブパッケージの初期化ファイルを含む）。
+  - パッケージのエントリポイント: `src/kabusys/__init__.py`（`__version__` と `__all__` を定義）。
 
-- 環境変数・設定管理（src/kabusys/config.py）
-  - .env ファイルまたは環境変数から設定を読み込む自動ローダーを実装。
-    - 読み込み優先順位: OS 環境変数 > .env.local > .env
-    - プロジェクトのルート検出: __file__ を起点に `.git` または `pyproject.toml` を探索してプロジェクトルートを特定（CWD 非依存）。
-    - 自動ロードを無効化するためのフラグ: `KABUSYS_DISABLE_AUTO_ENV_LOAD=1`
-    - .env ファイル読み込み時、OS 環境変数を保護するための `protected` キー集合をサポートし、必要に応じて上書きを制御。
-  - .env パース機能を実装
-    - 空行・コメント行（`#` で始まる）を無視。
+- 環境変数・設定管理モジュールを追加（src/kabusys/config.py）。
+  - .env ファイルおよび OS 環境変数から設定を読み込む仕組みを提供。
+  - 自動読み込みの探索はパッケージファイル位置から親ディレクトリを辿り、`.git` または `pyproject.toml` をプロジェクトルートとして検出。
+  - 読み込み優先順位:
+    - OS 環境変数 > .env.local > .env
+  - 自動ロードの無効化機能:
+    - 環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` により自動ロードを無効化可能（テスト用途など）。
+  - .env のパース機能（`_parse_env_line`）:
+    - 空行／コメント行（行頭の `#`）を無視。
     - `export KEY=val` 形式に対応。
-    - クォートされた値（シングルクォート／ダブルクォート）に対してバックスラッシュエスケープを処理し、対応する閉じクォートまでを値として扱う。
-    - クォートなしの値では、`#` の直前がスペースまたはタブであれば以降をコメントとして扱う（インラインコメントの取り扱い）。
-    - 無効な行・キーに対してはスキップ。
-  - Settings クラスを提供（環境変数からの値取得とバリデーション）
-    - J-Quants / kabuステーション / Slack / データベースパスなどの設定プロパティを実装。
-    - 必須設定が未設定の場合は ValueError を投げる `_require()` を用意。
-    - `duckdb_path` / `sqlite_path` は Path 型で返す（デフォルトパスを持つ）。
-    - 環境種別 `KABUSYS_ENV` とログレベル `LOG_LEVEL` に対する許容値チェックを実装（許容値はそれぞれ `development|paper_trading|live`, `DEBUG|INFO|WARNING|ERROR|CRITICAL`）。
-    - 利便性プロパティ `is_live`, `is_paper`, `is_dev` を実装。
+    - シングル／ダブルクォートを考慮した値のパース（バックスラッシュによるエスケープ処理をサポート）。
+    - クォートなし値に対しては `#` の前に空白またはタブがある場合のみコメントとして扱うなどの挙動を実装。
+  - .env 読み込み関数（`_load_env_file`）:
+    - ファイルごとの上書き制御（`override`）と保護対象キー（`protected`）を考慮して OS 環境変数を上書きしないように設計。
+    - 読み込み失敗時は警告を発行して継続。
+  - 必須値チェック（`_require`）:
+    - 必須の環境変数が未設定の場合は `ValueError` を送出して明示的に失敗させる。
+  - Settings クラス（`settings` インスタンスを公開）:
+    - J-Quants / kabu ステーション / Slack / DB パス / システム設定などのプロパティを提供。
+    - 取得可能プロパティ例:
+      - jquants_refresh_token（JQUANTS_REFRESH_TOKEN を必須取得）
+      - kabu_api_password（KABU_API_PASSWORD を必須取得）
+      - kabu_api_base_url（既定値: http://localhost:18080/kabusapi）
+      - slack_bot_token, slack_channel_id（必須）
+      - duckdb_path（既定: data/kabusys.duckdb）
+      - sqlite_path（既定: data/monitoring.db）
+      - env（KABUSYS_ENV の検証。許容値: development, paper_trading, live）
+      - log_level（LOG_LEVEL の検証。許容値: DEBUG, INFO, WARNING, ERROR, CRITICAL）
+      - is_live / is_paper / is_dev（環境判定ユーティリティ）
 
-- DuckDB スキーマ定義と初期化（src/kabusys/data/schema.py）
-  - DataLayer 構成に従うテーブル群を追加（Raw / Processed / Feature / Execution の 4 層）。
-    - Raw Layer:
-      - raw_prices, raw_financials, raw_news, raw_executions
-    - Processed Layer:
-      - prices_daily, market_calendar, fundamentals, news_articles, news_symbols
-    - Feature Layer:
-      - features, ai_scores
-    - Execution Layer:
-      - signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
-  - 各テーブルに対して型・チェック制約・PRIMARY KEY・外部キーを適切に設定
-    - 例: prices_daily の low カラムに low <= high の CHECK 制約、orders と signal_queue の外部キー関係、trades の order_id による ON DELETE CASCADE など
-  - インデックス定義を追加（頻出クエリパターンを想定したインデックス）
-    - 例: idx_prices_daily_code_date, idx_features_code_date, idx_signal_queue_status など
-  - スキーマ初期化 API
-    - init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection
-      - 指定したパスに対して親ディレクトリを自動作成し、全テーブル・インデックスを作成（冪等）。
-      - ":memory:" をサポート（インメモリ DB）。
-    - get_connection(db_path: str | Path) -> duckdb.DuckDBPyConnection
-      - 既存 DB への接続を返す（スキーマの初期化は行わない）。
-  - 実装上の注意
-    - DuckDB に対して複数 DDL を順次実行し、外部キー依存を考慮したテーブル作成順序を管理。
+- DuckDB 用スキーマ定義・初期化モジュールを追加（src/kabusys/data/schema.py）。
+  - DataSchema.md に基づく 3 層＋実行レイヤのテーブル定義を実装。
+    - Raw Layer: raw_prices, raw_financials, raw_news, raw_executions
+    - Processed Layer: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
+    - Feature Layer: features, ai_scores
+    - Execution Layer: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
+  - 各テーブルに適切な型チェック・制約を付与:
+    - 主キー（PRIMARY KEY）、外部キー（FOREIGN KEY）、CHECK 制約（価格 >= 0、サイズ > 0、ステータスや side の列挙値制約等）を含む。
+    - 外部キーに対して ON DELETE CASCADE / SET NULL を利用して参照整合性を管理。
+  - 頻出クエリを想定したインデックスを定義:
+    - 銘柄×日付スキャン用インデックスやステータス検索用インデックス等を作成。
+  - 公開 API:
+    - init_schema(db_path: str | Path) -> DuckDB 接続:
+      - 指定したパスで DB を初期化し、必要な親ディレクトリを自動作成。
+      - ":memory:" を渡すことでインメモリ DB を使用可能。
+      - 全 DDL とインデックスを冪等に作成。
+    - get_connection(db_path: str | Path) -> DuckDB 接続:
+      - 既存の DB へ接続。スキーマ初期化は行わない（初回は init_schema を推奨）。
 
-### Notes
-- 現在はコアのスケルトン（設定管理・スキーマ）を実装した段階で、戦略ロジックや発注実行の具体実装は未実装（サブパッケージの雛形のみ配置）。
-- .env パーサーや自動ロードはテストや CI 環境で挙動を制御できるよう配慮（KABUSYS_DISABLE_AUTO_ENV_LOAD、protected 機構）。
-- DuckDB スキーマは将来的に拡張可能な設計（特徴量テーブルや AI スコア、注文/約定の履歴管理を考慮）。
+- コード品質に関する実装:
+  - 型ヒント（Python の型注釈）を多数採用。
+  - ドキュメンテーション文字列（docstring）を各モジュール・関数に付与。
 
---- 
+Changed
+- 初回リリースのため該当なし。
 
-今後のリリース候補例（想定）
-- 0.2.0: データ取得モジュール（価格取得、財務データ、ニュースのフェッチ）を追加、定期実行ジョブの追加。
-- 0.3.0: 戦略実装（シグナル生成）、注文送信・監視モジュール（kabu ステーション連携）を追加。
-- 1.0.0: ライブ運用対応（安全性・リトライ・ロギング・メトリクス）とドキュメント整備。
+Fixed
+- 初回リリースのため該当なし。
+
+Removed
+- 初回リリースのため該当なし。
+
+Security
+- 初回リリースのため該当なし。
+
+Notes / Known limitations
+- サブパッケージ（strategy, execution, monitoring）は初期化ファイルのみであり、各機能の実装はこれから追加予定。
+- 環境変数の自動読み込みはプロジェクトルートの検出に依存する（.git または pyproject.toml）。配布後の環境では意図した動作を確認してください。
+- DuckDB スキーマは現状で冪等に作成されるが、マイグレーション機構は未実装のためスキーマ変更時は注意が必要。
+
+Contributing
+- 貢献やバグ報告、機能提案はリポジトリの Issue / Pull Request を通じて受け付けてください。
