@@ -1,4 +1,406 @@
 @CLAUDE.md
 
-python環境を整えて、
-create_issues.py を実行してください。
+ClaudeCode × GitHub × AI 自動開発環境
+
+AIで以下を自動化します。
+
+| 機能         | 説明                          |
+| ---------- | --------------------------- |
+| AIレビュー     | PRのコードレビュー                  |
+| AIテスト生成    | 不足しているテストを自動生成              |
+| AIバグ修正     | コメントでAI修正PR作成               |
+| AIドキュメント生成 | README / CHANGELOG / docs更新 |
+
+
+1. 必要なもの
+GitHub Secrets
+
+リポジトリに以下を登録します。
+
+Settings
+→ Secrets and variables
+→ Actions
+→ New repository secret
+
+| Secret名        | 内容                           |
+| -------------- | ---------------------------- |
+| OPENAI_API_KEY | OpenAI API Key               |
+| OPENAI_MODEL   | gpt-5                        |
+| GH_PAT         | GitHub Personal Access Token |
+
+2. 推奨ディレクトリ構成
+repo/
+ ├ .github/
+ │   ├ workflows/
+ │   │  ├ ai-review.yml
+ │   │  ├ ai-testgen.yml
+ │   │  ├ ai-bugfix.yml
+ │   │  └ ai-docs.yml
+ │   │
+ │   └ scripts/
+ │      ├ ai_review.py
+ │      ├ ai_testgen.py
+ │      ├ ai_bugfix.py
+ │      └ ai_docs.py
+ │
+ └ prompts/
+     ├ review.md
+     ├ testgen.md
+     ├ bugfix.md
+     └ docs.md
+
+3. AIレビュー Workflow
+.github/workflows/ai-review.yml
+name: AI Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install openai requests
+
+      - name: Create diff
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          git diff origin/${{ github.base_ref }} > diff.txt
+
+      - name: Run AI Review
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python .github/scripts/ai_review.py
+
+
+4. AIレビュー Python
+.github/scripts/ai_review.py
+import os
+import requests
+from openai import OpenAI
+
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+model = os.environ.get("OPENAI_MODEL","gpt-5")
+
+with open("diff.txt") as f:
+    diff = f.read()
+
+prompt = f"""
+あなたは優秀なシニアソフトウェアエンジニアです。
+以下のPull Requestの変更をレビューしてください。
+
+観点
+- バグ
+- セキュリティ
+- 設計
+- パフォーマンス
+- 可読性
+- テスト不足
+
+diff:
+{diff[:150000]}
+"""
+
+response = client.responses.create(
+    model=model,
+    input=prompt
+)
+
+review = response.output_text
+
+repo = os.environ["REPO"]
+pr = os.environ["PR_NUMBER"]
+
+token = os.environ["GITHUB_TOKEN"]
+
+url = f"https://api.github.com/repos/{repo}/issues/{pr}/comments"
+
+requests.post(
+    url,
+    headers={"Authorization": f"Bearer {token}"},
+    json={"body": f"## AI Review\n\n{review}"}
+)
+
+
+5. AIテスト生成
+.github/workflows/ai-testgen.yml
+name: AI Test Generator
+
+on:
+  pull_request:
+    types: [opened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  testgen:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install openai
+
+      - name: Generate tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python .github/scripts/ai_testgen.py
+
+      - name: Commit tests
+        run: |
+
+          git config user.name "ai-bot"
+          git config user.email "bot@example.com"
+
+          git add .
+
+          git commit -m "AI generated tests" || echo "no changes"
+
+          git push
+
+
+6. AIテスト生成 Python
+.github/scripts/ai_testgen.py
+import os
+from openai import OpenAI
+
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+code = ""
+
+for root, dirs, files in os.walk("src"):
+    for file in files:
+        if file.endswith(".py"):
+            code += open(os.path.join(root,file)).read()
+
+prompt = f"""
+以下のコードのユニットテストを生成してください。
+
+{code[:100000]}
+"""
+
+response = client.responses.create(
+model="gpt-5",
+input=prompt
+)
+
+tests = response.output_text
+
+open("tests/test_generated.py","w").write(tests)
+
+
+7. AIバグ修正
+
+コメントで
+
+/ai-fix
+
+を書くと修正PRを作成。
+
+.github/workflows/ai-bugfix.yml
+name: AI Bug Fix
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  fix:
+
+    if: contains(github.event.comment.body, '/ai-fix')
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install openai
+
+      - name: Run AI Fix
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python .github/scripts/ai_bugfix.py
+
+
+8. AIバグ修正 Python
+.github/scripts/ai_bugfix.py
+from openai import OpenAI
+import os
+
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+code=""
+
+for root, dirs, files in os.walk("."):
+    for file in files:
+        if file.endswith(".py"):
+            code+=open(os.path.join(root,file)).read()
+
+prompt=f"""
+以下のコードにバグがあれば修正してください
+
+{code[:100000]}
+"""
+
+response=client.responses.create(
+model="gpt-5",
+input=prompt
+)
+
+fixed=response.output_text
+
+open("ai_patch.diff","w").write(fixed)
+
+
+9. AIドキュメント生成
+.github/workflows/ai-docs.yml
+name: AI Docs
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+
+  docs:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install openai
+
+      - name: Generate docs
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python .github/scripts/ai_docs.py
+
+      - name: Commit docs
+        run: |
+          git config user.name "ai-bot"
+          git config user.email "bot@example.com"
+
+          git add docs README.md CHANGELOG.md
+
+          git commit -m "AI docs update" || echo "no change"
+
+          git push
+
+
+10. AIドキュメント生成 Python
+.github/scripts/ai_docs.py
+from openai import OpenAI
+import os
+
+client=OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+code=""
+
+for root,dirs,files in os.walk("src"):
+    for f in files:
+        code+=open(os.path.join(root,f)).read()
+
+prompt=f"""
+このコードベースのREADMEを書いてください
+
+{code[:120000]}
+"""
+
+response=client.responses.create(
+model="gpt-5",
+input=prompt
+)
+
+doc=response.output_text
+
+open("README.md","w").write(doc)
+
+
+11. 開発フロー
+ClaudeCodeで開発
+        ↓
+git push
+        ↓
+PullRequest作成
+        ↓
+AIレビュー
+        ↓
+AIテスト生成
+        ↓
+必要なら
+/ai-fix コメント
+        ↓
+AI修正PR
+        ↓
+merge
+        ↓
+AIドキュメント更新
+
+
+12. 追加すると強い機能
+
+この環境にさらに以下を入れると 開発速度が数倍上がります
+
+機能	内容
+AIコード生成	Issueから実装PR作成
+AIセキュリティ監査	OWASPチェック
+AIパフォーマンス分析	ボトルネック検出
+AI設計レビュー	アーキテクチャチェック
