@@ -1,199 +1,171 @@
 # KabuSys
 
-日本株自動売買システム（KabuSys）の軽量ライブラリ・コアモジュール群です。  
-本リポジトリはデータ層（DuckDBスキーマ定義）、設定管理、戦略/実行/モニタリングのためのパッケージ骨子を含みます。
+日本株自動売買システムのコアライブラリ（ライブラリ層）。  
+このリポジトリはデータ取得／スキーマ定義、環境設定、戦略・発注・監視の基盤モジュールを提供します。
 
-バージョン: 0.1.0
+- バージョン: 0.1.0
+- パッケージ: `kabusys`
 
----
+## プロジェクト概要
 
-## 概要
+KabuSys は日本株の自動売買に必要な基盤機能を提供する Python パッケージです。  
+主に以下を目的とします。
 
-- 日本株の自動売買システムを構築するための基礎的なモジュール群。
-- データレイヤー（Raw / Processed / Feature / Execution）向けの DuckDB スキーマ定義と初期化処理を提供。
-- 環境変数 / .env ファイルからの設定読み込みを行う Settings クラスを提供。
-- 将来的に strategy、execution、monitoring 用のモジュールに機能を追加するためのパッケージ構成。
+- 市場データ／財務／ニュースなどの生データ保存（Raw Layer）
+- 整形済み市場データ（Processed Layer）
+- 戦略やAIが利用する特徴量（Feature Layer）
+- シグナル・発注・約定・ポジション管理（Execution Layer）
+- 環境変数設定の読み込み・管理（自動 .env ロード）
+- DuckDB を用いた永続化・スキーマ初期化
 
----
+## 主な機能一覧
 
-## 主な機能
+- 環境設定管理（`kabusys.config.Settings`）
+  - 自動でプロジェクトルートの `.env` / `.env.local` を読み込む（無効化可能）
+  - 必須環境変数の取得と検証
+  - `KABUSYS_ENV`（development / paper_trading / live）やログレベル検証
+- DuckDB スキーマ定義・初期化（`kabusys.data.schema`）
+  - Raw / Processed / Feature / Execution の各層テーブル定義
+  - インデックス定義、外部キー依存を考慮した作成順序
+  - `init_schema()` による冪等な初期化と接続取得
+- パッケージ構成（戦略・発注・監視用のモジュール雛形）
+  - `kabusys.strategy`, `kabusys.execution`, `kabusys.monitoring`（各 __init__ は現状空）
 
-- 環境変数管理
-  - .env / .env.local を自動で読み込み（プロジェクトルートの検出: .git または pyproject.toml を起点）
-  - 必須設定の取得とバリデーション（Settings クラス）
-  - 自動ロードを無効化するフラグ（KABUSYS_DISABLE_AUTO_ENV_LOAD）
+## 必要条件
 
-- DuckDB スキーマ管理
-  - raw / processed / feature / execution の各レイヤーのテーブル DDL を定義
-  - インデックス定義とテーブル作成の冪等な初期化関数 init_schema()
-  - 既存 DB へ接続するための get_connection()
-
-- パッケージ構造
-  - kabusys.data（データ・スキーマ）
-  - kabusys.strategy（戦略）
-  - kabusys.execution（発注/実行）
-  - kabusys.monitoring（監視/ログ・メトリクス）
-  - kabusys.config（環境設定）
-
----
-
-## 要件
-
-- Python 3.10 以上（型ヒントの Union 表現等を使用）
+- Python 3.10 以上（型注釈に `X | Y` 構文を使用）
 - duckdb Python パッケージ
 
-必要に応じて、Slack API クライアントや kabu API 用クライアント等をプロジェクトに追加してください（本コードベースでは依存を明示していません）。
-
----
+インストール例：
+```bash
+python -m pip install --upgrade pip
+python -m pip install duckdb
+# 開発環境としてこのパッケージをインストールする場合（pyproject.toml がある前提）
+pip install -e .
+```
 
 ## セットアップ手順
 
-1. リポジトリをクローンします。
+1. リポジトリをクローン / チェックアウトする。
 
-   ```
-   git clone <repository-url>
-   cd <repository-dir>
-   ```
-
-2. 仮想環境を作成して有効化します（例: venv）:
-
-   ```
-   python -m venv .venv
-   source .venv/bin/activate  # macOS / Linux
-   .venv\Scripts\activate     # Windows
-   ```
-
-3. 必要なパッケージをインストールします。最小限は duckdb：
-
+2. 必要ライブラリをインストールする（例: duckdb）。
    ```
    pip install duckdb
    ```
 
-   プロジェクトに requirements.txt や pyproject.toml がある場合は、それに従ってインストールしてください（例: pip install -r requirements.txt または pip install -e .）。
+3. 環境変数を設定する
+   - プロジェクトルート（`src/` と同階層に .git または pyproject.toml がある場所）に `.env` を作成すると、自動で読み込まれます。
+   - 自動ロードを無効にする場合は環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定してください（テスト等で利用）。
 
-4. 環境変数を設定します。
-   - プロジェクトルートに `.env`（任意）や `.env.local`（開発用上書き）を置くと、自動で読み込まれます。
-   - 自動読み込みを無効化するには環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定してください（テスト等で利用）。
+   例 `.env`:
+   ```
+   # J-Quants
+   JQUANTS_REFRESH_TOKEN=your_refresh_token_here
 
----
+   # kabuステーション API
+   KABU_API_PASSWORD=your_kabu_password
+   KABU_API_BASE_URL=http://localhost:18080/kabusapi
 
-## 環境変数（主なキー）
+   # Slack
+   SLACK_BOT_TOKEN=xoxb-...
+   SLACK_CHANNEL_ID=C01234567
 
-下記キーは Settings クラスで参照されます。プロジェクトに応じて .env を作成してください。
+   # DB パス（任意、デフォルトは data/kabusys.duckdb）
+   DUCKDB_PATH=data/kabusys.duckdb
 
-- JQUANTS_REFRESH_TOKEN（必須）: J-Quants API のリフレッシュトークン
-- KABU_API_PASSWORD（必須）: kabuステーション API のパスワード
-- KABU_API_BASE_URL（任意、デフォルト: http://localhost:18080/kabusapi）: kabu API のベース URL
-- SLACK_BOT_TOKEN（必須）: Slack Bot トークン
-- SLACK_CHANNEL_ID（必須）: 通知先 Slack チャンネル ID
-- DUCKDB_PATH（任意、デフォルト: data/kabusys.duckdb）: DuckDB ファイルパス（:memory: も可）
-- SQLITE_PATH（任意、デフォルト: data/monitoring.db）: 監視用 SQLite パス
-- KABUSYS_ENV（任意、デフォルト: development）: 有効値 = development / paper_trading / live
-- LOG_LEVEL（任意、デフォルト: INFO）: DEBUG / INFO / WARNING / ERROR / CRITICAL
+   # 実行環境
+   KABUSYS_ENV=development
+   LOG_LEVEL=INFO
+   ```
 
-例（.env）:
+4. 必須環境変数（主なもの）
+   - JQUANTS_REFRESH_TOKEN
+   - KABU_API_PASSWORD
+   - SLACK_BOT_TOKEN
+   - SLACK_CHANNEL_ID
 
-```
-JQUANTS_REFRESH_TOKEN="your_token_here"
-KABU_API_PASSWORD="your_kabu_password"
-SLACK_BOT_TOKEN="xoxb-..."
-SLACK_CHANNEL_ID="C01234567"
-DUCKDB_PATH="data/kabusys.duckdb"
-KABUSYS_ENV=development
-LOG_LEVEL=INFO
-```
+   これらが未設定の場合、`kabusys.config.Settings` の該当プロパティアクセスで `ValueError` が発生します。
 
-.env のパースは次の特徴を持ちます（互換性のため）:
-- `export KEY=val` 形式を許容
-- シングル/ダブルクォート内のバックスラッシュエスケープに対応
-- クォートがない場合、`#` の直前が空白またはタブならコメントとして扱う
+## 使い方（簡単な例）
 
----
-
-## 使い方（簡易ガイド）
-
-- Settings の利用例
-
+- 設定取得:
 ```python
 from kabusys.config import settings
 
-print(settings.jquants_refresh_token)  # 必須: 未設定なら ValueError
-print(settings.duckdb_path)            # Path オブジェクト
-print(settings.is_live)                # bool
+token = settings.jquants_refresh_token
+print("env:", settings.env)
+print("is_live:", settings.is_live)
 ```
 
-- DuckDB スキーマ初期化
-
+- DuckDB スキーマ初期化:
 ```python
-from kabusys.data.schema import init_schema, get_connection
+from kabusys.data.schema import init_schema
 from kabusys.config import settings
 
-# 初回: スキーマを作成して接続を得る
+# settings.duckdb_path の既定値は "data/kabusys.duckdb"
 conn = init_schema(settings.duckdb_path)
-
-# 既存 DB に接続する（スキーマ初期化は行わない）
-conn2 = get_connection(settings.duckdb_path)
+# conn は duckdb の接続オブジェクト（DuckDBPyConnection）
 ```
 
-init_schema は冪等（既存テーブルはスキップ）で、db_path の親ディレクトリが存在しない場合は自動作成します。":memory:" を渡すとインメモリ DB を使用します。
+- 既存 DB に接続（スキーマ初期化しない場合）:
+```python
+from kabusys.data.schema import get_connection
+from kabusys.config import settings
 
-- ライフサイクル（例）
+conn = get_connection(settings.duckdb_path)
+```
 
-  1. 設定（.env）を準備
-  2. init_schema() で DB を初期化
-  3. データ収集コンポーネントで raw テーブルにデータを格納
-  4. ETL/加工で processed / feature テーブルを作成
-  5. 戦略で signals を生成し signal_queue にプッシュ
-  6. execution コンポーネントで orders/trades/positions を管理
-  7. monitoring で portfolio_performance やログを監視・通知
+- 自動 .env ロードの挙動（補足）
+  - プロジェクトルートを、`config.py` の位置から親方向に `.git` または `pyproject.toml` を検索して決定します（CWD に依存しない）。
+  - 読み込み順序:
+    1. OS 環境変数（既存）
+    2. `.env`（未設定のキーのみ設定）
+    3. `.env.local`（`.env.local` は既存のキーを上書きする）
+  - `.env` のパースはシェル形式に近いルールをサポート（`export KEY=val`、シングル/ダブルクォート、インラインコメントなど）。詳細は `kabusys.config._parse_env_line` を参照してください。
 
----
+## スキーマ（概略）
 
-## 主要 API の要約
+各レイヤーと主要テーブル（抜粋）:
 
-- kabusys.config.settings: アプリケーション設定の読み取り（プロパティとして環境変数を参照）
-  - jquants_refresh_token, kabu_api_password, kabu_api_base_url, slack_bot_token, slack_channel_id, duckdb_path, sqlite_path, env, log_level, is_live, is_paper, is_dev
+- Raw Layer
+  - raw_prices, raw_financials, raw_news, raw_executions
+- Processed Layer
+  - prices_daily, market_calendar, fundamentals, news_articles, news_symbols
+- Feature Layer
+  - features, ai_scores
+- Execution Layer
+  - signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
 
-- kabusys.data.schema.init_schema(db_path)
-  - DuckDB に対してテーブル/インデックスを作成して接続を返す
-
-- kabusys.data.schema.get_connection(db_path)
-  - 既存の DuckDB に接続（スキーマ初期化は行わない）
-
----
+テーブルは `kabusys.data.schema._ALL_DDL` に定義されており、`init_schema()` はこれらを冪等に作成します。インデックスも多数定義されています。
 
 ## ディレクトリ構成
 
-（抜粋）
+リポジトリ内の主なファイル構成（抜粋）:
 
-```
-src/
-  kabusys/
-    __init__.py            # パッケージエントリ（__version__ 等）
-    config.py              # 環境設定・.env ローダー・Settings
-    data/
-      __init__.py
-      schema.py            # DuckDB スキーマ定義と init_schema/get_connection
-    strategy/
-      __init__.py
-    execution/
-      __init__.py
-    monitoring/
-      __init__.py
-```
+- src/
+  - kabusys/
+    - __init__.py
+    - config.py                # 環境変数・設定管理
+    - data/
+      - __init__.py
+      - schema.py              # DuckDB スキーマ定義・初期化
+    - strategy/
+      - __init__.py
+    - execution/
+      - __init__.py
+    - monitoring/
+      - __init__.py
 
-- schema.py に Raw / Processed / Feature / Execution レイヤー向けの DDL がまとまっています。
-- 将来的な機能は各サブパッケージ（strategy、execution、monitoring）に追加してください。
+（実際のプロジェクトルートには pyproject.toml やその他スクリプトが存在する想定）
 
----
+## 注意事項・補足
 
-## 注意事項 / 補足
-
-- 自動で .env をプロジェクトルート（.git または pyproject.toml を探索して決定）から読み込みます。プロジェクト配布後やテスト時に自動読み込みを抑止したい場合は `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定してください。
-- Settings は必須環境変数が未設定の場合 ValueError を送出します。CI / デプロイ環境では必須キーを確実に設定してください。
-- DB 初期化は冪等ですが、本番環境ではバックアップや注意深い運用を行ってください。
-- 本リポジトリはコアの骨子を提供するものであり、外部 API クライアント（kabu API、J-Quants、Slack 等）の実装は別途追加してください。
+- Python バージョンは 3.10 以上を推奨します（型注釈の構文を使用）。
+- DuckDB をデータ永続化に使用します。デフォルトパスは `data/kabusys.duckdb`（`settings.duckdb_path` で変更可）。
+- `Settings` は必要な環境変数が未定義の場合に例外を投げます。アプリケーション起動前に `.env` を準備するか OS 環境変数を設定してください。
+- `KABUSYS_ENV` の有効値: `development`, `paper_trading`, `live`
+- `LOG_LEVEL` の有効値: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
 
 ---
 
-もし README に追加したい具体的な利用例（実際の戦略サンプル、ETL スクリプト、CI 設定等）があれば教えてください。README をそれに合わせて拡張します。
+ご不明点（例: .env の具体的なフォーマット、追加の初期化処理、戦略/発注フローの導入方法など）があれば教えてください。README をプロジェクトの運用ルールやデプロイ手順に合わせてさらに拡張できます。
