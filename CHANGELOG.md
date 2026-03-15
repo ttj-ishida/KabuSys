@@ -1,101 +1,74 @@
-CHANGELOG
-=========
+# Changelog
 
-すべての重要な変更点を記録します。  
-このファイルは "Keep a Changelog" の形式に準拠しています。
+すべての重要な変更をここに記録します。  
+フォーマットは「Keep a Changelog」に準拠しています。  
 
-フォーマット:
-- 追加 (Added)
-- 変更 (Changed)
-- 修正 (Fixed)
-- 削除 (Removed)
-- 破壊的変更 (Breaking Changes)
-
-最新リリース
-------------
+全般方針: SemVer に従い、リリースごとに項目を追加します。
 
 ## [0.1.0] - 2026-03-15
 
-初回公開リリース。日本株自動売買システムのコア基盤を実装しました。
-
 ### 追加
-- パッケージ初期化
-  - kabusys パッケージを追加。バージョンは 0.1.0。
-  - パッケージの公開 API として data, strategy, execution, monitoring を __all__ に定義。
+- 初回リリース。パッケージ名: `kabusys`（バージョン 0.1.0）。
+  - パッケージエントリポイント: `src/kabusys/__init__.py` にて `__version__` と公開モジュール `["data", "strategy", "execution", "monitoring"]` を定義。
 
-- 設定/環境変数管理モジュール (kabusys.config)
-  - .env ファイルと環境変数から設定を読み込む自動ローダーを実装。
-    - 読み込み順は OS 環境変数 > .env.local > .env（.env.local は上書き）。
-    - プロジェクトルートは .git または pyproject.toml を起点に探索して特定（CWD に依存しない実装）。
-    - 自動ロードを無効化するための環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD をサポート（主にテスト用）。
-    - OS 環境変数を保護するため、既存の os.environ のキーは保護集合として扱い .env による上書きを制御。
-    - .env ファイル読み込み時の I/O エラーは警告として処理。
+- 環境設定管理モジュールを追加（src/kabusys/config.py）。
+  - .env ファイルまたは既存の OS 環境変数から設定を読み込む自動読み込み機能を実装。
+    - 自動ロードはプロジェクトルートを .git または pyproject.toml から検出して行う（カレントワーキングディレクトリに依存しない）。
+    - 読み込み優先順位: OS 環境変数 > .env.local > .env。
+    - 自動ロードを無効化するためのフラグ: `KABUSYS_DISABLE_AUTO_ENV_LOAD=1`。
+  - .env パーサを実装（詳細な挙動をサポート）。
+    - 空行・コメント行（先頭 `#`）の無視。
+    - `export KEY=val` 形式のサポート。
+    - シングル/ダブルクォートで囲まれた値（エスケープシーケンス対応）を正しく解析。
+    - クォートなし値に対するインラインコメント判定（`#` の直前がスペース/タブの場合にコメント扱い）。
+    - 無効行は安全にスキップ。
+  - .env 読み込み時の上書きポリシー:
+    - `override=False`（デフォルト）: 未設定のキーのみ設定。
+    - `override=True`（.env.local 読み込み時）: OS側の既存キー（protected）を上書きしない。
+  - .env 読み込み失敗時に警告を発行（I/O エラー時）。
+  - 必須環境変数の取得時に未設定なら `ValueError` を送出する `_require()` を提供。
+  - Settings クラスを公開（インスタンス: `settings`）。
+    - J-Quants: `jquants_refresh_token`（必須）
+    - kabuステーション API: `kabu_api_password`（必須）、`kabu_api_base_url`（デフォルト `http://localhost:18080/kabusapi`）
+    - Slack: `slack_bot_token`（必須）、`slack_channel_id`（必須）
+    - データベースパス: `duckdb_path`（デフォルト `data/kabusys.duckdb`）、`sqlite_path`（デフォルト `data/monitoring.db`）
+    - システム設定: `env`（有効値: `development`, `paper_trading`, `live`）、`log_level`（有効値: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`）
+    - ユーティリティプロパティ: `is_live`, `is_paper`, `is_dev`（環境判定）
 
-  - .env 行パーサーを実装（堅牢性重視）
-    - 空行とコメント行（# で始まる）を無視。
-    - "export KEY=val" 形式をサポート。
-    - シングル/ダブルクォートを考慮した値の取り扱い（バックスラッシュによるエスケープ処理含む）。
-    - クォート無しの場合は '#' の直前がスペースまたはタブのときに以降をコメントとして無視。
+- DuckDB スキーマ定義・初期化モジュールを追加（src/kabusys/data/schema.py）。
+  - データレイヤー設計（Raw / Processed / Feature / Execution）に基づくテーブル群を定義。
+  - 主要テーブル（抜粋）:
+    - Raw Layer: `raw_prices`, `raw_financials`, `raw_news`, `raw_executions`
+    - Processed Layer: `prices_daily`, `market_calendar`, `fundamentals`, `news_articles`, `news_symbols`
+    - Feature Layer: `features`, `ai_scores`
+    - Execution Layer: `signals`, `signal_queue`, `portfolio_targets`, `orders`, `trades`, `positions`, `portfolio_performance`
+  - 各テーブルに対して適切な型、NOT NULL、CHECK 制約、PRIMARY KEY、FOREIGN KEY を定義（データ整合性を担保）。
+  - インデックスを複数定義（頻出クエリパターンを想定した最適化）。
+    - 例: `idx_prices_daily_code_date`, `idx_features_code_date`, `idx_signal_queue_status`, `idx_orders_status` など。
+  - 公開 API:
+    - init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection
+      - 指定パスに対してテーブルとインデックスを作成（既存テーブルはスキップ：冪等）。
+      - db_path の親ディレクトリを自動作成。
+      - `":memory:"` を指定してインメモリ DB を使用可能。
+    - get_connection(db_path: str | Path) -> duckdb.DuckDBPyConnection
+      - 既存 DB への接続を返す（スキーマ初期化は行わない。初回は init_schema() を推奨）。
 
-  - Settings クラスを追加（環境変数から値取得・バリデーション）
-    - J-Quants、kabuステーション API、Slack、データベースパスなど主要設定をプロパティとして提供:
-      - jquants_refresh_token (必須)
-      - kabu_api_password (必須)
-      - kabu_api_base_url (デフォルト: http://localhost:18080/kabusapi)
-      - slack_bot_token (必須)
-      - slack_channel_id (必須)
-      - duckdb_path (デフォルト: data/kabusys.duckdb)
-      - sqlite_path (デフォルト: data/monitoring.db)
-      - env (KABUSYS_ENV、有効値: development, paper_trading, live)
-      - log_level (LOG_LEVEL、有効値: DEBUG, INFO, WARNING, ERROR, CRITICAL)
-      - is_live / is_paper / is_dev ヘルパー
-    - 必須環境変数未設定時は ValueError を送出する明示的挙動。
+- モジュールスケルトンを追加（空の __init__ ファイル）:
+  - src/kabusys/data/__init__.py
+  - src/kabusys/execution/__init__.py
+  - src/kabusys/strategy/__init__.py
+  - src/kabusys/monitoring/__init__.py
+  - これにより将来的なサブモジュール実装のためのエントリポイントを確保。
 
-- データ層スキーマ (kabusys.data.schema)
-  - DuckDB 用スキーマ定義と初期化機能を実装。
-  - 3層＋実行層のテーブルを定義（冪等にテーブル作成を行う init_schema(db_path) を提供）。
-    - Raw Layer:
-      - raw_prices (日次価格の生データ、date+code を主キー)
-      - raw_financials (財務データ)
-      - raw_news (ニュース生データ)
-      - raw_executions (約定履歴の生データ)
-    - Processed Layer:
-      - prices_daily (整形済み日次価格)
-      - market_calendar (取引日カレンダー)
-      - fundamentals (整形済み財務)
-      - news_articles, news_symbols (ニュースと関連銘柄)
-    - Feature Layer:
-      - features (戦略/特徴量: momentum, volatility, PER/PBR 等)
-      - ai_scores (センチメント/AI スコア)
-    - Execution Layer:
-      - signals, signal_queue (シグナル・実行キュー)
-      - portfolio_targets (ポートフォリオターゲット)
-      - orders, trades (発注／約定)
-      - positions (ポジション管理)
-      - portfolio_performance (日次パフォーマンス)
-  - 各テーブルに対して適切な型チェック、CHECK 制約、PRIMARY/FOREIGN KEY 制約を設定。
-  - 典型的クエリ向けに複数のインデックスを作成（コード×日付検索、ステータス検索等）。
-  - init_schema は db_path の親ディレクトリを自動作成（":memory:" はインメモリ DB）。
-  - get_connection(db_path) を提供（スキーマ初期化は行わない点を明示）。
+### ドキュメント（コード内ドキュメント）
+- パッケージと主要モジュールに説明用 docstring を追加（システム概要、DataSchema.md 参照など）。
+- 設定モジュールに使用例の docstring を記載。
 
-- パッケージ構造（骨格）
-  - data, strategy, execution, monitoring の各サブパッケージを追加（将来の実装のためのプレースホルダ）。
+### その他
+- 型ヒント（Python 3.8+ 構文）を採用している箇所あり（戻り値注釈など）。
+- 初期リリースにつき後方互換性に関する破壊的変更はなし。
 
-### 変更
-- なし（初回リリース）
+---
 
-### 修正
-- なし（初回リリース）
-
-### 破壊的変更
-- なし（初回リリース）
-
-既知の注意点 / 今後の作業
------------------------
-- strategy / execution / monitoring サブパッケージは骨格のみで、各種アルゴリズム/実行ロジックは今後実装予定。
-- データ投入・マイグレーション用のユーティリティやマイグレーション機構は未実装（現状は init_schema により初期作成のみ）。
-- .env パーサーは一般的なユースケースを想定しているが、極端な形式の .env ファイルに対しては追加のテスト・調整が必要となる場合がある。
-
-ライセンス / 著作権
-------------------
-リポジトリに含まれる LICENSE ファイルに従ってください。
+注記:
+- 本CHANGELOGはリポジトリ内のコードを基に推測して作成しています。実際のリリース日や追加・変更項目は公開プロセスに応じて調整してください。
