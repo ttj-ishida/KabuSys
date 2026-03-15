@@ -12,12 +12,16 @@ from pathlib import Path
 
 
 def _find_project_root() -> Path:
-    """.git または pyproject.toml を基準にプロジェクトルートを特定する。"""
-    cwd = Path.cwd()
-    for p in [cwd, *cwd.parents]:
+    """.git または pyproject.toml を基準にプロジェクトルートを特定する。
+
+    __file__ を起点に親ディレクトリを探索するため、
+    CWDに依存せずパッケージ配布後も正しく動作する。
+    """
+    base = Path(__file__).resolve()
+    for p in base.parents:
         if (p / ".git").exists() or (p / "pyproject.toml").exists():
             return p
-    return cwd
+    return base.parent
 
 
 def _parse_env_line(line: str) -> tuple[str, str] | None:
@@ -33,16 +37,17 @@ def _parse_env_line(line: str) -> tuple[str, str] | None:
         return None
     key = key.strip()
     value = value.strip()
-    # インラインコメント対応（クォートなしの場合のみ）
-    # '#' の直前がスペースまたはタブの場合のみコメントと認識
-    if value and value[0] not in ("'", '"'):
+    if value and value[0] in ("'", '"'):
+        # クォートあり: 対応する閉じクォートまでを値とし、以降（コメント含む）は無視
+        q = value[0]
+        end = value.find(q, 1)
+        value = value[1:end] if end != -1 else value[1:]
+    else:
+        # クォートなし: '#' の直前がスペースまたはタブの場合のみコメントと認識
         for i, ch in enumerate(value):
             if ch == "#" and (i == 0 or value[i - 1] in (" ", "\t")):
                 value = value[:i].rstrip()
                 break
-    # クォート除去
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-        value = value[1:-1]
     if not key:
         return None
     return key, value
@@ -62,7 +67,13 @@ def _load_env_file(
     """
     if not path.exists():
         return
-    with open(path, encoding="utf-8") as f:
+    try:
+        f_obj = open(path, encoding="utf-8")
+    except OSError as e:
+        import warnings
+        warnings.warn(f".env ファイルの読み込みに失敗しました: {path}: {e}", stacklevel=2)
+        return
+    with f_obj as f:
         for raw in f:
             result = _parse_env_line(raw)
             if result is None:
@@ -79,11 +90,12 @@ def _load_env_file(
 
 
 # 読み込み優先順位: OS環境変数 > .env.local > .env
-# OS環境変数を protected として保持し、どちらのファイルも上書き不可にする
-_root = _find_project_root()
-_os_keys = frozenset(os.environ.keys())
-_load_env_file(_root / ".env", override=False, protected=_os_keys)
-_load_env_file(_root / ".env.local", override=True, protected=_os_keys)
+# KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で自動ロードを無効化できる（テスト等で使用）
+if not os.environ.get("KABUSYS_DISABLE_AUTO_ENV_LOAD"):
+    _root = _find_project_root()
+    _os_keys = frozenset(os.environ.keys())
+    _load_env_file(_root / ".env", override=False, protected=_os_keys)
+    _load_env_file(_root / ".env.local", override=True, protected=_os_keys)
 
 
 def _require(key: str) -> str:
