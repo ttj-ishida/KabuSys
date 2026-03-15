@@ -1,158 +1,148 @@
 # KabuSys
 
-日本株向けの自動売買システムの骨組み（KabuSys）。  
-このリポジトリはモジュール構成のみを持つシンプルなパッケージで、データ取得、売買戦略、注文実行、監視の4つの役割に分かれた拡張可能なアーキテクチャを提供します。
+KabuSys は日本株の自動売買（アルゴリズムトレード）を想定した軽量なパッケージのスケルトンです。  
+現在はパッケージ構成と基本情報のみを含む初期バージョン（v0.1.0）で、データ取得、売買戦略、注文実行、監視の各コンポーネントをモジュール単位で拡張できる設計になっています。
 
 バージョン: 0.1.0
 
 ---
 
-## プロジェクト概要
+## 機能一覧（想定）
 
-KabuSys は日本株（kabu）を対象とした自動売買システムのベースとなるライブラリです。  
-各機能（データ取得・戦略・実行・監視）をモジュール化しており、実装を差し替えたり拡張したりして独自の自動売買ロジックを構築できます。
+現状は骨組みのみですが、以下の機能を実装することを想定しています。
 
-対象ユーザー:
-- 自動売買のプロトタイプを作成したい開発者
-- 戦略/実行部分をカスタム実装して運用したい方
-- 教育目的でシステム構成を学びたい方
+- データ取得モジュール（data）
+  - 株価データの取得／キャッシュ
+  - CSV/データベース等からの読み込みインタフェース
+- 売買戦略モジュール（strategy）
+  - シグナル生成ロジック（例: テクニカル指標、シンプルなルールベース）
+  - バックテスト用のインタフェース
+- 注文実行モジュール（execution）
+  - ブローカーAPIへの注文送信（接続・約定管理・エラーハンドリング）
+  - 注文送信の抽象化レイヤ
+- 監視モジュール（monitoring）
+  - ログ／アラート出力
+  - 実行状況の可視化／ヘルスチェック
+
+※ 実装はこれから追加する想定です。各パッケージに対して独自の実装を追加してください。
 
 ---
 
-## 機能一覧（設計上の役割）
+## 要件
 
-- data: 市場データ（板情報・約定履歴・終値など）の取得・加工を行うモジュール
-- strategy: 取得したデータを元に売買シグナルやポートフォリオを決めるロジックを実装するモジュール
-- execution: 発注・キャンセル・注文状態の管理など、取引所やブローカーとやり取りするモジュール
-- monitoring: 稼働状況のログ、アラート、パフォーマンス監視を担当するモジュール
-
-※ 現状はモジュール構成のみで、実際の実装（クラス・関数）は含まれていません。各モジュールに独自実装を追加して利用します。
+- Python 3.8 以上（プロジェクトの方針に合わせて適宜調整してください）
+- （オプション）ブローカーAPIやデータソースに依存する外部ライブラリは、実装時に追加します
 
 ---
 
 ## セットアップ手順
 
-想定: Python 3.8 以上
-
-1. リポジトリをクローン（既にローカルにある場合は不要）
+1. リポジトリをクローン（既にローカルにある場合は省略）
    ```
-   git clone <repository-url>
-   cd <repository-directory>
+   git clone <リポジトリURL>
+   cd <リポジトリ名>
    ```
 
-2. 仮想環境を作成・有効化（推奨）
-   - macOS / Linux:
-     ```
-     python3 -m venv .venv
-     source .venv/bin/activate
-     ```
-   - Windows (PowerShell):
-     ```
-     python -m venv .venv
-     .\.venv\Scripts\Activate.ps1
-     ```
+2. 仮想環境の作成（推奨）
+   ```
+   python -m venv .venv
+   source .venv/bin/activate   # macOS / Linux
+   .venv\Scripts\activate      # Windows (PowerShell では .venv\Scripts\Activate.ps1)
+   ```
 
-3. パッケージをインストール（開発中は editable install が便利）
+3. 開発用インストール（プロジェクトルートに `setup.py` / `pyproject.toml` がある想定）
    ```
-   pip install -e src
+   pip install -e .
    ```
-   依存関係がある場合は `requirements.txt` をプロジェクトに追加し、次のようにインストールしてください:
+
+4. 依存パッケージがある場合は requirements.txt や pyproject.toml に従ってインストールしてください。
    ```
    pip install -r requirements.txt
    ```
 
-4. 環境変数や認証情報の設定  
-   実際の取引APIを使う場合は API キーやシークレットを環境変数等で設定します。例:
-   ```
-   export KABUSYS_API_KEY="your_api_key_here"
-   export KABUSYS_API_SECRET="your_api_secret_here"
-   ```
-   （Windows の場合は set / PowerShell の Set-Item を使用）
-
 ---
 
-## 使い方（例）
+## 使い方（基本）
 
-現状はモジュールのスケルトンのみですが、基本的な使用イメージは以下のとおりです。
+パッケージは以下のモジュールを提供する構成になっています：
+- kabusys.data
+- kabusys.strategy
+- kabusys.execution
+- kabusys.monitoring
 
-1. パッケージを読み込む（バージョン確認）
-   ```python
-   import kabusys
-   print(kabusys.__version__)  # "0.1.0"
-   ```
+最小の利用例（インポートとバージョン表示）:
+```python
+import kabusys
 
-2. 各モジュールにクラス・関数を実装して利用する例（擬似コード）
-   ```python
-   # src/kabusys/data/example.py に実装した場合の利用例
-   from kabusys.data import DataClient
-   from kabusys.strategy import MyStrategy
-   from kabusys.execution import ExecutionClient
-   from kabusys.monitoring import Monitoring
+print(kabusys.__version__)  # "0.1.0"
+```
 
-   # データ取得クライアントを作成
-   data_client = DataClient(api_key="xxx")
+開発者向けのワークフロー（例）:
+1. data モジュールにデータ取得・前処理ロジックを実装する
+2. strategy モジュールにシグナル生成クラスを実装する
+3. execution モジュールにブローカー接続と注文送信の実装を追加する
+4. monitoring モジュールでログや通知を組み込む
+5. 上記を組み合わせて自動売買フローを構築・テストする
 
-   # 戦略を初期化
-   strategy = MyStrategy(params={...})
+拡張例（ファイルを追加して戦略クラスを実装するイメージ）:
+- src/kabusys/strategy/my_strategy.py を作成し、Strategy クラスを実装
+- アプリケーションから import kabusys.strategy.my_strategy をして利用
 
-   # 実行クライアント
-   exec_client = ExecutionClient(api_key="yyy")
-
-   # 監視
-   monitor = Monitoring()
-
-   # ワークフローの例
-   prices = data_client.get_latest_prices(symbol="7203")  # トヨタの銘柄コード例
-   signals = strategy.generate_signals(prices)
-   for s in signals:
-       exec_client.place_order(s)
-   monitor.record(metrics={...})
-   ```
-
-3. 実装のポイント
-   - data モジュール: 取得頻度やキャッシュ、リトライなどの堅牢性を考慮
-   - strategy モジュール: 再現性のためにシード管理、パラメータ記録
-   - execution モジュール: 注文の一貫性（idempotency）とエラーハンドリング
-   - monitoring モジュール: 障害時のアラート、取引履歴・P/L の記録
+注意:
+- 実際の注文実行を行う際は、ブローカーAPI の利用規約や日本の法規制、リスク管理を必ず確認してください。
+- 本パッケージは自動売買のための土台です。実運用前に十分な検証と安全策（注文上限、損失制限、監視体制）を実装してください。
 
 ---
 
 ## ディレクトリ構成
 
-現状の最小構成は以下のとおりです。
+現在の最小構成は以下の通りです：
 
 ```
 .
 ├─ src/
 │  └─ kabusys/
-│     ├─ __init__.py           # パッケージ初期化 (version 等)
+│     ├─ __init__.py           # パッケージ定義（バージョンなど）
 │     ├─ data/
-│     │  └─ __init__.py        # データ取得モジュール
+│     │  └─ __init__.py
 │     ├─ strategy/
-│     │  └─ __init__.py        # 戦略モジュール
+│     │  └─ __init__.py
 │     ├─ execution/
-│     │  └─ __init__.py        # 注文実行モジュール
+│     │  └─ __init__.py
 │     └─ monitoring/
-│        └─ __init__.py        # 監視モジュール
+│        └─ __init__.py
+└─ README.md
 ```
 
-各サブパッケージに実装ファイル（例: clients.py, base.py, utils.py）やテストを追加していくことを想定しています。
+各サブパッケージ（data, strategy, execution, monitoring）は拡張ポイントです。必要に応じて以下のようなファイルを追加してください。
+- data/
+  - loader.py, provider.py, cache.py
+- strategy/
+  - base.py, examples/*.py
+- execution/
+  - broker_adapter.py, simulator.py
+- monitoring/
+  - logger.py, notifier.py, dashboard.py
 
 ---
 
-## 拡張・実装のガイドライン（簡易）
+## 開発・貢献
 
-- 各モジュールに共通のインターフェース（Base クラス）を作ると差し替えやテストが容易になります。
-- 実運用を想定する場合、以下を検討してください:
-  - ロギング（構造化ログ）
-  - リトライとバックオフ戦略
-  - 注文の冪等性・状態保存（永続化）
-  - モニタリング/アラート（メール、Slack、PagerDuty など）
-  - バックテスト用の分離（戦略の検証用データパス）
+- 新しい機能やバグ修正は Pull Request を通じて歓迎します。PR には変更点の説明と簡単な動作確認手順を添えてください。
+- テスト、型チェック（mypy）、静的解析（flake8/black など）のセットアップはプロジェクト方針に合わせて追加してください。
 
 ---
 
-補足:
-- このリポジトリは骨組みのみの提供です。実際の取引を行う前に、必ず十分なテストと検証を行ってください。取引には資金リスクがあります。
+## ライセンス・注意事項
 
-ご質問や具体的な実装サンプルが必要であれば、どのモジュール（data/strategy/execution/monitoring）を重点的に作りたいか教えてください。設計例やサンプル実装を提供します。
+- 本 README はプロジェクトの初期ドキュメントです。ライセンスや実運用に関する記載はリポジトリの方針に従って追加してください。  
+- 自動売買の実運用はリスクを伴います。実際に運用する場合は十分な検証・モニタリング・法令順守を行ってください。
+
+---
+
+必要であれば、README に以下の追記を行います：
+- 具体的なサンプル実装（戦略のテンプレート、バックテストのサンプル）
+- 依存関係（requirements.txt）や CI（GitHub Actions）の設定例
+- ブローカー（kabuステーション 等）向けアダプタのサンプル
+
+どの内容を優先して追加しますか？
