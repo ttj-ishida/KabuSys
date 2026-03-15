@@ -1,70 +1,72 @@
-Keep a Changelog
-=================
+CHANGELOG
+=========
 
-すべての注目すべき変更をこのファイルに記録します。  
-このプロジェクトは Keep a Changelog のフォーマットに従います。
+すべての重要な変更点を追跡します。本ファイルは「Keep a Changelog」形式に従います。
 
-0.1.0 - 2026-03-15
+[非公開/将来の変更]
 ------------------
 
+- Unreleased: なし
+
+0.1.0 - 2026-03-15
+-----------------
+
 Added
-- 初期リリース。基本パッケージ構成とコア機能を追加。
-  - パッケージエントリポイント
-    - kabusys/__init__.py を追加。バージョン情報 (__version__ = "0.1.0") と公開モジュール一覧 (__all__ = ["data", "strategy", "execution", "monitoring"]) を定義。
-  - 環境変数・設定管理 (kabusys.config)
-    - .env ファイルまたは既存の OS 環境変数から設定値を読み込む自動ロード機能を実装。
-      - 自動ロードは KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で無効化可能。
-      - プロジェクトルートの検出は、パッケージ内の __file__ を基準に親ディレクトリを探索し、.git または pyproject.toml を基準に判定。作業ディレクトリ (CWD) に依存しない設計。
-      - 読み込み順序: OS 環境変数 > .env.local (上書き) > .env（既存未設定のみ）。OS 環境変数は protected として扱われ、.env/.env.local で上書きされない。
-      - .env のパースで以下に対応:
-        - 空行・コメント行（# で始まる行）の無視。
-        - export KEY=val 形式のサポート。
-        - クォートされた値のバックスラッシュエスケープと対応する閉じクォートまでの正しい抽出。
-        - 非クォート値におけるコメント扱いは、'#' の直前が空白またはタブの場合のみコメントとみなす（'#' を含む値を許容）。
-      - .env ファイルの読み込みに失敗した場合は警告を発する（読み込み継続）。
-    - Settings クラスにより、アプリケーション設定をプロパティで提供。
-      - J-Quants、kabuステーション API、Slack、DB パスなど主要設定をプロパティとして露出:
-        - jquants_refresh_token (必須: JQUANTS_REFRESH_TOKEN)
-        - kabu_api_password (必須: KABU_API_PASSWORD)
-        - kabu_api_base_url (デフォルト: http://localhost:18080/kabusapi)
-        - slack_bot_token (必須: SLACK_BOT_TOKEN)
-        - slack_channel_id (必須: SLACK_CHANNEL_ID)
-        - duckdb_path (デフォルト: data/kabusys.duckdb)
-        - sqlite_path (デフォルト: data/monitoring.db)
-      - env (KABUSYS_ENV) のバリデーション: 有効値は "development", "paper_trading", "live"。不正値は ValueError。
-      - log_level (LOG_LEVEL) のバリデーション: 有効値は "DEBUG","INFO","WARNING","ERROR","CRITICAL"。不正値は ValueError。
-      - is_live / is_paper / is_dev の補助プロパティ。
-      - _require 関数により必須環境変数未設定時は ValueError を返し、.env.example を参照するようメッセージを提示。
-  - DuckDB スキーマ定義と初期化 (kabusys.data.schema)
-    - DataSchema.md に基づく想定の多層テーブル定義を実装（Raw / Processed / Feature / Execution レイヤー）。
-    - Raw Layer:
-      - raw_prices, raw_financials, raw_news, raw_executions を定義（主キー・型・CHECK 制約あり）。
-    - Processed Layer:
-      - prices_daily, market_calendar, fundamentals, news_articles, news_symbols を定義。news_symbols は news_articles への外部キー (ON DELETE CASCADE) を設定。
-    - Feature Layer:
-      - features, ai_scores を定義（特徴量・AI スコア領域）。
-    - Execution Layer:
-      - signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance を定義。
-      - 外部キー制約と CHECK（side, order_type, status 等の許容値）を多数採用。
-    - インデックス定義:
-      - 銘柄×日付スキャンやステータス検索のためのインデックス群を用意（例: idx_prices_daily_code_date, idx_signal_queue_status など）。
-    - スキーマ初期化 API:
-      - init_schema(db_path) を提供。DuckDB を接続し、全テーブルとインデックスを作成する（冪等）。db_path の親ディレクトリが存在しなければ自動作成。":memory:" を指定してインメモリ DB を使用可能。
-      - get_connection(db_path) を提供。スキーマ初期化は行わず既存 DB へ接続のみ行う（初回は init_schema を推奨）。
-    - テーブル作成順を外部キー依存を考慮して管理。
-    - DDL 定義によりデータ整合性を確保するための詳細な CHECK 制約を採用（負数禁止、サイズ > 0 など）。
-  - モジュール雛形
-    - execution, strategy, monitoring のパッケージ雛形を追加（各 __init__.py は存在）。
+- 初期公開リリース。
+- パッケージ構成
+  - パッケージルート: `kabusys`。`src/kabusys/__init__.py` にて __version__ = "0.1.0" とパブリックモジュールリスト (__all__) を定義。
+  - 空のモジュールエントリを用意: `kabusys.execution`, `kabusys.strategy`, `kabusys.data`, `kabusys.monitoring`（将来的な実装向けのプレースホルダ）。
+- 環境設定モジュール (`src/kabusys/config.py`)
+  - .env/.env.local の自動読み込み機能を実装。
+    - プロジェクトルートは `.git` または `pyproject.toml` を基準に `__file__` から探索して特定（CWD に依存しない挙動）。
+    - 自動読み込みを無効化するために環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を利用可能（テスト用途など）。
+    - 読み込み順序: OS 環境変数 > `.env.local` > `.env`。既存の OS 環境変数は保護される（protected）。
+    - ファイル読み込み失敗時は警告を発生させる。
+  - .env のパース機能（`_parse_env_line`）を実装。
+    - 空行・コメント行（先頭が `#`）を無視。
+    - `export KEY=val` 形式に対応。
+    - シングル/ダブルクォートされた値に対してバックスラッシュによるエスケープを考慮して閉じクォートまでを正しく抽出。
+    - クォートなしの値は `#` の直前がスペースまたはタブの場合にコメントとみなして切り捨てる挙動。
+  - 環境変数読み込み時の上書きルール:
+    - `override=False` の場合は未設定のキーのみ設定。
+    - `override=True` の場合は protected（OS 環境変数集合）を除いて上書き。
+  - 必須環境変数チェック `_require()` を実装し、未設定時は ValueError を送出。
+  - Settings クラスを提供（インスタンス `settings` を公開）。主なプロパティ:
+    - J-Quants: `jquants_refresh_token`（必須）
+    - kabuステーション API: `kabu_api_password`（必須）、`kabu_api_base_url`（デフォルト "http://localhost:18080/kabusapi"）
+    - Slack: `slack_bot_token`（必須）、`slack_channel_id`（必須）
+    - データベースパス: `duckdb_path`（デフォルト "data/kabusys.duckdb"）、`sqlite_path`（デフォルト "data/monitoring.db"）
+    - システム設定: `env`（`development|paper_trading|live` のバリデーション）、`log_level`（`DEBUG/INFO/WARNING/ERROR/CRITICAL` のバリデーション）
+    - ユーティリティ: `is_live`, `is_paper`, `is_dev`
+- DuckDB スキーマ定義と初期化 (`src/kabusys/data/schema.py`)
+  - ドメインを意識した 3 層（Raw / Processed / Feature）＋Execution レイヤのテーブル定義を実装。
+    - Raw レイヤ: `raw_prices`, `raw_financials`, `raw_news`, `raw_executions`
+    - Processed レイヤ: `prices_daily`, `market_calendar`, `fundamentals`, `news_articles`, `news_symbols`
+    - Feature レイヤ: `features`, `ai_scores`
+    - Execution レイヤ: `signals`, `signal_queue`, `portfolio_targets`, `orders`, `trades`, `positions`, `portfolio_performance`
+  - 各テーブルに適切な型チェック、NOT NULL 制約、主キー、外部キー（必要箇所）を定義。
+  - インデックスを複数定義して、銘柄×日付スキャンやステータス検索などの頻出クエリをサポート（例: `idx_prices_daily_code_date`, `idx_signal_queue_status` 等）。
+  - 公開 API:
+    - `init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection`
+      - DB ファイルの親ディレクトリを自動作成（`:memory:` をサポート）。
+      - DDL を順序に沿って実行し、冪等にテーブル・インデックスを作成して接続オブジェクトを返す。
+    - `get_connection(db_path: str | Path) -> duckdb.DuckDBPyConnection`
+      - 既存の DB に接続するための関数（スキーマ初期化は行わない。初回は init_schema を使用）。
+  - DataSchema.md を想定した設計（コメントあり）。
+- その他
+  - ドキュメンテーション文字列と型注釈（Python 3.10+ の union 表現など）を多数追加し、API の使い方や振る舞いが明示されている。
+  - DB 初期化関数は `duckdb` を直接使用する実装であり、ファイルベース・インメモリの両方をサポート。
 
 Changed
-- （初版のため変更なし）
+- なし（初期リリースのため）
 
 Fixed
-- （初版のため修正なし）
+- なし
 
-Security
-- （初版のためセキュリティ項目なし）
+Removed
+- なし
 
-Notes / 備考
-- .env の詳細なパース挙動（クォート内のエスケープ処理やコメント判定）により、実運用での .env 設定の柔軟性を高めていますが、期待どおりの動作にならないケースがあれば .env の書式を見直してください。
-- init_schema は既存テーブルがある場合でも冪等に実行されるため、起動時の初期化処理として安全に利用できます。get_connection はスキーマを保証しないため、初回起動時には init_schema を呼ぶことを推奨します。
+Notes
+- 初回起動時は必須環境変数（JQUANTS_REFRESH_TOKEN、KABU_API_PASSWORD、SLACK_BOT_TOKEN、SLACK_CHANNEL_ID 等）を設定してください。未設定の場合、Settings の各プロパティアクセスで ValueError が発生します。
+- DB をファイルで利用する場合、`init_schema()` は DB ファイルの親ディレクトリを自動作成します。インメモリ DB をテストで使う場合は `":memory:"` を渡してください。
+- .env の自動読み込みはプロジェクトルートの検出に依存するため、配布後やインストール環境でも動作するように __file__ を起点に探索する実装になっています。必要に応じて `KABUSYS_DISABLE_AUTO_ENV_LOAD` で無効化してください。
