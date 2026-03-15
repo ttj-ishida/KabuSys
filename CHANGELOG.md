@@ -1,72 +1,88 @@
-Keep a Changelog に準拠した CHANGELOG.md
+CHANGELOG
+=========
 
-全ての変更は慣例に従いセマンティックバージョニングで管理します。  
-このファイルはコードベースから推測して作成しています。
+すべての注目すべき変更点を記録します。  
+このファイルは Keep a Changelog のフォーマットに準拠しています。  
+安定したリリースはセマンティックバージョニングに従います。
 
 Unreleased
 ----------
+
 （なし）
 
-[0.1.0] - 2026-03-15
--------------------
+0.1.0 - 2026-03-15
+------------------
+
 Added
-- 初回公開リリース。以下の主要機能を追加。
-  - パッケージ初期化
-    - src/kabusys/__init__.py にてパッケージのバージョンを 0.1.0 として定義。__all__ に data, strategy, execution, monitoring を追加。
-  - 環境変数／設定管理モジュール
-    - src/kabusys/config.py を追加。
-    - .env ファイルまたは環境変数から設定を自動読み込み（プロジェクトルートは .git または pyproject.toml を基準に検索）。
-    - KABUSYS_DISABLE_AUTO_ENV_LOAD で自動読み込みを無効化可能。
-    - .env のパースは以下に対応：
-      - 空行やコメント行（#）を無視
-      - export KEY=VALUE 形式に対応
-      - シングル/ダブルクォートで囲まれた値のバックスラッシュエスケープ処理
-      - インラインコメントの処理（クォートなしでは '#' の直前が空白/タブならコメントと認識）
-    - 環境変数読み込み時の上書き制御（.env と .env.local の読み込み優先度）と保護（OS既存環境変数を保護）をサポート。
-    - Settings クラスを提供し、次のプロパティで必須設定や既定値、バリデーションを行う：
-      - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, KABU_API_BASE_URL (default=http://localhost:18080/kabusapi)
-      - SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
-      - DUCKDB_PATH (default=data/kabusys.duckdb), SQLITE_PATH (default=data/monitoring.db)
-      - KABUSYS_ENV の検証（development, paper_trading, live のみ有効）と補助メソッド is_live / is_paper / is_dev
-      - LOG_LEVEL の検証（DEBUG, INFO, WARNING, ERROR, CRITICAL）
-  - DuckDB スキーマ定義・初期化モジュール
-    - src/kabusys/data/schema.py を追加。
-    - DataSchema.md 想定の 3 層（Raw / Processed / Feature）＋Execution レイヤーのテーブル定義を実装。
-    - 主要テーブル（例: raw_prices, raw_financials, raw_news, raw_executions, prices_daily, market_calendar, fundamentals, news_articles, news_symbols, features, ai_scores, signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance）を DDL で定義。
-    - テーブル制約（CHECK, PRIMARY KEY, FOREIGN KEY 等）、型、NULL 制約を明示。
-    - 頻出クエリ向けのインデックス定義を追加（例: idx_prices_daily_code_date, idx_features_code_date, idx_signal_queue_status など）。
-    - init_schema(db_path) を実装：
-      - DuckDB 接続を返し、全テーブル／インデックスを冪等に作成。
-      - db_path の親ディレクトリを自動作成（":memory:" は除外）。
-    - get_connection(db_path) を実装（既存 DB へ接続。スキーマ初期化は行わない）。
-  - 監査ログ（トレーサビリティ）モジュール
-    - src/kabusys/data/audit.py を追加。
-    - シグナル → 発注 → 約定のトレーサビリティを確保する監査テーブル群を定義：
-      - signal_events（戦略が生成したシグナルの記録。棄却・エラーも含む）
-      - order_requests（冪等キー order_request_id を持つ発注要求ログ。order_type に応じた CHECK 制約で limit/stop の必須価格を検証）
-      - executions（証券会社からの約定ログ。broker_execution_id を一意に保持）
-    - 監査用インデックスを追加（例: idx_signal_events_date_code, idx_order_requests_status, idx_order_requests_broker_order_id 等）。
-    - init_audit_schema(conn) と init_audit_db(db_path) を実装：
-      - init_audit_schema は接続に対して UTC タイムゾーンをセット（SET TimeZone='UTC'）して監査テーブルを作成。
-      - init_audit_db は専用 DB を作成して監査スキーマを初期化（db_path の親ディレクトリ自動作成）。
-    - 設計上の注意事項は docstring に明記（UTC 保存、updated_at の取り扱い、FK は削除制限など）。
-  - モジュールスケルトン
-    - src/kabusys/data/__init__.py, src/kabusys/execution/__init__.py, src/kabusys/strategy/__init__.py, src/kabusys/monitoring/__init__.py を追加（空のパッケージ初期化ファイル、将来の拡張に備える）。
+- 初回リリース: kabusys パッケージ v0.1.0 を追加。
+  - パッケージ公開情報:
+    - __version__ = "0.1.0"
+    - __all__ = ["data", "strategy", "execution", "monitoring"]
+- 環境設定管理モジュール (kabusys.config)
+  - .env / .env.local からの自動読み込み機能を実装。
+    - プロジェクトルート検出: .git または pyproject.toml を起点に探索する _find_project_root() を採用し、CWD に依存しない仕様。
+    - 自動読み込みの無効化フラグ: 環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で自動ロードをスキップ可能。
+    - 読み込み優先順位: OS 環境変数 > .env.local > .env。
+  - .env パーサーの実装 (_parse_env_line):
+    - 空行・コメント行（先頭に #）を無視。
+    - export KEY=val 形式に対応。
+    - シングル／ダブルクォート内のバックスラッシュエスケープを処理し、対応する閉じクォートまでを値として扱う。
+    - クォート無しの値では、'#' が直前にスペースまたはタブある場合をコメント開始とみなす（インラインコメント処理）。
+  - .env 読み込みロジック (_load_env_file):
+    - override / protected オプションにより OS 環境変数保護や上書き制御が可能。
+    - ファイル読み込み失敗時に警告を出力。
+  - 設定抽象 (Settings クラス, settings シングルトン)
+    - 必須環境変数取得のヘルパー _require()。
+    - J-Quants / kabu ステーション / Slack / データベース 等のプロパティを提供:
+      - jquants_refresh_token, kabu_api_password, kabu_api_base_url (デフォルト値あり),
+      - slack_bot_token, slack_channel_id,
+      - duckdb_path (デフォルト data/kabusys.duckdb), sqlite_path (デフォルト data/monitoring.db)
+    - KABUSYS_ENV 値検証（development, paper_trading, live のみ許容）。
+    - LOG_LEVEL 値検証（DEBUG/INFO/WARNING/ERROR/CRITICAL）。
+    - is_live / is_paper / is_dev の利便性プロパティ。
+- DuckDB ベースのスキーマ定義・初期化 (kabusys.data.schema)
+  - DataSchema.md に基づく 3 層／Execution 層を含むテーブル群を実装:
+    - Raw Layer: raw_prices, raw_financials, raw_news, raw_executions
+    - Processed Layer: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
+    - Feature Layer: features, ai_scores
+    - Execution Layer: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
+  - 各テーブルに対して型チェック、CHECK 制約、主キー、外部キー（必要箇所）を付与。
+  - 頻出クエリを想定したインデックスを作成（銘柄×日付、ステータス検索等）。
+  - 初期化関数 init_schema(db_path) を提供:
+    - テーブル作成は冪等（存在する場合はスキップ）。
+    - db_path の親ディレクトリを自動作成。
+    - ":memory:" を使用したインメモリ DB をサポート。
+  - 既存 DB への接続取得用に get_connection(db_path) を提供（初期化は行わない）。
+- 監査ログ（トレーサビリティ）モジュール (kabusys.data.audit)
+  - DataPlatform.md に基づく監査テーブル群を実装し、シグナル→発注→約定までの UUID 連鎖でのトレースを可能にする設計。
+  - テーブル:
+    - signal_events: 戦略が生成したシグナルの全記録（リスクで棄却されたものも含む）。decision フィールドにより詳細な理由を保持。
+    - order_requests: 発注要求ログ（order_request_id を冪等キーとして扱う）。order_type ごとの価格チェック（limit/stop の必須制約）を含む。
+    - executions: 証券会社からの約定ログ。broker_execution_id をユニークにして約定の冪等性を担保。
+  - 監査用インデックス群を用意（シグナル日付/銘柄、戦略別検索、status によるキュー検索、broker_order_id/broker_execution_id での紐付け等）。
+  - 初期化 API:
+    - init_audit_schema(conn): 既存の DuckDB 接続に監査テーブルを追加（SET TimeZone='UTC' を実行し TIMESTAMP を UTC で保存）。
+    - init_audit_db(db_path): 監査専用 DB を作成して初期化（親ディレクトリ自動作成、":memory:" 対応）。
+- ドキュメント文字列（モジュール内 docstring）により設計意図・利用上の注意を明記（DataSchema.md / DataPlatform.md を参照する旨）。
 
 Changed
-- （初回リリースのため該当なし）
+- （該当なし: 初回リリース）
 
 Fixed
-- （初回リリースのため該当なし）
-
-Deprecated
-- （初回リリースのため該当なし）
+- （該当なし: 初回リリース）
 
 Removed
-- （初回リリースのため該当なし）
+- （該当なし: 初回リリース）
 
 Security
-- 環境変数の自動読み込みは明示的に無効化可能（KABUSYS_DISABLE_AUTO_ENV_LOAD）し、OS 環境変数は保護される設計。README/.env.example に秘匿情報の取り扱いを記載することを推奨。
+- （該当なし）
 
-注記
-- この CHANGELOG はソースコードのコメント・実装から推測して作成しています。細かな挙動（エラーメッセージ文言や例外型の扱いなど）は実際のランタイムでの確認を推奨します。
+Notes / Limitations
+- strategy, execution, monitoring パッケージは __init__.py が存在するものの具体的な実装は含まれておらず、今後の実装が想定されます。
+- DuckDB の制約やインデックスの挙動は DuckDB の仕様（例: UNIQUE における NULL 扱い）に依存します。README/設計文書の参照を推奨します。
+
+Upgrade notes
+- なし（初回リリース）
+
+References
+- 各モジュール内 docstring（DataSchema.md / DataPlatform.md に準拠）を参照してください。
