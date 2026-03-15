@@ -1,46 +1,39 @@
-# Changelog
+# Keep a Changelog
 
-すべての注目すべき変更をこのファイルに記録します。
-このプロジェクトでは「Keep a Changelog」形式に準拠し、セマンティック バージョニングを採用しています。
+すべての注目すべき変更はこのファイルに記録します。  
+このプロジェクトはセマンティックバージョニングに従います。  
 
-※日付はリリース日を示します。
+フォーマットの詳細: https://keepachangelog.com/ja/1.0.0/
 
 ## [Unreleased]
 
-追加予定 / 今後の作業（コードから推測）
-- data: 市場データの取得・キャッシュ・永続化の実装（リアルタイム/過去データ）
-- strategy: 売買戦略の定義・バックテスト・パラメータ管理機能の追加
-- execution: ブローカーAPI（kabuステーション等）との接続、注文送信/約定監視の実装
-- monitoring: ログ、メトリクス、アラート、稼働状況ダッシュボードの実装
-- テスト、ドキュメント、パッケージング（PyPI向けビルド/配布）の整備
-
----
+- 進行中の変更はここに記載します。
 
 ## [0.1.0] - 2026-03-15
 
-初期リリース（推測に基づくスケルトン実装）
+初期リリース — 日本株自動売買システムのパッケージ骨格を追加しました。
+
 ### 追加
-- k abusys パッケージを初期追加
-  - パッケージ説明（モジュールトップ）： "KabuSys - 日本株自動売買システム"
-  - バージョン情報を設定: `__version__ = "0.1.0"`
-  - 公開APIとして下記サブパッケージを定義: `__all__ = ["data", "strategy", "execution", "monitoring"]`
-- サブパッケージのスケルトンを追加
-  - src/kabusys/data/__init__.py
-  - src/kabusys/strategy/__init__.py
-  - src/kabusys/execution/__init__.py
-  - src/kabusys/monitoring/__init__.py
-  （各サブパッケージは現在プレースホルダ/空ファイル）
+- 新規パッケージ `kabusys` を追加。
+  - パッケージ説明: "KabuSys - 日本株自動売買システム"（トップレベル docstring）。
+  - パッケージバージョンを `__version__ = "0.1.0"` として定義。
+  - パブリック API の明示的エクスポートとして `__all__ = ["data", "strategy", "execution", "monitoring"]` を追加。
+- サブパッケージ（モジュール骨格）を追加:
+  - `kabusys.data`（`src/kabusys/data/__init__.py`）: データ取得・管理に関するプレースホルダ。
+  - `kabusys.strategy`（`src/kabusys/strategy/__init__.py`）: 売買戦略実装に関するプレースホルダ。
+  - `kabusys.execution`（`src/kabusys/execution/__init__.py`）: 注文送信・約定処理に関するプレースホルダ。
+  - `kabusys.monitoring`（`src/kabusys/monitoring/__init__.py`）: 監視・ログ・メトリクスに関するプレースホルダ。
+- 各サブパッケージは現時点では初期化ファイルのみ（プレースホルダ）で、今後の実装拡張を想定。
 
 ### 変更
-- なし（初期リリース）
+- なし
 
 ### 修正
 - なし
 
-### 注意事項（現状の制約・補足）
-- 現在のコードベースはパッケージとサブパッケージの骨組み（スケルトン）のみで、具体的な機能実装（データ取得、戦略実装、注文発行、監視・可視化等）は未実装です。
-- パブリックAPIとしては top-level の `kabusys` から `data`, `strategy`, `execution`, `monitoring` をインポート可能ですが、各モジュールの中身はこれからの実装を必要とします。
+### 削除
+- なし
 
---- 
+---
 
-（以降のバージョンでは、上記Unreleased項目の実装状況に応じて「追加」「変更」「修正」「削除」等を記録してください。）
+この CHANGELOG は Keep a Changelog の形式に準拠しています。今後のリリースでは「Added」「Changed」「Fixed」などのセクションに従って変更内容を追記してください。
