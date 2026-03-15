@@ -1,33 +1,34 @@
-# CHANGELOG
+# Changelog
 
-すべての注目すべき変更はこのファイルに記録します。  
-このプロジェクトは Keep a Changelog の方針に準拠し、セマンティックバージョニングを採用します。  
+この CHANGELOG は「Keep a Changelog」の形式に準拠しています。  
+安定したリリースからの重要な変更を時系列で記録します。
 
-- フォーマット: https://keepachangelog.com/ja/1.0.0/
-- バージョニング: https://semver.org/lang/ja/
+全般的なルール：
+- バージョン番号はセマンティックバージョニングに従います。
+- 日付はリリース日を表します。
 
-## [Unreleased]
+## Unreleased
 
-（現在未リリースの変更はここに記載します）
+- なし
 
 ## [0.1.0] - 2026-03-15
 
-初回リリース。プロジェクトの基本構造とエントリポイントを追加しました。
+初回リリース。日本株自動売買システム「KabuSys」の基本パッケージ構成を追加しました。
 
 ### Added
-- パッケージ初期化ファイルを追加
-  - src/kabusys/__init__.py
-    - パッケージ・ドキュメンテーション文字列: "KabuSys - 日本株自動売買システム"
-    - バージョン識別子: `__version__ = "0.1.0"`
-    - パブリックインターフェース: `__all__ = ["data", "strategy", "execution", "monitoring"]`
-- モジュール用パッケージプレースホルダーを追加（空の初期化ファイル）
-  - src/kabusys/data/__init__.py
-  - src/kabusys/strategy/__init__.py
-  - src/kabusys/execution/__init__.py
-  - src/kabusys/monitoring/__init__.py
+- パッケージの初期実装を追加
+  - `src/kabusys/__init__.py`
+    - パッケージのドキュメンテーション文字列を追加（"KabuSys - 日本株自動売買システム"）。
+    - パッケージバージョンを `__version__ = "0.1.0"` として定義。
+    - パブリック API としてのサブパッケージを `__all__ = ["data", "strategy", "execution", "monitoring"]` で明示。
+  - サブパッケージのスケルトンを追加（機能は今後実装予定）
+    - `src/kabusys/data/__init__.py`（データ取得・管理用の名前空間）
+    - `src/kabusys/strategy/__init__.py`（売買戦略実装用の名前空間）
+    - `src/kabusys/execution/__init__.py`（注文発行・約定処理用の名前空間）
+    - `src/kabusys/monitoring/__init__.py`（監視・ログ・アラート用の名前空間）
 
 ### Changed
-- なし
+- なし（初回リリースのため）
 
 ### Fixed
 - なし
@@ -38,6 +39,9 @@
 ### Removed
 - なし
 
-### Notes
-- 現時点ではモジュールはプレースホルダー（空のパッケージ）です。今後、各サブパッケージにデータ取得（data）、取引戦略（strategy）、注文実行（execution）、監視（monitoring）に関する具体的な実装を追加していく予定です。
-- パッケージの公開APIは現バージョンではモジュール名のみを公開しています。今後は各モジュール内にクラス・関数を追加し、利用者向けの安定APIを提供します。
+### Security
+- なし
+
+---
+
+注：本リリースはパッケージ構成と公開 API の骨組みを整えた段階です。各サブパッケージ内の具体的な実装（データ取得インターフェース、戦略の定義、注文実行ロジック、監視ツール等）は今後のリリースで追加・拡張されます。
