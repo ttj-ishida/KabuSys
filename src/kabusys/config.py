@@ -7,21 +7,24 @@
     token = settings.jquants_refresh_token
 """
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
 
 
-def _find_project_root() -> Path:
+def _find_project_root() -> Path | None:
     """.git または pyproject.toml を基準にプロジェクトルートを特定する。
 
     __file__ を起点に親ディレクトリを探索するため、
     CWDに依存せずパッケージ配布後も正しく動作する。
+    見つからない場合は None を返す（自動ロードをスキップ）。
     """
     base = Path(__file__).resolve()
     for p in base.parents:
         if (p / ".git").exists() or (p / "pyproject.toml").exists():
             return p
-    return base.parent
+    return None
 
 
 def _parse_env_line(line: str) -> tuple[str, str] | None:
@@ -38,10 +41,22 @@ def _parse_env_line(line: str) -> tuple[str, str] | None:
     key = key.strip()
     value = value.strip()
     if value and value[0] in ("'", '"'):
-        # クォートあり: 対応する閉じクォートまでを値とし、以降（コメント含む）は無視
+        # クォートあり: バックスラッシュエスケープを考慮して対応する閉じクォートを探す
+        # 以降（インラインコメント含む）は無視する
         q = value[0]
-        end = value.find(q, 1)
-        value = value[1:end] if end != -1 else value[1:]
+        i, chars = 1, []
+        while i < len(value):
+            ch = value[i]
+            if ch == "\\" and i + 1 < len(value):
+                # エスケープシーケンス: 次の文字をそのまま取り込む
+                chars.append(value[i + 1])
+                i += 2
+            elif ch == q:
+                break
+            else:
+                chars.append(ch)
+                i += 1
+        value = "".join(chars)
     else:
         # クォートなし: '#' の直前がスペースまたはタブの場合のみコメントと認識
         for i, ch in enumerate(value):
@@ -91,11 +106,13 @@ def _load_env_file(
 
 # 読み込み優先順位: OS環境変数 > .env.local > .env
 # KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で自動ロードを無効化できる（テスト等で使用）
+# プロジェクトルートが特定できない場合は自動ロードをスキップする
 if not os.environ.get("KABUSYS_DISABLE_AUTO_ENV_LOAD"):
     _root = _find_project_root()
-    _os_keys = frozenset(os.environ.keys())
-    _load_env_file(_root / ".env", override=False, protected=_os_keys)
-    _load_env_file(_root / ".env.local", override=True, protected=_os_keys)
+    if _root is not None:
+        _os_keys = frozenset(os.environ.keys())
+        _load_env_file(_root / ".env", override=False, protected=_os_keys)
+        _load_env_file(_root / ".env.local", override=True, protected=_os_keys)
 
 
 def _require(key: str) -> str:
