@@ -1,79 +1,83 @@
-# CHANGELOG
+# Keep a Changelog
 
-すべての変更は [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) の形式に従い、セマンティック バージョニングを採用します。
-
-準拠バージョン: 1.0.0
-リリース日付はパッケージ内の __version__ に基づき初回リリース 0.1.0 を記録しています。
-
-## [Unreleased]
+すべての注目すべき変更点をこのファイルで記録します。  
+このプロジェクトは Keep a Changelog の規約に従って変更履歴を記載します。
 
 ## [0.1.0] - 2026-03-15
-初期リリース。日本株自動売買システム「KabuSys」の基礎モジュールを実装しました。
 
-### Added
-- パッケージ初期化
-  - src/kabusys/__init__.py にてパッケージ名とバージョン（0.1.0）、公開サブパッケージ（data, strategy, execution, monitoring）を定義。
+初回リリース。日本株自動売買システムのコア基盤を追加しました。
 
-- 環境設定管理モジュール（src/kabusys/config.py）
-  - .env ファイルまたは環境変数から設定を読み込む Settings クラスを実装。
-  - 自動 .env ロード機構:
-    - プロジェクトルートを .git または pyproject.toml を基準に探索して判定（CWD 非依存）。
-    - 読み込み順序: OS 環境変数 > .env.local > .env。
-    - OS 環境変数は保護され、.env の上書きを防止（ただし .env.local は override）。
-    - 自動ロードを無効化する環境変数: KABUSYS_DISABLE_AUTO_ENV_LOAD。
-  - .env パーサ実装（_parse_env_line）:
-    - 空行およびコメント行（# で始まる）を無視。
-    - "export KEY=val" 形式に対応。
-    - シングル／ダブルクォート内のバックスラッシュエスケープに対応し、対応する閉じクォートまでを値として取り込む。
-    - クォートなしの値では、'#' の直前がスペースまたはタブの場合に限りインラインコメントとして扱う。
-  - 必須値取得ヘルパー _require を提供（未設定時は ValueError を送出）。
-  - 設定項目（プロパティ）を多数定義:
-    - J-Quants / kabu ステーション / Slack / DB パス(DuckDB, SQLite) / システム設定（KABUSYS_ENV の検証、LOG_LEVEL の検証）など。
-  - KABUSYS_ENV と LOG_LEVEL の許容値検証を実装（不正値時は ValueError）。
+### 追加
+- パッケージ基礎
+  - パッケージ名: kabusys、バージョン 0.1.0 を設定（src/kabusys/__init__.py）。
+  - モジュール構成の骨格を追加（data, strategy, execution, monitoring を公開）。
 
-- データスキーマ・初期化モジュール（src/kabusys/data/schema.py）
-  - DuckDB を対象としたスキーマ定義を実装。DataPlatform/ DataSchema に基づく多層構造を初期化可能。
-  - 層構成:
-    - Raw Layer: raw_prices, raw_financials, raw_news, raw_executions（取得した生データ）
-    - Processed Layer: prices_daily, market_calendar, fundamentals, news_articles, news_symbols（整形済み市場データ）
-    - Feature Layer: features, ai_scores（戦略／AI 用特徴量）
-    - Execution Layer: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance（発注・約定・ポジション管理）
-  - 各テーブルに適切な型・CHECK 制約（負値チェック、列長チェック、ENUM 相当の CHECK など）と主キーを付与。
-  - 外部キー制約（news_symbols → news_articles, orders → signal_queue, trades → orders, positions 等）を設定。
-  - パフォーマンス向けに頻出クエリに基づくインデックスを定義。
-  - 公開 API:
-    - init_schema(db_path) : DuckDB ファイル（または ":memory:"）の親ディレクトリを自動作成し、全テーブルとインデックスを冪等に作成して接続を返す。
-    - get_connection(db_path) : 既存の DuckDB へ接続（スキーマ初期化は行わない。初回は init_schema を利用）。
+- 環境変数 / 設定管理（src/kabusys/config.py）
+  - .env ファイルおよび OS 環境変数から設定を読み込む自動ロード機能を実装。
+  - プロジェクトルートの検出ロジックを実装（.git または pyproject.toml を起点に上位ディレクトリを探索）。これにより CWD に依存しない自動読み込みを実現。
+  - .env / .env.local の読み込み順（OS 環境 > .env.local > .env）を実装。`.env.local` は `.env` を上書きする。
+  - 自動ロードの無効化フラグ: KABUSYS_DISABLE_AUTO_ENV_LOAD により自動読み込みを無効化可能（テスト用途）。
+  - .env ファイルパーサを実装:
+    - 空行・コメント行を無視。
+    - export KEY=val 形式に対応。
+    - シングル/ダブルクォート内のバックスラッシュエスケープに対応して正しく値を復元。
+    - クォートなし値についてはインラインコメント（#）を適切に扱う（直前がスペース/タブの場合のみコメントと認識）。
+  - 環境変数の取得ヘルパー _require を実装（未設定時は ValueError を送出）。
+  - 設定オブジェクト Settings を提供（settings = Settings()）:
+    - J-Quants / kabuステーション / Slack / DB パス等のプロパティを定義。
+    - 必須環境変数を明示: JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID。
+    - デフォルト値: KABUSYS_API_BASE_URL のデフォルトは "http://localhost:18080/kabusapi"、データベースパスのデフォルトは duckdb: "data/kabusys.duckdb"、sqlite: "data/monitoring.db"。
+    - 環境（KABUSYS_ENV）は development, paper_trading, live のいずれかに制限（妥当性チェック）。
+    - LOG_LEVEL の妥当性チェック（DEBUG/INFO/WARNING/ERROR/CRITICAL）。
+    - is_live / is_paper / is_dev のユーティリティプロパティを提供。
 
-- 監査（トレーサビリティ）モジュール（src/kabusys/data/audit.py）
-  - シグナルから約定までの監査ログ用テーブル群を実装。
-  - 追跡階層（business_date → strategy_id → signal_id → order_request_id → broker_order_id）に基づく設計を反映。
-  - 実装テーブル:
-    - signal_events（戦略が生成したシグナルのログ。棄却やエラーも記録）
-    - order_requests（冪等キー order_request_id を持つ発注要求ログ。limit/stop の価格チェック等の CHECK を実装）
-    - executions（証券会社からの約定ログ。broker_execution_id をユニーク制約として冪等性を担保）
-  - 監査設計方針をドキュメント化（TIMESTAMP は UTC で保存、created_at/updated_at の扱い、FK の ON DELETE RESTRICT、削除しない前提 等）。
-  - 監査用インデックス群を定義（status ベースのキュー取得、signal_id / broker_order_id による紐付け、日付・銘柄の検索等）。
-  - 公開 API:
-    - init_audit_schema(conn) : 既存 DuckDB 接続に監査テーブルを追加（SET TimeZone='UTC' を実行）。
-    - init_audit_db(db_path) : 監査専用 DB ファイルを作成して接続を返す（親ディレクトリ自動作成）。
+- データベーススキーマ（DuckDB）と初期化 API（src/kabusys/data/schema.py）
+  - 3〜4 層構造のスキーマ定義を追加（Raw / Processed / Feature / Execution 層）:
+    - Raw 層: raw_prices, raw_financials, raw_news, raw_executions
+    - Processed 層: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
+    - Feature 層: features, ai_scores
+    - Execution 層: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
+  - 各テーブルに主キー、CHECK 制約、外部キー（必要に応じて ON DELETE 挙動）を定義し、データ整合性を強化。
+  - 頻出クエリを想定したインデックス群を定義（例: 銘柄×日付、ステータス検索、signal_id→orders 等）。
+  - init_schema(db_path) を実装:
+    - DuckDB ファイルを初期化し、すべてのテーブルとインデックスを作成（冪等性あり）。
+    - db_path の親ディレクトリを自動作成。
+    - ":memory:" によるインメモリ DB をサポート。
+    - 初回接続後に DDL を逐次実行して schema を構築。
+  - get_connection(db_path) を実装:
+    - 既存 DuckDB へ接続を返す（スキーマ初期化は行わない: 初回は init_schema を使用すること）。
 
-- パッケージ構造の骨格
-  - execution, strategy, monitoring, data の __init__.py を用意し、将来的な機能拡張のためのモジュール分割を準備。
+- 監査ログ（トレーサビリティ）モジュール（src/kabusys/data/audit.py）
+  - signal → order_request → execution のフローを UUID 連鎖で完全トレース可能にする監査テーブル群を実装。
+  - 主要テーブル:
+    - signal_events: 戦略が生成したすべてのシグナルを記録（rejected や error 含む）。
+    - order_requests: 発注要求（order_request_id を冪等キーとして採用）。limit/stop/market のチェック制約を実装。
+    - executions: 証券会社からの約定ログ（broker_execution_id をユニークな冪等キーとして保存）。
+  - 監査設計上の方針をドキュメント化:
+    - 監査ログは削除しない想定（FK は ON DELETE RESTRICT）。
+    - すべての TIMESTAMP を UTC で保存（初期化時に SET TimeZone='UTC' を実行）。
+    - created_at / updated_at の運用方針（アプリ側が更新時に updated_at を current_timestamp で更新）。
+  - init_audit_schema(conn) を実装:
+    - 既存の DuckDB 接続に監査テーブルと関連インデックスを追加（冪等）。
+  - init_audit_db(db_path) を実装:
+    - 監査専用 DB を初期化して接続を返す。親ディレクトリの自動作成、UTC タイムゾーン設定を行う。
 
-### Changed
-- 初回リリースのため該当なし。
+- その他
+  - データディレクトリや DB ファイルのデフォルトパスを設定（data/kabusys.duckdb, data/monitoring.db）。
+  - 各所にドキュメント文字列（docstring）を充実させ、設計意図や使用法を明確化。
 
-### Fixed
-- 初回リリースのため該当なし。
+### 変更
+- （初回リリースのため変更履歴なし）
 
-### Security
-- 初回リリースのため該当なし。
+### 修正
+- （初回リリースのため修正履歴なし）
+
+### 既知の注意点 / 今後の TODO（メモ）
+- strategy、execution、monitoring パッケージは骨格のみで、個別のアルゴリズム・実行ロジックは今後実装予定。
+- audit の updated_at フィールドはアプリ側で明示的に更新する運用を想定しているため、利用側の実装で current_timestamp を設定すること。
+- DuckDB の制限（例: UNIQUE と NULL の扱い）を踏まえたインデックス設計を行っているが、実運用での検証が必要。
+- .env パーサは一般的なフォーマットを広くサポートするが、特殊ケースは今後の拡張対象。
 
 ---
 
-備考:
-- DuckDB のファイルパスはデフォルトで data/kabusys.duckdb（DuckDB） / data/monitoring.db（SQLite）を使用する設定が含まれますが、環境変数で上書き可能です。
-- init_schema / init_audit_db は db_path に ":memory:" を渡すことでインメモリ DB を使用できます（テスト目的など）。
-- .env の自動ロードはプロジェクトルート検出に依存するため、配布後やパッケージ化後の挙動に配慮した実装になっています（CWD に依存しない）。
-- 今後のリリースでは、strategy / execution / monitoring 各モジュールの具象実装（シグナル生成ロジック、ブローカー接続、モニタリング用 API 等）を追加予定です。
+（このファイルはプロジェクトの初期リリースに合わせて自動生成した CHANGELOG です。必要に応じて後続リリースで追記してください。）
