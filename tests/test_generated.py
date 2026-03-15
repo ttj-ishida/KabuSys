@@ -92,7 +92,7 @@ def test_find_project_root(tmp_path, monkeypatch):
     project = tmp_path / "myproj"
     sub = project / "pkg" / "subpkg"
     sub.mkdir(parents=True)
-    (project / ".git").write_text("")  # mark project root
+    (project / ".git").mkdir()  # mark project root (directory, as in real git repos)
 
     fake_module = sub / "module.py"
     fake_module.write_text("# dummy")

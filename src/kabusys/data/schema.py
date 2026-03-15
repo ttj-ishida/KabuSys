@@ -25,12 +25,12 @@ _RAW_PRICES = """
 CREATE TABLE IF NOT EXISTS raw_prices (
     date        DATE        NOT NULL,
     code        VARCHAR     NOT NULL,
-    open        DECIMAL(18,4),
-    high        DECIMAL(18,4),
-    low         DECIMAL(18,4),
-    close       DECIMAL(18,4),
-    volume      BIGINT,
-    turnover    DECIMAL(18,2),
+    open        DECIMAL(18,4) CHECK (open >= 0),
+    high        DECIMAL(18,4) CHECK (high >= 0),
+    low         DECIMAL(18,4) CHECK (low >= 0),
+    close       DECIMAL(18,4) CHECK (close >= 0),
+    volume      BIGINT        CHECK (volume >= 0),
+    turnover    DECIMAL(18,2) CHECK (turnover >= 0),
     fetched_at  TIMESTAMP   NOT NULL DEFAULT current_timestamp,
     PRIMARY KEY (date, code)
 )
@@ -69,10 +69,10 @@ CREATE TABLE IF NOT EXISTS raw_executions (
     order_id        VARCHAR     NOT NULL,
     datetime        TIMESTAMP   NOT NULL,
     code            VARCHAR     NOT NULL,
-    side            VARCHAR     NOT NULL CHECK (side IN ('buy', 'sell')),
-    price           DECIMAL(18,4) NOT NULL,
-    size            BIGINT      NOT NULL,
-    fetched_at      TIMESTAMP   NOT NULL DEFAULT current_timestamp
+    side            VARCHAR       NOT NULL CHECK (side IN ('buy', 'sell')),
+    price           DECIMAL(18,4) NOT NULL CHECK (price >= 0),
+    size            BIGINT        NOT NULL CHECK (size > 0),
+    fetched_at      TIMESTAMP     NOT NULL DEFAULT current_timestamp
 )
 """
 
@@ -80,14 +80,14 @@ CREATE TABLE IF NOT EXISTS raw_executions (
 
 _PRICES_DAILY = """
 CREATE TABLE IF NOT EXISTS prices_daily (
-    date        DATE        NOT NULL,
-    code        VARCHAR     NOT NULL,
-    open        DECIMAL(18,4) NOT NULL,
-    high        DECIMAL(18,4) NOT NULL,
-    low         DECIMAL(18,4) NOT NULL,
-    close       DECIMAL(18,4) NOT NULL,
-    volume      BIGINT      NOT NULL,
-    turnover    DECIMAL(18,2),
+    date        DATE          NOT NULL,
+    code        VARCHAR       NOT NULL,
+    open        DECIMAL(18,4) NOT NULL CHECK (open >= 0),
+    high        DECIMAL(18,4) NOT NULL CHECK (high >= 0),
+    low         DECIMAL(18,4) NOT NULL CHECK (low >= 0),
+    close       DECIMAL(18,4) NOT NULL CHECK (close >= 0),
+    volume      BIGINT        NOT NULL CHECK (volume >= 0),
+    turnover    DECIMAL(18,2)          CHECK (turnover >= 0),
     PRIMARY KEY (date, code)
 )
 """
@@ -185,12 +185,12 @@ CREATE TABLE IF NOT EXISTS signal_queue (
     signal_id       VARCHAR     NOT NULL PRIMARY KEY,
     date            DATE        NOT NULL,
     code            VARCHAR     NOT NULL,
-    side            VARCHAR     NOT NULL CHECK (side IN ('buy', 'sell')),
-    size            BIGINT      NOT NULL,
-    order_type      VARCHAR     NOT NULL CHECK (order_type IN ('market', 'limit', 'stop')),
-    price           DECIMAL(18,4),
-    status          VARCHAR     NOT NULL DEFAULT 'pending'
-                                CHECK (status IN ('pending','processing','filled','cancelled','error')),
+    side            VARCHAR       NOT NULL CHECK (side IN ('buy', 'sell')),
+    size            BIGINT        NOT NULL CHECK (size > 0),
+    order_type      VARCHAR       NOT NULL CHECK (order_type IN ('market', 'limit', 'stop')),
+    price           DECIMAL(18,4)          CHECK (price >= 0),
+    status          VARCHAR       NOT NULL DEFAULT 'pending'
+                                  CHECK (status IN ('pending','processing','filled','cancelled','error')),
     created_at      TIMESTAMP   NOT NULL DEFAULT current_timestamp,
     processed_at    TIMESTAMP
 )
@@ -208,26 +208,28 @@ CREATE TABLE IF NOT EXISTS portfolio_targets (
 
 _ORDERS = """
 CREATE TABLE IF NOT EXISTS orders (
-    order_id    VARCHAR     NOT NULL PRIMARY KEY,
+    order_id    VARCHAR       NOT NULL PRIMARY KEY,
     signal_id   VARCHAR,
-    datetime    TIMESTAMP   NOT NULL,
-    code        VARCHAR     NOT NULL,
-    side        VARCHAR     NOT NULL CHECK (side IN ('buy', 'sell')),
-    size        BIGINT      NOT NULL,
-    price       DECIMAL(18,4),
-    status      VARCHAR     NOT NULL DEFAULT 'created'
-                            CHECK (status IN ('created','sent','filled','cancelled','rejected'))
+    datetime    TIMESTAMP     NOT NULL,
+    code        VARCHAR       NOT NULL,
+    side        VARCHAR       NOT NULL CHECK (side IN ('buy', 'sell')),
+    size        BIGINT        NOT NULL CHECK (size > 0),
+    price       DECIMAL(18,4)          CHECK (price >= 0),
+    status      VARCHAR       NOT NULL DEFAULT 'created'
+                              CHECK (status IN ('created','sent','filled','cancelled','rejected')),
+    FOREIGN KEY (signal_id) REFERENCES signal_queue(signal_id)
 )
 """
 
 _TRADES = """
 CREATE TABLE IF NOT EXISTS trades (
-    trade_id    VARCHAR     NOT NULL PRIMARY KEY,
-    order_id    VARCHAR     NOT NULL,
-    datetime    TIMESTAMP   NOT NULL,
-    code        VARCHAR     NOT NULL,
-    price       DECIMAL(18,4) NOT NULL,
-    size        BIGINT      NOT NULL
+    trade_id    VARCHAR       NOT NULL PRIMARY KEY,
+    order_id    VARCHAR       NOT NULL,
+    datetime    TIMESTAMP     NOT NULL,
+    code        VARCHAR       NOT NULL,
+    price       DECIMAL(18,4) NOT NULL CHECK (price >= 0),
+    size        BIGINT        NOT NULL CHECK (size > 0),
+    FOREIGN KEY (order_id) REFERENCES orders(order_id)
 )
 """
 
