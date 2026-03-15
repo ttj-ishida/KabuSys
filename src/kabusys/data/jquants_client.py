@@ -246,12 +246,14 @@ def fetch_daily_quotes(
         params["dateTo"] = date_to.strftime("%Y%m%d")
 
     result: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
     while True:
         data = _request("/prices/daily_quotes", params=params, id_token=id_token)
         result.extend(data.get("daily_quotes", []))
         pagination_key = data.get("pagination_key")
-        if not pagination_key:
+        if not pagination_key or pagination_key in seen_keys:
             break
+        seen_keys.add(pagination_key)
         params["pagination_key"] = pagination_key
 
     logger.info("fetch_daily_quotes: %d レコード取得", len(result))
@@ -284,12 +286,14 @@ def fetch_financial_statements(
         params["dateTo"] = date_to.strftime("%Y%m%d")
 
     result: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
     while True:
         data = _request("/fins/statements", params=params, id_token=id_token)
         result.extend(data.get("statements", []))
         pagination_key = data.get("pagination_key")
-        if not pagination_key:
+        if not pagination_key or pagination_key in seen_keys:
             break
+        seen_keys.add(pagination_key)
         params["pagination_key"] = pagination_key
 
     logger.info("fetch_financial_statements: %d レコード取得", len(result))
@@ -505,6 +509,7 @@ def _to_int(value: Any) -> int | None:
     """値を int に変換する。変換失敗または空値は None を返す。
 
     "1.0" のような float 文字列は float 経由で変換する。
+    小数部が 0 以外（例: "1.9"）は意図しない切り捨てを防ぐため None を返す。
     """
     if value is None or value == "":
         return None
@@ -513,6 +518,9 @@ def _to_int(value: Any) -> int | None:
     except (ValueError, TypeError):
         pass
     try:
-        return int(float(value))
+        f = float(value)
+        if f != int(f):  # 小数部が 0 以外は変換しない
+            return None
+        return int(f)
     except (ValueError, TypeError):
         return None
