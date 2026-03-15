@@ -1,101 +1,98 @@
 # CHANGELOG
 
-すべての重要な変更はこのファイルに記録します。フォーマットは「Keep a Changelog」に準拠しています。
+すべての変更は Keep a Changelog に準拠して記載します。  
+このファイルはプロジェクトの公開 API・データベーススキーマ・設定読み込み・外部 API クライアント等の導入を中心に、コードベースから推測して作成しています。
 
-全般方針:
-- 主要リリースは semver に従います（このリポジトリはこの段階で v0.1.0）。
-- 日付はリリース日を示します。
+どのバージョンでも、重大な後方互換破壊（Breaking changes）は明記します。
+
+## [Unreleased]
 
 ## [0.1.0] - 2026-03-15
-
-初回リリース — 日本株自動売買システムの基盤モジュール群を追加しました。
+初回リリース。日本株自動売買システムの基盤となる設定管理、データ取得・永続化、監査ログ、スキーマ定義を含むコア実装を追加。
 
 ### Added
-- パッケージ初期化
-  - `kabusys` パッケージを追加し、バージョンを 0.1.0 に設定。
-  - サブパッケージのプレースホルダを作成：`data`, `strategy`, `execution`, `monitoring`。
+- パッケージ基礎
+  - kabusys パッケージを追加。__version__ = "0.1.0" を設定し、主要サブパッケージ（data, strategy, execution, monitoring）を公開。
 
-- 環境設定管理
-  - `kabusys.config` モジュールを追加。
-  - `.env` ファイルまたは OS 環境変数から設定を自動読み込み（優先度: OS 環境 > .env.local > .env）。
-  - 自動ロードを無効化するためのフラグ `KABUSYS_DISABLE_AUTO_ENV_LOAD` をサポート（テスト等で使用）。
-  - .env パーサー実装:
-    - `export KEY=val` 形式対応。
-    - シングル/ダブルクォート中のバックスラッシュエスケープ対応。
-    - クォートなしのコメント扱いは「# の直前が空白/タブの場合」に限定。
-  - `Settings` クラスを提供し、環境変数の取得と検証を一元化。
-    - 必須環境変数チェック（例: `JQUANTS_REFRESH_TOKEN`, `KABU_API_PASSWORD`, `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID`）。
-    - デフォルト値: `KABUS_API_BASE_URL` は `http://localhost:18080/kabusapi`、`DUCKDB_PATH` は `data/kabusys.duckdb`、`SQLITE_PATH` は `data/monitoring.db`。
-    - `KABUSYS_ENV` 値検証（有効値: `development`, `paper_trading`, `live`）。
-    - `LOG_LEVEL` 検証（有効値: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`）。
-    - ヘルパーで実行モード判定: `is_live`, `is_paper`, `is_dev`。
+- 設定・環境変数管理（kabusys.config）
+  - .env/.env.local ファイルおよび OS 環境変数から設定を自動読み込みする仕組みを実装。
+    - プロジェクトルートの判定に .git または pyproject.toml を利用し、CWD に依存しない堅牢な探索を実装。
+    - 読み込み優先順：OS 環境変数 > .env.local > .env。
+    - KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で自動読み込みを無効化可能（テスト用途を想定）。
+  - .env パーサーを実装（export プレフィックス対応、シングル/ダブルクォート内のバックスラッシュエスケープ、コメント処理など）。
+  - .env 読み込み時の上書き制御（override）と protected キー保護（OS 環境変数の保護）をサポート。
+  - Settings クラスを追加し、以下の必須設定をプロパティで取得：
+    - JQUANTS_REFRESH_TOKEN（必須）
+    - KABU_API_PASSWORD（必須）
+    - SLACK_BOT_TOKEN（必須）
+    - SLACK_CHANNEL_ID（必須）
+    - KABU_API_BASE_URL（デフォルト http://localhost:18080/kabusapi）
+    - DUCKDB_PATH / SQLITE_PATH（デフォルトパスを持つ、Path 型で取得）
+    - KABUSYS_ENV の検証（development / paper_trading / live のみ有効）
+    - LOG_LEVEL の検証（DEBUG/INFO/WARNING/ERROR/CRITICAL）
+  - 環境判定ユーティリティ: is_live / is_paper / is_dev
 
-- J-Quants API クライアント
-  - `kabusys.data.jquants_client` を実装。
-  - 取得可能データ:
-    - 株価日足（OHLCV）: `fetch_daily_quotes`
-    - 財務データ（四半期 BS/PL）: `fetch_financial_statements`
-    - JPX マーケットカレンダー: `fetch_market_calendar`
-  - 設計上の特徴:
-    - レート制限遵守: 固定間隔スロットリングで 120 req/min に対応（内部クラス `_RateLimiter`）。
-    - リトライ戦略: 最大 3 回、指数バックオフ（基底 2 秒）、HTTP 408/429 と 5xx を対象に再試行。
-    - 429 の場合は `Retry-After` ヘッダを優先。
-    - 401 (Unauthorized) 受信時はリフレッシュトークンで自動的に ID トークンを再取得して 1 回だけリトライ（無限再帰防止）。
-    - ページネーション対応: `pagination_key` を用いたループ処理、重複検出で終了。
-    - モジュールレベルで ID トークンをキャッシュし、ページネーション間で共有。
-    - 取得時刻（fetched_at）を UTC タイムスタンプで記録することで Look-ahead Bias を低減。
-  - HTTP ユーティリティ `_request` 実装（JSON デコード時のエラーハンドリングなど）。
+- J-Quants API クライアント（kabusys.data.jquants_client）
+  - API クライアントを実装。取得可能なデータ：
+    - 株価日足（OHLCV）
+    - 財務データ（四半期 BS/PL）
+    - JPX マーケットカレンダー（祝日・半日・SQ）
+  - 設計上の特徴：
+    - レート制限遵守のための固定間隔スロットリング（デフォルト 120 req/min）。
+    - リトライロジック（指数バックオフ、最大 3 回）。408/429/5xx をリトライ対象に含む。
+    - 429 への対応で Retry-After ヘッダを優先して待機。
+    - 401 発生時はリフレッシュトークンで id_token を自動更新して 1 回のみリトライ（無限再帰防止）。
+    - id_token のモジュールレベルキャッシュを実装し、ページネーション間で共有。
+    - ページネーション対応の fetch_* API（fetch_daily_quotes、fetch_financial_statements）を実装（pagination_key の追跡で重複防止）。
+    - fetch_* は取得日時（fetched_at）を UTC で記録する方針で設計（Look-ahead Bias 防止）。
+  - HTTP ユーティリティ _request を提供し、JSON デコードエラーやネットワークエラー時の扱いを明示。
+  - get_id_token(refresh_token=None) を提供（settings.jquants_refresh_token をデフォルトで使用可能）。
 
-- DuckDB スキーマと永続化ユーティリティ
-  - `kabusys.data.schema` を追加。
-  - 3 層アーキテクチャに対応する DDL を定義:
-    - Raw Layer: `raw_prices`, `raw_financials`, `raw_news`, `raw_executions`
-    - Processed Layer: `prices_daily`, `market_calendar`, `fundamentals`, `news_articles`, `news_symbols`
-    - Feature Layer: `features`, `ai_scores`
-    - Execution Layer: `signals`, `signal_queue`, `portfolio_targets`, `orders`, `trades`, `positions`, `portfolio_performance`
-  - 各テーブルに妥当性制約（CHECK, NOT NULL, PRIMARY KEY, FOREIGN KEY）を追加。
-  - 運用を想定したインデックス群を定義（例: 銘柄×日付スキャン、ステータス検索など）。
-  - `init_schema(db_path)` を提供:
-    - DuckDB ファイル作成（親ディレクトリ自動作成）および DDL/インデックスの適用（冪等）。
-    - `:memory:` を指定してインメモリ DB を利用可能。
-  - `get_connection(db_path)` を提供（既存 DB への接続。スキーマ初期化は行わない）。
+- DuckDB 永続化ユーティリティ（kabusys.data.jquants_client の保存関数）
+  - raw_prices, raw_financials, market_calendar に対する冪等な保存関数を追加（save_daily_quotes, save_financial_statements, save_market_calendar）。
+  - INSERT ... ON CONFLICT DO UPDATE による上書き（アップサート）を実装し、重複を排除。
+  - PK 欠損行はスキップして警告ログを出力。
+  - 数値変換ユーティリティ _to_float / _to_int を実装し、空値・不正値を安全に None に変換。_to_int は "1.0" のような float 文字列を許容するが小数部がある場合は None を返す等の細かな振る舞いを定義。
 
-- DuckDB への保存（J-Quants 連携）
-  - `save_daily_quotes`, `save_financial_statements`, `save_market_calendar` を実装。
-  - 保存は冪等: INSERT ... ON CONFLICT DO UPDATE を使用して重複を更新。
-  - PK 欠損行はスキップし、その数を警告ログ出力。
-  - `save_*` は保存件数を返す。
+- DuckDB スキーマ定義・初期化（kabusys.data.schema）
+  - DataLayer の 3 層（Raw / Processed / Feature）および Execution レイヤーのテーブル DDL を定義。
+    - Raw: raw_prices, raw_financials, raw_news, raw_executions
+    - Processed: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
+    - Feature: features, ai_scores
+    - Execution: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
+  - インデックス（頻出クエリ向け）を定義。
+  - init_schema(db_path) を実装：親ディレクトリの自動作成、DDL の順序実行（外部キーを考慮）、冪等（既存テーブルはスキップ）。
+  - get_connection(db_path) を提供（スキーマ初期化を行わないため初回は init_schema を推奨）。
 
-- 監査ログ（トレーサビリティ）
-  - `kabusys.data.audit` を追加。
-  - 監査用テーブル群:
-    - `signal_events`（シグナル生成ログ、decision/status を含む）
-    - `order_requests`（発注要求、`order_request_id` を冪等キーとして扱う）
-    - `executions`（約定ログ、証券会社提供の約定 ID を冪等キーとして扱う）
-  - 監査用インデックス群を定義（status や signal_id、broker_order_id 等での検索を高速化）。
-  - `init_audit_schema(conn)` を提供（既存の DuckDB 接続へ監査テーブルを追加、UTC タイムゾーンを強制）。
-  - `init_audit_db(db_path)` を提供（監査専用 DB を初期化して接続を返す）。
-  - 設計原則の注記（UTC 保存、削除禁止の設計、updated_at はアプリ側で更新等）。
+- 監査ログ（kabusys.data.audit）
+  - シグナル〜発注〜約定までをトレース可能な監査テーブル群を実装（signal_events, order_requests, executions）。
+  - 設計上の特徴：
+    - order_request_id を冪等キーとして扱い、同一キーでの再送でも二重発注を防止する仕様。
+    - すべてのテーブルに created_at（および必要に応じて updated_at）を持ち、監査痕跡を保証。
+    - 監査テーブルは削除しない前提（外部キーは ON DELETE RESTRICT）。
+    - init_audit_schema(conn) において TimeZone を UTC に設定してからテーブル作成。
+    - init_audit_db(db_path) で監査専用 DB を作成するユーティリティを提供。
+  - 監査向けのインデックスを複数追加（status／signal_id／broker_order_id 等の検索高速化）。
 
-- データ変換ユーティリティ
-  - `_to_float`, `_to_int` を実装。無効値や変換失敗時は `None` を返す。
-  - `_to_int` は "1.0" のような浮動小数文字列を適切に整数変換し、小数部が 0 以外の場合は None を返して誤切り捨てを防止。
+- パッケージ構成
+  - strategy/, execution/, monitoring/ の __init__.py を配置（将来の拡張用のプレースホルダ）。
 
-### Notes
-- 必須環境変数（例）:
-  - JQUANTS_REFRESH_TOKEN（J-Quants リフレッシュトークン）
-  - KABU_API_PASSWORD（kabuステーション API パスワード）
-  - SLACK_BOT_TOKEN / SLACK_CHANNEL_ID（Slack 通知用）
-- デフォルトやオプションについては `kabusys.config.Settings` を参照してください。
-- 現時点では `strategy`, `execution`, `monitoring` の実装はプレースホルダ（空）です。戦略ロジックや発注実行・監視の実装は今後追加予定です。
-- 監査ログは削除しない前提で設計されているため、消去操作は現行実装で行わないでください。
+### Changed
+- （初回リリースのため該当なし）
 
-### Known limitations / TODO
-- J-Quants API クライアントは urllib を使用する低レベル実装です。将来的に requests / httpx 等への移行検討。
-- トークンキャッシュはモジュールレベルの単純キャッシュ。マルチプロセスや分散環境では追加の考慮が必要。
-- テスト用フック（モック可能な HTTP 層、DB の DI 等）を拡充する予定。
-- monitoring / execution の実装（発注送信、ステータス管理、Slack 通知等）は未実装。
+### Fixed
+- （初回リリースのため該当なし）
+
+### Notes / Migration
+- 必須環境変数：
+  - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID を必ず設定してください。未設定の場合 Settings の該当プロパティアクセスで ValueError が発生します。
+- デフォルト DuckDB パスは settings.duckdb_path = data/kabusys.duckdb。init_schema は親ディレクトリを自動作成します。
+- J-Quants API のレート制限はデフォルトで 120 req/min に固定されています。必要に応じて _MIN_INTERVAL_SEC を調整してください。
+- .env の自動ロードを無効化したい場合は環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください（テスト実行時の隔離に便利です）。
+- API リトライの挙動：
+  - 401 の場合は一度だけトークンをリフレッシュして再試行します（リフレッシュ失敗時は例外）。
+  - 429 の際は Retry-After ヘッダを優先して待機します。その他のリトライは指数バックオフを使用します。
 
 ---
 
-（以降のリリース履歴はここに追加してください）
+将来的に、戦略実装（strategy/）、発注実行ロジック（execution/）、モニタリング（monitoring/）を実装・拡充していく予定です。変更履歴は以降のリリースで詳細に記載します。
