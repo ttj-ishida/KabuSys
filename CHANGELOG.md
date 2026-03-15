@@ -1,101 +1,104 @@
-# Changelog
+# CHANGELOG
 
-すべての重要な変更はこのファイルに記録します。本ファイルは Keep a Changelog の形式に準拠しています。  
-※日付はリリース日を示します。
+すべての重要な変更はこのファイルに記録します。  
+フォーマットは Keep a Changelog に準拠します。  
+
+現在のバージョンはパッケージメタデータ (kabusys.__version__) に従っています。
 
 ## [Unreleased]
 
 ## [0.1.0] - 2026-03-15
+初回公開リリース。
 
-### Added
-- パッケージ初期リリース: kabusys 0.1.0
-  - パッケージルート: src/kabusys/__init__.py にてバージョンと公開モジュールを定義。
+### 追加
+- パッケージの基本構成
+  - モジュールを公開: kabusys.data, kabusys.strategy, kabusys.execution, kabusys.monitoring
+  - パッケージバージョン: 0.1.0
 
-- 環境設定管理モジュール (src/kabusys/config.py)
-  - .env ファイルまたは環境変数から設定を読み込む機能を追加。
-  - 自動ロード順序:
-    - OS 環境変数 > .env.local > .env
-    - プロジェクトルートは __file__ を起点に .git または pyproject.toml を探索して特定（CWD 非依存）。
-    - KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で自動ロード無効化可能（テスト用途）。
-  - .env パーサーを実装:
-    - コメント行、export プレフィックス、シングル/ダブルクォート、バックスラッシュエスケープ、インラインコメント処理などを考慮。
-    - 無効行はスキップ。
-  - 環境変数読み込みの制御:
-    - _load_env_file に override フラグと protected セットを導入し、OS 環境変数の上書きを防止。
-  - Settings クラスを提供（settings インスタンスを公開）:
-    - J-Quants / kabuステーション / Slack / DB パスなどのプロパティ（例: jquants_refresh_token, kabu_api_password, slack_bot_token, duckdb_path, sqlite_path）。
-    - KABUSYS_ENV のバリデーション（development, paper_trading, live）。
-    - LOG_LEVEL のバリデーション（DEBUG/INFO/WARNING/ERROR/CRITICAL）。
-    - ヘルパー: is_live / is_paper / is_dev。
+- 環境設定 / 設定管理 (kabusys.config)
+  - Settings クラスを追加し、環境変数から設定を取得する一貫した API を提供。
+  - 自動 .env ロード機能:
+    - プロジェクトルートは __file__ を起点に .git または pyproject.toml を探索して特定（CWD に依存しない）。
+    - 読み込み優先順: OS 環境変数 > .env.local > .env。
+    - 自動ロードを無効化する環境変数: KABUSYS_DISABLE_AUTO_ENV_LOAD=1（テスト等で使用）。
+    - .env 読み込みはファイルが存在しない場合は無視、読み込み失敗時は警告を出す。
+  - .env 行パーサー:
+    - コメント行・空行無視、`export KEY=val` 形式対応。
+    - シングル/ダブルクォート内のバックスラッシュエスケープ、インラインコメントの扱いを考慮。
+    - クォートなしの値では、前にスペース/タブがある `#` をコメントとして扱う（一般的な .env の挙動に準拠）。
+  - 必須設定取得ヘルパー: _require()。未設定時は ValueError を投げる。
+  - 利用可能な設定項目（例）:
+    - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, KABU_API_BASE_URL (デフォルト: http://localhost:18080/kabusapi)
+    - SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
+    - DUCKDB_PATH (デフォルト data/kabusys.duckdb), SQLITE_PATH (デフォルト data/monitoring.db)
+    - KABUSYS_ENV (development/paper_trading/live のいずれか、妥当性チェックあり)
+    - LOG_LEVEL (DEBUG/INFO/WARNING/ERROR/CRITICAL のいずれか、妥当性チェックあり)
+  - settings = Settings() を公開。
 
-- J-Quants API クライアント (src/kabusys/data/jquants_client.py)
-  - 支持するデータ取得:
-    - 株価日足（OHLCV）: fetch_daily_quotes()
-    - 財務データ（四半期 BS/PL）: fetch_financial_statements()
-    - JPX マーケットカレンダー: fetch_market_calendar()
-  - 設計・実装の主な特徴:
-    - レート制限: 120 req/min を厳守する固定間隔スロットリング（_RateLimiter）。
-    - リトライロジック: 指数バックオフ、最大 3 回、対象は 408/429/5xx およびネットワークエラー。429 の場合は Retry-After を優先。
-    - 401 Unauthorized を検出した場合は ID トークンを自動リフレッシュして 1 回だけ再試行（無限再帰を防止）。
-    - モジュールレベルの ID トークンキャッシュを保持し、ページネーション間でトークンを共有。
-    - ページネーション対応: pagination_key を用いた繰り返し取得。
-    - JSON デコードエラー時の明確な例外メッセージ。
-    - タイムアウト設定（urllib の timeout=30）。
-    - ロギングを適切に出力（取得件数、リトライ、警告など）。
-  - DuckDB への保存ユーティリティ:
-    - save_daily_quotes(conn, records): raw_prices に保存（ON CONFLICT DO UPDATE による冪等性）。
-    - save_financial_statements(conn, records): raw_financials に保存（冪等）。
-    - save_market_calendar(conn, records): market_calendar に保存（冪等）。
-    - 取得時の fetched_at は UTC (ISO8601、Z 表記) で記録して Look-ahead Bias を防止。
-    - PK 欠損行はスキップしスキップ数を警告ログ出力。
-  - 入出力変換ユーティリティ:
-    - _to_float/_to_int: 空値・変換失敗時は None を返す。_to_int は "1.0" のような文字列を float 経由で処理し、小数部が非ゼロの場合は None を返す（意図しない切り捨てを防止）。
+- J-Quants API クライアント (kabusys.data.jquants_client)
+  - API 呼び出しラッパー実装:
+    - ベース URL: https://api.jquants.com/v1
+    - レート制限: 固定間隔スロットリングで 120 req/min（最小間隔 60/120 秒）を実装する _RateLimiter。
+    - 再試行ロジック: 指数バックオフで最大 3 回リトライ（対象: 408, 429, 5xx、ネットワークエラー等）。
+    - 401 時の自動トークンリフレッシュ: 1 回のみリフレッシュして再試行（無限再帰を防ぐため allow_refresh フラグを利用）。
+    - id_token のモジュールレベルキャッシュを維持し、ページネーション間で共有。
+  - API 用ヘルパー関数:
+    - get_id_token(refresh_token: Optional[str]) → idToken を取得（POST /token/auth_refresh）。
+    - fetch_daily_quotes(...): 日足（OHLCV）をページネーション対応で取得。
+    - fetch_financial_statements(...): 四半期財務データをページネーション対応で取得。
+    - fetch_market_calendar(...): JPX マーケットカレンダーを取得。
+    - 各 fetch 関数は取得件数をログ出力。
+  - DuckDB 保存関数（冪等性を考慮した保存処理）:
+    - save_daily_quotes(conn, records): raw_prices テーブルへ INSERT ... ON CONFLICT DO UPDATE を使って保存。fetched_at（UTC ISO 形式）を付与。PK 欠損レコードはスキップして警告ログ。
+    - save_financial_statements(conn, records): raw_financials テーブルへ同様に保存。
+    - save_market_calendar(conn, records): market_calendar テーブルへ同様に保存。HolidayDivision を基に is_trading_day/is_half_day/is_sq_day を算出。
+  - データ変換ユーティリティ:
+    - _to_float: 空値や変換失敗時は None を返す。
+    - _to_int: "1.0" のような文字列は float 経由で変換。小数部が 0 以外の場合は None（誤切り捨て防止）。
 
-- DuckDB スキーマ定義・初期化モジュール (src/kabusys/data/schema.py)
-  - DataSchema.md の想定に基づく 3 層＋実行層のテーブル定義を実装:
-    - Raw Layer: raw_prices, raw_financials, raw_news, raw_executions
-    - Processed Layer: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
-    - Feature Layer: features, ai_scores
-    - Execution Layer: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
-  - 各種制約（PRIMARY KEY、CHECK、FOREIGN KEY）や型（DECIMAL, BIGINT, TIMESTAMP など）を定義。
-  - パフォーマンスを考慮したインデックス群を作成（頻出クエリパターンに対応）。
-  - init_schema(db_path) を提供:
-    - db_path の親ディレクトリ自動作成、":memory:" のサポート。
-    - テーブル作成は冪等（IF NOT EXISTS）。
-    - 全 DDL とインデックスを実行して DuckDB 接続を返す。
-  - get_connection(db_path): 既存 DB への接続を返す（スキーマ初期化は行わない）。
+- データベーススキーマ定義 (kabusys.data.schema)
+  - DuckDB に対する包括的なスキーマを定義（Raw / Processed / Feature / Execution 層）。
+    - Raw レイヤー: raw_prices, raw_financials, raw_news, raw_executions
+    - Processed レイヤー: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
+    - Feature レイヤー: features, ai_scores
+    - Execution レイヤー: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
+  - 各テーブルに型チェック制約（CHECK）、主キー、外部キー（必要箇所）を設定。
+  - パフォーマンス向けインデックスを定義（銘柄×日付、ステータス検索など）。
+  - スキーマ初期化 / 接続関数:
+    - init_schema(db_path) → DuckDB 接続を返す。必要に応じて親ディレクトリを作成し、すべてのテーブルとインデックスを作成（冪等）。
+    - get_connection(db_path) → 既存 DB への接続（スキーマは初期化しない。初回は init_schema を推奨）。
+  - ":memory:" を指定するとインメモリ DB を使用可能。
 
-- 監査ログ・トレーサビリティモジュール (src/kabusys/data/audit.py)
-  - シグナルから約定までを UUID 連鎖でトレース可能にする監査テーブルを追加。
-  - 主なテーブル:
-    - signal_events: 戦略が生成した全シグナル（棄却されたものも含む）を記録。decision と reason を保持。
-    - order_requests: 発注要求を冪等キー(order_request_id)付きで記録。order_type ごとのチェック制約（limit/stop/market に応じた価格必須制約）を追加。
-    - executions: 実際の約定情報を broker_execution_id を用いて記録（ユニーク、冪等性）。
-  - 監査ポリシーの設計反映:
-    - すべての TIMESTAMP を UTC で保存（init_audit_schema は SET TimeZone='UTC' を実行）。
-    - FK は ON DELETE RESTRICT（監査ログは削除しない前提）。
-    - created_at / updated_at を用いた更新トラッキング（アプリ側で updated_at を更新する運用を想定）。
-  - 監査用インデックス群を作成（status 検索、signal_id/日付/銘柄検索など）。
-  - init_audit_schema(conn) / init_audit_db(db_path) を提供:
-    - 既存の DuckDB 接続に監査テーブルを追加（冪等）。
-    - init_audit_db は専用 DB を初期化して接続を返す（親ディレクトリ自動作成、":memory:" サポート）。
+- 監査ログ（トレーサビリティ）モジュール (kabusys.data.audit)
+  - 監査用テーブルを定義し、シグナルから約定まで UUID 連鎖で完全にトレース可能にする設計を実装。
+  - テーブル:
+    - signal_events: 戦略が生成したシグナルログ（ステータス・理由を含む）
+    - order_requests: 発注要求（order_request_id を冪等キーとして扱う。limit/stop の価格チェックを含む）
+    - executions: 証券会社から返された約定ログ（broker_execution_id をユニーク冪等キーとして扱う）
+  - すべての TIMESTAMP は UTC（初期化時に SET TimeZone='UTC' を実行）。
+  - インデックスを定義し、クエリパターン（status、signal_id、日付・銘柄、broker_order_id など）に最適化。
+  - DB 初期化関数:
+    - init_audit_schema(conn): 既存の DuckDB 接続に監査テーブルを追加（冪等）。
+    - init_audit_db(db_path): 監査専用 DB を初期化して接続を返す（親ディレクトリ自動作成、UTC 設定）。
 
-- パッケージ構成
-  - 空のサブパッケージ/プレースホルダ: execution, strategy, monitoring（将来的な拡張のための初期プレースホルダ）。
+- 空のパッケージ初期化ファイルを追加
+  - src/kabusys/execution/__init__.py, src/kabusys/strategy/__init__.py, src/kabusys/data/__init__.py, src/kabusys/monitoring/__init__.py を追加（将来的な拡張ポイント）。
 
-### Changed
-- （初回リリースのため該当なし）
+### 変更
+- 初版のため該当なし。
 
-### Fixed
-- （初回リリースのため該当なし）
+### 修正
+- 初版のため該当なし。
 
-### Security
-- API 認証トークンの取り扱いに注意:
-  - J-Quants リフレッシュトークンは環境変数経由で供給され、コード内にハードコーディングしない設計。
-  - 自動 .env ロード機能は必要に応じて無効化可能（KABUSYS_DISABLE_AUTO_ENV_LOAD）。
+### 警告 / マイグレーション
+- DuckDB スキーマ初期化は冪等だが、スキーマ定義や制約に依存する既存データとの互換性は要確認。スキーマ変更時はバックアップ推奨。
+- .env 自動ロードはプロジェクトルートの検出に依存するため、パッケージを配布後に動作させる場合は KABUSYS_DISABLE_AUTO_ENV_LOAD を使用して明示的に設定をロードすることを推奨。
+
+### 既知の制約 / 留意点
+- J-Quants API のレート制限は固定間隔スロットリングで実現しているため、より細かいバースト制御や複数プロセス環境での共有制御は実装されていない（将来の改善点）。
+- get_id_token によるトークン取得中は allow_refresh=False により無限再帰を防止しているが、外部要因での認証失敗時の挙動はアプリ側でハンドリングする必要がある。
+- DuckDB の UNIQUE/INDEX の振る舞い（NULL の扱い等）に起因する運用上の注意があるため、broker_order_id 等を外部連携で使用する場合は設計を確認すること。
 
 ---
 
-注記:
-- 本リリースは内部設計文書（DataSchema.md, DataPlatform.md 等）に基づいた初期実装です。  
-- 次期リリースではストラテジー実装、発注送信ロジック、モニタリング/アラート、テストカバレッジの追加が想定されます。
+(補足) 初版では多くの基盤機能（環境設定、外部 API クライアント、永続化スキーマ、監査ログ）が実装されています。今後のリリースでは戦略実装、実際の発注実行の統合、モニタリング・通知機能（Slack 等）の実装やテスト追加、複数プロセス／分散実行を意識したレートリミッティングの強化などを予定しています。
