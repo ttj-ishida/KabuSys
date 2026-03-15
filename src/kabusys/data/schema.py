@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS prices_daily (
     code        VARCHAR       NOT NULL,
     open        DECIMAL(18,4) NOT NULL CHECK (open >= 0),
     high        DECIMAL(18,4) NOT NULL CHECK (high >= 0),
-    low         DECIMAL(18,4) NOT NULL CHECK (low >= 0),
+    low         DECIMAL(18,4) NOT NULL CHECK (low >= 0 AND low <= high),
     close       DECIMAL(18,4) NOT NULL CHECK (close >= 0),
     volume      BIGINT        NOT NULL CHECK (volume >= 0),
     turnover    DECIMAL(18,2)          CHECK (turnover >= 0),
@@ -171,11 +171,11 @@ CREATE TABLE IF NOT EXISTS ai_scores (
 
 _SIGNALS = """
 CREATE TABLE IF NOT EXISTS signals (
-    date    DATE        NOT NULL,
-    code    VARCHAR     NOT NULL,
-    side    VARCHAR     NOT NULL CHECK (side IN ('buy', 'sell')),
-    score   DOUBLE,
-    rank    INTEGER,
+    date         DATE        NOT NULL,
+    code         VARCHAR     NOT NULL,
+    side         VARCHAR     NOT NULL CHECK (side IN ('buy', 'sell')),
+    score        DOUBLE,
+    signal_rank  INTEGER,
     PRIMARY KEY (date, code, side)
 )
 """
@@ -217,7 +217,7 @@ CREATE TABLE IF NOT EXISTS orders (
     price       DECIMAL(18,4)          CHECK (price >= 0),
     status      VARCHAR       NOT NULL DEFAULT 'created'
                               CHECK (status IN ('created','sent','filled','cancelled','rejected')),
-    FOREIGN KEY (signal_id) REFERENCES signal_queue(signal_id)
+    FOREIGN KEY (signal_id) REFERENCES signal_queue(signal_id) ON DELETE SET NULL
 )
 """
 
@@ -229,7 +229,7 @@ CREATE TABLE IF NOT EXISTS trades (
     code        VARCHAR       NOT NULL,
     price       DECIMAL(18,4) NOT NULL CHECK (price >= 0),
     size        BIGINT        NOT NULL CHECK (size > 0),
-    FOREIGN KEY (order_id) REFERENCES orders(order_id)
+    FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE
 )
 """
 
@@ -262,8 +262,11 @@ _INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_prices_daily_code_date ON prices_daily(code, date)",
     "CREATE INDEX IF NOT EXISTS idx_features_code_date ON features(code, date)",
     "CREATE INDEX IF NOT EXISTS idx_ai_scores_code_date ON ai_scores(code, date)",
+    "CREATE INDEX IF NOT EXISTS idx_signals_code_date ON signals(code, date)",
     "CREATE INDEX IF NOT EXISTS idx_signal_queue_status ON signal_queue(status)",
     "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)",
+    "CREATE INDEX IF NOT EXISTS idx_orders_signal_id ON orders(signal_id)",
+    "CREATE INDEX IF NOT EXISTS idx_trades_order_id ON trades(order_id)",
     "CREATE INDEX IF NOT EXISTS idx_news_symbols_code ON news_symbols(code)",
 ]
 
