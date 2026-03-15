@@ -1,40 +1,42 @@
-# CHANGELOG
+# Changelog
 
-すべての重要な変更を記録します。  
-このプロジェクトは Keep a Changelog のフォーマットに従い、セマンティックバージョニング（SemVer）を採用します。
+すべての重要な変更はこのファイルに記録します。本プロジェクトは Keep a Changelog の慣例に従います。
+セマンティック バージョニング（https://semver.org/lang/ja/）を採用します。
 
-まとめ:
-- プロジェクト名: KabuSys（日本株自動売買システム）
-- 初期リリース（スケルトン）：0.1.0
+フォーマット:
+- Unreleased（未リリース） — 今後の変更をここに記載します。
+- 各リリースごとに日付を付けて記載します。
 
 ## [Unreleased]
-（未リリースの変更はここに記載します）
+
+（現在未登録の変更はありません）
 
 ## [0.1.0] - 2026-03-15
-初期リリース。プロジェクトの骨組み（パッケージ構成）を追加しました。
 
-### 追加 (Added)
-- ベースパッケージを追加
-  - `src/kabusys/__init__.py`
-    - パッケージドキュメンテーション文字列: "KabuSys - 日本株自動売買システム"
-    - バージョン識別子 `__version__ = "0.1.0"` を設定
-    - 外部公開シンボルとして `__all__ = ["data", "strategy", "execution", "monitoring"]` を定義
-- サブパッケージ（スケルトン）を追加
-  - `src/kabusys/data/__init__.py` — データ取得・管理用サブパッケージ（現時点ではプレースホルダ）
-  - `src/kabusys/strategy/__init__.py` — 売買戦略実装用サブパッケージ（プレースホルダ）
-  - `src/kabusys/execution/__init__.py` — 注文実行／ブローカー連携用サブパッケージ（プレースホルダ）
-  - `src/kabusys/monitoring/__init__.py` — 監視・ログ・メトリクス用サブパッケージ（プレースホルダ）
+初期リリース。
 
-### 変更 (Changed)
+### 追加
+- 新規パッケージ `kabusys` を作成。
+  - パッケージ説明: "KabuSys - 日本株自動売買システム"（トップレベル docstring）。
+  - バージョン情報: `__version__ = "0.1.0"` をトップレベルに定義。
+  - 公開モジュール指定: `__all__ = ["data", "strategy", "execution", "monitoring"]` を設定。
+- 以下のサブパッケージ骨格を追加（現時点では各サブパッケージの __init__.py は空ファイル、将来的な実装のためのプレースホルダ）:
+  - `kabusys.data` — 市場データの取得・管理を担うモジュールの想定場所。
+  - `kabusys.strategy` — 売買戦略（シグナル生成・バックテスト等）を実装する想定場所。
+  - `kabusys.execution` — 注文発行・約定管理・取引所とのインタフェースを担当する想定場所。
+  - `kabusys.monitoring` — ロギング、モニタリング、アラート等の運用監視を担う想定場所。
+
+### 変更
 - なし（初回リリースのため）
 
-### 修正 (Fixed)
+### 修正
 - なし
 
-### 削除 (Removed)
+### 削除
 - なし
 
-Notes / 今後の予定:
-- 各サブパッケージは現段階で __init__.py が空のスケルトンになっているため、データ取得、戦略ロジック、注文の送信、監視機能等の具体実装を追加する必要があります。
-- 次のマイナー/パッチリリースでは、各サブパッケージに具体的なモジュール（例: data.fetcher, strategy.simple, execution.adapter, monitoring.metrics など）を追加する予定です。
-- CHANGELOG はリリースごとに更新してください。
+---
+
+参考:
+- Keep a Changelog: https://keepachangelog.com/ja/1.0.0/
+- Semantic Versioning: https://semver.org/lang/ja/
