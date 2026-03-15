@@ -1,39 +1,46 @@
-# Changelog
+# CHANGELOG
 
-すべての重要な変更はこのファイルに記録します。本ドキュメントは「Keep a Changelog」ガイドラインに準拠しています。
-慣例に従い、セマンティック バージョニングを使用します。
+すべての重要な変更点はこのファイルに記録します。  
+フォーマットは「Keep a Changelog」（https://keepachangelog.com/ja/1.0.0/）の指針に従います。  
 
-フォーマット:
-- Unreleased: 開発中の変更
-- 各リリース: 日付付きで記載
+※ このファイルはコードベース（src/kabusys 以下）の現状から推測して作成しています。実装の詳細が追加された場合は適宜更新してください。
 
-## Unreleased
-（現時点では未リリースの変更はありません）
+## [Unreleased]
 
 ## [0.1.0] - 2026-03-15
-初回公開リリース
+初回リリース（骨格の作成）
 
-### 追加 (Added)
-- 基本パッケージ `kabusys` を追加。
-  - パッケージ説明: "KabuSys - 日本株自動売買システム"（src/kabusys/__init__.py のモジュールドックストリング）。
-  - パッケージバージョンを定義: `__version__ = "0.1.0"`.
-  - 公開対象モジュールを明示: `__all__ = ["data", "strategy", "execution", "monitoring"]`。
-- 以下のサブパッケージの雛形（空の __init__.py）を追加:
-  - `kabusys.data`（src/kabusys/data/__init__.py） — 市場データ取得・管理用の名前空間を想定。
-  - `kabusys.strategy`（src/kabusys/strategy/__init__.py） — 売買戦略実装用の名前空間を想定。
-  - `kabusys.execution`（src/kabusys/execution/__init__.py） — 注文発行・約定処理用の名前空間を想定。
-  - `kabusys.monitoring`（src/kabusys/monitoring/__init__.py） — ログ・監視・アラート用の名前空間を想定。
+### Added
+- パッケージ「KabuSys」を初期作成
+  - パッケージメタ情報を定義（src/kabusys/__init__.py）
+    - __version__ = "0.1.0"
+    - パブリックAPIを明示する __all__ = ["data", "strategy", "execution", "monitoring"]
+    - 簡潔なパッケージドキュメンテーション（モジュールドックストリング）
+- コアサブパッケージの骨格を追加（空パッケージとしての初期配置）
+  - src/kabusys/data/__init__.py
+  - src/kabusys/strategy/__init__.py
+  - src/kabusys/execution/__init__.py
+  - src/kabusys/monitoring/__init__.py
+- プロジェクトのソース配置を src/ 配下に構成（src-layout の採用）
 
-### 変更 (Changed)
-- 初回リリースのため該当なし。
+### Changed
+- （該当なし）初回リリースのため変更履歴なし
 
-### 修正 (Fixed)
-- 初回リリースのため該当なし。
+### Fixed
+- （該当なし）初回リリースのため修正履歴なし
 
-### 削除 (Removed)
-- 初回リリースのため該当なし。
+### Removed
+- （該当なし）
+
+### Security
+- （該当なし）
 
 ---
 
-注意:
-- 現状はパッケージ骨格（スケルトン構成）のみで、各サブパッケージは実装を含みません。今後のリリースで各モジュールに機能（データ取得、戦略ロジック、注文実行、監視・通知）を追加予定です。
+今後の予定例（今後のリリースで追加する想定の項目）
+- data: 株価データの取得/キャッシュ機構の実装
+- strategy: 取引戦略の基底クラスおよびサンプル戦略
+- execution: 注文送信・約定管理インターフェース
+- monitoring: ログ・メトリクス・監視ダッシュボード用のユーティリティ
+
+変更を加えた際は、本CHANGELOGも更新してください。
