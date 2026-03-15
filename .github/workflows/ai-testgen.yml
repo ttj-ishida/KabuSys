@@ -11,7 +11,10 @@ permissions:
 jobs:
   testgen:
 
-    if: github.event_name == 'pull_request'
+    # フォークPRはGITHUB_TOKENでpush不可のためスキップ
+    if: >
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
 
     runs-on: ubuntu-latest
 
@@ -22,7 +25,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
+          fetch-depth: 2
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -32,24 +36,25 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
-      - run: pip install openai
+      - name: Install deps
+        run: pip install -c constraints.txt openai
 
       - name: Generate tests
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL_TEST }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL_TEST || 'gpt-4o-mini' }}
         run: |
           python .github/scripts/ai_testgen.py
 
       - name: Commit tests
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "ai-testgen[bot]"
-          git config user.email "bot@example.com"
+          git config user.email "ai-testgen-bot@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}
           git add tests/test_generated.py
           git diff --cached --quiet && echo "no changes" && exit 0
-          git commit -m "AI generated tests [skip ci]"
-          git fetch origin "$HEAD_REF"
-          git rebase origin/"$HEAD_REF" || true
-          git push --force-with-lease origin HEAD:"$HEAD_REF"
+          git commit -m "Add AI generated tests for PR #${{ github.event.pull_request.number }} [skip ci]"
+          git push origin HEAD:"$HEAD_REF"
