@@ -237,9 +237,7 @@ class TestJQuantsClientMock:
 
         monkeypatch.setattr(jquants, "_request", fake_request)
         result = jquants.fetch_daily_quotes(id_token="dummy")
-        assert call_count["n"] >= 1   # 少なくとも1回はリクエスト
-        assert call_count["n"] <= 5   # 無限ループせず有限回で終了
-        assert len(result) < 100      # データが無限に蓄積されていない
+        assert call_count["n"] == 2   # 1回目取得 + 2回目で同一キー検出 → break
 
     def test_fetch_financial_statements(self, monkeypatch):
         """財務データを取得できることを確認。"""

@@ -8,7 +8,7 @@ import pytest
 
 # import target modules / functions
 from kabusys.config import _parse_env_line, _require, settings
-from kabusys.jquants import (
+from kabusys.data.jquants_client import (
     _to_float,
     _to_int,
     fetch_daily_quotes,
@@ -18,8 +18,7 @@ from kabusys.jquants import (
     save_financial_statements,
     save_market_calendar,
 )
-from kabusys.data.schema import init_schema, get_connection
-from kabusys.quality import (
+from kabusys.data.quality import (
     QualityIssue,
     check_missing_data,
     check_spike,
@@ -56,7 +55,7 @@ def test_parse_env_line_quoted_and_escapes():
     # single quotes with escaped sequences
     parsed2 = _parse_env_line("S='x\\'y\\nz'")
     # parser treats backslash + next char as literal; newline escape becomes 'n' here
-    assert parsed2 == ("S", "x'ynz") or parsed2 == ("S", "x'ynz")  # tolerant
+    assert parsed2 in (("S", "x'ynz"), ("S", "x'y\nz"))  # tolerant
 
 
 # -----------------------
@@ -87,8 +86,11 @@ def test_to_int(inp, exp):
 # jquants token cache
 # -----------------------
 def test_get_cached_token_and_force_refresh(monkeypatch):
+    # reset module-level cache to avoid contamination from other tests
+    monkeypatch.setattr("kabusys.data.jquants_client._ID_TOKEN_CACHE", None)
+
     # mock get_id_token to control returned token
-    with mock.patch("kabusys.jquants.get_id_token", autospec=True) as mock_get:
+    with mock.patch("kabusys.data.jquants_client.get_id_token", autospec=True) as mock_get:
         mock_get.side_effect = ["t1", "t2"]
         # first call -> uses cache, calls get_id_token once
         tok1 = _get_cached_token(force_refresh=False)
@@ -123,7 +125,7 @@ def test_fetch_daily_quotes_pagination(monkeypatch):
         else:
             return responses[1]
 
-    monkeypatch.setattr("kabusys.jquants._request", fake_request)
+    monkeypatch.setattr("kabusys.data.jquants_client._request", fake_request)
 
     res = fetch_daily_quotes(id_token="dummy", code="0001")
     assert isinstance(res, list)
@@ -132,12 +134,49 @@ def test_fetch_daily_quotes_pagination(monkeypatch):
     assert "2021-01-01" in dates and "2021-01-02" in dates
 
 
+_MINIMAL_DDL = [
+    """CREATE TABLE IF NOT EXISTS raw_prices (
+        date        DATE          NOT NULL,
+        code        VARCHAR       NOT NULL,
+        open        DECIMAL(18,4),
+        high        DECIMAL(18,4),
+        low         DECIMAL(18,4),
+        close       DECIMAL(18,4),
+        volume      BIGINT,
+        turnover    DECIMAL(18,2),
+        fetched_at  TIMESTAMP     NOT NULL DEFAULT current_timestamp,
+        PRIMARY KEY (date, code)
+    )""",
+    """CREATE TABLE IF NOT EXISTS raw_financials (
+        code            VARCHAR       NOT NULL,
+        report_date     DATE          NOT NULL,
+        period_type     VARCHAR       NOT NULL,
+        revenue         DECIMAL(20,4),
+        operating_profit DECIMAL(20,4),
+        net_income      DECIMAL(20,4),
+        eps             DECIMAL(18,4),
+        roe             DECIMAL(10,6),
+        fetched_at      TIMESTAMP     NOT NULL DEFAULT current_timestamp,
+        PRIMARY KEY (code, report_date, period_type)
+    )""",
+    """CREATE TABLE IF NOT EXISTS market_calendar (
+        date            DATE        NOT NULL PRIMARY KEY,
+        is_trading_day  BOOLEAN     NOT NULL,
+        is_half_day     BOOLEAN     NOT NULL DEFAULT false,
+        is_sq_day       BOOLEAN     NOT NULL DEFAULT false,
+        holiday_name    VARCHAR
+    )""",
+]
+
+
 # -----------------------
 # Save functions -> use DuckDB in-memory
 # -----------------------
 @pytest.fixture
 def db_conn():
-    conn = init_schema(":memory:")
+    conn = duckdb.connect(":memory:")
+    for ddl in _MINIMAL_DDL:
+        conn.execute(ddl)
     yield conn
     try:
         conn.close()
@@ -179,9 +218,11 @@ def test_save_financials_and_market_calendar(db_conn):
     assert cal_count == 2
     rows_cal = db_conn.execute("SELECT date, is_trading_day, is_half_day, is_sq_day, holiday_name FROM market_calendar ORDER BY date").fetchall()
     assert len(rows_cal) == 2
-    # check boolean flags: "0" => trading day True, "3" => half-day True
-    assert rows_cal[0][1] in (True, 1) and rows_cal[0][3] in (False, 0)
-    assert rows_cal[1][2] in (True, 1)
+    # rows sorted by date: rows_cal[0]=2021-12-30 (Division "3" half day), rows_cal[1]=2021-12-31 (Division "0" normal)
+    # check 2021-12-30 half day: is_trading_day=True, is_half_day=True, is_sq_day=False
+    assert rows_cal[0][1] in (True, 1) and rows_cal[0][2] in (True, 1) and rows_cal[0][3] in (False, 0)
+    # check 2021-12-31 normal day: is_trading_day=True, is_half_day=False
+    assert rows_cal[1][1] in (True, 1) and rows_cal[1][2] in (False, 0)
 
 
 # -----------------------
@@ -316,7 +357,7 @@ def test_get_id_token_uses_request(monkeypatch):
     monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "r_token")
 
     fake_ret = {"idToken": "ID123"}
-    with mock.patch("kabusys.jquants._request", autospec=True) as mock_req:
+    with mock.patch("kabusys.data.jquants_client._request", autospec=True) as mock_req:
         mock_req.return_value = fake_ret
         tok = get_id_token(None)
         assert tok == "ID123"
