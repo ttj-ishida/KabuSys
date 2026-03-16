@@ -1,101 +1,107 @@
 # Changelog
 
-すべての重要な変更はこのファイルに記録します。  
-フォーマットは「Keep a Changelog」に準拠し、セマンティックバージョニングを使用します。
+すべての変更は [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) の形式に従っています。
 
-## [0.1.0] - 2026-03-16
+現在のバージョン: 0.1.0 (初回リリース)
 
-### Added
-- パッケージ初期リリース "KabuSys"（src/kabusys）
-  - パッケージメタ情報と公開モジュールを定義（src/kabusys/__init__.py）。
-  - モジュール構成: data, strategy, execution, monitoring（現時点で一部はプレースホルダ）。
+## [0.1.0] - 初回リリース
+リリース日: 未設定
 
-- 環境設定管理（src/kabusys/config.py）
-  - .env ファイルまたは環境変数から設定を自動読み込み（プロジェクトルートは .git または pyproject.toml を基準に探索）。
-  - 自動読み込みを無効化するフラグ: KABUSYS_DISABLE_AUTO_ENV_LOAD。
-  - .env/.env.local の読み込み順・上書きルール実装（OS 環境変数は保護）。
-  - .env のパース機能: コメント、export プレフィックス、シングル/ダブルクォート、バックスラッシュエスケープをサポート。
-  - Settings クラスによる型付きプロパティ:
-    - J-Quants / kabu station / Slack / DB パス（DuckDB / SQLite）などの必須/省略可能設定取得。
-    - KABUSYS_ENV（development/paper_trading/live）と LOG_LEVEL の値検証。
-    - is_live / is_paper / is_dev のユーティリティプロパティ。
-  - 必須環境変数未設定時は ValueError を送出する _require ロジック。
+### 追加
+- パッケージ基本情報
+  - パッケージ名: kabusys、バージョン 0.1.0（src/kabusys/__init__.py）。
+  - パッケージ公開 API: data, strategy, execution, monitoring をエクスポート。
 
-- J-Quants API クライアント（src/kabusys/data/jquants_client.py）
-  - API 呼び出しの汎用リクエスト実装（JSON デコード、タイムアウト、ヘッダ設定）。
-  - レート制限実装: 固定間隔スロットリングで 120 req/min を尊重（_RateLimiter）。
-  - リトライ実装: 指数バックオフ、最大 3 回、408/429/5xx を対象。429 の場合は Retry-After ヘッダ優先。
-  - 401 エラー時の自動トークンリフレッシュ（1 回まで）と再試行処理。
-  - id_token のキャッシュ共有と強制リフレッシュ機構。
-  - データ取得関数:
-    - fetch_daily_quotes（株価日足、ページネーション対応）
-    - fetch_financial_statements（四半期財務、ページネーション対応）
-    - fetch_market_calendar（JPX マーケットカレンダー）
-  - DuckDB 保存関数（冪等）:
-    - save_daily_quotes, save_financial_statements, save_market_calendar
-    - すべて ON CONFLICT DO UPDATE を使用して重複を排除し更新を許容
-    - fetched_at を UTC タイムスタンプ（ISO 8601, "Z"）で記録
-  - 値変換ユーティリティ: _to_float, _to_int（厳格な int 変換ルールを含む）
+- 設定・環境変数管理 (src/kabusys/config.py)
+  - .env ファイルおよび環境変数からの設定読み込みを実装。
+  - 読み込み優先順位: OS 環境変数 > .env.local > .env。
+  - プロジェクトルート検出ロジックを実装（.git または pyproject.toml を基準に探索）。これにより CWD に依存せずパッケージ配布後も .env の自動読み込みが機能。
+  - 自動読み込み無効化フラグ: KABUSYS_DISABLE_AUTO_ENV_LOAD=1 によりテスト等で自動ロードを抑止可能。
+  - .env 行パーサを実装（コメント、export プレフィックス、シングル/ダブルクォート、エスケープ、インラインコメント処理に対応）。
+  - Settings クラスを提供し、以下の設定プロパティを公開:
+    - jquants_refresh_token (J-Quants リフレッシュトークン、必須)
+    - kabu_api_password / kabu_api_base_url
+    - slack_bot_token / slack_channel_id
+    - duckdb_path / sqlite_path（デフォルトパスを設定、Path 型で返す）
+    - env（development/paper_trading/live の検証）
+    - log_level（DEBUG/INFO/WARNING/ERROR/CRITICAL の検証）
+    - is_live / is_paper / is_dev の便宜プロパティ
+  - 必須環境変数が未設定の場合は ValueError を送出して明示的にエラーを通知。
 
-- DuckDB スキーマ定義・初期化（src/kabusys/data/schema.py）
-  - 3 層データモデル（Raw / Processed / Feature）と Execution 層を含む包括的な DDL を実装。
-  - Raw テーブル: raw_prices, raw_financials, raw_news, raw_executions 等。
-  - Processed テーブル: prices_daily, market_calendar, fundamentals, news_articles, news_symbols 等。
-  - Feature テーブル: features, ai_scores。
-  - Execution テーブル: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance。
-  - パフォーマンスを考慮したインデックス定義群。
-  - init_schema(db_path) による冪等な初期化（親ディレクトリ自動作成、:memory: サポート）。
-  - get_connection(db_path) による既存 DB への接続取得（スキーマ初期化は行わない）。
+- J-Quants API クライアント (src/kabusys/data/jquants_client.py)
+  - API ベース機能:
+    - 日次株価 (OHLCV)、財務データ（四半期 BS/PL）、JPX マーケットカレンダーを取得する fetch_* 関数を実装。
+    - ページネーション対応: pagination_key を利用して全ページを取得。
+    - レスポンス JSON のデコードとエラーハンドリングを実装。
+  - レート制限制御:
+    - 固定間隔スロットリング実装（120 req/min を遵守する _RateLimiter）。
+  - リトライ・認証ロジック:
+    - 指数バックオフによるリトライ（最大 3 回、408/429/5xx を対象）。
+    - 401 受信時は自動でリフレッシュトークンを使って ID トークンを再取得し 1 回リトライ（無限再帰を防ぐため allow_refresh 制御あり）。
+    - id_token キャッシュ（モジュールレベル）を導入し、ページネーション間でトークンを共有。
+  - データ保存ユーティリティ:
+    - DuckDB に対する冪等な保存関数 save_daily_quotes / save_financial_statements / save_market_calendar を実装（ON CONFLICT DO UPDATE を利用）。
+    - fetched_at を UTC で記録し、Look-ahead Bias 防止（いつデータを取得したかの追跡可能）。
+    - 型変換ユーティリティ _to_float / _to_int を実装（安全な変換ルール、空値・不正値を None に）。
 
-- ETL パイプライン（src/kabusys/data/pipeline.py）
-  - 日次 ETL のワークフローを実装（差分取得 → 保存 → 品質チェック）。
-  - 差分更新ロジック:
-    - 最終取得日からの自動算出（初回は J-Quants の最小データ日付を使用）
-    - backfill_days による再取得（デフォルト 3 日）で API の後出しを吸収
-  - 市場カレンダーの先読み（デフォルト 90 日）を実装し、営業日調整に利用
-  - ETLResult データクラスによる実行結果（取得件数、保存件数、品質問題、エラー等）の集約
-  - 個別ジョブ:
-    - run_prices_etl, run_financials_etl, run_calendar_etl（各々差分取得＋保存）
-  - run_daily_etl: カレンダー → 価格 → 財務 → 品質チェック の順で実行。各ステップは独立してエラー処理（1 ステップ失敗でも他は継続）する設計。
-  - 品質チェックの注入（run_quality_checks 引数）と spike_threshold の可変化。
+- DuckDB スキーマ定義と初期化 (src/kabusys/data/schema.py)
+  - DataPlatform の 3 層構造に基づくテーブル定義を実装:
+    - Raw Layer: raw_prices, raw_financials, raw_news, raw_executions
+    - Processed Layer: prices_daily, market_calendar, fundamentals, news_articles, news_symbols
+    - Feature Layer: features, ai_scores
+    - Execution Layer: signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
+  - 各テーブルに制約（PRIMARY KEY、CHECK 等）を付与。
+  - 頻出クエリ向けにインデックスを定義。
+  - init_schema(db_path) によりデータベースファイルの親ディレクトリを自動作成し、全テーブル・インデックスを冪等に作成して接続を返す。
+  - get_connection(db_path) により既存 DB へ接続可能（初期化は行わない旨を明示）。
 
-- 監査ログ（Audit）スキーマ（src/kabusys/data/audit.py）
-  - シグナル→発注要求→約定までトレース可能な監査テーブルを定義:
-    - signal_events, order_requests, executions
-  - 冪等キー（order_request_id / broker_execution_id 等）と厳密なチェック制約、FK（ON DELETE RESTRICT）を採用。
-  - init_audit_schema(conn) / init_audit_db(db_path) による初期化（UTC タイムゾーン固定）。
-  - 発注ロジックへ適用可能なステータス列と更新タイムスタンプ仕様。
+- データ ETL パイプライン (src/kabusys/data/pipeline.py)
+  - ETL の設計方針に沿った差分更新パイプラインを提供:
+    - 差分更新ロジック（DB の最終取得日から未取得範囲のみ取得、デフォルトのバックフィルは 3 日）。
+    - 市場カレンダーは lookahead（デフォルト 90 日）で先読みして営業日調整に利用。
+    - 各ステップは独立したエラーハンドリングで、1 ステップ失敗でも他ステップは継続（Fail-Fast ではない）。
+    - id_token を引数で注入可能にしてテスト容易性を確保。
+  - ETLResult dataclass を導入し、各 ETL 実行結果（取得数、保存数、品質問題、エラー概要）を返す。
+  - 個別ジョブ: run_prices_etl, run_financials_etl, run_calendar_etl を提供。
+  - 統合エントリ: run_daily_etl により順序付けられた ETL を実行（カレンダー → 株価 → 財務 → 品質チェック）。
 
-- データ品質チェックモジュール（src/kabusys/data/quality.py）
-  - QualityIssue データクラスで品質問題を表現（check_name, table, severity, detail, rows）。
-  - 実装済みチェック:
-    - 欠損データ検出（raw_prices の OHLC 欄）
-    - スパイク検出（前日比の変動率が閾値を超える場合、デフォルト閾値 50%）
-    - （設計に重複チェック、日付不整合検出も記載。現コードは主要チェックを実装中）
-  - DuckDB 上で効率的に SQL による検査を行い、サンプル行を返却。
+- 監査ログ（トレーサビリティ） (src/kabusys/data/audit.py)
+  - シグナルから約定までの完全なトレーサビリティを担保する監査テーブル群を実装:
+    - signal_events（戦略が生成した全シグナルを記録）
+    - order_requests（発注要求。order_request_id を冪等キーとして利用、各種チェック制約を実装）
+    - executions（実際の約定を記録。broker_execution_id を一意に保存）
+  - 全 TIMESTAMP を UTC で保存する方針（init_audit_schema は SET TimeZone='UTC' を実行）。
+  - ステータス列、エラーメッセージ、created_at/updated_at を持ち、監査用にデータを削除しない方針（ON DELETE RESTRICT 等）。
+  - init_audit_schema(conn) / init_audit_db(db_path) を提供し、既存接続へ監査テーブルを追加、または専用 DB を初期化。
 
-### Changed
-- 初回リリースのため該当なし。
+- データ品質チェック (src/kabusys/data/quality.py)
+  - QualityIssue dataclass を導入（チェック名、テーブル、重大度、詳細、問題レコードサンプル）。
+  - チェック実装（DuckDB 接続で SQL により効率的に実行）:
+    - 欠損データ検出 (check_missing_data): raw_prices の OHLC 欄の NULL を検出（volume は除外）。発見時は severity="error"。
+    - 異常値（スパイク）検出 (check_spike): LAG ウィンドウで前日比を計算し、閾値（デフォルト 50%）を超える急騰/急落を検出。問題のサンプルと件数を報告。
+  - 各チェックは QualityIssue のリストを返し、呼び出し元が重大度に応じて対処可能。
 
-### Fixed
-- 初回リリースのため該当なし。
+- モジュール構成
+  - 空のパッケージ初期化ファイルを配置（src/kabusys/data/__init__.py、src/kabusys/strategy/__init__.py、src/kabusys/execution/__init__.py 等） — 将来的な拡張点を確保。
 
-### Deprecated
-- 初回リリースのため該当なし。
+### 変更
+- 初回リリースのため変更履歴なし。
 
-### Removed
-- 初回リリースのため該当なし。
+### 修正
+- 初回リリースのため修正履歴なし。
 
-### Security
-- 初回リリースのため該当なし。
+### 非推奨
+- 初回リリースのため非推奨項目なし。
 
-Notes / 補足
-- J-Quants API 呼び出しに関する詳細（レート制限、リトライ、トークンリフレッシュ）は jquants_client に実装されており、運用時の安定性を重視しています。
-- DuckDB スキーマは冪等に作成されるため、既存データベースへの追加入力が容易です。監査ログは削除しない設計（トレーサビリティ重視）です。
-- .env の自動読み込みはプロジェクトルート検出に依存します。パッケージ配布後の環境やテスト環境では KABUSYS_DISABLE_AUTO_ENV_LOAD を設定して無効化してください。
+### 削除
+- 初回リリースのため削除履歴なし。
 
-今後の予定（例）
-- strategy / execution 層の具体実装（発注ロジックとブローカー連携）
-- 追加品質チェック（重複・未来日付など）の実装完了
-- CI/テスト用の ID トークンモックや API モックの整備
-- ドキュメント（DataSchema.md, DataPlatform.md 参照）の公開（現コードに設計意図を多数コメントとして含む）
+### セキュリティ
+- 初回リリースのためセキュリティ項目なし。
+
+---
+
+備考:
+- DuckDB スキーマや監査スキーマはすべて冪等（CREATE IF NOT EXISTS / ON CONFLICT / INDEX IF NOT EXISTS）で実装されており、既存データベースに対して安全に初期化を実行できます。
+- J-Quants クライアントは API レート制限遵守、指数バックオフ、トークン自動リフレッシュなどの堅牢化が施されていますが、本番環境では実際の API レスポンスやエッジケースの確認を推奨します。
+- .env の自動ロードはプロジェクトルート検出に依存するため、パッケージ配布後やテスト環境では KABUSYS_DISABLE_AUTO_ENV_LOAD を利用して明示的に制御可能です。
