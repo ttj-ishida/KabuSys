@@ -1,0 +1,78 @@
+=== COMMENT (id=4063248827) ===
+## AI Code Review
+
+以下は差分のレビュー結果です。観点ごとに指摘と提案をまとめました。
+
+バグ
+- トークンリフレッシュのスコープ\n  - _request で 401 を受けたときに get_id_token() で新しい id_token を取得しますが、そのトークンは当該 _request 呼び出しにだけ使われ、呼び出し元には伝播しません。結果として、呼び出し元が同じ古いトークンを使い続け、401→リフレッシュ→成功、の往復が頻発しうるため、無駄な /token/auth_refresh コールが増えます。
+  - 改善案: クライアントクラス化して id_token を内部にキャッシュし、401 一度で共有トークンを更新する。もしくは _request の戻り値を (data, used_token) にして呼び出し側で更新を反映する。
+- 429 の Retry-After を未考慮
+  - 429 時に指数バックオフしますが、サーバーが返す Retry-After ヘッダの指示を尊重していません。RFC 的にもベストプラクティスでは Retry-After を優先すべきです。
+  - 改善案: HTTPError の e.headers または e.hdrs から Retry-After を取り、指定があればそれに従って sleep。
+- 多スレッド時のレートリミット破りの可能性
+  - _RateLimiter はスレッドセーフではありません。複数スレッドから _request を呼ぶと last_called の更新が競合し、120 req/min を超える恐れがあります。
+  - 改善案: threading.Lock で wait() を保護する。もしくはトークンバケット方式へ変更。
+- JSON デコードエラー時のメッセージ不明瞭
+  - API が空ボディや非 JSON を返した場合（まれに 204/HTML エラーなど）、json.loads で例外が発生し、どのエンドポイント・レスポンスで失敗したのかが分かりにくい。
+  - 改善案: JSONDecodeError を捕捉して、path/HTTP ステータス/レスポンス抜粋を含む例外にラップして投げ直す。
+- DuckDB の ON CONFLICT 前提
+  - raw_prices/raw_financials/market_calendar に (date, code) 等の UNIQUE/PK 制約が存在しない場合、DuckDB の ON CONFLICT は失敗します。スキーマ側前提ですが、ここに暗黙依存している点は注意が必要です。
+  - 改善案: 初期化時に UNIQUE 制約の存在を検証するか、マイグレーションに明記する。
+- 小さなテストの懸念点
+  - tests/test_generated.py で builtins を import していますが直接参照していません（mock.patch で "builtins.open" の文字列参照）。不要インポートです。
+
+セキュリティ
+- トークンのログ出力\n  - 現状トークン文字列はログに出力していません。良いです。そのまま維持してください。
+- タイムアウト
+  - urlopen の timeout=30 は適切。任意に調整できるよう _request の引数に timeout を露出させると運用時に便利です。
+- ベース URL の固定\n  - _BASE_URL は https で固定されており良いです。プロキシ環境などが必要な場合、環境変数で上書き可能にする拡張余地はあります。
+
+可読性
+- 全体\n  - ドキュメンテーションと型ヒントが行き届いており読みやすいです。
+- コメントと実装の一致
+  - _RETRY_STATUS_CODES のコメントが「ネットワーク起因の 4xx + 5xx 系」となっていますが集合は {408, 429} と 5xx 全般のみです。コメントを実装に合わせて明確化するか、対象 4xx を増やすと齟齬が減ります。
+- 例外メッセージ
+  - RuntimeError の日本語メッセージは運用ログで分かりやすいです。一方で API パスやステータスコードなどの診断情報も含めるとさらに解析しやすくなります。
+
+設計
+- クライアントの状態管理
+  - 現状は関数群とグローバルのレートリミッタで構成。扱いやすい反面、トークンのライフサイクルやスレッドセーフな共有、接続再利用が難しくなります。
+  - 改善案:
+    - JQuantsClient クラスを導入し、id_token のキャッシュ、リフレッシュ、RateLimiter、HTTP セッション（後述）を一括管理。
+    - JWT の exp を読めるなら事前更新（例えば残り 60 秒未満なら更新）も可能。
+- ページネーションのストリーミング
+  - fetch_* が全件をメモリに載せます。データ量が多い場合にメモリ圧迫が起きます。
+  - 改善案: イテレータ・ジェネレータで 1 ページずつ yield し、セーバにストリーミング保存できる API も提供する。
+- 保存時のトランザクション境界\n  - executemany は便利ですが、大量行のときに明示トランザクション BEGIN/COMMIT を張ると高速かつ原子性を担保できます。
+  - 改善案: save_* の先頭で conn.execute("BEGIN")、最後に COMMIT、例外時に ROLLBACK。
+
+パフォーマンス
+- 接続再利用
+  - urllib.request はコネクションプーリングや keep-alive の扱いが限定的です。多数ページ/高頻度リクエストでは TLS/接続確立のオーバーヘッドが無視できなくなります。
+  - 改善案: requests.Session を使った実装に切替（外部依存を避ける必要があるなら urllib3 を直に使う、もしくは urllib の OpenerDirector を使って keep-alive を有効化）。
+- バックオフとジッタ
+  - 2^attempt 固定バックオフは良いですが、ジッタを加えると輻輳を避けやすいです。
+- 429 のバックオフ\n  - Retry-After 未考慮は前述。加えて 429 専用の上限増加（指数＋ヘッダ尊重）でレート制限回復を待つのが有効です。
+- 保存のバルク挿入
+  - executemany でも十分速いですが、更なる高速化が必要なら\n    - 一時テーブルに COPY/INSERT してマージ
+    - DuckDB の DataFrame 取り込み（from_df）や COPY FROM JSON を検討\n
+具体的な改善提案（抜粋）\n- RateLimiter のスレッドセーフ化
+  - クラスに threading.Lock を追加し、wait() をロック内で実行。
+- 429/Retry-After の尊重
+  - HTTPError 捕捉時に:
+    - if status == 429: retry_after = parse_retry_after(e.headers.get("Retry-After")); if retry_after: time.sleep(retry_after); で再試行。
+- トークン管理
+  - クライアントクラス化し、self._id_token を保持。_request 内で 401→refresh 成功時は self._id_token を更新。外部 API は id_token を引数に取らず内部トークンを使用。
+- JSON エラーの改善\n  - _do_call の戻りで json.loads を try/except JSONDecodeError で捕捉し、レスポンス先頭 200 文字程度を含めた RuntimeError を投げる。
+- トランザクション
+  - save_*:
+    - try: conn.execute("BEGIN"); executemany(...); conn.execute("COMMIT")
+    - except: conn.execute("ROLLBACK"); raise
+
+細かな指摘\n- _request の method 引数は "GET"/"POST" のみを想定しているようなので、その他が来たら ValueError にするなどバリデーションを入れておくと安全です。
+- Accept-Encoding: gzip を指定して圧縮レスポンスを許可すると帯域削減になります（urllib は Content-Encoding:gzip を自動解凍可能）。
+- fetched_at は秒精度固定ですが、必要に応じてミリ秒精度も検討できます。
+- tests/test_generated.py の builtins の import は不要です。削除可能です。
+
+総評\n- 全体として堅実な実装で、レート制限順守・リトライ・401 リフレッシュ・冪等な保存など基本要件が網羅されています。実運用での安定性と効率をさらに高めるには、トークンの共有管理、Retry-After の尊重、RateLimiter のスレッドセーフ化、HTTP セッションの再利用、保存時のトランザクション化を優先して対応することをおすすめします。
+Total comments: 5

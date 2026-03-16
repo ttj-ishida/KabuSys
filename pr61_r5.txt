@@ -1,0 +1,111 @@
+=== COMMENT (id=4063257339) ===
+## AI Code Review
+
+以下は差分に対するレビュー結果です。特に追加された jquants_client.py とドキュメント/テスト変更を中心に確認しました。
+
+総評\n- 大筋の方向性は良いです。レート制限、リトライ、401 時のトークン自動リフレッシュ、DuckDB への冪等 UPSERT、fetched_at による「いつ取得したか」の記録など、運用を見据えた実装になっています。
+- ただし、トークン更新の設計に起因する重大なバグ（ページネーション時に毎回 401→リフレッシュが発生しうる）があり、実運用ではスローダウン/Rate Limit 逼迫を招きます。あわせて API パラメータ名の整合性・Python バージョン表記・README の重複などいくつかの瑣末な不備も見受けられます。
+
+指摘事項（カテゴリ別）\n
+バグ
+- 401 リフレッシュが呼び出し側に反映されない\n  - _request 内で 401 受信時に get_id_token() を呼んで当該リクエストは成功させますが、呼び出し元（fetch_daily_quotes など）に「新しい id_token」を返していません。
+  - fetch_* 系はページネーションのたびに _request を新規に呼びますが、毎回「古い id_token」を渡し続けるため、ページごとに 401→リフレッシュが繰り返される可能性が高いです。大量ページで致命的な遅延と無駄なリフレッシュを引き起こします。
+  - 対応案（いずれか）\n    - クライアントクラスを導入して id_token を内部キャッシュし、401 リフレッシュ時にキャッシュを更新して以降の呼び出しでも新トークンを使う。
+    - _request がモジュール内キャッシュ（例: _ID_TOKEN_CACHE）を持ち、id_token 引数が None の場合はキャッシュを利用/更新する。fetch_* からは id_token を渡さず None にする。
+    - あるいは _request の返り値を (data, id_token) にして、fetch_* 内で保持・次ページに引き回す。
+- API クエリパラメータ名の不整合の可能性
+  - J-Quants の公式仕様では date_from/date_to（スネークケース）等が使われる箇所が多く、diff の dateFrom/dateTo（キャメル）や pagination_key のキー名が不正確な可能性があります。実機テスト/ドキュメント突合が必要です。
+  - 同様に markets/trading_calendar のパラメータ名（holidayDivision）が仕様と一致しているか再確認を推奨します。
+- fetched_at の更新ポリシー
+  - ON CONFLICT DO UPDATE で fetched_at を常に excluded に更新しています。バックフィルなどで同一キーを後日再取得すると「最初に知り得た時刻」を上書きしてしまい、Look-ahead Bias 対策としては不適切になる恐れがあります。
+  - 望ましいのは「最古」の fetched_at を保持する（LEAST で更新）か、履歴（複数行）で保持する設計です。DuckDB の ON CONFLICT DO UPDATE で既存行参照が可能か、または MERGE での書き方を確認ください。
+- Python バージョン表記の齟齬（README）\n  - コードは dict[str, Any] 等の PEP 585 型ヒントを使用しており、Python 3.9+ が必須です（from __future__ import annotations は 3.9 未満で PEP 585 を有効化しません）。README の「3.8+」は誤解を招くため「3.9+」に修正してください。
+- README のディレクトリ構成に audit.py が重複で4回記載されています。誤りと思われるので修正してください。
+- tests/test_generated.py
+  - import builtins が未使用です。削除してください。
+
+セキュリティ
+- トークンやパスワードをログに出さない設計で良いです。401 時のログにもトークンは含めていません。
+- _request の JSON デコード失敗時にレスポンス先頭 200 文字を例外メッセージに含めています。一般に機微情報は含まれないはずですが、API がエラー時にトークン等をエコーバックする可能性がゼロでないなら、ログ/例外への出力はより保守的に扱う（マスク/省略）と安心です。
+- ユーザーエージェント未設定のため、API 側でのトラフィック識別が困難です。headers["User-Agent"] = "kabusys/0.1.0 (+repo-url)" の追加を推奨します。
+
+可読性
+- _request の責務がやや肥大化しています。クライアントクラス化し、以下を内包すると追跡が容易です。
+  - id_token の状態管理（取得/更新）\n  - レートリミットとリトライポリシー
+  - ベース URL
+- save_* のカラムマッピングは良いですが、J-Quants のフィールド名とテーブル列名の対応を定数マップで明示化すると将来の変更に強くなります。
+- Market calendar の HolidayDivision マッピングは根拠コメント/出典リンクを追記しておくと保守しやすいです。
+- 例外メッセージは日本語で親切ですが、path/params の簡易情報（トークン抜き）も含めると調査性が上がります。
+
+設計
+- トークン管理
+  - 上述の通り「呼び出し間でトークンを引き継ぐ」仕組みが必須です。最小変更であればモジュール内キャッシュ + fetch_* からは id_token を省略の形が妥当です。将来的にはクラス化（JQuantsClient）を推奨します。
+- ストレージ/API の疎結合
+  - save_* 系は conn.executemany に直結しています。大量データ時の挿入戦略（チャンクサイズや COPY 経由、DataFrame 経由）を切り替えられるようオプション化しておくとスケール時に便利です。
+- 例外分類\n  - _request は最終的に RuntimeError を投げていますが、用途別に例外種別を分ける（JQAuthError, JQRateLimitError, JQServerError など）と上位でのリカバリ/通知が書きやすくなります。
+- 設定値の拡張
+  - ベース URL、タイムアウト、最大リトライ、レート（120 req/min）などを Settings から調整可能にすると環境差分や将来変更に追従しやすくなります。
+- スレッドセーフ\n  - _RateLimiter は現在スレッドセーフではありません（_last_called の更新にロック無し）。将来的に並列取得を想定するなら threading.Lock を導入してください。加えて固定間隔スロットリングにジッター（±10〜20%）を入れるとスパイクを均せます。
+
+パフォーマンス
+- ページネーション結果を全件メモリに保持（result.extend）→ 大量データでメモリを圧迫します。ストリーミング/ジェネレータで 1 ページずつ save_* に流し込むインターフェースを用意すると、大量取得でも安定します。
+- executemany の 1 回あたり件数をチャンク化（例: 5k〜20k 行）できるようにすると巨大バッチでの準備時間やメモリ消費を抑制できます。
+- リトライの指数バックオフにジッターを追加するとスパイク時の輻輳を緩和できます。
+
+具体的な改善提案（抜粋パッチ例）\n- トークンキャッシュ（最小修正案）\n
+  # モジュール先頭付近\n  _ID_TOKEN_CACHE: str | None = None
+
+  def _get_cached_token(force_refresh: bool = False) -> str:
+      global _ID_TOKEN_CACHE
+      if force_refresh or not _ID_TOKEN_CACHE:
+          _ID_TOKEN_CACHE = get_id_token()
+      return _ID_TOKEN_CACHE
+
+  def _request(..., id_token: str | None = None, ...):
+      ...
+      token = id_token or _get_cached_token()
+      ...
+      if status == 401 and allow_refresh and not _token_refreshed:
+          _get_cached_token(force_refresh=True)
+          token = _ID_TOKEN_CACHE
+          _token_refreshed = True
+          continue
+
+  # fetch_* は id_token を省略（呼び出し側にも渡させない）\n  def fetch_daily_quotes(id_token: str | None = None, ...):
+      ...
+      data = _request("/prices/daily_quotes", params=params, id_token=None)
+      ...
+
+- Python バージョンの明記\n  - README: 「前提: Python 3.9+」に修正。
+- fetched_at の扱い\n  - もし DuckDB の ON CONFLICT DO UPDATE で既存行参照が可能なら、例:
+    ON CONFLICT (...) DO UPDATE SET
+      fetched_at = CASE WHEN excluded.fetched_at < raw_prices.fetched_at
+                        THEN excluded.fetched_at ELSE raw_prices.fetched_at END
+  - できない場合は、「最初の取得時刻」を保持する別カラム（first_fetched_at）を新設して、更新時は LEAST ロジックをアプリ側で適用するか、履歴テーブルで保持する運用を検討してください。
+- ユーザーエージェントの追加
+  headers["User-Agent"] = f"kabusys/{__version__} (+https://...)"（__version__ が取得可能なら）\n- RateLimiter のロック
+
+  import threading
+  class _RateLimiter:
+      def __init__(...):
+          self._lock = threading.Lock()
+      def wait(self):
+          with self._lock:
+              elapsed = ...
+              ...
+
+- API パラメータ名の再確認\n  - 公式クライアント/ドキュメントに合わせて date_from/date_to など正しいキー名を使用。必要なら後方互換のために両方出すより、正しいものに一本化してください。
+
+ドキュメント/テスト
+- README
+  - Python 3.9+ に修正
+  - ディレクトリ構成の重複（audit.py x4）を修正
+  - jquants_client の利用例（取得→保存のワークフロー）を追記すると便利です\n- CHANGELOG
+  - Keep a Changelog 準拠の見出し/リンク書式は概ね OK。0.1.0 のセクションに jquants_client の追加記載があると親切です。
+- tests/test_generated.py
+  - 未使用 import の削除（builtins）\n  - jquants_client 用のユニットテスト（401 リフレッシュ、429 Retry-After、5xx バックオフ、レートリミットの最小間隔、save_* の UPSERT 挙動）を追加すると品質が上がります。urllib.request.urlopen をモックして応答を差し替える形が現実的です。
+
+まとめ\n- 実運用上、最優先で「トークン更新の呼び出し間引き継ぎ」を修正してください。これによりページネーション時の 401 ループ/無駄なリフレッシュを解消できます。
+- 併せて API パラメータ名の正確性確認・Python バージョン表記・README の誤記修正をお願いします。
+- 余力があれば、ストリーミング保存・例外分類・ユーザーエージェント追加・RateLimiter のスレッドセーフ化で堅牢性/可観測性/性能がさらに向上します。
+Total comments: 6

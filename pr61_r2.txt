@@ -1,0 +1,153 @@
+=== COMMENT (id=4063202734) ===
+## AI Code Review
+
+総評\n- 方向性は良いです。API クライアントとしての基本（レート制限、リトライ、401 時のリフレッシュ、ページネーション、DuckDB への冪等保存）を押さえています。
+- ただし、いくつかの実バグ/データ正確性の懸念、スレッド安全性、耐障害性、将来の拡張性に関する改善余地があります。
+- さらに、この PR では config モジュールの実装を変更していないのに tests/test_generated.py の期待仕様が変わっている箇所があり、CI 落ちのリスクが高いです。
+
+指摘（バグ）\n- market_calendar の HolidayDivision の比較\n  - r.get("HolidayDivision") が int の場合があり得ますが、現在は文字列リテラル "0"/"2"/"3" と比較しています。型不一致で全て False になり、is_trading_day 等が誤る可能性があります。
+  - 対応案:
+    - dv = str(r.get("HolidayDivision", "")) としてから比較する
+    - あるいは数値比較に統一する
+- 401 リフレッシュの「1回だけ」保証が実装されていない\n  - コメントでは「401 受信時はトークンを自動リフレッシュして 1 回リトライ」とありますが、コード上は attempt ごとに毎回リフレッシュが行われる可能性があります。無駄なリフレッシュや、トークン側のレート制限を踏む恐れがあります。
+  - 対応案: refreshed = False フラグを導入し、401 でのリフレッシュは 1 回のみに制限する。
+- JSON デコードエラー時のメッセージが不十分
+  - API が HTML/テキストを返した場合に json.loads が JSONDecodeError を投げますが、現在は捕捉されず、原因調査が難しいです。
+  - 対応案: JSONDecodeError を捕捉し、HTTP ステータス・先頭 N バイトのレスポンスボディをログに出してから RuntimeError で包んで投げる。
+- save_financial_statements のキー設計の妥当性
+  - ON CONFLICT (code, report_date, period_type) において period_type に TypeOfDocument を使っていますが、J-Quants の statements は「四半期種別（期/四半期）」や改訂/訂正の別、同一開示日の差分などを区別するフィールドが別にあります。TypeOfDocument だけだと衝突や上書きミスの可能性が高いです。
+  - 最低限、ユニーク性を満たすために code + DisclosedDate + TypeOfCurrentPeriod（あるいは CurrentPeriodEndDate）+ AmendmentFlag 等の組み合わせを検討してください。J-Quants の仕様に沿ってキー設計を見直すことを強く推奨します。
+- fetched_at の型整合性
+  - fetched_at を ISO 文字列（+00:00 付き）で挿入しています。DuckDB 側の列型が TIMESTAMP（タイムゾーンなし）の場合、パースに失敗するか、意図せぬ変換になります。TIMESTAMPTZ を使うか、UTC naive に正規化してから文字列化するなど、DB 列型と合わせてください。
+- save_* 系で不完全なレコードの混入
+  - 例えば code を str(r.get("Code", "")) として空文字を許しています。PRIMARY KEY に code を含むなら空文字は実質的に 1 銘柄として衝突します。不完全レコードは除外するか、必須フィールドが欠損しているデータはスキップ/ログ出力してください。
+
+セキュリティ
+- Authorization ヘッダやトークンをログに出していないのは良いです。
+- HTTP タイムアウトは設定済み（timeout=30）。ただし、DNS ハングや一部経路で長時間待たされる可能性はあるため、再試行の最大所要時間を設計決定しておくと安心です（総合タイムアウト）。
+- User-Agent を明示的に付けることを推奨します（どのクライアントかの識別、先方トラブルシュートに有用）。
+- リトライ時にレートリミットと指数バックオフが二重に効く形になっているため、攻撃的にはならない一方で遅延過多の可能性があります。最大待機時間・ジッタの導入などで平準化を。
+
+可読性
+- 全体的に読みやすく、docstring/コメントも適切です。
+- _RETRY_STATUS_CODES のコメントと実装の齟齬（「ネットワーク起因の 4xx + 5xx 系」→実装は {408, 429} と 5xx）があるのでコメントを正しくしてください。
+- _request 内の内部関数 _do_call は読みやすいですが、例外処理パスでのログに path, method, url を併記しておくと調査が楽です。
+- market_calendar の HolidayDivision の意味はコメントで明示されていて良いです。上記の型変換だけ直せばより堅牢になります。
+
+設計
+- RateLimiter はモジュールスコープの単一インスタンスで、スレッドセーフではありません。将来的に並列取得（マルチスレッド/非同期）を検討するなら Lock を入れるか、クライアントインスタンス内にレートリミッタを持たせる設計にすると安全です。
+- _request が認証更新（401 対応）まで担っているため、状態（id_token）を持つクライアントクラスにまとめると拡張しやすくなります（自動更新、token 共有、プロセス内再利用など）。
+- 取得関数が全件をリストに溜めてから返すため、大量データ時のメモリ使用量が大きくなります。イテレータ（yield）でストリーミングする API も用意しておくと柔軟です。保存もストリーミング/チャンク単位挿入に対応できると良いです。
+- save_financial_statements の数値を float に丸めていますが、金額や EPS は Decimal または整数（最小通貨単位）で扱う選択肢も検討してください（精度劣化回避）。
+
+パフォーマンス
+- レートリミット wait と指数バックオフ sleep が重なるため、リトライ時の遅延が大きくなりがちです。どちらかを優先（例えばリトライ時はレートリミットをスキップ、または backoff にジッタ・上限を設定）するとスループットを保ちやすいです。
+- DuckDB への大量挿入は executemany でも十分速いケースが多いですが、非常に大量の場合は以下の最適化を検討ください:
+  - 一時テーブルにまとめて挿入してから MERGE/INSERT ON CONFLICT
+  - DataFrame 経由で register と INSERT SELECT
+- fetch 系がページネーションのたびに都度 dict リストをマージしています。巨大件数時には生成・結合コストが効くので、yield ベースにして呼び出し側で処理する形だと無駄が減ります。
+
+改善提案（具体例）\n- 401 リフレッシュ 1 回制限\n  - for の外に refreshed = False を置き、401 で not refreshed のときだけ get_id_token()。以降は素通りで通常のリトライへ。
+- JSONDecodeError のハンドリング
+  - _do_call 内で body を読み、decode→json.loads を try/except して、先頭 200 バイト程度をログ出ししてから RuntimeError にラップ。
+- market_calendar の型安全
+  - dv = str(r.get("HolidayDivision", "")); is_trading = dv in {"0","2","3"}; is_half = dv == "3"; is_sq = dv == "2"
+- User-Agent の追加
+  - headers["User-Agent"] = f"kabusys/{app_version}" のように識別子を付ける。
+- settings へのトークン永続反映（任意）\n  - get_id_token を呼んだらキャッシュして再利用する仕組み（スレッドセーフに注意）。
+- backoff ジッタ
+  - wait = min(max_wait, (_RETRY_BACKOFF_BASE ** attempt)) + random.uniform(0, 0.5)
+
+tests/test_generated.py について
+- この PR では config 実装が変更されていないのに、テストの期待を以下のように変更しています。実装が追随していない場合は CI が落ちます。
+  - _find_project_root のマーカーを .git から pyproject.toml に変更した前提
+  - _parse_env_line のクォート/エスケープやコメントの扱いの細部
+  - ログ/警告メッセージ文字列（日本語文言）に依存したアサーション
+- 提案
+  - 実装が pyproject.toml を探す仕様になっていないなら、テストを .git/.hg 等も許容するか、実装側を合わせてください。
+  - 警告メッセージは文言全体ではなく、警告種別（UserWarning）や一意なサブストリング、あるいは warn コール回数等でマッチさせ、i18n 変更に強くしましょう。
+  - builtins の import が未使用です。削除してください。
+  - settings がシングルトン/キャッシュする設計の場合、monkeypatch 後に同一インスタンスが更新反映されずテストが不安定になることがあります。必要なら Settings の再生成やキャッシュクリアのヘルパを用意してテストで使えるようにしてください。
+  - _parse_env_line の仕様を明確にドキュメント化し、テストはその仕様に忠実に保ちましょう（特に「#」のコメント判定ルールやエスケープの扱い）。
+
+小さな指摘/微修正案
+- _RETRY_STATUS_CODES のコメント修正、あるいは 408/429 以外の一部 4xx（例えば 425/499 等）を対象にするかの整理。
+- タイムアウト 30 秒は OK ですが、必要に応じて settings で可変に。
+- _to_float/_to_int が "NaN" や "inf" を受けた場合の扱い（float("nan") は DB へはじかれることがある）を決め、None を返すほうが扱いやすいです。
+- ログレベル: fetch_* の「n レコード取得」は INFO だとログが多くなりがちです。運用のログ方針に応じて DEBUG でもよいかもしれません。
+- リクエストヘッダに Accept: application/json は良いです。サーバが gzip を返す場合に備え Accept-Encoding: gzip を明示しても良いでしょう（urllib は自動ハンドルしないことがあります）。
+
+まとめ\n- jquants_client.py は大枠良くできていますが、上記のバグ（特に HolidayDivision の型、401 リフレッシュ回数、financial statements のキー設計、fetched_at 型整合）と、スレッド安全性・エラーメッセージの改善を優先して修正してください。
+- tests/test_generated.py の変更は、実装が追随していないと落ちる内容が含まれています。実装とテストの整合性を再確認のうえ、過度に文言依存しないテストにすることをおすすめします。
+=== COMMENT (id=4063231163) ===
+## AI Code Review
+
+以下、変更内容に対するレビューです。観点別に指摘と改善提案をまとめます。
+
+バグ
+- fetched_at のタイムゾーン情報が欠落
+  - save_daily_quotes/save_financial_statements で fetched_at を UTC として記録する方針ですが、strftime("%Y-%m-%dT%H:%M:%S") でタイムゾーンを落としており、DB 側でローカル時刻として解釈される恐れがあります。
+  - 対応案: datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z") のように UTC を明示する、もしくは DuckDB の TIMESTAMPTZ に直接渡す。
+- ON CONFLICT の主キー相当カラムが None/空文字になり得る
+  - raw_prices: (date, code) のどちらかが None/空だと冪等性が壊れます。
+  - raw_financials: (code, report_date, period_type) に None が含まれると一意制約の衝突にならず重複行が発生し得ます（多くのDBで UNIQUE における NULL は互いに異なる値として扱われる）。period_type が空文字/None で揺れると特に危険です。
+  - market_calendar: date が None の場合も同様。
+  - 対応案: これらキーが欠損している行は挿入スキップ、もしくは正規化（例: period_type の None/空文字を "UNKNOWN" へ）。また、テーブル側に UNIQUE 制約の存在を前提としているので、マイグレーションで UNIQUE(date, code) 等を必ず張ることを確認（コメント/ドキュメントに注意書き推奨）。
+- HTTP 401 リフレッシュ後のトークンの扱い\n  - _request は 401 で get_id_token() を呼んで内部で1回だけ再試行しますが、呼び出し元には新しい id_token を返しません。呼び出し元が常に古いトークンを使い続けると、毎回 401→リフレッシュが発生し得ます。
+  - 対応案: クライアントがトークンを保持する設計（後述のクラス化）にするか、_request の戻り値に新トークンを合せて返す仕組み/コールバックで更新させる。
+- JSON デコード例外未処理
+  - API が 204/空応答や HTML エラーページを返した場合、json.loads が例外になり、そのまま外へ漏れます。
+  - 対応案: JSONDecodeError を捕捉してリトライ対象にする/より意味のある例外へラップ。
+- リトライの最終試行でも sleep している\n  - 現状 attempt=(_MAX_RETRIES-1) でもスリープします。ユーザ体験上は無駄な待ち。
+  - 対応案: 最終試行では sleep しないよう条件分岐。
+- コメントの不整合
+  - _RETRY_STATUS_CODES のコメントに「4xx + 5xx 系」とありますが、実装では 408/429 のみで 5xx は別分岐。コメントを実装に合わせて修正を。
+
+セキュリティ
+- 機密情報のログ出力は避けられており良いです（401時のログもパスのみ）。
+- urllib.request はデフォルトで証明書検証あり。追加対策は不要ですが、プロキシ/企業CA 等が必要な場合に備え、オプション化の余地あり。
+- エラー時に urllib.error.HTTPError をそのまま raise しているため、外側のログに URL（クエリ含む）が出る可能性があります。必要に応じて、外向けにはサニタイズした例外へラップするのが安全。
+
+可読性
+- 全体的に docstring・型ヒントが行き届いており読みやすいです。
+- 改善提案
+  - _request の責務（レート制限・リトライ・リフレッシュ）を持つなら、実体をクラス化して状態（id_token/refresh_token/レートリミット）を内包すると API が分かりやすくなります。
+  - エンドポイントやクエリキー（dateFrom/dateTo 等）は定数化しておくと将来の変更時に楽です。
+  - _RETRY_STATUS_CODES のコメント修正（上記）。
+
+設計
+- 単関数群での構成は最小限で悪くないですが、以下の理由からクラス化を推奨します。
+  - id_token の自動リフレッシュ結果を次回以降に反映（メンバとして保持）。
+  - レートリミットをインスタンスに閉じる（スレッドセーフ化もしやすい）。
+  - 設定（タイムアウト、バックオフ、ベースURL）を DI できる。
+- _RateLimiter はスレッドセーフではありません。将来的に並列化するならロックや非同期対応、またはトークンバケット方式の導入を検討。
+- DB 側の制約依存が強い\n  - ON CONFLICT を使う前提で、対象列に UNIQUE 制約があることを明記・検証（起動時に PRAGMA table_info/duckdb_catalog で確認して warn なども可）。
+  - トランザクション境界の明示: 大量挿入時は begin/commit を呼ぶか、呼び出し側に責務を明確化（docstring に記載）。
+- fetched_at の取り扱い\n  - ページング中の各ページ取得時刻を厳密に残したいなら fetch と save を結合し、ページ単位で fetched_at を付ける/保存する設計にする。
+- エラーの表面化\n  - _request は最大リトライ超過時に RuntimeError を投げますが、途中で非リトライ HTTPError はそのまま漏れます。公開インターフェイスとしては例外型を統一（例えば JQuantsApiError）すると扱いやすいです。
+
+パフォーマンス
+- executemany は小～中規模では十分ですが、数十万件超だとオーバーヘッドが目立ちます。
+  - 対応案: チャンク分割（例: 10k 行ごと）や、DuckDB の COPY FROM、あるいは pandas/pyarrow 経由で一括投入（conn.register + INSERT SELECT）を検討。
+- レートリミットは固定間隔スロットリングのため、120 req/min の枠内でもバーストできません。必要であればトークンバケット方式＋ジッター付きバックオフでスループットと衝突回避を両立可能。
+- バックオフにジッターがないため同時実行時に同調しやすいです。ランダムジッター導入を推奨。
+
+細かな指摘・改善提案
+- get_id_token のリクエストボディキー "refreshtoken"
+  - J-Quants の仕様が "refreshtoken" or "refreshToken" かは実装依存です。念のためドキュメントで確認し、相違があれば修正/回帰テスト追加。
+- _to_int が "1.0" のような文字列に対して None を返します。データ仕様上あり得ないなら問題なしですが、許容したいなら int(float(value)) などのフォールバックを検討。
+- _request の method が GET のときに json_body が渡された場合、data を付けてしまう可能性があり得ます（現行呼び出しでは使っていない前提）。assertion で防御するか、GET のときは json_body を無視する。
+- HTTP タイムアウト（30秒）・ベースURL・リトライ回数を settings で外出しできるようにすると運用が楽。
+- ログ
+  - fetch_* のログは総件数のみですが、ページ数や期間、コードなども debug レベルで出せるとトラブルシュートが容易。
+- テスト（別ファイル変更）\n  - tests/test_generated.py に import builtins が未使用のままです。削除を推奨。
+  - テストが .env ロードの警告文に依存しているため、メッセージを変更する場合は揺れやすいです。警告カテゴリや一部キーワードのみにマッチさせると堅牢になります。
+
+まとめ（優先度高から）\n1) fetched_at に UTC を明示（Z 付き ISO8601 など）し、DB 型も TIMESTAMPTZ 相当にする。
+2) ON CONFLICT キーの欠損・不正データ行をスキップ/正規化し、テーブルの UNIQUE 制約を明文化。
+3) トークン自動リフレッシュ後の新トークンを次回以降に反映できる設計（クライアントクラス化）にする。
+4) JSONDecodeError の扱いと例外型の統一、リトライの最終スリープ抑止、バックオフにジッター追加。
+5) 大量データへの挿入最適化（チャンク化 or Arrow 経由）、レートリミットの改善（必要に応じて）。
+
+現状でも最小要件は概ね満たしていますが、上記を反映すると堅牢性・保守性・運用性が一段上がると思います。
+Total comments: 3

@@ -1,0 +1,251 @@
+=== COMMENT ===
+## AI Code Review
+
+以下、観点ごとにレビューします。結論から言うと、全体の方向性はよいですが、実運用での安定性に関わるバグ・設計課題がいくつかあります。特に認証と HTTP メソッド、カレンダーの区分解釈、DuckDB への UPSERT 互換性は修正を推奨します。
+
+バグ
+- 認証メソッド/ドキュメント不整合
+  - get_id_token は _request("/token/auth_refresh", params=…) を呼んでいますが、現行の J-Quants v1 API は POST で refreshtoken を JSON ボディに載せる想定です（GET クエリで動かない可能性が高い）。
+  - _request は GET 固定の実装で、POST が打てない。→ 認証は失敗し得ます。
+  - 対応案: _request に method と data を受け取り、POST を実装するか、専用の _post_request を追加してください。
+- id_token の自動取得の未実装
+  - _request の docstring に「id_token 省略時は refresh_token から自動取得」とありますが、実装されていません。→ ドキュメントと実装が食い違い。
+  - 対応案: id_token が None の場合 settings.jquants_refresh_token から get_id_token() を呼ぶロジックを実装するか、docstring を修正する。
+- 401 対応の欠如
+  - id_token の有効期限切れ時（HTTP 401）に refresh_token からの再取得＋リトライが無い。→ 長期運用で死にやすい。
+  - 対応案: HTTP 401 を受けたら 1 回だけ id_token をリフレッシュしてリトライ。
+- マーケットカレンダーの区分解釈の可能な誤り\n  - is_trading_day を HolidayDivision == "0" のみ True にしていますが、半日("3")、SQ("2") は通常「取引あり」の日です。現状だと半日営業日や SQ 日が非営業日として扱われます。
+  - 対応案: is_trading_day = HolidayDivision in {"0","2","3"}（定義は要ドキュメント確認）。is_half_day, is_sq_day の付与は現状のままで OK。
+- DuckDB の INSERT OR REPLACE 互換性リスク
+  - DuckDB のバージョンによっては INSERT OR REPLACE のサポート／挙動が異なることがあります（SQLite 互換のつもりで書くと刺さることがある）。運用環境の DuckDB バージョンで互換を要確認。
+  - 安全策: MERGE INTO もしくは INSERT … ON CONFLICT DO UPDATE を使う（DuckDB 0.9+）。MERGE のほうが無難。
+- データ型の不整合の可能性
+  - Volume（出来高）や TurnoverValue（売買代金）は本来整数です。_to_float で float にして保存すると、DuckDB 側が BIGINT の場合に型不一致や不要なキャストが発生します。
+  - 対応案: _to_int を用意して整数フィールドは int に。
+- 小さな不具合/不整合
+  - _RateLimiter の docstring が「トークンバケット方式」とありますが、実装は固定間隔のスロットリングです（トークンバケットではない）。→ ドキュメント修正か実装変更。
+  - get_id_token 内の url 変数が未使用。
+  - 未使用 import: Path, timedelta を import していますが未使用。
+
+セキュリティ
+- トークンのログ混入は現状回避されており良いです。
+- 攻撃耐性
+  - 429/5xx のリトライは OK。ただし 408（Request Timeout）等の一部 4xx もネットワーク越しでは再試行が有効な場合があり、再試行対象に含めると堅牢性が上がります。
+  - SSL 検証は urllib のデフォルトで有効ですが、明示の検証設定や User-Agent ヘッダの付与も（稀に） API 側で推奨されます。
+- 認証の自動更新（401 時の refresh）を入れると運用の安定性が大きく向上。
+
+可読性
+- ドキュメントと実装の不一致（id_token 自動取得、RateLimiter 方式）は修正推奨。
+- パラメータ組み立てが各関数に重複しているので、小さなヘルパーに切り出すとスッキリします。
+- 例外メッセージに URL だけでなくクエリ（機密を除く）や attempt 回数も含めると調査が楽。
+- ロガーのメッセージは十分に情報量があり良いです。
+
+設計
+- HTTP 層の抽象化\n  - method, headers, data（JSON ボディ）の指定を含む汎用関数にし、GET/POST/再認証（401）/リトライ/レート制限を一箇所に集約するのがおすすめです。
+  - requests.Session の採用でコネクションプールとタイムアウト制御が容易になります（urllib でも可能ですが記述量が増えがち）。
+- クライアントの状態管理
+  - JQuantsClient クラス化し、id_token・refresh_token を保持、401 時の自動再認証と RateLimiter を内包させると利用側が楽になります。
+- ページネーション
+  - いまは全件リストに貯めて返す設計。大量件数時のメモリ使用が増えるため、イテレータ（yield）で逐次的に流せる API も用意するとスケールしやすいです（保存関数もストリーミング対応可）。
+- スキーマ・UPSERT
+  - DuckDB 側の PK/UK に依存する UPSERT は、コード側にもキー定義（コメントでも可）を明示すると保守性が上がります。MERGE を採用する場合はキー項目をコード上にも表現できる。
+
+パフォーマンス
+- RateLimiter は単純な最小間隔スリープで、シングルスレッドなら十分。並列実行を想定する場合はスレッドセーフ化（ロック）やプロセス間共有の設計が必要です。
+- HTTP コネクション再利用のために requests.Session を使うと、ページネーションでの多数リクエストが高速化します。
+- DuckDB への投入
+  - 大量投入時は executemany でも十分速いことが多いですが、さらに高速化したい場合は pandas/pyarrow 経由の COPY/INSERT SELECT、あるいは duckdb.register + SQL INSERT SELECT のほうが伸びます。
+
+修正提案（抜粋コード）\n- _request を汎用化（GET/POST、401 自動リフレッシュ、再試行拡張）\n
+  def _request(path: str,
+               params: dict[str, str] | None = None,
+               id_token: str | None = None,
+               method: str = "GET",
+               json_body: dict[str, Any] | None = None) -> Any:
+      url = _BASE_URL + path
+      if params:
+          url += "?" + urllib.parse.urlencode(params)
+
+      headers = {"Accept": "application/json"}
+      data_bytes = None
+      if json_body is not None:
+          headers["Content-Type"] = "application/json"
+          data_bytes = json.dumps(json_body).encode("utf-8")
+
+      def do_call(token: str | None):
+          h = dict(headers)
+          if token:
+              h["Authorization"] = f"Bearer {token}"
+          req = urllib.request.Request(url, headers=h, method=method, data=data_bytes)
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              return json.loads(resp.read().decode("utf-8"))
+
+      last_exc: Exception | None = None
+      token = id_token
+      for attempt in range(_MAX_RETRIES):
+          _rate_limiter.wait()
+          try:
+              return do_call(token)
+          except urllib.error.HTTPError as e:
+              status = e.code
+              # 401 -> refresh once (only if settings has refresh token)
+              if status == 401 and settings.jquants_refresh_token:
+                  try:
+                      token = get_id_token()
+                      continue  # retry immediately with refreshed token
+                  except Exception as re:
+                      last_exc = re
+              if status in (408, 429) or status >= 500:
+                  wait = _RETRY_BACKOFF_BASE ** attempt
+                  logger.warning("HTTP %d on %s, retry %d/%d in %.1fs",
+                                 status, path, attempt + 1, _MAX_RETRIES, wait)
+                  time.sleep(wait)
+                  last_exc = e
+                  continue
+              raise
+          except (urllib.error.URLError, OSError) as e:
+              wait = _RETRY_BACKOFF_BASE ** attempt
+              logger.warning("Network error on %s, retry %d/%d in %.1fs: %s",
+                             path, attempt + 1, _MAX_RETRIES, wait, e)
+              time.sleep(wait)
+              last_exc = e
+      raise RuntimeError(f"J-Quants API リクエスト失敗 ({_MAX_RETRIES} 回リトライ済み): {path}") from last_exc
+
+- get_id_token を POST 化\n
+  def get_id_token(refresh_token: str | None = None) -> str:
+      token = refresh_token or settings.jquants_refresh_token
+      if not token:
+          raise ValueError("refresh_token が指定されていません")
+      data = _request("/token/auth_refresh",
+                      method="POST",
+                      json_body={"refreshtoken": token})
+      return data["idToken"]
+
+- マーケットカレンダーのマッピング修正（要仕様確認のうえ）\n
+  rows = [
+      (
+          r.get("Date"),
+          r.get("HolidayDivision") in {"0", "2", "3"},  # 取引あり（全日/半日/SQ）とみなす\n          r.get("HolidayDivision") == "3",
+          r.get("HolidayDivision") == "2",
+          r.get("HolidayName") or None,
+      )
+      for r in records
+  ]
+
+- 型変換の明確化\n
+  def _to_int(value: Any) -> int | None:
+      if value in (None, ""):
+          return None
+      try:
+          return int(value)
+      except (ValueError, TypeError):
+          return None
+
+  # 例: 日足保存で Volume/Turnover は int
+  _to_int(r.get("Volume")), _to_int(r.get("TurnoverValue"))
+
+- fetched_at のタイムゾーン明示（Z 付きにする）\n
+  fetched_at = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+
+- 代替 UPSERT（DuckDB 0.9+ の MERGE 例。実テーブルの主キーに合わせて調整）\n
+  conn.executemany(
+      """
+      MERGE INTO raw_prices t
+      USING (SELECT ? AS date, ? AS code, ? AS open, ? AS high, ? AS low, ? AS close, ? AS volume, ? AS turnover, ? AS fetched_at) s
+      ON t.date = s.date AND t.code = s.code
+      WHEN MATCHED THEN UPDATE SET
+          open = s.open, high = s.high, low = s.low, close = s.close,
+          volume = s.volume, turnover = s.turnover, fetched_at = s.fetched_at
+      WHEN NOT MATCHED THEN INSERT (date, code, open, high, low, close, volume, turnover, fetched_at)
+      VALUES (s.date, s.code, s.open, s.high, s.low, s.close, s.volume, s.turnover, s.fetched_at)
+      """,
+      rows,
+  )
+
+その他の提案（任意）\n- requests + Session への移行で接続再利用とコード簡素化ができます。
+- ページネーションはジェネレータ版 fetch_xxx_iter を提供し、保存関数で逐次 INSERT できるようにするとメモリ効率が向上します。
+- 並列取得を視野に入れるなら _RateLimiter をスレッドセーフに（lock で _last_called を保護）。
+
+総評\n- 方針（レート制限、リトライ、fetched_at 記録、冪等）は非常に良いです。上記のバグ（特に認証の POST 化、401 自動リフレッシュ）と型/カレンダー解釈/UPSERT の互換性を修正できれば、実運用に耐える堅牢なクライアントになります。
+=== COMMENT ===
+## AI Code Review
+
+総評\n- 方向性は良いです。API クライアントとしての基本（レート制限、リトライ、401 時のリフレッシュ、ページネーション、DuckDB への冪等保存）を押さえています。
+- ただし、いくつかの実バグ/データ正確性の懸念、スレッド安全性、耐障害性、将来の拡張性に関する改善余地があります。
+- さらに、この PR では config モジュールの実装を変更していないのに tests/test_generated.py の期待仕様が変わっている箇所があり、CI 落ちのリスクが高いです。
+
+指摘（バグ）\n- market_calendar の HolidayDivision の比較\n  - r.get("HolidayDivision") が int の場合があり得ますが、現在は文字列リテラル "0"/"2"/"3" と比較しています。型不一致で全て False になり、is_trading_day 等が誤る可能性があります。
+  - 対応案:
+    - dv = str(r.get("HolidayDivision", "")) としてから比較する
+    - あるいは数値比較に統一する
+- 401 リフレッシュの「1回だけ」保証が実装されていない\n  - コメントでは「401 受信時はトークンを自動リフレッシュして 1 回リトライ」とありますが、コード上は attempt ごとに毎回リフレッシュが行われる可能性があります。無駄なリフレッシュや、トークン側のレート制限を踏む恐れがあります。
+  - 対応案: refreshed = False フラグを導入し、401 でのリフレッシュは 1 回のみに制限する。
+- JSON デコードエラー時のメッセージが不十分
+  - API が HTML/テキストを返した場合に json.loads が JSONDecodeError を投げますが、現在は捕捉されず、原因調査が難しいです。
+  - 対応案: JSONDecodeError を捕捉し、HTTP ステータス・先頭 N バイトのレスポンスボディをログに出してから RuntimeError で包んで投げる。
+- save_financial_statements のキー設計の妥当性
+  - ON CONFLICT (code, report_date, period_type) において period_type に TypeOfDocument を使っていますが、J-Quants の statements は「四半期種別（期/四半期）」や改訂/訂正の別、同一開示日の差分などを区別するフィールドが別にあります。TypeOfDocument だけだと衝突や上書きミスの可能性が高いです。
+  - 最低限、ユニーク性を満たすために code + DisclosedDate + TypeOfCurrentPeriod（あるいは CurrentPeriodEndDate）+ AmendmentFlag 等の組み合わせを検討してください。J-Quants の仕様に沿ってキー設計を見直すことを強く推奨します。
+- fetched_at の型整合性
+  - fetched_at を ISO 文字列（+00:00 付き）で挿入しています。DuckDB 側の列型が TIMESTAMP（タイムゾーンなし）の場合、パースに失敗するか、意図せぬ変換になります。TIMESTAMPTZ を使うか、UTC naive に正規化してから文字列化するなど、DB 列型と合わせてください。
+- save_* 系で不完全なレコードの混入
+  - 例えば code を str(r.get("Code", "")) として空文字を許しています。PRIMARY KEY に code を含むなら空文字は実質的に 1 銘柄として衝突します。不完全レコードは除外するか、必須フィールドが欠損しているデータはスキップ/ログ出力してください。
+
+セキュリティ
+- Authorization ヘッダやトークンをログに出していないのは良いです。
+- HTTP タイムアウトは設定済み（timeout=30）。ただし、DNS ハングや一部経路で長時間待たされる可能性はあるため、再試行の最大所要時間を設計決定しておくと安心です（総合タイムアウト）。
+- User-Agent を明示的に付けることを推奨します（どのクライアントかの識別、先方トラブルシュートに有用）。
+- リトライ時にレートリミットと指数バックオフが二重に効く形になっているため、攻撃的にはならない一方で遅延過多の可能性があります。最大待機時間・ジッタの導入などで平準化を。
+
+可読性
+- 全体的に読みやすく、docstring/コメントも適切です。
+- _RETRY_STATUS_CODES のコメントと実装の齟齬（「ネットワーク起因の 4xx + 5xx 系」→実装は {408, 429} と 5xx）があるのでコメントを正しくしてください。
+- _request 内の内部関数 _do_call は読みやすいですが、例外処理パスでのログに path, method, url を併記しておくと調査が楽です。
+- market_calendar の HolidayDivision の意味はコメントで明示されていて良いです。上記の型変換だけ直せばより堅牢になります。
+
+設計
+- RateLimiter はモジュールスコープの単一インスタンスで、スレッドセーフではありません。将来的に並列取得（マルチスレッド/非同期）を検討するなら Lock を入れるか、クライアントインスタンス内にレートリミッタを持たせる設計にすると安全です。
+- _request が認証更新（401 対応）まで担っているため、状態（id_token）を持つクライアントクラスにまとめると拡張しやすくなります（自動更新、token 共有、プロセス内再利用など）。
+- 取得関数が全件をリストに溜めてから返すため、大量データ時のメモリ使用量が大きくなります。イテレータ（yield）でストリーミングする API も用意しておくと柔軟です。保存もストリーミング/チャンク単位挿入に対応できると良いです。
+- save_financial_statements の数値を float に丸めていますが、金額や EPS は Decimal または整数（最小通貨単位）で扱う選択肢も検討してください（精度劣化回避）。
+
+パフォーマンス
+- レートリミット wait と指数バックオフ sleep が重なるため、リトライ時の遅延が大きくなりがちです。どちらかを優先（例えばリトライ時はレートリミットをスキップ、または backoff にジッタ・上限を設定）するとスループットを保ちやすいです。
+- DuckDB への大量挿入は executemany でも十分速いケースが多いですが、非常に大量の場合は以下の最適化を検討ください:
+  - 一時テーブルにまとめて挿入してから MERGE/INSERT ON CONFLICT
+  - DataFrame 経由で register と INSERT SELECT
+- fetch 系がページネーションのたびに都度 dict リストをマージしています。巨大件数時には生成・結合コストが効くので、yield ベースにして呼び出し側で処理する形だと無駄が減ります。
+
+改善提案（具体例）\n- 401 リフレッシュ 1 回制限\n  - for の外に refreshed = False を置き、401 で not refreshed のときだけ get_id_token()。以降は素通りで通常のリトライへ。
+- JSONDecodeError のハンドリング
+  - _do_call 内で body を読み、decode→json.loads を try/except して、先頭 200 バイト程度をログ出ししてから RuntimeError にラップ。
+- market_calendar の型安全
+  - dv = str(r.get("HolidayDivision", "")); is_trading = dv in {"0","2","3"}; is_half = dv == "3"; is_sq = dv == "2"
+- User-Agent の追加
+  - headers["User-Agent"] = f"kabusys/{app_version}" のように識別子を付ける。
+- settings へのトークン永続反映（任意）\n  - get_id_token を呼んだらキャッシュして再利用する仕組み（スレッドセーフに注意）。
+- backoff ジッタ
+  - wait = min(max_wait, (_RETRY_BACKOFF_BASE ** attempt)) + random.uniform(0, 0.5)
+
+tests/test_generated.py について
+- この PR では config 実装が変更されていないのに、テストの期待を以下のように変更しています。実装が追随していない場合は CI が落ちます。
+  - _find_project_root のマーカーを .git から pyproject.toml に変更した前提
+  - _parse_env_line のクォート/エスケープやコメントの扱いの細部
+  - ログ/警告メッセージ文字列（日本語文言）に依存したアサーション
+- 提案
+  - 実装が pyproject.toml を探す仕様になっていないなら、テストを .git/.hg 等も許容するか、実装側を合わせてください。
+  - 警告メッセージは文言全体ではなく、警告種別（UserWarning）や一意なサブストリング、あるいは warn コール回数等でマッチさせ、i18n 変更に強くしましょう。
+  - builtins の import が未使用です。削除してください。
+  - settings がシングルトン/キャッシュする設計の場合、monkeypatch 後に同一インスタンスが更新反映されずテストが不安定になることがあります。必要なら Settings の再生成やキャッシュクリアのヘルパを用意してテストで使えるようにしてください。
+  - _parse_env_line の仕様を明確にドキュメント化し、テストはその仕様に忠実に保ちましょう（特に「#」のコメント判定ルールやエスケープの扱い）。
+
+小さな指摘/微修正案
+- _RETRY_STATUS_CODES のコメント修正、あるいは 408/429 以外の一部 4xx（例えば 425/499 等）を対象にするかの整理。
+- タイムアウト 30 秒は OK ですが、必要に応じて settings で可変に。
+- _to_float/_to_int が "NaN" や "inf" を受けた場合の扱い（float("nan") は DB へはじかれることがある）を決め、None を返すほうが扱いやすいです。
+- ログレベル: fetch_* の「n レコード取得」は INFO だとログが多くなりがちです。運用のログ方針に応じて DEBUG でもよいかもしれません。
+- リクエストヘッダに Accept: application/json は良いです。サーバが gzip を返す場合に備え Accept-Encoding: gzip を明示しても良いでしょう（urllib は自動ハンドルしないことがあります）。
+
+まとめ\n- jquants_client.py は大枠良くできていますが、上記のバグ（特に HolidayDivision の型、401 リフレッシュ回数、financial statements のキー設計、fetched_at 型整合）と、スレッド安全性・エラーメッセージの改善を優先して修正してください。
+- tests/test_generated.py の変更は、実装が追随していないと落ちる内容が含まれています。実装とテストの整合性を再確認のうえ、過度に文言依存しないテストにすることをおすすめします。
+Total: 2

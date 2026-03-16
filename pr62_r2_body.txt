@@ -1,0 +1,102 @@
+## AI Code Review
+
+総評
+- 追加された quality.py は目的が明確で、SQL をパラメータバインドで書いておりセキュア、かつ「全件収集して呼び出し側で判定」設計も良いです。QualityIssue データクラスやサンプル＋件数の返し方、ロギングも妥当です。
+- 一方で、テストコードに致命的なモックの使い方の誤り（pytest の monkeypatch API の誤用）が複数あり、このままだとテストが失敗します。いくつかのアサーションは実装依存度が高く brittle です。
+- 性能面では大規模データに対しては軽微な改善余地があります（特にスパイク検出）。設計面では軽い DRY 化や例外ハンドリング範囲の見直しがあるとより堅牢になります。
+
+詳細レビュー
+
+バグ
+- tests: monkeypatch API の誤用
+  - pytest の monkeypatch には patch/patch.object はありません。setattr を使ってください。以下のように修正してください。
+    - test_request_json_decode_error
+      - 現在: monkeypatch.patch("urllib.request.urlopen", return_value=fake)
+      - 修正: monkeypatch.setattr(urllib.request, "urlopen", fake)
+    - test_request_http_error_raises_after_retries
+      - 現在: monkeypatch.patch("urllib.request.urlopen", side_effect=err)
+      - 修正: monkeypatch.setattr(urllib.request, "urlopen", mock.MagicMock(side_effect=err))
+      - 現在: monkeypatch.patch("time.sleep", lambda s: None)
+      - 修正: monkeypatch.setattr(time, "sleep", lambda s: None)
+    - test_request_http_401_raises_when_no_refresh
+      - 修正: monkeypatch.setattr(urllib.request, "urlopen", mock.MagicMock(side_effect=err))
+    - test_get_id_token_success_and_missing / test_fetch_daily_quotes_pagination
+      - 現在: monkeypatch.patch.object(jquants, "_request", ...)
+      - 修正: monkeypatch.setattr(jquants, "_request", mock.MagicMock(return_value=...)) あるいは side_effect=...
+- tests: 期待値が実装依存で brittle
+  - test_to_int/to_float: _to_int("1.0")==1 を前提にしていますが、実装が「整数表現のみ許容（str.isdigit など）」なら失敗します。仕様を明文化し、テストをそれに合わせるか、1.0 を許容する仕様なら _to_int 側の実装確認が必要です。
+  - test_request_json_decode_error で RuntimeError 前提にしていますが、実装が ValueError を投げる可能性もあります。ここも仕様の合意が必要です。
+- ロギングレベルの不一致
+  - check_missing_data は severity="error" なのに logger.warning を使っています。logger.error に揃える方が一貫します（下記提案参照）。
+- check_date_consistency の例外ハンドリング
+  - market_calendar が存在してもカラム欠落などで CatalogException 以外（BinderException 等）が起こり得ます。現状だとそれらでテストが落ちる可能性があります。duckdb.Error まで広げて握りつぶすのが堅牢です（下記提案参照）。
+
+セキュリティ
+- すべての SQL がパラメータバインドで構築されており、SQL インジェクション対策は良好です。
+- ログはデータサンプルを含みますが、機密情報は扱っていない前提のモジュールなので問題は小さいです。もし外部共有されるログに載る可能性がある場合はサンプルのマスキングや件数のみのログ化も検討可。
+
+可読性
+- 日本語ドキュメントと設計方針の記述が明確でよいです。
+- 同じクエリを「サンプル取得」と「件数取得」で2回発行している箇所が複数あります。ウィンドウ関数 COUNT(*) OVER() で1クエリにまとめると DRY かつ意図が読みやすくなります（パフォーマンスにも寄与）。
+- 変数名の一貫性: duplicates で cnt/total/count など表記が混在しています。cols と detail の表記ゆれも揃えると読みやすくなります。
+- Check 名と Severity は Magic string より Enum などで型安全にできると IDE 支援が効きますが、現状でも Literal で最低限は担保されています。
+
+設計
+- QualityIssue はよくできています。加えて以下の拡張も検討の余地があります。
+  - max_sample_rows を関数引数化（現状は固定 10）
+  - target_date を日付範囲 (start_date, end_date) に拡張
+  - チェック名を Enum 化、テーブル名も定数に
+- check_date_consistency の market_calendar が未存在時はスキップする設計は妥当です。加えて「raw_prices にあるが calendar に存在しない日付」の検出（警告）も追加できると、カレンダー整備漏れの早期発見に有効です。
+- run_all_checks の実行順は大勢に影響しませんが、基礎的な整合性（date）→ 形式的エラー（欠損・重複）→ ルール的警告（スパイク）の順にするのも一案です。
+
+パフォーマンス
+- DuckDB はインデックスを持たないためフルスキャン前提ですが、それでも以下の微調整で大規模データ時の負荷を下げられます。
+  - check_spike: target_date が与えられた場合、LAG 用に「その前日」までに限定したウィンドウに絞る工夫
+    - 例: WHERE (? IS NULL OR date <= ?) を lagged CTE に入れ、spikes 側で (= ?) を適用
+  - 「サンプル＋件数」を別クエリにせず COUNT(*) OVER() を併用して1回で取得
+  - AND (? IS NULL OR date = ?) はプラン最適化しにくいことがあります。DuckDB では大差ないですが、動的に WHERE 句を付け替えるか、または IF 条件を避けられる構成の方が最適化しやすい場合があります。
+
+改善提案（コード例）
+
+1) ロギングレベルの統一（欠損は error に）
+- check_missing_data 内の logger.warning を logger.error に変更
+  - 変更前: logger.warning("check_missing_data: raw_prices に OHLC 欠損 %d 件", count)
+  - 変更後: logger.error("check_missing_data: raw_prices に OHLC 欠損 %d 件", count)
+
+2) market_calendar 例外の網羅
+- check_date_consistency の except 範囲を広げる
+  - 変更前: except duckdb.CatalogException:
+  - 変更後: except duckdb.Error:
+  - 理由: カラム欠落などの Binder/Parser 系も握りたい
+
+3) サンプル＋件数を1クエリ化（例: 欠損チェック）
+- イメージ
+  - WITH q AS (... WHERE 欠損 ... AND(=target)) SELECT date, code, ..., COUNT(*) OVER() AS total FROM q ORDER BY ... LIMIT 10
+  - 取得した最初の行の total を件数として使う（0 行なら issues なし）
+
+4) check_spike の日付最適化（オプション）
+- target_date 指定時のみ範囲を切る
+  - lagged CTE 内 WHERE (? IS NULL OR date <= ?)
+  - spikes 側 WHERE (? IS NULL OR date = ?) または BETWEEN
+
+5) テスト修正（monkeypatch）
+- 例: test_request_json_decode_error
+  - 修正前: monkeypatch.patch("urllib.request.urlopen", return_value=fake)
+  - 修正後:
+    - import urllib.request
+    - monkeypatch.setattr(urllib.request, "urlopen", fake)
+- 例: test_get_id_token_success_and_missing
+  - 修正前: monkeypatch.patch.object(jquants, "_request", return_value={"idToken": "ID123"})
+  - 修正後: monkeypatch.setattr(jquants, "_request", mock.MagicMock(return_value={"idToken": "ID123"}))
+- 例: test_request_http_error_raises_after_retries
+  - monkeypatch.setattr(urllib.request, "urlopen", mock.MagicMock(side_effect=err))
+  - monkeypatch.setattr(time, "sleep", lambda s: None)
+
+追加で検討すると良いチェック
+- OHLC の内部整合性: low <= min(open, close) <= max(open, close) <= high、low <= high の検証
+- 価格の非負性（close <= 0 の検出）
+- 分割・併合など企業アクション発生日の大幅変動除外（企業アクションテーブルがある場合はスパイク検知の誤検出を抑制）
+
+結論
+- quality.py 自体は堅実でセキュア、拡張性もあります。軽微なロギングレベル調整・例外ハンドリングの網羅・（任意で）パフォーマンス最適化を入れればさらに良くなります。
+- テストは monkeypatch API の誤用が複数あるため、必ず修正が必要です。加えて、いくつかのアサーションは実装の詳細に依存しているため、仕様の合意に合わせて期待結果を見直してください。

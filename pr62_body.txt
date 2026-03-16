@@ -1,0 +1,181 @@
+## AI Code Review
+
+以下、観点別にレビューします。結論としては「大きな設計破綻や危険な処理はないが、件数の誤表記、SQLの組み立て方法、前日比判定の効率化、仕様と実装のズレ」など、実運用で効いてくる改善ポイントが複数あります。
+
+良い点
+- 各チェックが QualityIssue のリストを返す非Fail-Fast設計で、呼び出し側の裁量を確保できている。
+- サンプルと総件数（COUNT）を分けて返す方針が運用時に有用（状況把握と調査のきっかけを両立）。
+- ログ出力の粒度（warning/error）も概ね妥当。
+
+バグ/不整合
+- check_duplicates のメッセージとログで使っている件数が len(result)（= LIMIT 10 分）になっており、実際の重複グループ総数を表していません。総数の COUNT を別途取って表示すべきです。
+- check_date_consistency の非営業日データのメッセージ・ログも len(non_trading_rows)（= LIMIT 10 分）を使っており、総「日数」になっていません。こちらも総日数を COUNT で計測して使うべきです。
+- check_date_consistency の docstring に「省略時は現在の最大日付より 1 営業日超のギャップがないかを確認」とありますが、そのロジックは実装されていません（将来日付・非営業日の検出のみ）。仕様と実装が不一致です。どちらかに合わせてください。
+- 欠損の説明に「NULL または空」とありますが、実装は NULL のみを判定しています。raw_prices の型が数値なら空文字は挿入段階で NULL 化されるはずですが、仕様と実装の記述を一致させるか、空文字（''）由来の異常値について明記するとよいです。
+
+セキュリティ
+- すべてのクエリが f-string による文字列結合で日付や閾値を埋め込んでいます。現状の引数型（date/float）からの直接注入リスクは低いですが、将来的に外部入力が入りうる可能性を考えると、パラメータバインドに統一すべきです。DuckDB は ? プレースホルダが使えます。
+
+可読性
+- where 句/フィルタの組み立てを生文字列で都度連結しています。以下のどちらかに統一すると読みやすく、かつ安全になります。
+  - パラメータバインドで where を固定し、パラメータの有無で条件を追加
+  - 条件を配列で管理して " AND ".join(...) する小さなヘルパを用意
+- 同じクエリ構造（サンプル取得＋総件数取得）が繰り返し登場します。小さなユーティリティ（共通CTEを使う/同一の抽出条件を2回使うヘルパ）を用意すると重複が減り、集計漏れや条件不一致の事故が減ります。
+- severity は Literal["error","warning"] あるいは Enum を使うと型安全性が上がります。
+
+設計
+- 前日比スパイクの検出は「前営業日の close」を取っていますが、株式分割・併合、配当落ち、上場廃止/再上場等の企業アクションで機械的にスパイク扱いされるケースが多発します。将来的に企業アクション補正（調整後株価）や銘柄別の除外リスト/適応閾値を受け取れる拡張ポイントを用意すると実務耐性が上がります。
+- エラー/警告の定義が関数ごとに妥当ですが、全体ポリシー（例: スパイクが一定件数以上なら error に格上げ）など、呼び出し側が後段で再評価できる仕組み（post-processor）を用意してもよいです。
+- check_date_consistency の market_calendar 存在確認で broad except を使っています。テーブル無存在のみを握りつぶしたいのであれば、DuckDB の CatalogException を明示的に捕捉する/事前に PRAGMA table_info('market_calendar') で存在確認する方が意図が明確です。
+
+パフォーマンス
+- check_spike の「ひとつ前の日付」をサブクエリで MAX(date) を求める形だと、全体Nに対し相関サブクエリが発生してスキャンが重くなりがちです。DuckDB はウィンドウ関数が強力なので LAG を使うと高速・簡潔です。
+  例:
+  WITH t AS (
+    SELECT
+      date, code, close,
+      LAG(close) OVER (PARTITION BY code ORDER BY date) AS prev_close
+    FROM raw_prices
+  )
+  SELECT date, code, prev_close, close AS curr_close,
+         (close - prev_close) / prev_close AS change_rate
+  FROM t
+  WHERE prev_close > 0
+    AND ABS((close - prev_close) / prev_close) > ?
+    [AND date = ?]
+  ORDER BY ABS((close - prev_close) / prev_close) DESC
+  LIMIT 10;
+- 同一の抽出条件で「サンプル取得」「総件数カウント」を2回発行しています。CTEで anomalies AS (...) を作って sample と count を2クエリで使い回すか、1クエリで COUNT(*) OVER() を返してサンプルに総数を含めるなどで、重複計算を削減できます（読みやすさと一貫性にも寄与）。
+- 列名 date は型名と同名で衝突しやすく、将来的な可搬性を考えると "date" のクオートか、列名の変更を検討してもよいです。
+
+改善提案（抜粋コード）
+
+1) パラメータバインド＋件数の正確化（duplicates, 非営業日）
+- check_duplicates
+  sample_sql = """
+    SELECT date, code, COUNT(*) AS cnt
+    FROM raw_prices
+    WHERE (? IS NULL OR date = ?)
+    GROUP BY date, code
+    HAVING COUNT(*) > 1
+    ORDER BY date, code
+    LIMIT 10
+  """
+  rows = conn.execute(sample_sql, [target_date, target_date]).fetchall()
+
+  count_sql = """
+    SELECT COUNT(*) FROM (
+      SELECT 1
+      FROM raw_prices
+      WHERE (? IS NULL OR date = ?)
+      GROUP BY date, code
+      HAVING COUNT(*) > 1
+    )
+  """
+  total = conn.execute(count_sql, [target_date, target_date]).fetchone()[0]
+
+  if total > 0:
+    issues.append(QualityIssue(
+      check_name="duplicates",
+      table="raw_prices",
+      severity="error",
+      detail=f"主キー重複が {total} グループ検出されました",
+      rows=[{"date": r[0], "code": r[1], "count": r[2]} for r in rows],
+    ))
+
+- 非営業日（日数の総数を返す）
+  sample_sql = """
+    SELECT rp.date, COUNT(*) AS cnt
+    FROM raw_prices rp
+    JOIN market_calendar mc ON rp.date = mc.date
+    WHERE mc.is_trading_day = false
+    GROUP BY rp.date
+    ORDER BY rp.date
+    LIMIT 10
+  """
+  rows = conn.execute(sample_sql).fetchall()
+
+  total_sql = """
+    SELECT COUNT(*) FROM (
+      SELECT rp.date
+      FROM raw_prices rp
+      JOIN market_calendar mc ON rp.date = mc.date
+      WHERE mc.is_trading_day = false
+      GROUP BY rp.date
+    )
+  """
+  total_days = conn.execute(total_sql).fetchone()[0]
+
+  if total_days > 0:
+    issues.append(QualityIssue(
+      check_name="non_trading_day",
+      table="raw_prices",
+      severity="warning",
+      detail=f"market_calendar で非営業日とされる日に {total_days} 日分の株価データがあります",
+      rows=[{"date": r[0], "record_count": r[1]} for r in rows],
+    ))
+
+2) スパイク検出の LAG 化＋パラメータ化
+- サンプル取得
+  sample_sql = """
+    WITH t AS (
+      SELECT
+        date, code, close,
+        LAG(close) OVER (PARTITION BY code ORDER BY date) AS prev_close
+      FROM raw_prices
+    )
+    SELECT
+      date, code, prev_close, close AS curr_close,
+      (close - prev_close) / prev_close AS change_rate
+    FROM t
+    WHERE prev_close > 0
+      AND ABS((close - prev_close) / prev_close) > ?
+      AND (? IS NULL OR date = ?)
+    ORDER BY ABS((close - prev_close) / prev_close) DESC
+    LIMIT 10
+  """
+  rows = conn.execute(sample_sql, [threshold, target_date, target_date]).fetchall()
+
+- 総件数
+  count_sql = """
+    WITH t AS (
+      SELECT
+        date, code, close,
+        LAG(close) OVER (PARTITION BY code ORDER BY date) AS prev_close
+      FROM raw_prices
+    )
+    SELECT COUNT(*)
+    FROM t
+    WHERE prev_close > 0
+      AND ABS((close - prev_close) / prev_close) > ?
+      AND (? IS NULL OR date = ?)
+  """
+  total = conn.execute(count_sql, [threshold, target_date, target_date]).fetchone()[0]
+
+3) 日付ギャップ検出の実装例（仕様に合わせる場合）
+- market_calendar がある前提:
+  WITH last_two AS (
+    SELECT MAX(date) AS max_date FROM raw_prices
+  ), next_trading AS (
+    SELECT MIN(date) AS next_trading_date
+    FROM market_calendar
+    WHERE is_trading_day = true AND date > (SELECT max_date FROM last_two)
+  )
+  SELECT 1
+  FROM next_trading
+  WHERE next_trading_date IS NOT NULL
+    AND next_trading_date <= (CURRENT_DATE - INTERVAL 1 DAY);
+  → 条件に合致したら「最新データが営業日基準から遅延している」旨を warning/error で返す。
+- あるいは「最新営業日（calendar）」と「raw_prices の MAX(date)」の差が1営業日を超えるかを直接比較。
+
+4) その他の小改善
+- severity を Literal["error","warning"] に変更
+  from typing import Literal
+  severity: Literal["error", "warning"]
+- market_calendar の存在確認は例外の種類を限定するか、事前に存在確認して分岐。
+- 値の妥当性強化案（任意）
+  - 0 または負の価格/出来高の検出（分割・併合/板寄せの特殊値の扱いと要相談）。
+  - 価格が high >= low, high/low が open/close を包含しているか 等の整合チェック。
+
+総評
+- 基本方針はよく、ETL 前段の健全性確認に十分使える出来です。一方で「件数の誤表記（LIMIT 10 依存）」「SQLのパラメータ化」「スパイク検出の窓関数化」「仕様（ギャップ検出）の実装or記述修正」は早めに手当てしたいポイントです。上記の修正で安全性・性能・運用時の信頼性が大きく向上します。

@@ -1,0 +1,76 @@
+## AI Code Review
+
+以下は、このPRで追加・変更されたテストコードに関するレビューです。
+
+総評
+- カバレッジの観点では、ETLの冪等性・スキーマ整合性・APIクライアントのページネーション・データ品質チェックまで網羅されており、有益なテストが多いです。
+- 一方で、いくつかのテストは実装の内部キャッシュやDuckDBのバージョン依存により不安定化する恐れがあります。また、既存テストの一部（HTTPリトライやauditスキーマ等）が削られており、回帰を見逃すリスクが上がっています。
+- 小さな不具合（アサーションの誤り）と一貫性の問題（モジュールパスの混在、スキーマ初期化方法の不統一）が見受けられます。
+
+観点別レビュー
+
+1) バグ
+- settings/env のキャッシュによる不安定化の可能性
+  - tests/test_generated.py::test_settings_env_and_log_level で settings.env を何度も参照していますが、Settings 実装が値をキャッシュしている場合、途中で環境変数を切り替えても期待どおりに例外が出ない（前回の値が使われる）可能性があります。
+  - 対応案: テスト内で新しい Settings インスタンスを生成して検証する、もしくは importlib.reload(kabusys.config) で再読み込み、あるいは settings の内部キャッシュを一時的にクリアする補助関数を用意。
+- トークンキャッシュの汚染による不安定化
+  - tests/test_generated.py::test_get_cached_token_and_force_refresh は _get_cached_token をテストしますが、モジュールスコープのキャッシュが他テストの実行順序に依存してしまいます。
+  - 対応案: テスト開始前に kabusys.jquants モジュールのトークンキャッシュ（例: _TOKEN_CACHE など）を monkeypatch.setattr(..., None) でリセットする。
+- DuckDB スキーマ初期化の不一致
+  - test_data_pipeline.py は古い DuckDB の CASCADE 制約問題を回避するために最小DDLを独自作成。一方 tests/test_generated.py は init_schema(":memory:") を使っています。これにより環境によっては tests/test_generated.py 側が落ちる可能性があります。
+  - 対応案: 両方のテストで同じアプローチ（最小DDL or バージョンチェックで skip）を採用して統一する。
+- アサーションの誤り（明確なバグ）
+  - tests/test_generated.py::test_parse_env_line_quoted_and_escapes で
+    assert parsed2 == ("S", "x'ynz") or parsed2 == ("S", "x'ynz")
+    となっており、両辺が同一でバリエーションを許容できていません。おそらく後者は ("S", "x'y\nz") を想定していたはずです。修正を推奨します。
+- ページネーション終了条件のテストが実装依存
+  - tests/test_data_pipeline.py::test_fetch_daily_quotes_dedup_pagination_key は call_count <= 5 を要求していますが、実装側が「重複pagination_key検出で即終了」なら2回で終わる一方、実装が「上限100ページで打ち切り」の設計なら失敗します。
+  - 対応案: 「同一pagination_keyを検出したら打ち切る」仕様を前提にするなら call_count == 2 など、より決定的な基準に変更するのが安全です（実装仕様に合わせてください）。
+
+2) セキュリティ
+- ネットワーク層まわりの回帰検知が薄くなっている
+  - 旧 tests/test_generated.py にあった _request のHTTPエラー/JSONデコードエラー/401時の挙動/リトライのテストが削除されています。これらは堅牢性（可用性）とセキュリティ（異常時のハンドリング）に関わる重要な箇所なので、何らかの形で残す（モック中心でOK）ことを強く推奨します。
+- 環境変数の扱いはテスト中で適切にモックされています（実環境のトークン等は使っていない）ので、現状の漏洩リスクは低いです。
+
+3) 可読性
+- コメントとテスト名が明確で理解しやすいです。境界条件（空配列、PK欠損など）のテストも網羅されていて良いです。
+- ただし、モジュールパスが混在しています。
+  - test_data_pipeline.py は kabusys.data.jquants_client / kabusys.data.quality
+  - tests/test_generated.py は kabusys.jquants / kabusys.quality / kabusys.data.schema
+  - 同じ概念を異なるモジュールでテストしているため、読者にとって混乱の元です。どちらのAPIが正なのか（移行途中なのか）をREADMEやコメントで明示するか、テストの対象をどちらかに寄せると良いです。
+- tests/test_generated.py で使っていない import（duckdb）が存在します。不要な import は削除を。
+
+4) 設計
+- プライベート関数の直接テスト
+  - _get_cached_token, _to_float/_to_int, _parse_env_line のような内部関数を直接テストしています。ユーティリティなら有用ですが、内部仕様変更でテストが壊れやすくなります。可能であればパブリックAPI経由（例: get_id_token を通じてキャッシュの振る舞いを検証）で目的を果たせないか検討してください。
+- スキーマの扱い
+  - あるテストでは最小DDL、別テストでは init_schema を使い分けており、CI環境依存の不具合を生みやすいです。init_schema 自体をDuckDBのバージョンに応じてCASCADEを避ける実装にする、あるいはテスト側で version gate (pytest.skip) を入れるなど統一した方が安全です。
+
+5) パフォーマンス
+- 全てインメモリDuckDBで軽量に実行されており、現状大きな懸念はありません。
+- ページネーションの無限ループ対策テストが追加されている点は良いですが、前述のとおり境界（<=5）のハードコードは将来の実装変更でテストが足を引っ張る可能性があります。仕様を明確化し、それに沿った決定的アサーションにすると良いです。
+
+具体的な改善提案（抜粋）
+- トークンキャッシュをテスト間でリセット
+  - 例: monkeypatch.setattr(kabusys.jquants, "_TOKEN_CACHE", None, raising=False)
+- Settings のテストでキャッシュ影響を回避
+  - 例: import importlib; importlib.reload(kabusys.config) を使い直後に新しい settings を取得、または Settings() を直接生成してテスト。
+- _parse_env_line の誤アサーション修正
+  - 現在: assert parsed2 == ("S", "x'ynz") or parsed2 == ("S", "x'ynz")
+  - 修正案: assert parsed2 in (("S", "x'ynz"), ("S", "x'y\nz"))
+- DuckDBスキーマ初期化の統一
+  - どちらかに統一するか、init_schema が古いDuckDBでも通るように改善、あるいは該当テストをバージョン条件でskip。
+- 失われたネットワーク層テストの復活（モックベースで可）
+  - JSONデコードエラー、HTTP 5xx リトライ、401ハンドリング（allow_refreshの挙動等）を簡素化版でもよいので残す。
+- モジュールパスの統一方針を決める
+  - kabusys.data.jquants_client vs kabusys.jquants のどちらを正式APIにするか明記し、テストも揃える。
+
+小さな指摘
+- tests/test_generated.py の duckdb import は未使用に見えます。削除可。
+- tests/test_data_pipeline.py の TestJQuantsClientMock での fake_request は **kw を受けていて安全ですが、実装側が必須引数を増やす場合に備え、可能なら実際の _request の引数と整合的に def fake_request(path, params=None, id_token=None, method="GET", json_body=None, allow_refresh=True): のようにしておくと将来の壊れにくさが上がります（既に tests/test_generated.py の方ではそうなっていて良いです）。
+- 市場カレンダーの HolidayDivision マッピングはテストで明確化されていて良いです。さらに "未知の division 値" に対するデフォルト挙動（例: 非営業日にする/営業日にする/無視）も一つテスト追加すると堅牢性が増します。
+
+結論
+- 今回のテスト追加は全体として価値が高く、ETLとデータ品質およびAPIクライアントの重要な振る舞いをよく押さえています。
+- ただし、環境（DuckDBバージョン、設定キャッシュ、トークンキャッシュ）により不安定になる恐れのある箇所と、削られたネットワーク層の回帰テストは是非改善・補完してほしいです。
+- 細かな不具合（_parse_env_lineのアサーション）と一貫性（スキーマ初期化/モジュールパス）を直せば、より信頼性の高いテストスイートになります。

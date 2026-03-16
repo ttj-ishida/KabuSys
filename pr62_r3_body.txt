@@ -1,0 +1,74 @@
+## AI Code Review
+
+以下は、今回の変更（主に src/kabusys/data/quality.py と tests/test_generated.py）に対するレビューです。観点ごとに指摘と提案をまとめます。
+
+総評
+- quality.py の設計は一貫しており、DuckDB を前提にSQLで効率的に集計・検出する方針、サンプルを10件に制限、パラメータバインドの徹底など良いです。
+- 重大なセキュリティ問題は見当たりません。
+- 実運用でのパフォーマンス・誤検知（スパイク判定）・ログ設計に関して、いくつか改善余地があります。
+- tests はモジュール横断で増強されており、全体として有用ですが、いくつかフレークしやすい/曖昧なアサーションがあります。
+
+バグ
+- check_duplicates のサンプル行の列名の不一致
+  - SQL では COUNT(*) AS cnt としている一方、rows に詰める際のキー配列は ["date", "code", "count"] になっています。実害は小さい（テストでも rows の内容を検証していない）ですが、可読性と一貫性のため、AS count にするか、cols を ["date", "code", "cnt"] に合わせてください。
+- check_spike の prev_close > 0 フィルタ
+  - 0割回避の意図は良いですが、prev_close が0未満でも（通常は起こりえないが）理論的には発生した場合、誤って除外されます。ABS(prev_close) > 0 にしておく方が堅牢です。
+- check_date_consistency の非営業日検出での NULL 取扱い
+  - WHERE mc.is_trading_day = false のため、is_trading_day が NULL の場合は比較結果が UNKNOWN になり、拾えません。明確に false のみを対象にしたい場合は IS FALSE を使うと意図が明確です（DuckDB は IS [NOT] TRUE/FALSE/UNKNOWN をサポートします）。
+
+セキュリティ
+- 問題なし。すべてのクエリがパラメータバインドを使用しており、SQLインジェクションのリスクは適切に抑えられています。
+- ログ出力は件数やサンプルレコードのみで、秘匿情報は扱っていない前提。必要なら rows のマスキングポリシーを検討（現状は株価等のみで問題なさそう）。
+
+可読性
+- (? IS NULL OR date = ?) のパターンが各所に繰り返し登場しており、少し読みづらいです。小さなヘルパーでSQL断片とパラメータを組み立てる、もしくはコメントでこのイディオムの意図（None時に全件）を一度明記すると読み手が迷いません。
+- スパイク検出の CTE は読みやすく書けています。count 用クエリと sample 用クエリが同じ CTE を使っているのは良いです。
+- QualityIssue.detail は機械でも解釈しやすいよう、数値（件数・閾値など）を別フィールドとして持たせるのも検討の余地があります（後述の設計）。
+
+設計
+- QualityIssue は最小限で実用的。ただし以下の拡張を検討すると後工程の実装が楽になります。
+  - numeric_fields あるいは metrics といった dict を追加して、件数・閾値・対象日などを構造化して渡す（detail の文言依存を弱める）。
+  - sample_limit を関数引数やモジュール定数にして、呼び出し元で柔軟に制御できるようにする（現状は固定10件）。
+- ログ戦略
+  - 個々のチェック関数内で error/warning ログを出し、さらに run_all_checks でも info を出しています。呼び出し元で重大度に応じた処理を行う設計と整合させるなら、関数内ログは debug 程度に抑えるか、run_all_checks で集約してログするほうが冗長になりにくいです。
+- スパイク検出の仕様
+  - ストック・スプリット/リバース・スプリットが入ると前日比が大きく変動し、偽陽性になります。将来的に corporate actions を考慮できるよう、quality.check_spike に「調整済み終値を使う／CAを無視する」オプションや、除外銘柄・日付のフィルタ機構を設計レベルで用意すると運用が安定します。
+
+パフォーマンス
+- target_date 指定時のスパイク検出
+  - 現状は LAG を全体に対して実行し、その後で target_date をフィルタしています。日単位の定常実行を想定するなら、lagged CTE で日付範囲を絞る工夫があると良いです（ただし「営業日」を跨いだ正しい前日終値を得るためには前営業日の行が必要になる点に注意）。
+  - 例えば market_calendar がある環境では、target_date とその直近の直前営業日を特定し、その2日（または数日前までのスモールウィンドウ）に絞って LAG をかけると大幅にコスト削減できます。CA未考慮でも、この範囲絞りは有効です。
+- 重複チェック・欠損チェック
+  - 全件（target_date=None）の場合はフルスキャン・フルグループになります。バッチ運用では初回フルチェック後は日次で target_date を指定して運用する方針をドキュメント化するのが良いです。
+- 非営業日チェック
+  - 現状も素直で十分。ただし market_calendar が大きい場合は raw_prices の日付範囲で限定する WHERE 節（例: rp.date BETWEEN min_date AND max_date を事前に取得して付与）を加えると無駄が減ります。
+
+テストに関する所感と改善提案
+- test_parse_env_line_quotes_and_escapes
+  - 期待値を「hellonworld」または「hello\nworld」のどちらでもよいとする条件分岐は、実装依存性が高く、テストの意図が不明瞭になります。パーサの仕様をどちらにするか決め、テストもそれに固定してください。
+- test_rate_limiter_wait
+  - time.monotonic の side_effect と sleep の挙動に関するアサーションが緩く、フレークする可能性があります。経過時間の境界値（min_interval きっかりの場合に sleep する/しない）の仕様を決め、sleep が呼ばれた回数/引数を明確に検証する方が良いです。
+- quality の統合テスト
+  - raw_prices の PK を落として重複を挿入→重複検出の確認、という流れは意図が明確で良いです。一方で本番スキーマは PK 制約で重複が入りにくい前提のため、「ETL外の挿入」など異常系を再現するためにテスト時のみテーブルを置き換えることをコメントで明示しておくと、将来の保守で混乱しにくいです。
+
+具体的な修正提案（例）
+- duplicates の列名整合
+  - クエリ側を AS count に変更:
+    SELECT date, code, COUNT(*) AS count ...
+  - あるいは Python 側の cols = ["date", "code", "cnt"] に合わせる。
+- prev_close フィルタの堅牢化
+  - WHERE ABS(prev_close) > 0 に変更して 0割以外の不正値も包括的に除外。
+- 非営業日チェックの NULL 安全性
+  - WHERE mc.is_trading_day IS FALSE に変更。
+- ログの集約
+  - 各チェック関数内の logger.error/logger.warning を logger.debug に落とし、run_all_checks のみで重大度別の件数サマリをログ出力（必要に応じて issue ごとに info ログも）。あるいは呼び出し元のポリシーに委ね、quality 側ではログを出さない方針に統一。
+- パフォーマンス（任意・将来対応）
+  - target_date 指定時の check_spike の CTE で date フィルタを導入（営業日特定が難しい場合は N日前までのレンジに絞るオプションを追加）。
+  - run_all_checks に sample_limit と perform_full_scan フラグを追加し、無指定時は target_date 必須など運用ガードを設ける。
+
+その他小さな改善
+- _SPIKE_THRESHOLD は外部設定可能に（環境変数や settings 参照、または run_all_checks の引数を優先）。
+- QualityIssue に numeric な count などを別フィールドで持たせる（後段のフォーマッタや通知で扱いやすくなる）。
+- SQL 内のカラム名 date は DuckDB では問題になりにくいですが、可読性/将来の移植性のため backticks/ダブルクォートで囲むことも検討可。
+
+上記のうち、バグに類するもの（列名整合、prev_close フィルタ、IS FALSE）は優先度高で対応を推奨します。設計/パフォーマンス/テストの改善は段階的に行うとよいと思います。

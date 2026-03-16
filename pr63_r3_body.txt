@@ -1,0 +1,78 @@
+## AI Code Review
+
+以下は、今回のテスト追加・変更に対するレビューです。
+
+総評
+- データパイプラインの主要ユースケース（J-Quantsクライアントのページネーション、ETLの冪等性、スキーマ整合、qualityチェック統合）をよくカバーできており、有益な回帰テストになっています。
+- 一方で、以前存在していたエラーハンドリング系（HTTPエラー、リトライ、レートリミット）や監査DB/auditの初期化に関するテストが削除され、重要な経路のカバレッジが落ちています。ここは退行の懸念があるため補完を推奨します。
+- テスト内で最小DDLを2箇所に重複定義しているなど、メンテナンス面での改善余地があります。
+- 設定管理（settings）に対するテストはシングルトンのキャッシュ実装に依存した記述となっており、将来の実装変更やプロセス内の相互作用で不安定になる可能性があるため改善提案があります。
+
+以下、観点別の詳細です。
+
+バグ
+- settings のキャッシュ前提による非決定性の可能性
+  - tests/test_generated.py::test_settings_env_and_log_level では、同一の settings インスタンスに対し、KABUSYS_ENV を development→live→invalid_env と書き換えて同一プロセス内で評価しています。もし settings.env/log_level が初回評価結果をキャッシュする実装（よくあるパターン）だと、途中で環境変数を書き換えても反映されずテストが壊れる/将来壊れるリスクがあります。
+  - 改善案: importlib.reload(kabusys.config) で tests 内で都度再読込する、あるいは Settings をテスト用に新規インスタンス化して使う（settings の Singleton を避ける）、もしくは settings が毎回環境変数を評価することを明示する（ドキュメント化）など。
+- DuckDB バージョン依存の可能性
+  - tests/test_data_pipeline.py では FK の CASCADE 問題回避のため最小DDLを手動で作成していますが、同ファイル内で ON CONFLICT … DO UPDATE を使用（raw_prices_pk_constraint）しています。ON CONFLICT サポートは DuckDB のバージョンに依存します。古い DuckDB をサポートする前提があるなら、CI のバージョンをピン留めするか、該当テストにスキップ条件（duckdb.__version__ チェック）を入れることを検討してください。
+- settings/env テストの副作用
+  - settings をテスト中に変化させると、他テストへの副作用（特に並列実行時）になり得ます。pytest の monkeypatch は環境変数自体は戻しますが、モジュールスコープのシングルトンが値をキャッシュしていると復元されません。前述の reload 等での孤立化を推奨します。
+
+セキュリティ
+- テストで環境変数（JQUANTS_REFRESH_TOKEN）を書き換えていますが、値はダミーかつ出力・ログに出していないため問題なし。
+- 外部ネットワークアクセスはモック化されており、秘密情報の流出リスクは見当たりません。
+
+可読性
+- テスト名・docstring が意図を明確に表現しており良いです。_sample_* ヘルパーにより入力データの可読性も高いです。
+- ただし以下は改善余地あり:
+  - _MINIMAL_DDL が tests/test_data_pipeline.py と tests/test_generated.py に重複定義。conftest.py の共通フィクスチャや helper モジュールに切り出すと保守が楽になります。
+  - tests/test_generated.py と tests/test_data_pipeline.py のそれぞれで DB フィクスチャ（mem_db, db_conn）が似た役割を持っているので統合可能です。
+  - 一部のブール判定で in (True, 1) といった表記を使っていますが、変換関数を噛ませる／明示 cast を行うユーティリティを介すと意図が明確になります。
+
+設計
+- テスト戦略のバランス
+  - 以前存在していた下記のテストが削除され、耐障害性の回帰検知が弱くなりました。復帰を強く推奨します。
+    - _request の JSON decode エラー、HTTP 5xx リトライ、HTTP 401 での挙動（allow_refresh の有無）など
+    - レートリミッタ（_RateLimiter.wait）のスリープ判定
+    - audit.init_audit_db のスキーマ初期化確認
+  - これらはプロダクション運用で特に重要な部分なので、ユニットテスト or 統合テストいずれかの層で一定の検証を維持してください。
+- プライベート関数のテスト
+  - _parse_env_line, _to_float/_to_int, _get_cached_token などの内部実装に依存するテストが増えています。妥当ではありますが、可能であれば公開 API 越しの振る舞いで検証する方が、実装変更に強いテストになります（例: トークンキャッシュは fetch_xxx が401→リフレッシュの実際のフローで e2e 的に担保する等）。
+- market_calendar のマッピング仕様の明確化
+  - HolidayDivision の未知値に対する扱い（is_trading_day, is_half_day, is_sq_day のデフォルト）に関するテストがないため、将来の仕様変更やデータ不整合に弱いです。未知値や None のときの期待挙動を明示しテスト化を推奨します。
+- ETL の冪等性テストの拡充
+  - raw_financials, market_calendar でも ON CONFLICT 時に上書きされるカラムが想定どおり更新されるか（例: holiday_name の変更、financial 数値の更新）を検証するとより強固になります。
+- モジュールパス変更の後方互換性
+  - jquants -> kabusys.data.jquants_client への移動に伴い、既存コード利用者への互換性が必要なら、旧パスからの import で新実装にフォワードする薄いラッパーか deprecation を検討してください（今回の PR 自体はテストのみですが、意図の共有があると良いです）。
+
+パフォーマンス
+- すべて DuckDB のインメモリで高速に完結しており問題なし。
+- スキーマ作成（DDL）をテストごとに都度実行していますが、現状のテスト規模なら十分高速。将来的に件数が増える場合は session スコープのフィクスチャ化で加速できます。
+
+具体的な改善提案
+- カバレッジ復元
+  - tests/test_generated.py に以下を復活（あるいは jquants_client 用に移植）:
+    - _request のエラーハンドリングテスト（JSON Decode Error、HTTP 5xx リトライ、401 の挙動）
+    - レートリミッタの wait テスト
+    - audit.init_audit_db の初期化確認（必要であれば tests/test_audit.py に分離）
+- 設定テストの安定化
+  - settings を再importして検証するユーティリティを用意
+    - 例: import importlib; import kabusys.config as cfg; monkeypatch.setenv(...); importlib.reload(cfg); assert cfg.settings.env == ...
+  - もしくは Settings を直接生成して検証（settings シングルトンは使わない）。
+- DDL/フィクスチャの共通化
+  - tests/conftest.py に _MINIMAL_DDL と DB フィクスチャ（mem_db/db_conn統合）を集約。
+- 追加テストの提案
+  - save_financial_statements, save_market_calendar の ON CONFLICT DO UPDATE（更新系）の検証
+  - fetch_financial_statements, fetch_market_calendar でもページネーションの検証（現在は daily_quotes のみ）
+  - HolidayDivision の未知値や None のテスト
+  - _to_int/_to_float に前後空白や全角数値が来た場合の扱い（必要に応じて）を明確化
+- 互換性のケア（任意）
+  - 旧モジュールパスの非推奨警告やフォワーディングを追加し、リリースノートで周知
+
+小さな指摘
+- tests/test_data_pipeline.py の TestJQuantsClientMock.test_fetch_daily_quotes_dedup_pagination_key は結果の件数に対するアサートがなく call_count のみですが、無限ループ回避を主目的にするなら call_count に加えて、返却データの整合（2回目時点で break → 最後に取得した daily_quotes が返ってくるなど）も軽く見ると意図がより明確になります。
+- tests/test_generated.py のブール判定で in (True, 1) の表記は、コメントで「DuckDB の Python バインディングが bool/1 を返す場合に対応」と補足があると読み手に親切です。
+
+結論
+- テストの量・質ともに有益で、ETL の冪等性や quality チェック周りがしっかり担保できています。一方で、通信エラー系・リトライ・レート制御といった運用上クリティカルな箇所のテストが削除されたのは後退です。これらの再追加（もしくは別ファイルへの移動）と、settings テストの安定化、DDL/フィクスチャの共通化を行えば、より堅牢で保守しやすいテスト群になります。

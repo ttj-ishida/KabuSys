@@ -1,0 +1,50 @@
+#56: 【横断】パフォーマンス分析・レポート機能実装
+#55: 【横断】統合ログ・トレーサビリティシステム構築
+#53: 【横断】設定ファイル・スキーマ整備
+#52: 【横断】ストレステスト・シナリオテスト実装
+#51: 【横断】統合テスト実装
+#50: 【横断】CI/CDパイプライン構築
+#49: 【横断】Python環境・依存関係管理
+#48: 【Phase 9】障害復旧手順の整備
+#47: 【Phase 9】日次運用Runbookの整備
+#46: 【Phase 9】システム起動・停止スクリプト実装
+#45: 【Phase 9】Windows Task Schedulerスクリプト実装
+#44: 【Phase 8】Paper Trading検証テスト
+#43: 【Phase 8】Execution優先度制御実装
+#42: 【Phase 8】Paper Trading環境構築
+#41: 【Phase 7】監視機能のユニットテスト
+#40: 【Phase 7】Kill Switch実装 [CRITICAL]
+#39: 【Phase 7】Slackアラート機能実装
+#38: 【Phase 7】取引・リスク監視エンジン実装
+#37: 【Phase 7】システム・データ監視エンジン実装
+#36: 【Phase 7】SQLite監視ログDB実装
+#35: 【Phase 7】Streamlit監視ダッシュボード実装
+#34: 【Phase 6】Execution Engineのシミュレーションテスト
+#33: 【Phase 6】Order State Machineの単体テスト
+#32: 【Phase 6】自動復旧・リコンシリエーション実装 [CRITICAL]
+#31: 【Phase 6】リスク管理3段階ガード実装 [CRITICAL]
+#30: 【Phase 6】Execution Engineメインループ実装 [CRITICAL]
+#29: 【Phase 6】Order State Machine実装 [CRITICAL]
+#28: 【Phase 6】kabuステーションAPIクライアント実装 [CRITICAL]
+#27: 【Phase 5】ポートフォリオ構築ロジックのテスト
+#26: 【Phase 5】リスク調整・セクター制御実装
+#25: 【Phase 5】ポジションサイジングエンジン実装 [CRITICAL]
+#24: 【Phase 5】ポートフォリオビルダー実装
+#23: 【Phase 4】バックテスト検証テスト実装
+#22: 【Phase 4】Look-ahead Bias防止機構の実装 [CRITICAL]
+#21: 【Phase 4】バックテストメトリクス計算実装
+#20: 【Phase 4】バックテストシミュレータ実装
+#19: 【Phase 4】バックテストエンジンの実装
+#18: 【Phase 3】シグナル生成ロジックの単体テスト
+#17: 【Phase 3】特徴量計算ロジックの単体テスト
+#16: 【Phase 3】ニュースNLPスコアリングエンジン実装 [CRITICAL]
+#15: 【Phase 3】市場レジーム判定エンジン実装
+#14: 【Phase 3】売買シグナル生成ロジック実装
+#13: 【Phase 3】特徴量生成エンジン実装
+#12: 【Phase 3】Universe定義・銘柄フィルタリング実装
+#11: 【Phase 2】Research環境の分離テスト
+#10: 【Phase 2】ファクター探索ユーティリティ実装
+#9: 【Phase 2】Jupyter Notebook研究環境のセットアップ
+#8: 【Phase 1】データパイプラインの単体テスト実装
+#7: 【Phase 1】データ品質チェック機能実装
+#6: 【Phase 1】トレーサビリティ・監査ログテーブル構築

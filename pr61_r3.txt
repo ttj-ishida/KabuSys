@@ -1,0 +1,145 @@
+=== COMMENT (id=4063241921) ===
+## AI Code Review
+
+以下、PRの変更点に対するレビューです。
+
+総評\n- 概ね設計意図は良く、レートリミット・リトライ・IDトークン自動リフレッシュ・DuckDBへの冪等なUPSERTの方針はよいです。
+- 重要なバグが1件（ネットワーク系エラーのリトライで待機が行われていない）と、401時のトークンリフレッシュ実装が無限再帰に至り得る重大リスクがあります。
+- スレッドセーフティ、トークンキャッシュ、Retry-After対応、ページネーションのストリーミングなどの設計改善余地があります。
+- テストでは不要なimportが1件あります。
+
+バグ
+1) URLError/OSError リトライ時に待機がない\n- 対象: _request 内 except (urllib.error.URLError, OSError) ブロック
+- 期待: HTTPError系と同様に指数バックオフで sleep すべき\n- 現状: wait を計算・ログ出力はしているが time.sleep(wait) がない\n- 影響: ネットワーク不安定時に即時に連打し、回復待ちができない\n- 修正案:
+  except (urllib.error.URLError, OSError) as e:
+      last_exc = e
+      if attempt < _MAX_RETRIES - 1:
+          wait = _RETRY_BACKOFF_BASE ** attempt
+          logger.warning("Network error ...")
+          time.sleep(wait)  # これが必要\n      continue  # 明示しておくと読みやすい
+
+2) get_id_token が 401 → _request が自動リフレッシュ → 再度 get_id_token ... の無限再帰の可能性
+- 対象: get_id_token() が _request("/token/auth_refresh") を呼ぶが、_request 側で401時に get_id_token() を呼ぶ設計
+- 影響: refresh_token が失効/不正な場合などに無限再帰 → スタックオーバーフロー/DoS の恐れ
+- 修正案: _request に allow_refresh フラグを追加（デフォルト True）。tokenリフレッシュAPI呼び出し時は False を渡す。
+  def _request(..., allow_refresh: bool = True) -> Any:
+      ...
+      if status == 401 and allow_refresh and not _token_refreshed:
+          token = get_id_token()
+  get_id_token() 側:
+      data = _request("/token/auth_refresh", method="POST", json_body={...}, allow_refresh=False)
+
+3) ドキュメンテーションと挙動の不整合
+- _request の docstring は「最大リトライ超過時に RuntimeError」とあるが、再試行対象外のHTTPエラー(例: 400/403/404など)はそのまま再raiseしている。
+- 提案: docstring を「再試行対象外のHTTPエラーは urllib.error.HTTPError を送出する。再試行枯渇時は RuntimeError を送出する」に更新。
+
+セキュリティ
+- トークンや機微情報のログ出力はしておらず良いです。
+- ただし、前述の無限再帰はDoSリスクにつながるため早急に修正を。
+- 追加提案:
+  - User-Agent を明示（運用で問い合わせやレート制限支援が受けやすくなります）\n  - 429/5xx時に Retry-After ヘッダを尊重（API側のレート制限ポリシー順守・BAN回避）\n
+可読性
+- fetch_* のページネーション処理がほぼ同型。共通化すると読みやすく保守しやすい。
+  例: _fetch_paginated(path, root_key, params)
+- 例外系の分岐（401/429/5xx/その他）にコメント追加で意図を明確化。
+- _to_int は "1.5" → 1 に切り捨てる設計だが、コメントに意図（API仕様上は整数想定、フォールバックとしてfloat経由）を明記すると誤解が減る。
+
+設計
+- レートリミッタのスレッドセーフティ
+  - 現状は単一プロセス・単一スレッド前提。将来の並行実行に備えるなら _RateLimiter.wait() に Lock を入れるべき。
+- トークンキャッシュ
+  - _request が401のたびに get_id_token() を呼ぶが、呼び出し側の id_token は更新されないためリクエスト毎に毎回401→リフレッシュが発生しうる。
+  - 改善案:
+    - JQuantsClient クラス化し、インスタンス内で id_token をキャッシュ・更新。全メソッドは内部トークンを自動利用。
+    - もしくはモジュールスコープで最新の id_token をキャッシュ（スレッドセーフ対応を考慮）\n- リトライポリシー
+  - バックオフにジッターを入れるとスパイク時の同調を避けられます。
+  - 429の場合は Retry-After 優先、なければ指数バックオフ。
+- フェッチと保存のストリーミング
+  - 現状は全ページをメモリに溜めてから保存。大量データ時にメモリを圧迫。
+  - ページ単位で save_* を呼ぶストリーミング（またはジェネレータで返す）設計にするとスケールしやすい。
+- DuckDB へのロード\n  - 大量行では executemany よりも、DataFrame/Arrow 経由や一時テーブルへの COPY/INSERT SELECT の方が高速になることが多いです。
+  - テーブルスキーマ（PK/UNIQUE制約）やカラム型に合わせて date の正規化（YYYY-MM-DD）を徹底（APIがYYYYMMDDを返す可能性がある場合は正規化ロジック追加）。
+
+パフォーマンス
+- 120 req/min 固定間隔は OK。ただしリトライが発生するケースでは「レートリミット＋バックオフ＋Retry-After」の組合せ最適化の余地あり。
+- ページング全件収集をやめてストリーム保存するだけでメモリフットプリントが大きく下がります。
+- DuckDB 挿入の高速化（前述）を検討。
+
+具体的な修正例（抜粋）\n- _request のネットワークエラー待機追加と無限再帰防止（allow_refresh）\n  def _request(..., allow_refresh: bool = True) -> Any:
+      ...
+      for attempt in range(_MAX_RETRIES):
+          _rate_limiter.wait()
+          try:
+              return _do_call(token)
+          except urllib.error.HTTPError as e:
+              status = e.code
+              if status == 401:
+                  if allow_refresh and not _token_refreshed:
+                      logger.warning("401 Unauthorized on %s, refreshing id_token", path)
+                      try:
+                          token = get_id_token()
+                          _token_refreshed = True
+                          continue
+                      except Exception as refresh_exc:
+                          raise RuntimeError("id_token のリフレッシュに失敗しました") from refresh_exc
+                  raise
+              if status in _RETRY_STATUS_CODES or status >= 500:
+                  last_exc = e
+                  if attempt < _MAX_RETRIES - 1:
+                      # Retry-After を尊重
+                      retry_after = None
+                      if hasattr(e, "headers"):
+                          retry_after = e.headers.get("Retry-After")
+                      wait = _compute_wait(attempt, retry_after)
+                      logger.warning("HTTP %d on %s, retry %d/%d in %.1fs", status, path, attempt + 1, _MAX_RETRIES, wait)
+                      time.sleep(wait)
+                  continue
+              raise
+          except (urllib.error.URLError, OSError) as e:
+              last_exc = e
+              if attempt < _MAX_RETRIES - 1:
+                  wait = _RETRY_BACKOFF_BASE ** attempt
+                  logger.warning("Network error on %s, retry %d/%d in %.1fs: %s", path, attempt + 1, _MAX_RETRIES, wait, e)
+                  time.sleep(wait)
+              continue
+      raise RuntimeError(...)
+
+  def get_id_token(...):
+      data = _request("/token/auth_refresh", method="POST", json_body={"refreshtoken": token}, allow_refresh=False)
+      return data["idToken"]
+
+- _RateLimiter のスレッドセーフ化
+  class _RateLimiter:
+      def __init__(...):
+          self._lock = threading.Lock()
+      def wait(self):
+          with self._lock:
+              elapsed = time.monotonic() - self._last_called
+              wait_sec = self._min_interval - elapsed
+              if wait_sec > 0:
+                  time.sleep(wait_sec)
+              self._last_called = time.monotonic()
+
+- 共通ページネーションヘルパ（任意）\n  def _fetch_paginated(path, root_key, id_token, params):
+      result = []
+      p = dict(params or {})
+      while True:
+          data = _request(path, params=p, id_token=id_token)
+          result.extend(data.get(root_key, []))
+          k = data.get("pagination_key")
+          if not k: break
+          p["pagination_key"] = k
+      return result
+
+テスト
+- tests/test_generated.py で import builtins が未使用です。削除してください（flake8等で警告対象）。
+- このPRでは jquants_client のテストが未追加のようなので、最低限ユニットテストを追加すると信頼性が上がります。
+  - _to_float/_to_int の境界ケース
+  - _request の 401/429/5xx/URLError のリトライ挙動（urlopen をモック）\n  - get_id_token で allow_refresh=False が効いて無限再帰しないこと
+
+小さな改善提案
+- User-Agent を追加: headers["User-Agent"] = "kabusys-jquants-client/1.0"
+- Accept-Encoding: gzip を付け、GzipHandler を有効化（任意）\n- _request の timeout を settings 側で設定可能にする（長期運用で調整しやすい）\n- save_* の日付フォーマットの正規化（API仕様に依存するため、受け取り値が YYYYMMDD の可能性があれば YYYY-MM-DD に変換）\n- ログの粒度: info は最終件数、debug にページ毎件数やURL(クエリ除く)を出すなど調整
+
+以上です。特に「URLError系の待機追加」と「get_id_token の無限再帰回避（allow_refresh導入）」は必須修正と考えます。その上で、スレッドセーフなレートリミッタとトークンキャッシュ/クライアントクラス化を行うと、堅牢で拡張性の高いクライアントになります。
+Total comments: 4
