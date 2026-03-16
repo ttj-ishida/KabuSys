@@ -1,113 +1,87 @@
-CHANGELOG
-=========
+# CHANGELOG
 
-すべての注目すべき変更点を記録します。  
-フォーマットは「Keep a Changelog」に準拠しています。
+すべての重要な変更点はこのファイルに記録します。本ドキュメントは「Keep a Changelog」フォーマットに準拠します。
 
-[Unreleased]
-------------
+全般ルール:
+- バージョン番号はパッケージの __version__ に従います。
+- 日付はこの変更履歴作成日です。
 
-（現在未リリースの変更はありません）
+## [Unreleased]
 
-[0.1.0] - 2026-03-16
--------------------
 
-初回リリース。日本株自動売買システム「KabuSys」の基盤機能を実装しました。主な追加点は以下の通りです。
+## [0.1.0] - 2026-03-16
 
-Added
-- パッケージ基礎
-  - パッケージエントリポイントを追加（kabusys.__init__、バージョン 0.1.0、公開モジュール一覧）。
-  - 空のサブパッケージを追加（kabusys.execution, kabusys.strategy）。将来の実装のためのプレースホルダ。
+初回リリース。日本株自動売買システムのコアデータ層、ETL、監査、品質チェック、設定管理、J-Quants API クライアントを実装。
 
-- 環境設定管理（kabusys.config）
-  - .env または環境変数から設定を自動読み込みする仕組みを実装。
-  - 自動ロードはプロジェクトルート（.git または pyproject.toml）を基準に探索するため、CWD に依存しない。
-  - KABUSYS_DISABLE_AUTO_ENV_LOAD 環境変数で自動ロードを無効化可能（テスト用）。
-  - .env パーサーは以下に対応：
-    - 空行、コメント行（#）の無視
-    - export KEY=VAL 形式のサポート
-    - シングル/ダブルクォート内のエスケープ処理
-    - クォートなしのインラインコメント処理（直前がスペース/タブの場合にコメントと判定）
-  - _load_env_file により OS 環境変数を protected として上書き制御が可能。
-  - Settings クラスを追加し、アプリケーション設定（J-Quants トークン、kabu API パスワード、Slack トークン/チャネル、DB パス、環境、ログレベル等）をプロパティとして提供。必須項目は未設定時に ValueError を送出。
-  - KABUSYS_ENV と LOG_LEVEL の値検証を実装（許容値セットの検証）。
+### 追加 (Added)
+- パッケージ基盤
+  - パッケージ初期化を定義（kabusys.__init__）。公開モジュール: data, strategy, execution, monitoring。
+  - バージョン: 0.1.0
 
-- J-Quants API クライアント（kabusys.data.jquants_client）
-  - J-Quants の認証・データ取得機能を実装：
-    - get_id_token (リフレッシュトークンから idToken を取得)
-    - fetch_daily_quotes（株価日足、ページネーション対応）
-    - fetch_financial_statements（財務データ、ページネーション対応）
-    - fetch_market_calendar（JPX マーケットカレンダー）
-  - HTTP 呼び出しの共通処理で以下を実装：
-    - レート制限（固定間隔スロットリング、デフォルト 120 req/min）
-    - リトライ（指数バックオフ、最大 3 回、408/429/5xx を対象）
-    - 429 の場合は Retry-After ヘッダを尊重
-    - 401 受信時は id_token を自動リフレッシュして 1 回再試行（無限再帰を防止）
-    - id_token のモジュールレベルキャッシュ（ページネーション間で共有）
-    - JSON デコード失敗時の明確なエラーメッセージ
-  - 取得データには fetched_at（UTC ISO8601）での取得時刻付与に対応（保存処理で使用）。
+- 環境設定管理 (`kabusys.config`)
+  - .env ファイルと OS 環境変数からの自動ロード機能を実装。
+  - プロジェクトルート検出ロジック: `.git` または `pyproject.toml` を基準に親ディレクトリを検索（CWD 依存を回避）。
+  - .env パーサー: `export KEY=val` 形式、シングル/ダブルクォート、エスケープシーケンス、コメント処理に対応。
+  - 自動ロードの無効化フラグ: `KABUSYS_DISABLE_AUTO_ENV_LOAD=1`。
+  - Settings クラスを提供し、アプリケーションで使用する主要な設定値をプロパティ経由で取得（J-Quants トークン、kabu API パスワード、Slack トークン/チャンネル、DB パス、環境 / ログレベル判定など）。
+  - 設定値のバリデーション（KABUSYS_ENV / LOG_LEVEL の有効値チェック）および必須項目未設定時のエラー (`_require`)。
 
-- DuckDB スキーマ定義・初期化（kabusys.data.schema）
-  - 3 層（Raw / Processed / Feature）＋ Execution レイヤーに基づくテーブル定義を追加。
-  - raw_prices/raw_financials/raw_news/raw_executions 等の Raw テーブルを定義。
-  - prices_daily, market_calendar, fundamentals, features, ai_scores, signals, signal_queue, orders, trades, positions, portfolio_performance などを含む豊富なテーブル群を定義。
-  - テーブルの CHECK 制約、PRIMARY KEY、FOREIGN KEY を積極的に設定。
-  - クエリパフォーマンスを考慮したインデックス群を定義。
-  - init_schema(db_path) によりディレクトリ作成（必要時）→ DuckDB 接続 → DDL/インデックス実行を行う冪等な初期化処理を提供。
-  - get_connection(db_path) で既存 DB への接続を取得可能。
+- J-Quants API クライアント (`kabusys.data.jquants_client`)
+  - 日足（OHLCV）、四半期財務データ、JPX マーケットカレンダーの取得機能を実装（ページネーション対応）。
+  - API 呼び出しの共通実装: レートリミッタ、リトライ（指数バックオフ、最大 3 回）、HTTP ステータスに基づくリトライ制御（408/429/5xx 等）。
+  - 401 Unauthorized 時にリフレッシュトークンから ID トークンを自動取得して 1 回リトライ（無限再帰を防止）。
+  - モジュールレベルの ID トークンキャッシュでページネーション間のトークン共有を実現。
+  - JSON デコード失敗時や HTTP エラー時の詳細な例外メッセージ。
+  - DuckDB への保存関数: `save_daily_quotes`, `save_financial_statements`, `save_market_calendar` を提供。いずれも冪等（ON CONFLICT DO UPDATE）で保存し、`fetched_at` を UTC タイムスタンプで記録。
+  - 値変換ユーティリティ `_to_float`, `_to_int`（堅牢な変換、空値処理、小数文字列の扱いに注意）。
 
-- ETL パイプライン（kabusys.data.pipeline）
-  - 日次 ETL の実装（run_daily_etl）：
-    - 市場カレンダー取得 → 株価差分取得（backfill 対応）→ 財務差分取得 → 品質チェック の順で実行。
-    - 各ステップは独立してエラーハンドリングされ、1 ステップ失敗でも他ステップは継続（結果にエラー情報を集約）。
-    - ETLResult データクラスで結果（取得数/保存数/品質問題/エラー）を返却し、to_dict() で整形可能。
-    - 差分取得ヘルパー（get_last_price_date / get_last_financial_date / get_last_calendar_date）を実装。
-    - run_prices_etl/run_financials_etl/run_calendar_etl を個別に実行可能。backfill_days と calendar_lookahead_days のデフォルトを設定。
-    - カレンダー取得後に target_date を最寄り営業日に自動調整（_adjust_to_trading_day）。
-    - jquants_client の save_* 関数を利用して冪等に保存。
+- DuckDB スキーマ定義・初期化 (`kabusys.data.schema`)
+  - DataPlatform の 3 層（Raw / Processed / Feature）＋ Execution 層を網羅する DDL を定義。
+  - raw_prices, raw_financials, raw_news, raw_executions などの Raw テーブル。
+  - prices_daily, market_calendar, fundamentals, news_articles, news_symbols などの Processed テーブル。
+  - features, ai_scores などの Feature テーブル。
+  - signals, signal_queue, orders, trades, positions, portfolio_performance などの Execution テーブル。
+  - パフォーマンス向けに想定クエリに基づくインデックスを作成。
+  - `init_schema(db_path)` によりディレクトリ生成 → DuckDB 接続 → 全テーブル・インデックス作成（冪等）。
+  - `get_connection(db_path)` による既存 DB への接続取得。
 
-- DuckDB への保存（kabusys.data.jquants_client の save_*）
-  - save_daily_quotes / save_financial_statements / save_market_calendar を実装。
-  - 保存は ON CONFLICT DO UPDATE を用いた冪等な挙動（重複の更新）を実現。
-  - PK 欠損行はスキップし、スキップ件数をログ出力。
-  - 型安全な変換ユーティリティ _to_float / _to_int を実装（不正値に対して None を返す等の保護処理）。
+- ETL パイプライン (`kabusys.data.pipeline`)
+  - 日次 ETL の主要ロジックを実装: カレンダー取得 → 株価差分取得（バックフィル対応）→ 財務データ差分取得 → 品質チェック。
+  - 差分更新ヘルパー: DB の最終取得日から自動で再取得範囲を算出（デフォルト backfill_days=3）。
+  - カレンダーは先読み（デフォルト 90 日）を行い、非営業日のターゲット調整機能を実装。
+  - fetch/save は jquants_client の idempotent な保存関数を利用。
+  - 品質チェック（quality モジュール）をオプションで実行。ETL はステップ毎にエラーハンドリングされ、1 ステップ失敗でも他ステップは継続。
+  - ETL 実行結果を表す `ETLResult` クラスを提供（品質問題・エラーメッセージの集約、シリアライズ機能）。
 
-- 監査ログ（kabusys.data.audit）
-  - シグナル→発注→約定のトレースを目的とした監査テーブルを実装：
-    - signal_events（戦略が生成した全シグナル）
-    - order_requests（発注要求、order_request_id を冪等キーとして扱う）
-    - executions（証券会社からの約定情報、broker_execution_id を一意キーとして扱う）
-  - 発注種別（market/limit/stop）に応じた CHECK 制約（limit_price / stop_price 要件）を実装。
-  - すべての TIMESTAMP を UTC で保存するよう init_audit_schema は SET TimeZone='UTC' を実行。
-  - init_audit_db(db_path) で専用 DB を初期化するユーティリティを追加。
-  - 監査用インデックス群を追加（検索/結合/コールバック用途を想定）。
+- 監査ログ（トレーサビリティ）(`kabusys.data.audit`)
+  - シグナル → 発注要求 → 約定までの監査テーブルを実装。
+  - テーブル: `signal_events`, `order_requests`（冪等キー: order_request_id）, `executions`（broker_execution_id はユニーク）。
+  - すべての TIMESTAMP を UTC で保存する方針を採用（init 時に `SET TimeZone='UTC'` を実行）。
+  - 監査用インデックス群を作成し、クエリパフォーマンスを向上。
+  - `init_audit_schema(conn)` と `init_audit_db(db_path)` を提供。
 
-- データ品質チェック（kabusys.data.quality）
-  - QualityIssue データクラスを定義（check_name, table, severity, detail, rows）。
-  - check_missing_data（raw_prices の OHLC 欠損検出）を実装（サンプル行の取得、カウント）。
-  - check_spike（前日比スパイク検出）を実装（LAG ウィンドウ関数を利用、閾値デフォルト 50%）。
-  - 各チェックは問題点を全件（Fail-Fast ではなく）収集して返却。ETL 側で重大度に基づく判断が可能。
-  - DuckDB のパラメータバインドを使い SQL インジェクションリスクを低減。
+- データ品質チェック (`kabusys.data.quality`)
+  - 必須カラムの欠損検出（`check_missing_data`）: raw_prices の OHLC 欠損を検出しサンプルを返す。
+  - スパイク検出（`check_spike`）: 前日比変動率が閾値（デフォルト 50%）を超えるレコードを検出（LAG ウィンドウを使用）。
+  - 問題は `QualityIssue` dataclass として集約（check_name, table, severity, detail, rows）。
+  - 各チェックは Fail-Fast せず、問題を列挙して返す設計（呼び出し元が重大度に応じて停止判断）。
 
-- その他
-  - ロギングを活用して各モジュールで情報/警告/エラーを出力。
-  - テスト容易性を考慮して id_token の注入や DB 接続の注入が可能な設計。
-  - ドキュメント参照コメント（DataPlatform.md / DataSchema.md 相当）を各モジュールに追加。
+### 変更 (Changed)
+- 初回リリースにあたって多数のモジュールを新規追加したため、外部仕様（API、DB スキーマ、環境変数名など）は以降のリリースで拡張・変更される可能性があります。
 
-Changed
-- （初回リリースのため該当なし）
+### 修正 (Fixed)
+- 初版のため特定のバグ修正履歴はありません。実運用でのフィードバックにより修正予定。
 
-Fixed
-- （初回リリースのため該当なし）
+### 既知の制約 / 注意点 (Notes)
+- 自動 .env ロードはプロジェクトルートが検出できない場合はスキップされます（配布後の動作を想定）。
+- J-Quants API のレート制限は 120 req/min に固定した実装（固定間隔スロットリング）。高スループット用途では設計の見直しが必要になる可能性あり。
+- ID トークンの自動リフレッシュは 401 を受けた場合に「最大 1 回」行う挙動です。リフレッシュ失敗時はエラーになります。
+- DuckDB スキーマの DDL は多くの制約・CHECK を含むため、データロード時に型・値の整合性に注意してください。
+- audit テーブルは削除を前提としない（ON DELETE RESTRICT 等）監査用途向けの設計。
 
-Security
-- （既知のセキュリティ修正はなし）
+### 互換性に関する注記 (Breaking Changes)
+- なし（初回リリース）。
 
-Notes / Known limitations
-- execution と strategy パッケージは空実装（プレースホルダ）です。注文送信ロジックや取引戦略は今後追加予定。
-- jquants_client は urllib を使った実装でタイムアウトや HTTP エラー処理を備えていますが、より高度な HTTP クライアント（例: requests/HTTPX）への移行やモック対応は将来検討の余地があります。
-- DuckDB をデータストアとして想定しているため、別の DB を使う場合はスキーマ/DDL/クエリの移植が必要です。
-- 一部の関数はデフォルトで UTC タイムスタンプを想定しているため、ローカルタイム利用時は注意してください。
+---
 
-履歴管理について
-- 以降の変更は本ファイルに新しいバージョンセクションを追加して記録してください。
+将来的なリリースでは、strategy と execution 層の具体的な発注実装、モニタリング、Slack 連携等の機能追加・改善を予定しています。問題報告・機能要望は Issue にてお願いします。
