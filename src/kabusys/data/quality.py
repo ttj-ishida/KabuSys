@@ -158,7 +158,7 @@ def check_spike(
                 close AS curr_close,
                 (close - prev_close) / prev_close AS change_rate
             FROM lagged
-            WHERE prev_close > 0
+            WHERE ABS(prev_close) > 0
               AND ABS((close - prev_close) / prev_close) > ?
               AND (? IS NULL OR date = ?)
         )
@@ -221,7 +221,7 @@ def check_duplicates(
     params = [target_date, target_date]
     sample_rows = conn.execute(
         """
-        SELECT date, code, COUNT(*) AS cnt
+        SELECT date, code, COUNT(*) AS count
         FROM raw_prices
         WHERE (? IS NULL OR date = ?)
         GROUP BY date, code
@@ -322,7 +322,7 @@ def check_date_consistency(
             SELECT rp.date, COUNT(*) AS cnt
             FROM raw_prices rp
             JOIN market_calendar mc ON rp.date = mc.date
-            WHERE mc.is_trading_day = false
+            WHERE mc.is_trading_day IS FALSE
             GROUP BY rp.date
             ORDER BY rp.date
             LIMIT 10
@@ -336,7 +336,7 @@ def check_date_consistency(
                     SELECT rp.date
                     FROM raw_prices rp
                     JOIN market_calendar mc ON rp.date = mc.date
-                    WHERE mc.is_trading_day = false
+                    WHERE mc.is_trading_day IS FALSE
                     GROUP BY rp.date
                 )
                 """
