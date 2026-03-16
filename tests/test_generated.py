@@ -8,6 +8,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest import mock
 import urllib.error
+import urllib.request
 
 import pytest
 
@@ -159,7 +160,7 @@ def make_fake_response(body: bytes):
 def test_request_json_decode_error(monkeypatch):
     # urlopen returns non-json -> RuntimeError
     fake = make_fake_response(b'not-json')
-    monkeypatch.patch("urllib.request.urlopen", return_value=fake)
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: fake)
     with pytest.raises(RuntimeError):
         jquants._request("/test", id_token="t", params={"a": "1"})
 
@@ -167,9 +168,9 @@ def test_request_json_decode_error(monkeypatch):
 def test_request_http_error_raises_after_retries(monkeypatch):
     # force urllib.request.urlopen to raise HTTPError with 500 to trigger retries and final RuntimeError
     err = urllib.error.HTTPError(url="u", code=500, msg="err", hdrs=None, fp=None)
-    monkeypatch.patch("urllib.request.urlopen", side_effect=err)
+    monkeypatch.setattr(urllib.request, "urlopen", mock.MagicMock(side_effect=err))
     # patch sleep to avoid delay
-    monkeypatch.patch("time.sleep", lambda s: None)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
     with pytest.raises(RuntimeError):
         jquants._request("/retry", id_token="t")
 
@@ -177,14 +178,14 @@ def test_request_http_error_raises_after_retries(monkeypatch):
 def test_request_http_401_raises_when_no_refresh(monkeypatch):
     # when HTTPError 401 occurs and allow_refresh=False -> raise immediately
     err = urllib.error.HTTPError(url="u", code=401, msg="unauth", hdrs=None, fp=None)
-    monkeypatch.patch("urllib.request.urlopen", side_effect=err)
+    monkeypatch.setattr(urllib.request, "urlopen", mock.MagicMock(side_effect=err))
     with pytest.raises(urllib.error.HTTPError):
         jquants._request("/auth", id_token="t", allow_refresh=False)
 
 
 def test_get_id_token_success_and_missing(monkeypatch):
     # monkeypatch jquants._request to return idToken
-    monkeypatch.patch.object(jquants, "_request", return_value={"idToken": "ID123"})
+    monkeypatch.setattr(jquants, "_request", mock.MagicMock(return_value={"idToken": "ID123"}))
     # ensure settings provides a refresh token if none provided
     monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "RTOKEN")
     assert jquants.get_id_token() == "ID123"
@@ -209,7 +210,7 @@ def test_fetch_daily_quotes_pagination(monkeypatch):
             return page1
         return page2
 
-    monkeypatch.patch.object(jquants, "_request", side_effect=fake_request)
+    monkeypatch.setattr(jquants, "_request", fake_request)
     res = jquants.fetch_daily_quotes(id_token="T")
     assert len(res) == 2
     # ensure pagination_key was passed on second call

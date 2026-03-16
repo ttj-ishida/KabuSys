@@ -112,7 +112,7 @@ def check_missing_data(
                 rows=[dict(zip(cols, row)) for row in sample_rows],
             )
         )
-        logger.warning("check_missing_data: raw_prices に OHLC 欠損 %d 件", count)
+        logger.error("check_missing_data: raw_prices に OHLC 欠損 %d 件", count)
 
     return issues
 
@@ -358,8 +358,8 @@ def check_date_consistency(
                 "check_date_consistency: 非営業日の株価データ %d 日分",
                 total_days,
             )
-    except duckdb.CatalogException:
-        # market_calendar テーブルが未存在の場合はスキップ
+    except duckdb.Error:
+        # market_calendar テーブル未存在・カラム不一致等の場合はスキップ
         pass
 
     return issues
