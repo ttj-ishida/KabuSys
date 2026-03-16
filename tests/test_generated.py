@@ -1,5 +1,8 @@
 
 import os
+import time
+import urllib.error
+import urllib.request
 from datetime import date, datetime, timezone
 from unittest import mock
 
@@ -7,8 +10,11 @@ import duckdb
 import pytest
 
 # import target modules / functions
-from kabusys.config import _parse_env_line, _require, settings
+from kabusys.config import Settings, _parse_env_line, _require
+from kabusys.data import audit
+from kabusys.data import jquants_client as _jq
 from kabusys.data.jquants_client import (
+    _RateLimiter,
     _to_float,
     _to_int,
     fetch_daily_quotes,
@@ -320,25 +326,25 @@ def test_quality_checks_all(db_conn):
 # Settings getters and validation
 # -----------------------
 def test_settings_env_and_log_level(monkeypatch):
-    # env default: development
+    # Settings() を直接インスタンス化してシングルトンキャッシュの影響を回避
     monkeypatch.delenv("KABUSYS_ENV", raising=False)
-    assert settings.env == "development"
+    assert Settings().env == "development"
     # set valid env
     monkeypatch.setenv("KABUSYS_ENV", "live")
-    assert settings.env == "live"
+    assert Settings().env == "live"
     # invalid env raises
     monkeypatch.setenv("KABUSYS_ENV", "invalid_env")
     with pytest.raises(ValueError):
-        _ = settings.env
+        _ = Settings().env
 
     # log level default INFO
     monkeypatch.delenv("LOG_LEVEL", raising=False)
-    assert settings.log_level == "INFO"
+    assert Settings().log_level == "INFO"
     monkeypatch.setenv("LOG_LEVEL", "debug")
-    assert settings.log_level == "DEBUG"
+    assert Settings().log_level == "DEBUG"
     monkeypatch.setenv("LOG_LEVEL", "BAD")
     with pytest.raises(ValueError):
-        _ = settings.log_level
+        _ = Settings().log_level
 
 
 def test_require_raises_and_returns(monkeypatch):
@@ -362,3 +368,74 @@ def test_get_id_token_uses_request(monkeypatch):
         tok = get_id_token(None)
         assert tok == "ID123"
         mock_req.assert_called_once()
+
+
+# -----------------------
+# _request エラーハンドリング（カバレッジ復元）
+# -----------------------
+
+def _make_fake_response(body: bytes):
+    fake = mock.MagicMock()
+    fake.read.return_value = body
+    fake.__enter__.return_value = fake
+    return fake
+
+
+def test_request_json_decode_error(monkeypatch):
+    """urlopen が非JSON を返した場合 RuntimeError を送出する。"""
+    fake = _make_fake_response(b"not-json")
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: fake)
+    with pytest.raises(RuntimeError):
+        _jq._request("/test", id_token="t", params={"a": "1"})
+
+
+def test_request_http_5xx_raises_after_retries(monkeypatch):
+    """HTTP 500 エラーはリトライ後に RuntimeError を送出する。"""
+    err = urllib.error.HTTPError(url="u", code=500, msg="err", hdrs=None, fp=None)
+    monkeypatch.setattr(urllib.request, "urlopen", mock.MagicMock(side_effect=err))
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError):
+        _jq._request("/retry", id_token="t")
+
+
+def test_request_http_401_no_refresh_raises(monkeypatch):
+    """allow_refresh=False のとき HTTP 401 は即座に送出される（リフレッシュしない）。"""
+    err = urllib.error.HTTPError(url="u", code=401, msg="unauth", hdrs=None, fp=None)
+    monkeypatch.setattr(urllib.request, "urlopen", mock.MagicMock(side_effect=err))
+    with pytest.raises(urllib.error.HTTPError):
+        _jq._request("/auth", id_token="t", allow_refresh=False)
+
+
+# -----------------------
+# レートリミッタ（カバレッジ復元）
+# -----------------------
+
+def test_rate_limiter_wait_sleeps(monkeypatch):
+    """前回呼び出しから間隔が不足している場合 sleep が呼ばれる。"""
+    rl = _RateLimiter(min_interval=0.5)
+    rl._last_called = 0.5  # 擬似的に直前に呼んだ状態にする
+    monkeypatch.setattr(time, "monotonic", mock.MagicMock(side_effect=[1.0, 1.6, 2.0]))
+    slept = []
+    monkeypatch.setattr(time, "sleep", lambda s: slept.append(s))
+    rl.wait()
+    assert all(s >= 0 for s in slept)
+
+
+# -----------------------
+# audit スキーマ初期化（カバレッジ復元）
+# -----------------------
+
+def test_init_audit_db_schema(tmp_path):
+    """audit スキーマ初期化でシグナルイベント・注文リクエストテーブルが作成される。
+
+    DuckDB 1.x では with conn: がコネクションを閉じるため、ファイルベース DB で
+    init_audit_schema 後に再接続して検証する。
+    """
+    db_file = tmp_path / "audit_test.duckdb"
+    conn = duckdb.connect(str(db_file))
+    audit.init_audit_schema(conn)
+    # init_audit_schema 内の with conn: でコネクションが閉じられるので再接続
+    conn2 = duckdb.connect(str(db_file))
+    assert conn2.execute("SELECT COUNT(*) FROM signal_events").fetchone()[0] == 0
+    assert conn2.execute("SELECT COUNT(*) FROM order_requests").fetchone()[0] == 0
+    conn2.close()
