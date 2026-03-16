@@ -140,54 +140,14 @@ def test_fetch_daily_quotes_pagination(monkeypatch):
     assert "2021-01-01" in dates and "2021-01-02" in dates
 
 
-_MINIMAL_DDL = [
-    """CREATE TABLE IF NOT EXISTS raw_prices (
-        date        DATE          NOT NULL,
-        code        VARCHAR       NOT NULL,
-        open        DECIMAL(18,4),
-        high        DECIMAL(18,4),
-        low         DECIMAL(18,4),
-        close       DECIMAL(18,4),
-        volume      BIGINT,
-        turnover    DECIMAL(18,2),
-        fetched_at  TIMESTAMP     NOT NULL DEFAULT current_timestamp,
-        PRIMARY KEY (date, code)
-    )""",
-    """CREATE TABLE IF NOT EXISTS raw_financials (
-        code            VARCHAR       NOT NULL,
-        report_date     DATE          NOT NULL,
-        period_type     VARCHAR       NOT NULL,
-        revenue         DECIMAL(20,4),
-        operating_profit DECIMAL(20,4),
-        net_income      DECIMAL(20,4),
-        eps             DECIMAL(18,4),
-        roe             DECIMAL(10,6),
-        fetched_at      TIMESTAMP     NOT NULL DEFAULT current_timestamp,
-        PRIMARY KEY (code, report_date, period_type)
-    )""",
-    """CREATE TABLE IF NOT EXISTS market_calendar (
-        date            DATE        NOT NULL PRIMARY KEY,
-        is_trading_day  BOOLEAN     NOT NULL,
-        is_half_day     BOOLEAN     NOT NULL DEFAULT false,
-        is_sq_day       BOOLEAN     NOT NULL DEFAULT false,
-        holiday_name    VARCHAR
-    )""",
-]
-
-
 # -----------------------
 # Save functions -> use DuckDB in-memory
 # -----------------------
+# mem_db フィクスチャは tests/conftest.py で定義（DRY化）。
+# db_conn は conftest.py の mem_db のエイリアス。
 @pytest.fixture
-def db_conn():
-    conn = duckdb.connect(":memory:")
-    for ddl in _MINIMAL_DDL:
-        conn.execute(ddl)
-    yield conn
-    try:
-        conn.close()
-    except Exception:
-        pass
+def db_conn(mem_db):
+    return mem_db
 
 
 def test_save_daily_quotes_inserts_and_skips(db_conn):
@@ -413,12 +373,22 @@ def test_request_http_401_no_refresh_raises(monkeypatch):
 def test_rate_limiter_wait_sleeps(monkeypatch):
     """前回呼び出しから間隔が不足している場合 sleep が呼ばれる。"""
     rl = _RateLimiter(min_interval=0.5)
-    rl._last_called = 0.5  # 擬似的に直前に呼んだ状態にする
-    monkeypatch.setattr(time, "monotonic", mock.MagicMock(side_effect=[1.0, 1.6, 2.0]))
+    rl._last_called = 0.8  # 擬似的に直前に呼んだ状態にする
+
+    # monotonic の呼び出し回数に依存しないカウンタ方式
+    _t = [0.9]  # elapsed = 0.9 - 0.8 = 0.1 → wait_sec = 0.4 → sleep(0.4) が呼ばれる
+    def fake_monotonic():
+        val = _t[0]
+        _t[0] += 0.5
+        return val
+
+    monkeypatch.setattr(time, "monotonic", fake_monotonic)
     slept = []
     monkeypatch.setattr(time, "sleep", lambda s: slept.append(s))
     rl.wait()
-    assert all(s >= 0 for s in slept)
+    # sleep が呼ばれたことを検証（呼び出し回数や正確な値は実装依存なので問わない）
+    assert len(slept) >= 1
+    assert all(s > 0 for s in slept)
 
 
 # -----------------------
