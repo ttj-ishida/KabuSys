@@ -1,77 +1,107 @@
-# Changelog
+Keep a Changelog に準拠した CHANGELOG.md（日本語）を以下に作成しました。
 
-すべての重要な変更を記録します。本ファイルは Keep a Changelog の形式に準拠します。  
+CHANGELOG.md
+------------
 
-リリースは逆順（最新が上）で並べています。
+すべての重要な変更点をここに記録します。フォーマットは「Keep a Changelog」に準拠しています。
 
-## [0.1.0] - 2026-03-16
+[0.1.0] - 2026-03-16
+-------------------
 
-### Added
-- パッケージ初期リリース: KabuSys — 日本株自動売買システムのコアモジュール群を追加。
-  - src/kabusys/__init__.py
-    - パッケージメタ情報（__version__ = "0.1.0"）と公開サブパッケージ定義を追加。
-- 設定/環境変数管理（src/kabusys/config.py）
-  - .env ファイルまたは環境変数からの設定自動読み込み機能を実装（プロジェクトルート検出ロジック: .git または pyproject.toml を基準）。
-  - .env と .env.local の読み込み順と override 挙動の実装。OS 環境変数を保護する protected セットを導入。
-  - export KEY=val 形式、クォートやエスケープ、インラインコメントの扱いに対応したパーサー実装。
-  - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動ロード無効化対応（テスト用途）。
-  - Settings クラスを提供し、J-Quants / kabu API / Slack / DB パス / 環境種別 / ログレベル 等のプロパティを取得。
-  - 環境値のバリデーション（KABUSYS_ENV, LOG_LEVEL）と便利な is_live / is_paper / is_dev プロパティを追加。
+Added
+- パッケージの初期リリース: kabusys 0.1.0
+  - パッケージエントリポイント: src/kabusys/__init__.py を追加（__version__ = "0.1.0"、公開モジュール指定）。
+- 環境設定管理（src/kabusys/config.py）
+  - .env ファイルや環境変数から設定を自動読み込み（読み込み順: OS 環境 > .env.local > .env）。
+  - プロジェクトルート検出ロジック（.git または pyproject.toml を基準）により CWD 非依存で自動ロードを実現。
+  - export KEY=val 形式やクォート／エスケープ、インラインコメント（スペース前の#）に対応した .env パーサ実装。
+  - 自動ロード無効化フラグ: KABUSYS_DISABLE_AUTO_ENV_LOAD。
+  - OS 環境変数を保護する protected 機能（.env の上書きを制御）。
+  - Settings クラスで主要設定をプロパティ化:
+    - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, KABU_API_BASE_URL（デフォルト http://localhost:18080/kabusapi）
+    - SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
+    - DUCKDB_PATH（デフォルト data/kabusys.duckdb）, SQLITE_PATH（デフォルト data/monitoring.db）
+    - KABUSYS_ENV（development/paper_trading/live の検証）および LOG_LEVEL（DEBUG/INFO/WARNING/ERROR/CRITICAL の検証）
+    - is_live/is_paper/is_dev ヘルパープロパティ
 - J-Quants API クライアント（src/kabusys/data/jquants_client.py）
-  - 株価日足（OHLCV）、財務データ（四半期 BS/PL）、JPX マーケットカレンダー取得 API を実装。
-  - API レート制限対応（120 req/min）を固定間隔スロットリングで実装（RateLimiter）。
-  - リトライ戦略を実装（最大 3 回、指数バックオフ、408/429/5xx の自動リトライ、429 の Retry-After 優先）。
-  - 401 Unauthorized 受信時の ID トークン自動リフレッシュ（一回のみ）を実装。
-  - ページネーション対応（pagination_key を用いたループ）。
-  - 取得時刻（fetched_at）を UTC ISO8601 で記録し、Look-ahead Bias 的な追跡を可能にする設計。
-  - DuckDB への保存関数（save_daily_quotes / save_financial_statements / save_market_calendar）を実装。ON CONFLICT DO UPDATE による冪等性を確保。
-  - 型安全な変換ユーティリティ（_to_float / _to_int）を実装。
-- DuckDB スキーマ定義（src/kabusys/data/schema.py）
-  - DataPlatform の3層（Raw / Processed / Feature / Execution）に基づくテーブル群を定義。
-  - raw_prices, raw_financials, raw_news, raw_executions を含む Raw レイヤー。
-  - prices_daily, market_calendar, fundamentals, news_articles, news_symbols などの Processed レイヤー。
-  - features, ai_scores など Feature レイヤー。
-  - signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance など Execution レイヤー。
-  - 頻出クエリ向けのインデックス群を定義。
-  - init_schema(db_path) により DB ファイルの親ディレクトリ自動作成とテーブル/インデックス作成（冪等）を実装。get_connection() も提供。
+  - 株価日足（OHLCV）、四半期財務データ、JPX 市場カレンダーを取得する API クライアントを実装。
+  - 設計上の特徴:
+    - レート制限遵守（120 req/min）を固定間隔スロットリングで制御（_RateLimiter）。
+    - 再試行（指数バックオフ、最大 3 回）を実装（対象: 408/429/>=500、429 の場合は Retry-After を優先）。
+    - 401 受信時には ID トークンを自動リフレッシュして 1 回だけリトライ（トークン取得の再帰を防止）。
+    - ページネーション対応（pagination_key を用いた繰り返し取得）。
+    - データ取得時刻（fetched_at）を UTC で記録して Look-ahead バイアスを抑止。
+  - DuckDB 向け保存関数（save_daily_quotes, save_financial_statements, save_market_calendar）:
+    - ON CONFLICT DO UPDATE により冪等に保存。
+    - PK 欠損行はスキップし、スキップ件数をログ出力。
+    - 型変換ユーティリティ (_to_float, _to_int) を提供し、安全に数値変換。
+- DuckDB スキーマ定義と初期化（src/kabusys/data/schema.py）
+  - 3 層（Raw / Processed / Feature）＋ Execution レイヤのテーブルを包括的に定義。
+  - raw_prices, raw_financials, raw_news, raw_executions 等の Raw テーブル。
+  - prices_daily, market_calendar, fundamentals, news_articles, news_symbols 等の Processed テーブル。
+  - features, ai_scores 等の Feature テーブル。
+  - signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance 等の Execution テーブル。
+  - 頻出クエリのためのインデックスを定義。
+  - init_schema(db_path) によりディレクトリ自動作成とテーブル／インデックス作成を行う（冪等）。
+  - get_connection(db_path) を提供（既存 DB への接続）。
 - ETL パイプライン（src/kabusys/data/pipeline.py）
-  - 日次 ETL のエントリ run_daily_etl を実装（市場カレンダー取得 → 株価差分取得 → 財務差分取得 → 品質チェック の順）。
-  - 差分更新ロジック: DB 最終取得日を基に date_from を算出、backfill_days により数日前から再取得して API の後出し修正を吸収。
-  - 市場カレンダーは lookahead（デフォルト 90 日）分を先読み。
-  - 各ステップは独立してエラーハンドリングされ、1 ステップ失敗でも他ステップを継続（Fail-Fast ではない）。
-  - ETL 実行結果を表す ETLResult データクラスを追加（品質問題・エラーの収集、辞書化機能あり）。
-  - get_last_price_date / get_last_financial_date / get_last_calendar_date 等の差分ヘルパーを提供。
-- 監査ログ（Audit）モジュール（src/kabusys/data/audit.py）
-  - 信頼できるトレーサビリティを確保するための監査テーブル群を実装（signal_events, order_requests, executions）。
-  - order_request_id を冪等キーとして扱う設計、すべての TIMESTAMP を UTC で保存する方針（init_audit_schema で SET TimeZone='UTC' を設定）。
-  - 発注フローを追跡するためのインデックス群を定義（status 検索、ID 関連の結合など）。
-  - init_audit_db(db_path) により監査ログ専用 DB を初期化可能。
+  - 日次 ETL の統合実装（run_daily_etl を提供）。
+  - 処理フロー:
+    1. カレンダー ETL（先読み: デフォルト 90 日）
+    2. 株価日足 ETL（差分更新 + デフォルトバックフィル 3 日）
+    3. 財務データ ETL（差分更新 + バックフィル）
+    4. 品質チェック（オプション）
+  - 差分更新ヘルパー（DB の最終取得日取得関数 get_last_price_date / get_last_financial_date / get_last_calendar_date）。
+  - run_prices_etl/run_financials_etl/run_calendar_etl は差分算出・API 取得・保存を個別に実行し、失敗しても他処理は継続。
+  - ETLResult データクラスで結果・品質問題・エラー概要を集約。
+- 監査ログ（トレーサビリティ）（src/kabusys/data/audit.py）
+  - signal_events, order_requests, executions の監査テーブルを定義。
+  - order_request_id を冪等キーとして扱い、発注再送で二重発注を防止する制約を導入。
+  - 各テーブルは created_at / updated_at を持ち、UTC 保存を前提（init_audit_schema は SET TimeZone='UTC' を実行）。
+  - 複数のチェック制約（limit/stop/market における価格必須／排他）や外部キー制約（ON DELETE RESTRICT）を定義。
+  - init_audit_schema(conn) / init_audit_db(db_path) を提供。
 - データ品質チェック（src/kabusys/data/quality.py）
-  - 欠損データ検出（OHLC の NULL チェック）、スパイク検出（前日比が閾値超：デフォルト 50%）、主キー重複、日付不整合検出の設計方針を実装。
-  - QualityIssue データクラスを追加し、各チェックは QualityIssue のリストを返す（Fail-Fast ではなく全件収集）。
-  - DuckDB 上で効率的に動作する SQL ベースのチェック実装（パラメータバインド使用）。
-  - check_missing_data / check_spike などのチェック実装（サンプル行の収集とログ出力）。
-- パッケージ構造
-  - data, strategy, execution, monitoring のパッケージエントリを追加（空 __init__ も配置）。
+  - QualityIssue データクラスを定義（check_name, table, severity, detail, rows）。
+  - 実装済みチェック（少なくとも）:
+    - 欠損データ検出 (check_missing_data): raw_prices の OHLC 欠損を検出しエラーとして報告。
+    - スパイク検出 (check_spike): 前日比が閾値（デフォルト 50%）を超える価格変動を検出。
+  - 各チェックはサンプル行（最大 10 件）を返し、Fail-Fast ではなく全件収集を行う設計。
+  - pipeline 側から run_all_checks を呼べる設計（ETL と統合）。
 
-### Changed
-- （初回リリースのため該当なし）
+Notes / マイグレーション
+- データベース初期化:
+  - 全テーブルを含む DB を作成するには data.schema.init_schema(db_path) を実行してください（db_path の親ディレクトリは自動作成されます）。
+  - 監査ログのみを追加する場合は init_audit_schema(conn) を既存接続に対して呼び出してください。
+- 環境変数:
+  - 必須: JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID（Settings のプロパティ参照）。
+  - 自動 .env 読み込みを無効にするには KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください（テスト用途など）。
+- ETL 実行例:
+  - init_schema() で DB 初期化後、run_daily_etl(conn) を呼ぶことで市場カレンダー取得→価格取得→財務取得→品質チェックの一連処理を実行できます。
+- ロギング/運用:
+  - Settings.log_level によりロギング閾値を検証します（不正値は例外を投げます）。
+  - J-Quants API クライアントは 120 req/min に合わせたスロットリングと再試行を実装していますが、大量のバッチ処理では運用面のレート管理・監視を推奨します。
 
-### Fixed
-- （初回リリースのため該当なし）
+Changed
+- 初回リリースのため該当なし。
 
-### Removed
-- （初回リリースのため該当なし）
+Fixed
+- 初回リリースのため該当なし。
 
-### Notes / 補足
-- 設計文書（DataPlatform.md, DataSchema.md 等）に基づく構成を想定した実装となっている（各モジュールの docstring に参照記載）。
-- ネットワーク/API の挙動（レートリミット、再試行ポリシー、トークンリフレッシュ）は定数で定義されており、将来的に調整可能（例: _RATE_LIMIT_PER_MIN, _MAX_RETRIES, _RETRY_BACKOFF_BASE）。
-- 現状はファイルベースで DuckDB を想定。":memory:" を指定してインメモリ DB での実行も可能。
-- 自動 .env ロードを無効化したい場合は環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください。
-- 今後のリリースで以下が期待されます:
-  - strategy / execution / monitoring 層の具体的実装（現在はパッケージエントリのみ）
-  - 追加の品質チェック・ETL モニタリング機能・テストカバレッジ強化
+Deprecated
+- 初回リリースのため該当なし。
 
----
+Removed
+- 初回リリースのため該当なし。
 
-この CHANGELOG はコードベースの実装内容から推測して作成しています。追加の変更点や補足情報があれば反映します。
+Security
+- 初回リリースのため該当なし。
+
+補足
+- README や DataPlatform.md / DataSchema.md 等の設計ドキュメントに基づいて実装しています。将来的に以下の点を拡張予定です:
+  - 追加の品質チェック（重複チェック、日付不整合チェック等）の拡張／強化。
+  - execution 層のブローカー接続ラッパー（kabuステーション等）と監査ログの連携実装。
+  - 単体テストおよび E2E テストの追加（トークンリフレッシュ・ページネーション・レート制御の検証）。
+
+-----
+
+必要であれば、各リリース項目を英語版にしたり、より詳細な移行手順（コードスニペット・コマンド）を追記します。どのレベルの詳細が必要か教えてください。
