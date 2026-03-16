@@ -19,8 +19,9 @@ DataPlatform.md Section 4, 5, 6 に基づき、以下のETL処理を実現する
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date, timedelta
+from typing import Any
 
 import duckdb
 
@@ -41,6 +42,9 @@ _CALENDAR_LOOKAHEAD_DAYS = 90
 
 # デフォルトのバックフィル日数（最終取得日の数日前から再取得して後出し修正を吸収）
 _DEFAULT_BACKFILL_DAYS = 3
+
+# 品質チェックの重大度定数（quality.QualityIssue.severity と一致させる）
+_SEVERITY_ERROR = "error"
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +86,22 @@ class ETLResult:
     @property
     def has_quality_errors(self) -> bool:
         """品質チェックでエラー重大度の問題が検出されたかどうか。"""
-        return any(i.severity == "error" for i in self.quality_issues)
+        return any(i.severity == _SEVERITY_ERROR for i in self.quality_issues)
+
+    def to_dict(self) -> dict[str, Any]:
+        """ETLResult を辞書に変換する（監査ログ書き込みやデバッグに利用）。
+
+        quality_issues は (check_name, severity, message) のタプルリストに変換する。
+
+        Returns:
+            ETLResult の全フィールドを含む辞書。
+        """
+        d = asdict(self)
+        d["quality_issues"] = [
+            {"check_name": i.check_name, "severity": i.severity, "message": i.message}
+            for i in self.quality_issues
+        ]
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +154,54 @@ def _get_max_date(
             return val
         return date.fromisoformat(str(val))
     return None
+
+
+# ---------------------------------------------------------------------------
+# 市場カレンダーヘルパー
+# ---------------------------------------------------------------------------
+
+
+def _adjust_to_trading_day(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+) -> date:
+    """target_date が非営業日なら、直近の営業日（過去方向）に調整して返す。
+
+    market_calendar テーブルが存在しない、またはカレンダーデータがない場合は
+    target_date をそのまま返す（カレンダー未取得時のフォールバック）。
+
+    Args:
+        conn:        DuckDB 接続。
+        target_date: 調整対象の日付。
+
+    Returns:
+        target_date またはそれ以前で最も近い営業日。
+    """
+    if not _table_exists(conn, "market_calendar"):
+        return target_date
+
+    # target_date 以前で最も新しい営業日を取得（最大 30 日遡る）
+    look_back = target_date - timedelta(days=30)
+    row = conn.execute(
+        """
+        SELECT MAX(date) FROM market_calendar
+        WHERE date <= ? AND date >= ? AND is_trading_day = true
+        """,
+        [target_date, look_back],
+    ).fetchone()
+
+    if row and row[0] is not None:
+        val = row[0]
+        adjusted = val if isinstance(val, date) else date.fromisoformat(str(val))
+        if adjusted != target_date:
+            logger.info(
+                "_adjust_to_trading_day: %s は非営業日のため %s に調整",
+                target_date,
+                adjusted,
+            )
+        return adjusted
+
+    return target_date
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +435,7 @@ def run_daily_etl(
     today = target_date or date.today()
     result = ETLResult(target_date=today)
 
-    # 1. 市場カレンダーETL
+    # 1. 市場カレンダーETL（先に取得して営業日調整に使用できるようにする）
     try:
         fetched, saved = run_calendar_etl(
             conn, today, id_token=id_token, lookahead_days=calendar_lookahead_days
@@ -379,10 +446,13 @@ def run_daily_etl(
         logger.exception("run_calendar_etl 失敗")
         result.errors.append("run_calendar_etl 失敗")
 
+    # カレンダー取得後に対象日を営業日に調整する
+    trading_day = _adjust_to_trading_day(conn, today)
+
     # 2. 株価日足ETL
     try:
         fetched, saved = run_prices_etl(
-            conn, today, id_token=id_token, backfill_days=backfill_days
+            conn, trading_day, id_token=id_token, backfill_days=backfill_days
         )
         result.prices_fetched = fetched
         result.prices_saved = saved
@@ -393,7 +463,7 @@ def run_daily_etl(
     # 3. 財務データETL
     try:
         fetched, saved = run_financials_etl(
-            conn, today, id_token=id_token, backfill_days=backfill_days
+            conn, trading_day, id_token=id_token, backfill_days=backfill_days
         )
         result.financials_fetched = fetched
         result.financials_saved = saved
@@ -406,8 +476,8 @@ def run_daily_etl(
         try:
             result.quality_issues = quality.run_all_checks(
                 conn,
-                target_date=today,
-                reference_date=today,
+                target_date=trading_day,
+                reference_date=trading_day,
                 spike_threshold=spike_threshold,
             )
         except Exception:
