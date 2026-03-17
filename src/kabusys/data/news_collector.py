@@ -35,6 +35,7 @@ from typing import Any, TypedDict
 
 import duckdb
 from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 logger = logging.getLogger(__name__)
 
@@ -265,7 +266,7 @@ def fetch_rss(
 
     try:
         root = ET.fromstring(raw)
-    except ET.ParseError:
+    except (ET.ParseError, DefusedXmlException):
         logger.warning("fetch_rss: XMLパース失敗 source=%s url=%s", source, url)
         return []
 
