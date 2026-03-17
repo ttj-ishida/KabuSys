@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 import duckdb
 import pytest
+from duckdb import ConstraintException
 
 from kabusys.data.audit import init_audit_schema, init_audit_db
 
@@ -181,17 +182,17 @@ class TestSignalEvents:
             _insert_signal(audit_conn, decision=decision)
 
     def test_invalid_decision_raises(self, audit_conn):
-        with pytest.raises(Exception):
+        with pytest.raises(ConstraintException):
             _insert_signal(audit_conn, decision="unknown_decision")
 
     def test_invalid_side_raises(self, audit_conn):
-        with pytest.raises(Exception):
+        with pytest.raises(ConstraintException):
             _insert_signal(audit_conn, side="long")
 
     def test_primary_key_unique(self, audit_conn):
         sid = _uid()
         _insert_signal(audit_conn, signal_id=sid)
-        with pytest.raises(Exception):
+        with pytest.raises(ConstraintException):
             _insert_signal(audit_conn, signal_id=sid)
 
     def test_created_at_auto_set(self, audit_conn):
@@ -236,12 +237,12 @@ class TestOrderRequests:
         sid = _insert_signal(audit_conn)
         oid = _uid()
         _insert_order(audit_conn, sid, order_request_id=oid)
-        with pytest.raises(Exception):
+        with pytest.raises(ConstraintException):
             _insert_order(audit_conn, sid, order_request_id=oid)
 
     def test_foreign_key_signal_id(self, audit_conn):
         """存在しない signal_id は FK エラー。"""
-        with pytest.raises(Exception):
+        with pytest.raises(ConstraintException):
             _insert_order(audit_conn, "nonexistent-signal-id")
 
     def test_all_status_values_valid(self, audit_conn):
@@ -252,13 +253,13 @@ class TestOrderRequests:
 
     def test_invalid_status_raises(self, audit_conn):
         sid = _insert_signal(audit_conn)
-        with pytest.raises(Exception):
+        with pytest.raises(ConstraintException):
             _insert_order(audit_conn, sid, status="unknown")
 
     def test_limit_order_requires_limit_price(self, audit_conn):
         """limit 注文: limit_price が必須。"""
         sid = _insert_signal(audit_conn)
-        with pytest.raises(Exception):
+        with pytest.raises(ConstraintException):
             audit_conn.execute(
                 """
                 INSERT INTO order_requests
@@ -304,7 +305,7 @@ class TestOrderRequests:
             [broker_id, oid1],
         )
         _insert_order(audit_conn, sid, order_request_id=oid2)
-        with pytest.raises(Exception):
+        with pytest.raises(ConstraintException):
             audit_conn.execute(
                 "UPDATE order_requests SET broker_order_id = ? WHERE order_request_id = ?",
                 [broker_id, oid2],
@@ -333,24 +334,24 @@ class TestExecutions:
         oid = _insert_order(audit_conn, sid)
         beid = _uid()
         _insert_execution(audit_conn, oid, broker_execution_id=beid)
-        with pytest.raises(Exception):
+        with pytest.raises(ConstraintException):
             _insert_execution(audit_conn, oid, broker_execution_id=beid)
 
     def test_foreign_key_order_request_id(self, audit_conn):
         """存在しない order_request_id は FK エラー。"""
-        with pytest.raises(Exception):
+        with pytest.raises(ConstraintException):
             _insert_execution(audit_conn, "nonexistent-order-id")
 
     def test_filled_qty_positive(self, audit_conn):
         sid = _insert_signal(audit_conn)
         oid = _insert_order(audit_conn, sid)
-        with pytest.raises(Exception):
+        with pytest.raises(ConstraintException):
             _insert_execution(audit_conn, oid, filled_qty=0)
 
     def test_fill_price_non_negative(self, audit_conn):
         sid = _insert_signal(audit_conn)
         oid = _insert_order(audit_conn, sid)
-        with pytest.raises(Exception):
+        with pytest.raises(ConstraintException):
             _insert_execution(audit_conn, oid, fill_price=-1.0)
 
     def test_commission_default_zero(self, audit_conn):
