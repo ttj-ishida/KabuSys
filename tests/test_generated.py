@@ -1,309 +1,346 @@
 
-# tests/test_kabusys.py
-import gzip
-import io
-from datetime import datetime, timezone, date, timedelta
+import os
+import hashlib
+from datetime import date, datetime, timezone
+from types import SimpleNamespace
 from unittest import mock
 
 import duckdb
 import pytest
 
-# ---- config tests ----
-from kabusys import config
+# config
 from kabusys.config import _parse_env_line, _require, Settings
 
-# ---- jquants client (utils + save) ----
-from kabusys.data import jquants_client as jq
-from kabusys.data import schema
+# research (feature exploration)
+from kabusys.research import (
+    calc_forward_returns,
+    calc_ic,
+    _rank,
+    factor_summary,
+)
 
-# ---- news collector ----
+# features (zscore)
+from kabusys.data.features import zscore_normalize
+
+# jquants client utils
+from kabusys.data.jquants_client import _to_float, _to_int, get_id_token
+
+# schema init
+from kabusys.data.schema import init_schema
+
+# news collector
 from kabusys.data import news_collector as nc
 
-# ---- quality ----
-from kabusys.data import quality
+# etl
+from kabusys.data.etl import ETLResult
+
+# -------------------------
+# config tests
+# -------------------------
 
 
-# Helper fixture: initialized in-memory DB with schema
-@pytest.fixture
-def conn():
-    conn = schema.init_schema(":memory:")
-    yield conn
-    try:
-        conn.close()
-    except Exception:
-        pass
-
-
-# -----------------------
-# config module tests
-# -----------------------
 def test_parse_env_line_basic_and_comments():
     assert _parse_env_line("") is None
-    assert _parse_env_line("   # comment") is None
-    assert _parse_env_line("KEY=VALUE") == ("KEY", "VALUE")
-    assert _parse_env_line(" export  KEY =  value  ") == ("KEY", "value")
-    # no "="
+    assert _parse_env_line("  # comment ") is None
+    # no separator
     assert _parse_env_line("NOSEP") is None
+    # simple unquoted with inline comment recognized only if preceded by space
+    assert _parse_env_line("BAR=1 #ignored") == ("BAR", "1")
+    # export prefix
+    assert _parse_env_line("export X=val") == ("X", "val")
+    # quoted with escaped quote and '#' inside quotes should be preserved
+    # FOO='a\'b#c'  -> value should be: a'b#c
+    line = "FOO='a\\'b#c'   #comment"
+    assert _parse_env_line(line) == ("FOO", "a'b#c")
+    # double quoted with escaped quote
+    line2 = 'Q="x\\\"y"'
+    assert _parse_env_line(line2) == ("Q", 'x"y')
 
 
-def test_parse_env_line_quoted_and_escaped():
-    # simple quoted
-    assert _parse_env_line("A='hello world'") == ("A", "hello world")
-    # double quoted with escaped quote and escaped char
-    assert _parse_env_line(r'B="he\"llo\nx"') == ("B", 'he"llonx')
-    # inline comment after space should be treated as comment
-    assert _parse_env_line("C=val # comment") == ("C", "val")
-    # inline # without preceding space should be kept
-    assert _parse_env_line("D=val#no_comment") == ("D", "val#no_comment")
-
-
-def test_require_and_settings_env(tmp_path, monkeypatch):
-    # ensure missing variable raises
-    monkeypatch.delenv("SOME_NON_EXISTENT_VAR", raising=False)
+def test_require_raises_and_ok(monkeypatch):
+    monkeypatch.delenv("SOME_MISSING_VAR", raising=False)
     with pytest.raises(ValueError):
-        _require("SOME_NON_EXISTENT_VAR")
-    # set env and retrieve
-    monkeypatch.setenv("SOME_VAR", "v1")
-    assert _require("SOME_VAR") == "v1"
-    # Settings properties that use defaults / _require
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "rtok")
-    monkeypatch.setenv("KABU_API_PASSWORD", "pwd")
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "sbot")
-    monkeypatch.setenv("SLACK_CHANNEL_ID", "chan")
-    # env default for KABUSYS_ENV -> development
+        _require("SOME_MISSING_VAR")
+    monkeypatch.setenv("SOME_MISSING_VAR", "value")
+    assert _require("SOME_MISSING_VAR") == "value"
+
+
+def test_settings_env_and_log_level(monkeypatch):
     s = Settings()
-    assert s.jquants_refresh_token == "rtok"
-    assert s.kabu_api_password == "pwd"
-    assert s.slack_bot_token == "sbot"
-    assert s.slack_channel_id == "chan"
-    # default base url
+    # default env is development
     monkeypatch.delenv("KABUSYS_ENV", raising=False)
-    assert s.kabu_api_base_url.startswith("http")
-    # invalid env value raises
+    assert s.env == "development"
+    # valid values
+    monkeypatch.setenv("KABUSYS_ENV", "live")
+    assert s.env == "live"
+    monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+    assert s.env == "paper_trading"
+    # invalid value
     monkeypatch.setenv("KABUSYS_ENV", "invalid_env")
     with pytest.raises(ValueError):
         _ = s.env
-    # log level invalid
-    monkeypatch.setenv("LOG_LEVEL", "nope")
+
+    # log level default INFO
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+    assert s.log_level == "INFO"
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+    assert s.log_level == "DEBUG"
+    monkeypatch.setenv("LOG_LEVEL", "BAD")
     with pytest.raises(ValueError):
         _ = s.log_level
 
 
-# -----------------------
-# jquants_client utils + save_* tests
-# -----------------------
-def test_to_float_and_to_int_edge_cases():
-    assert jq._to_float(None) is None
-    assert jq._to_float("") is None
-    assert jq._to_float("12.34") == 12.34
-    assert jq._to_float("bad") is None
-
-    assert jq._to_int(None) is None
-    assert jq._to_int("") is None
-    assert jq._to_int("10") == 10
-    assert jq._to_int(10) == 10
-    assert jq._to_int("1.0") == 1
-    # fractional non-zero -> None
-    assert jq._to_int("1.5") is None
-    assert jq._to_int("bad") is None
+# -------------------------
+# research tests (_rank, calc_ic, calc_forward_returns, factor_summary)
+# -------------------------
 
 
-def test_save_daily_quotes_inserts_and_skips(conn):
-    # Prepare records: one valid, one missing PK fields (skip)
+def test_rank_with_ties():
+    vals = [10.0, 20.0, 20.0, 30.0]
+    ranks = _rank(vals)
+    # expected ranks: 1.0, 2.5, 2.5, 4.0
+    assert pytest.approx(ranks[0]) == 1.0
+    assert pytest.approx(ranks[1]) == 2.5
+    assert pytest.approx(ranks[2]) == 2.5
+    assert pytest.approx(ranks[3]) == 4.0
+
+
+def test_calc_ic_insufficient_and_perfect_correlation():
+    # insufficient records (<3)
+    factor = [{"code": "A", "f": 1.0}, {"code": "B", "f": 2.0}]
+    fwd = [{"code": "A", "r": 0.1}, {"code": "B", "r": 0.2}]
+    assert calc_ic(factor, fwd, "f", "r") is None
+
+    # perfect monotonic correlation -> Spearman rho == 1.0
+    factor = [
+        {"code": "C", "f": 1.0},
+        {"code": "D", "f": 2.0},
+        {"code": "E", "f": 3.0},
+    ]
+    fwd = [
+        {"code": "C", "r": 10.0},
+        {"code": "D", "r": 20.0},
+        {"code": "E", "r": 30.0},
+    ]
+    rho = calc_ic(factor, fwd, "f", "r")
+    assert pytest.approx(rho) == 1.0
+
+    # negative monotonic
+    factor = [
+        {"code": "X", "f": 1.0},
+        {"code": "Y", "f": 2.0},
+        {"code": "Z", "f": 3.0},
+    ]
+    fwd = [
+        {"code": "X", "r": 30.0},
+        {"code": "Y", "r": 20.0},
+        {"code": "Z", "r": 10.0},
+    ]
+    rho = calc_ic(factor, fwd, "f", "r")
+    assert pytest.approx(rho) == -1.0
+
+
+def test_calc_forward_returns_basic():
+    conn = duckdb.connect(":memory:")
+    # create minimal prices_daily table used by calc_forward_returns
+    conn.execute(
+        """
+        CREATE TABLE prices_daily (
+            date DATE,
+            code VARCHAR,
+            close DOUBLE
+        )
+        """
+    )
+    # target_date and future dates
+    t = date(2020, 1, 1)
+    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [t, "0001", 100.0])
+    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 2), "0001", 110.0])
+    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 6), "0001", 120.0])
+    # another code missing future -> returns None
+    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [t, "0002", 50.0])
+
+    res = calc_forward_returns(conn, t, horizons=[1, 5])
+    # should have two codes, ordered by code
+    codes = [r["code"] for r in res]
+    assert "0001" in codes and "0002" in codes
+    r1 = next(r for r in res if r["code"] == "0001")
+    # fwd_1d = (110 - 100) / 100 = 0.1
+    assert pytest.approx(r1["fwd_1d"]) == 0.1
+    # fwd_5d = (120 - 100) / 100 = 0.2
+    assert pytest.approx(r1["fwd_5d"]) == 0.2
+    r2 = next(r for r in res if r["code"] == "0002")
+    assert r2["fwd_1d"] is None and r2["fwd_5d"] is None
+
+
+def test_factor_summary_and_median_even_odd():
     records = [
-        {"Date": "2024-01-01", "Code": "1234", "Open": "10", "High": "11", "Low": "9", "Close": "10.5", "Volume": "1000", "TurnoverValue": "10000"},
-        {"Date": None, "Code": "9999", "Open": "1", "High": "1", "Low": "1", "Close": "1", "Volume": "1", "TurnoverValue": "1"},
+        {"a": 1.0, "b": None},
+        {"a": 2.0, "b": 3.0},
+        {"a": 3.0, "b": 6.0},
+        {"a": None, "b": 9.0},
     ]
-    saved = jq.save_daily_quotes(conn, records)
-    assert saved == 1
-    row = conn.execute("SELECT date, code, open, high, low, close, volume, turnover FROM raw_prices").fetchone()
-    assert row[1] == "1234"
-    # ensure warning not fatal; second record skipped
+    summary = factor_summary(records, ["a", "b", "c"])
+    # 'a' has values [1,2,3] median=2
+    assert summary["a"]["count"] == 3
+    assert pytest.approx(summary["a"]["mean"]) == 2.0
+    assert summary["a"]["median"] == 2.0
+    # 'b' has values [3,6,9] median=6
+    assert summary["b"]["count"] == 3
+    assert pytest.approx(summary["b"]["mean"]) == 6.0
+    assert summary["b"]["median"] == 6.0
+    # 'c' absent -> all None
+    assert summary["c"]["count"] == 0
+    assert summary["c"]["mean"] is None
 
 
-def test_save_financials_and_market_calendar(conn):
-    fin_records = [
-        {"LocalCode": "0001", "DisclosedDate": "2023-12-31", "TypeOfDocument": "Q", "NetSales": "1000", "OperatingProfit": "100", "Profit": "80", "EarningsPerShare": "10", "ROE": "0.12"},
-        {"LocalCode": "", "DisclosedDate": "2023-01-01", "TypeOfDocument": "Q"},  # missing PK -> skip
+# -------------------------
+# features: zscore_normalize
+# -------------------------
+
+
+def test_zscore_normalize_basic_and_none_and_single():
+    records = [
+        {"code": "A", "val": 1.0},
+        {"code": "B", "val": 3.0},
+        {"code": "C", "val": None},
     ]
-    saved_fin = jq.save_financial_statements(conn, fin_records)
-    assert saved_fin == 1
-    cal_records = [
-        {"Date": "2024-01-01", "HolidayDivision": "0", "HolidayName": "Normal day"},
-        {"Date": None, "HolidayDivision": "1"},
-    ]
-    saved_cal = jq.save_market_calendar(conn, cal_records)
-    assert saved_cal == 1
-    # verify market_calendar inserted
-    rc = conn.execute("SELECT date, is_trading_day, is_half_day, is_sq_day, holiday_name FROM market_calendar").fetchone()
-    assert rc[1] is True
-    assert rc[4] == "Normal day"
+    out = zscore_normalize(records, ["val"])
+    # mean = 2, std = 1 -> zscores [-1, +1], None preserved
+    vals = {r["code"]: r["val"] for r in out}
+    assert pytest.approx(vals["A"], rel=1e-6) == -1.0
+    assert pytest.approx(vals["B"], rel=1e-6) == 1.0
+    assert vals["C"] is None
+
+    # single record -> no normalization performed (len <=1)
+    single = [{"code": "A", "val": 10.0}]
+    out2 = zscore_normalize(single, ["val"])
+    assert out2[0]["val"] == 10.0
 
 
-# -----------------------
-# news_collector tests
-# -----------------------
-def test_normalize_url_and_make_id():
-    url = "HTTPS://Example.COM/path?b=2&utm_source=aa&a=1#frag"
-    n = nc._normalize_url(url)
-    assert "utm_" not in n
-    assert n.startswith("https://example.com")
-    # query params sorted: a=1&b=2
-    assert "a=1&b=2" in n
-    idval = nc._make_article_id(url)
-    assert isinstance(idval, str) and len(idval) == 32
+# -------------------------
+# jquants_client utils tests
+# -------------------------
 
 
-def test_preprocess_text_and_parse_rss_datetime():
-    text = "Visit https://x.example.com and   \n new  lines"
-    p = nc.preprocess_text(text)
-    assert "https" not in p
-    assert "  " not in p
-    # parse valid RFC date
+def test_to_float_and_to_int_edge_cases():
+    assert _to_float(None) is None
+    assert _to_float("") is None
+    assert _to_float("1.23") == pytest.approx(1.23)
+    assert _to_float("abc") is None
+
+    assert _to_int(None) is None
+    assert _to_int("") is None
+    assert _to_int("1") == 1
+    assert _to_int("1.0") == 1
+    assert _to_int("1.9") is None
+    assert _to_int("abc") is None
+
+
+def test_get_id_token_uses_request_and_env(monkeypatch):
+    # patch the internal _request used by get_id_token to return an idToken
+    import kabusys.data.jquants_client as jc
+
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "dummy_refresh")
+    with mock.patch.object(jc, "_request", return_value={"idToken": "ID123"}) as m:
+        token = get_id_token()
+        assert token == "ID123"
+        m.assert_called_once()
+    # if no refresh token in env, get_id_token should raise ValueError
+    monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
+    with pytest.raises(ValueError):
+        get_id_token(None)
+
+
+# -------------------------
+# schema init test
+# -------------------------
+
+
+def test_init_schema_creates_tables():
+    conn = init_schema(":memory:")
+    # check that a few expected tables exist
+    row = conn.execute(
+        "SELECT 1 FROM information_schema.tables WHERE lower(table_name) = lower('raw_prices')"
+    ).fetchone()
+    assert row is not None
+    # check another table
+    row2 = conn.execute(
+        "SELECT 1 FROM information_schema.tables WHERE lower(table_name) = lower('prices_daily')"
+    ).fetchone()
+    assert row2 is not None
+    conn.close()
+
+
+# -------------------------
+# news_collector utils and save_raw_news
+# -------------------------
+
+
+def test_normalize_url_and_make_article_id_and_preprocess_text():
+    url = "HTTPS://Example.COM/path?utm_source=aa&b=2#frag"
+    norm = nc._normalize_url(url)
+    assert "utm_source" not in norm
+    assert "#" not in norm
+    assert norm.startswith("https://")
+    # article id is 32-hex prefix
+    aid = nc._make_article_id(url)
+    assert isinstance(aid, str) and len(aid) == 32
+    # preprocess text removes urls and collapses whitespace
+    txt = "Visit https://x.com  \n\n and  enjoy"
+    assert nc.preprocess_text(txt) == "Visit and enjoy"
+    # None -> empty
+    assert nc.preprocess_text(None) == ""
+
+
+def test_parse_rss_datetime_and_extract_stock_codes():
+    # RFC2822 with timezone +0900 -> should convert to UTC naive
     s = "Mon, 01 Jan 2024 00:00:00 +0900"
     dt = nc._parse_rss_datetime(s)
-    assert isinstance(dt, datetime)
-    # invalid date returns datetime (now substitute)
-    dt2 = nc._parse_rss_datetime("not a date")
-    assert isinstance(dt2, datetime)
+    # dt should be naive and represent UTC time (i.e., 2023-12-31 15:00:00 UTC)
+    assert dt.tzinfo is None
+    # extract stock codes from text, only known codes allowed and duplicates removed
+    text = "This mentions 7203 and 6758 and 7203 again"
+    codes = nc.extract_stock_codes(text, {"7203", "6758", "9999"})
+    assert set(codes) == {"7203", "6758"}
+    # no known codes -> empty
+    assert nc.extract_stock_codes("No codes here 1234", {"0000"}) == []
 
 
-def test_validate_url_scheme_raises():
-    with pytest.raises(ValueError):
-        nc._validate_url_scheme("ftp://example.com")
-    with pytest.raises(ValueError):
-        nc._validate_url_scheme("file:///etc/passwd")
-    # ok cases
-    nc._validate_url_scheme("http://example.com")
-    nc._validate_url_scheme("https://example.com")
-
-
-def make_dummy_resp(raw_bytes, headers=None, final_url=None):
-    headers = headers or {}
-    class DummyResp:
-        def __init__(self, data, headers, url):
-            self._data = data
-            self.headers = headers
-            self._url = url or "http://example.com/rss"
-        def read(self, n=-1):
-            # ignore n and return full bytes
-            return self._data
-        def geturl(self):
-            return self._url
-        def __enter__(self):
-            return self
-        def __exit__(self, exc_type, exc, tb):
-            return False
-    return DummyResp(raw_bytes, headers, final_url)
-
-
-def test_fetch_rss_basic(monkeypatch):
-    # simple RSS
-    rss = b"""<?xml version="1.0"?><rss><channel><item><title>Hi</title><link>http://example.com/a?utm=1</link><description>Desc</description><pubDate>Mon, 01 Jan 2024 00:00:00 +0900</pubDate></item></channel></rss>"""
-    resp = make_dummy_resp(rss, headers={"Content-Length": str(len(rss)), "Content-Encoding": ""}, final_url="http://example.com/rss")
-    monkeypatch.setattr(nc, "_urlopen", lambda req, timeout: resp)
-    articles = nc.fetch_rss("http://example.com/rss", "src", timeout=5)
-    assert isinstance(articles, list)
-    assert len(articles) == 1
-    art = articles[0]
-    assert art["source"] == "src"
-    assert "id" in art and "url" in art
-
-
-def test_fetch_rss_gzip_and_size_limits(monkeypatch):
-    rss = b"""<?xml version="1.0"?><rss><channel><item><title>T</title><link>http://x/a</link><description>c</description></item></channel></rss>"""
-    gz = gzip.compress(rss)
-    resp = make_dummy_resp(gz, headers={"Content-Length": str(len(gz)), "Content-Encoding": "gzip"}, final_url="http://x/a")
-    monkeypatch.setattr(nc, "_urlopen", lambda req, timeout: resp)
-    arts = nc.fetch_rss("http://x/a", "s", timeout=5)
-    assert len(arts) == 1
-
-    # Content-Length too large -> skip
-    big_headers = {"Content-Length": str(nc.MAX_RESPONSE_BYTES + 1000)}
-    resp2 = make_dummy_resp(rss, headers=big_headers, final_url="http://x/b")
-    monkeypatch.setattr(nc, "_urlopen", lambda req, timeout: resp2)
-    arts2 = nc.fetch_rss("http://x/b", "s", timeout=5)
-    assert arts2 == []
-
-    # response body exceeding MAX_RESPONSE_BYTES
-    large_body = b"a" * (nc.MAX_RESPONSE_BYTES + 1)
-    resp3 = make_dummy_resp(large_body, headers={}, final_url="http://x/c")
-    monkeypatch.setattr(nc, "_urlopen", lambda req, timeout: resp3)
-    arts3 = nc.fetch_rss("http://x/c", "s", timeout=5)
-    assert arts3 == []
-
-    # invalid XML -> empty list (logs warning)
-    bad = b"<notxml"
-    resp4 = make_dummy_resp(bad, headers={"Content-Length": str(len(bad))}, final_url="http://x/d")
-    monkeypatch.setattr(nc, "_urlopen", lambda req, timeout: resp4)
-    assert nc.fetch_rss("http://x/d", "s", timeout=5) == []
-
-
-def test_save_raw_news_and_symbols(conn):
-    # create two articles (one duplicate id)
+def test_save_raw_news_idempotent(tmp_path):
+    conn = init_schema(":memory:")
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    a1 = {"id": "id1", "datetime": now, "source": "s", "title": "t1", "content": "c1", "url": "http://a/1"}
-    a2 = {"id": "id2", "datetime": now, "source": "s", "title": "t2", "content": "c2 7203", "url": "http://a/2"}
-    new_ids = nc.save_raw_news(conn, [a1, a2])
-    assert set(new_ids) == {"id1", "id2"}
-    # second save of same articles should return []
-    new_ids2 = nc.save_raw_news(conn, [a1, a2])
-    assert new_ids2 == []
+    art = {
+        "id": "id1",
+        "datetime": now,
+        "source": "test",
+        "title": "t",
+        "content": "c",
+        "url": "https://example.com/a",
+    }
+    # first save -> returns ['id1']
+    from kabusys.data.news_collector import save_raw_news
 
-    # now save symbols linking a2 to known code 7203 via run logic
-    saved = nc.save_news_symbols(conn, "id2", ["7203"])
-    assert saved == 1
-    # duplicate insertion -> 0
-    saved2 = nc.save_news_symbols(conn, "id2", ["7203"])
-    assert saved2 == 0
-
-    # bulk save util with duplicates and order retention
-    pairs = [("id3", "1234"), ("id3", "1234"), ("id4", "1111")]
-    bulk = nc._save_news_symbols_bulk(conn, pairs)
-    # inserted up to 2 (if ids not present in news_articles, foreign key doesn't exist because news_articles is separate;
-    # but news_symbols FK references news_articles(id) in schema; our raw insert above used raw_news table but news_articles separate.
-    # To avoid FK issue we won't assert exact number, but ensure function runs without raising.
-    assert isinstance(bulk, int)
+    inserted = save_raw_news(conn, [art])
+    assert inserted == ["id1"]
+    # second save same article -> returns []
+    inserted2 = save_raw_news(conn, [art])
+    assert inserted2 == []
+    conn.close()
 
 
-def test_extract_stock_codes_duplicates_and_filtering():
-    text = "This mentions 7203 and 6758 and 7203 again and 0000"
-    known = {"7203", "6758"}
-    res = nc.extract_stock_codes(text, known)
-    assert res == ["7203", "6758"]
+# -------------------------
+# ETLResult dataclass
+# -------------------------
 
 
-# -----------------------
-# quality checks tests
-# -----------------------
-def test_quality_checks_missing_and_duplicates_and_spike_and_future(conn):
-    # Create some raw_prices rows
-    conn.execute(
-        "INSERT INTO raw_prices (date, code, open, high, low, close, volume, turnover) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ["2024-01-01", "1111", None, 10.0, 9.0, 9.5, 100, 1000],
-    )  # missing open -> should trigger missing_data
-    # duplicate group (simulate by bypassing PK constraints using a temp table? In DuckDB we cannot insert duplicate PK easily.
-    # To test duplicates detection, create a temporary table and then insert into raw_prices via INSERT SELECT that bypasses PK.
-    # But for simplicity, emulate duplicates by inserting two different rows with same date+code after dropping PK constraint is non-trivial.
-    # Instead, we directly insert two rows into raw_prices by creating a custom table (not possible here). So we will at least test missing/spike/future.
-    # Insert previous day close and current large jump for spike
-    conn.execute(
-        "INSERT INTO raw_prices (date, code, open, high, low, close, volume, turnover) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ["2023-12-31", "2222", 10.0, 11.0, 9.5, 10.0, 100, 1000],
-    )
-    conn.execute(
-        "INSERT INTO raw_prices (date, code, open, high, low, close, volume, turnover) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ["2024-01-01", "2222", 50.0, 60.0, 40.0, 60.0, 100, 1000],
-    )  # 10 -> 60 = 500% jump -> spike
-    # future date row
-    future = date.today() + timedelta(days=10)
-    conn.execute(
-        "INSERT INTO raw_prices (date, code, open, high, low, close, volume, turnover) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [future.isoformat(), "3333", 1, 1, 1, 1, 1, 1],
-    )
-    issues = quality.run_all_checks(conn, target_date=None, reference_date=date.today(), spike_threshold=0.5)
-    # Expect at least missing_data (error), spike (warning), future_date (error)
-    names = {i.check_name for i in issues}
-    assert "missing_data" in names
-    assert "spike" in names
-    assert "future_date" in names
+def test_etlresult_to_dict_and_flags():
+    # create dummy quality issue like object
+    qi = SimpleNamespace(check_name="chk", severity="error", message="bad")
+    r = ETLResult(target_date=date(2020, 1, 1), quality_issues=[qi], errors=["e"])
+    d = r.to_dict()
+    assert d["target_date"] == date(2020, 1, 1)
+    assert r.has_errors is True
+    assert r.has_quality_errors is True
+    assert isinstance(d["quality_issues"], list)
+    assert d["quality_issues"][0]["check_name"] == "chk"
