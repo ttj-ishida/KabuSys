@@ -153,6 +153,18 @@ _AUDIT_DDL: list[str] = [
 
 
 # ---------------------------------------------------------------------------
+# 内部ヘルパー
+# ---------------------------------------------------------------------------
+
+def _apply_audit_schema(conn: duckdb.DuckDBPyConnection) -> None:
+    """DDL とインデックスを順に実行する（トランザクション管理なし）。"""
+    for ddl in _AUDIT_DDL:
+        conn.execute(ddl)
+    for idx in _AUDIT_INDEXES:
+        conn.execute(idx)
+
+
+# ---------------------------------------------------------------------------
 # 公開 API
 # ---------------------------------------------------------------------------
 
@@ -165,32 +177,33 @@ def init_audit_schema(
     既存の DuckDB 接続に監査ログテーブルを追加する。
     通常は data.schema.init_schema() で取得した接続を渡す。
 
-    すべての TIMESTAMP は UTC で保存する（SET TimeZone='UTC' を実行）。
+    この関数は接続の TimeZone を UTC に固定する（SET TimeZone='UTC' を実行）。
 
     Args:
         conn:          初期化済みの DuckDB 接続。
-        transactional: True（デフォルト）の場合、DDL・インデックス作成を
-                       1 トランザクションで実行し原子性を保証する。
-                       呼び出し元が既にトランザクションを開いている場合は
-                       False を渡してネストを避けること。
+        transactional: True（デフォルト）の場合、BEGIN/COMMIT/ROLLBACK で
+                       DDL・インデックス作成を原子的に実行する。
+                       呼び出し元がすでにトランザクションを開いている場合は
+                       False を渡して既存トランザクションに委ねること
+                       （DuckDB はネストトランザクション非対応）。
+                       False の場合はトランザクションなしで直接実行するため、
+                       途中失敗時に一部のテーブル/インデックスだけ作成された
+                       状態になる可能性があることに注意。
     """
     conn.execute("SET TimeZone='UTC'")
     if transactional:
+        conn.execute("BEGIN")
         try:
-            conn.execute("BEGIN")
-            for ddl in _AUDIT_DDL:
-                conn.execute(ddl)
-            for idx in _AUDIT_INDEXES:
-                conn.execute(idx)
+            _apply_audit_schema(conn)
             conn.execute("COMMIT")
         except Exception:
-            conn.execute("ROLLBACK")
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass  # ROLLBACK 失敗は元の例外を優先して無視
             raise
     else:
-        for ddl in _AUDIT_DDL:
-            conn.execute(ddl)
-        for idx in _AUDIT_INDEXES:
-            conn.execute(idx)
+        _apply_audit_schema(conn)
 
 
 def init_audit_db(db_path: str | Path) -> duckdb.DuckDBPyConnection:
