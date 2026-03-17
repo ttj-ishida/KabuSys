@@ -205,9 +205,15 @@ _SAMPLE_RSS = """<?xml version="1.0" encoding="UTF-8"?>
 </rss>""".encode("utf-8")
 
 
+class _MockHeaders:
+    def get(self, key, default=None):
+        return default
+
+
 class _MockResponse:
     def __init__(self, data: bytes):
         self._data = data
+        self.headers = _MockHeaders()
 
     def read(self, n=-1):
         return self._data[:n] if n >= 0 else self._data

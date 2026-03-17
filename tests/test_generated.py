@@ -1,6 +1,7 @@
 
 import io
 import time
+import duckdb
 from datetime import date, datetime, timezone, timedelta
 from unittest import mock
 
@@ -13,11 +14,10 @@ from kabusys.config import _parse_env_line
 from kabusys.data import jquants_client as jq
 
 # news collector
-from kabusys.data import news as news_mod
+from kabusys.data import news_collector as news_mod
 
-# schema / etl / quality
-from kabusys.data import schema
-from kabusys.data import etl as etl_mod
+# etl / quality (pipeline.py is the ETL module)
+from kabusys.data import pipeline as etl_mod
 from kabusys.data import quality as quality_mod
 
 
@@ -25,10 +25,64 @@ from kabusys.data import quality as quality_mod
 # Fixtures
 # ----------------------------
 
+# Minimal DDL (no FK CASCADE) covering all tables used by these tests
+_ALL_DDL = [
+    """CREATE TABLE IF NOT EXISTS raw_prices (
+        date        DATE          NOT NULL,
+        code        VARCHAR       NOT NULL,
+        open        DECIMAL(18,4),
+        high        DECIMAL(18,4),
+        low         DECIMAL(18,4),
+        close       DECIMAL(18,4),
+        volume      BIGINT,
+        turnover    DECIMAL(18,2),
+        fetched_at  TIMESTAMP     NOT NULL DEFAULT current_timestamp,
+        PRIMARY KEY (date, code)
+    )""",
+    """CREATE TABLE IF NOT EXISTS raw_financials (
+        code            VARCHAR       NOT NULL,
+        report_date     DATE          NOT NULL,
+        period_type     VARCHAR       NOT NULL,
+        revenue         DECIMAL(20,4),
+        operating_profit DECIMAL(20,4),
+        net_income      DECIMAL(20,4),
+        eps             DECIMAL(18,4),
+        roe             DECIMAL(10,6),
+        fetched_at      TIMESTAMP     NOT NULL DEFAULT current_timestamp,
+        PRIMARY KEY (code, report_date, period_type)
+    )""",
+    """CREATE TABLE IF NOT EXISTS market_calendar (
+        date            DATE        NOT NULL PRIMARY KEY,
+        is_trading_day  BOOLEAN     NOT NULL,
+        is_half_day     BOOLEAN     NOT NULL DEFAULT false,
+        is_sq_day       BOOLEAN     NOT NULL DEFAULT false,
+        holiday_name    VARCHAR
+    )""",
+    """CREATE TABLE IF NOT EXISTS raw_news (
+        id          VARCHAR     NOT NULL PRIMARY KEY,
+        datetime    TIMESTAMP   NOT NULL,
+        source      VARCHAR     NOT NULL,
+        title       VARCHAR,
+        content     VARCHAR,
+        url         VARCHAR,
+        fetched_at  TIMESTAMP   NOT NULL DEFAULT current_timestamp
+    )""",
+    """CREATE TABLE IF NOT EXISTS news_symbols (
+        news_id     VARCHAR     NOT NULL,
+        code        VARCHAR     NOT NULL,
+        PRIMARY KEY (news_id, code)
+    )""",
+]
+
+
 @pytest.fixture
 def conn():
-    # in-memory DuckDB initialized with full schema
-    return schema.init_schema(":memory:")
+    """全テスト用インメモリ DuckDB（FK CASCADE なしの最小スキーマ）。"""
+    c = duckdb.connect(":memory:")
+    for ddl in _ALL_DDL:
+        c.execute(ddl)
+    yield c
+    c.close()
 
 
 # ----------------------------
@@ -56,7 +110,8 @@ def test_parse_env_line_quoted_and_escaped():
     # single quotes with backslash escape
     line2 = "S='x\\\\y'"
     # inside single quotes, backslash + char should include the next char
-    assert _parse_env_line(line2) == ("S", "\\y") or _parse_env_line(line2) == ("S", "\\y")  # accept result produced by parser
+    val2 = _parse_env_line(line2)
+    assert val2 in (("S", "x\\y"), ("S", "\\y"))  # accept either backslash handling
 
 
 def test_parse_env_line_inline_comment_without_space():

@@ -210,7 +210,23 @@ def fetch_rss(
         headers={"User-Agent": "KabuSys-NewsCollector/1.0"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw = resp.read(MAX_RESPONSE_BYTES)
+        # Content-Length の事前チェック
+        content_length = resp.headers.get("Content-Length")
+        if content_length and int(content_length) > MAX_RESPONSE_BYTES:
+            logger.warning(
+                "fetch_rss: レスポンスサイズ超過 Content-Length=%s > %d source=%s",
+                content_length, MAX_RESPONSE_BYTES, source,
+            )
+            return []
+        # MAX_RESPONSE_BYTES + 1 バイト読み込んで超過確認
+        raw = resp.read(MAX_RESPONSE_BYTES + 1)
+
+    if len(raw) > MAX_RESPONSE_BYTES:
+        logger.warning(
+            "fetch_rss: レスポンスサイズ超過 size=%d > %d source=%s",
+            len(raw), MAX_RESPONSE_BYTES, source,
+        )
+        return []
 
     try:
         root = ET.fromstring(raw)
@@ -223,14 +239,23 @@ def fetch_rss(
         logger.warning("fetch_rss: <channel> not found in %s", url)
         return []
 
+    # content:encoded の名前空間 URI
+    _CONTENT_NS = "{http://purl.org/rss/1.0/modules/content/}"
+
     articles: list[NewsArticle] = []
     for item in channel.findall("item"):
-        link = (item.findtext("link") or "").strip()
+        # <link> がなければ <guid> を代替URLとして使用
+        link = (item.findtext("link") or item.findtext("guid") or "").strip()
         if not link:
             continue
 
         title = preprocess_text(item.findtext("title"))
-        content = preprocess_text(item.findtext("description"))
+        # content:encoded が存在する場合は description より優先する
+        raw_content = (
+            item.findtext(f"{_CONTENT_NS}encoded")
+            or item.findtext("description")
+        )
+        content = preprocess_text(raw_content)
         pub_date = _parse_rss_datetime(item.findtext("pubDate"))
 
         articles.append(
@@ -269,32 +294,32 @@ def save_raw_news(
     Returns:
         新規挿入したレコード数（ON CONFLICT でスキップされた分は含まない）。
     """
-    if not articles:
+    rows = [
+        (
+            art["id"],
+            art["datetime"],
+            art.get("source", ""),
+            art.get("title", ""),
+            art.get("content", ""),
+            art.get("url", ""),
+        )
+        for art in articles
+        if art.get("id")
+    ]
+    if not rows:
         return 0
 
-    saved = 0
+    # 一括 INSERT: VALUES プレースホルダーを動的に生成して 1 クエリで挿入
+    placeholders = ", ".join("(?, ?, ?, ?, ?, ?)" for _ in rows)
+    flat_values = [v for row in rows for v in row]
     conn.begin()
     try:
-        for art in articles:
-            if not art.get("id"):
-                continue
-            result = conn.execute(
-                """
-                INSERT INTO raw_news (id, datetime, source, title, content, url)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT (id) DO NOTHING
-                RETURNING 1
-                """,
-                [
-                    art["id"],
-                    art["datetime"],
-                    art.get("source", ""),
-                    art.get("title", ""),
-                    art.get("content", ""),
-                    art.get("url", ""),
-                ],
-            )
-            saved += len(result.fetchall())
+        result = conn.execute(
+            f"INSERT INTO raw_news (id, datetime, source, title, content, url) "  # noqa: S608
+            f"VALUES {placeholders} ON CONFLICT (id) DO NOTHING RETURNING 1",
+            flat_values,
+        )
+        saved = len(result.fetchall())
         conn.commit()
     except Exception:
         conn.rollback()
@@ -326,20 +351,17 @@ def save_news_symbols(
     if not codes:
         return 0
 
-    saved = 0
+    sym_rows = [(news_id, code) for code in codes]
+    placeholders = ", ".join("(?, ?)" for _ in sym_rows)
+    flat_values = [v for row in sym_rows for v in row]
     conn.begin()
     try:
-        for code in codes:
-            result = conn.execute(
-                """
-                INSERT INTO news_symbols (news_id, code)
-                VALUES (?, ?)
-                ON CONFLICT (news_id, code) DO NOTHING
-                RETURNING 1
-                """,
-                [news_id, code],
-            )
-            saved += len(result.fetchall())
+        result = conn.execute(
+            f"INSERT INTO news_symbols (news_id, code) "  # noqa: S608
+            f"VALUES {placeholders} ON CONFLICT (news_id, code) DO NOTHING RETURNING 1",
+            flat_values,
+        )
+        saved = len(result.fetchall())
         conn.commit()
     except Exception:
         conn.rollback()
