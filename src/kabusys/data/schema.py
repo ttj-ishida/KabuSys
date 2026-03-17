@@ -132,7 +132,7 @@ CREATE TABLE IF NOT EXISTS news_symbols (
     news_id     VARCHAR     NOT NULL,
     code        VARCHAR     NOT NULL,
     PRIMARY KEY (news_id, code),
-    FOREIGN KEY (news_id) REFERENCES news_articles(id) ON DELETE CASCADE
+    FOREIGN KEY (news_id) REFERENCES news_articles(id)
 )
 """
 
@@ -217,7 +217,7 @@ CREATE TABLE IF NOT EXISTS orders (
     price       DECIMAL(18,4)          CHECK (price >= 0),
     status      VARCHAR       NOT NULL DEFAULT 'created'
                               CHECK (status IN ('created','sent','filled','cancelled','rejected')),
-    FOREIGN KEY (signal_id) REFERENCES signal_queue(signal_id) ON DELETE SET NULL
+    FOREIGN KEY (signal_id) REFERENCES signal_queue(signal_id)
 )
 """
 
@@ -229,7 +229,7 @@ CREATE TABLE IF NOT EXISTS trades (
     code        VARCHAR       NOT NULL,
     price       DECIMAL(18,4) NOT NULL CHECK (price >= 0),
     size        BIGINT        NOT NULL CHECK (size > 0),
-    FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE
+    FOREIGN KEY (order_id) REFERENCES orders(order_id)
 )
 """
 
@@ -320,11 +320,19 @@ def init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection:
     if db_path_str != ":memory:":
         Path(db_path_str).parent.mkdir(parents=True, exist_ok=True)
     conn = duckdb.connect(db_path_str)
-    with conn:
+    conn.execute("BEGIN")
+    try:
         for ddl in _ALL_DDL:
             conn.execute(ddl)
         for idx in _INDEXES:
             conn.execute(idx)
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
     return conn
 
 
