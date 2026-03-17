@@ -168,11 +168,10 @@ def init_audit_schema(conn: duckdb.DuckDBPyConnection) -> None:
         conn: 初期化済みの DuckDB 接続。
     """
     conn.execute("SET TimeZone='UTC'")
-    with conn:
-        for ddl in _AUDIT_DDL:
-            conn.execute(ddl)
-        for idx in _AUDIT_INDEXES:
-            conn.execute(idx)
+    for ddl in _AUDIT_DDL:
+        conn.execute(ddl)
+    for idx in _AUDIT_INDEXES:
+        conn.execute(idx)
 
 
 def init_audit_db(db_path: str | Path) -> duckdb.DuckDBPyConnection:
