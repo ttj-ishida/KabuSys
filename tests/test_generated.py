@@ -206,7 +206,7 @@ def test_fetch_daily_quotes_pagination(monkeypatch):
 def test_make_article_id_and_preprocess_and_parse_datetime():
     url = "https://example.com/article/1"
     aid = news_mod._make_article_id(url)
-    assert isinstance(aid, str) and len(aid) == 16
+    assert isinstance(aid, str) and len(aid) == 32
     # preprocess removes URLs and normalizes whitespace
     s = "This is  a test https://x example\nnew"
     assert "https" not in news_mod.preprocess_text(s)
@@ -237,6 +237,7 @@ def test_fetch_rss_and_save_and_extract(monkeypatch, conn):
     # mock urlopen to return object with read() method
     fake_resp = mock.MagicMock()
     fake_resp.read.return_value = rss
+    fake_resp.geturl.return_value = "http://example.com/rss"
     fake_cm = mock.MagicMock()
     fake_cm.__enter__.return_value = fake_resp
     monkeypatch.setattr(news_mod.urllib.request, "urlopen", lambda req, timeout=30: fake_cm)
@@ -251,7 +252,7 @@ def test_fetch_rss_and_save_and_extract(monkeypatch, conn):
 
     # save to DB
     saved = news_mod.save_raw_news(conn, articles)
-    assert saved == 1
+    assert len(saved) == 1
     # verify row in raw_news
     rows = conn.execute("SELECT id, source, title, content, url FROM raw_news").fetchall()
     assert len(rows) == 1

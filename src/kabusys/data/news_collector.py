@@ -22,6 +22,7 @@ raw_news テーブルに保存する。
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import logging
 import re
@@ -54,6 +55,9 @@ _TRACKING_PARAM_PREFIXES = ("utm_", "fbclid", "gclid", "ref_", "_ga")
 
 # content:encoded の名前空間 URI
 _CONTENT_NS = "{http://purl.org/rss/1.0/modules/content/}"
+
+# バルク INSERT のチャンクサイズ（SQL 長・パラメータ数の上限を抑える）
+_INSERT_CHUNK_SIZE = 1000
 
 # ---------------------------------------------------------------------------
 # 型定義
@@ -118,7 +122,7 @@ def _make_article_id(url: str) -> str:
     Returns:
         16文字の16進数文字列。
     """
-    return hashlib.sha256(_normalize_url(url).encode()).hexdigest()[:16]
+    return hashlib.sha256(_normalize_url(url).encode()).hexdigest()[:32]
 
 
 def _validate_url_scheme(url: str) -> None:
@@ -213,9 +217,18 @@ def fetch_rss(
 
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "KabuSys-NewsCollector/1.0"},
+        headers={
+            "User-Agent": "KabuSys-NewsCollector/1.0",
+            "Accept-Encoding": "gzip",
+        },
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
+        # リダイレクト後の最終 URL のスキームを再検証（SSRF 対策）
+        final_url = resp.geturl()
+        if urllib.parse.urlparse(final_url).scheme.lower() not in ("http", "https"):
+            logger.warning("fetch_rss: リダイレクト先のスキームが不正 url=%s", final_url)
+            return []
+
         # Content-Length の事前チェック
         content_length = resp.headers.get("Content-Length")
         if content_length and int(content_length) > MAX_RESPONSE_BYTES:
@@ -226,6 +239,7 @@ def fetch_rss(
             return []
         # MAX_RESPONSE_BYTES + 1 バイト読み込んで超過確認
         raw = resp.read(MAX_RESPONSE_BYTES + 1)
+        content_encoding = (resp.headers.get("Content-Encoding") or "").lower()
 
     if len(raw) > MAX_RESPONSE_BYTES:
         logger.warning(
@@ -233,6 +247,14 @@ def fetch_rss(
             len(raw), MAX_RESPONSE_BYTES, source,
         )
         return []
+
+    # gzip 圧縮レスポンスを解凍
+    if "gzip" in content_encoding:
+        try:
+            raw = gzip.decompress(raw)
+        except Exception:
+            logger.warning("fetch_rss: gzip解凍失敗 source=%s", source)
+            return []
 
     try:
         root = ET.fromstring(raw)
@@ -289,18 +311,18 @@ def fetch_rss(
 def save_raw_news(
     conn: duckdb.DuckDBPyConnection,
     articles: list[NewsArticle],
-) -> int:
+) -> list[str]:
     """記事リストを raw_news テーブルに保存する。
 
-    INSERT ... RETURNING を使い、実際に挿入されたレコード数を正確に返す。
-    全件を 1 トランザクションにまとめてオーバーヘッドを削減する。
+    INSERT ... RETURNING id を使い、実際に挿入された記事IDのリストを返す。
+    _INSERT_CHUNK_SIZE 件ずつチャンク分割して 1 トランザクションで挿入する。
 
     Args:
         conn:     DuckDB 接続。
         articles: fetch_rss が返す NewsArticle リスト。
 
     Returns:
-        新規挿入したレコード数（ON CONFLICT でスキップされた分は含まない）。
+        新規挿入した記事IDのリスト（ON CONFLICT でスキップされた分は含まない）。
     """
     rows = [
         (
@@ -315,27 +337,29 @@ def save_raw_news(
         if art.get("id")
     ]
     if not rows:
-        return 0
+        return []
 
-    # 一括 INSERT: VALUES プレースホルダーを動的に生成して 1 クエリで挿入
-    placeholders = ", ".join("(?, ?, ?, ?, ?, ?)" for _ in rows)
-    flat_values = [v for row in rows for v in row]
+    new_ids: list[str] = []
     conn.begin()
     try:
-        result = conn.execute(
-            f"INSERT INTO raw_news (id, datetime, source, title, content, url) "  # noqa: S608
-            f"VALUES {placeholders} ON CONFLICT (id) DO NOTHING RETURNING 1",
-            flat_values,
-        )
-        saved = len(result.fetchall())
+        for i in range(0, len(rows), _INSERT_CHUNK_SIZE):
+            chunk = rows[i : i + _INSERT_CHUNK_SIZE]
+            placeholders = ", ".join("(?, ?, ?, ?, ?, ?)" for _ in chunk)
+            flat_values = [v for row in chunk for v in row]
+            result = conn.execute(
+                f"INSERT INTO raw_news (id, datetime, source, title, content, url) "  # noqa: S608
+                f"VALUES {placeholders} ON CONFLICT (id) DO NOTHING RETURNING id",
+                flat_values,
+            )
+            new_ids.extend(row[0] for row in result.fetchall())
         conn.commit()
     except Exception:
         conn.rollback()
         logger.exception("save_raw_news: トランザクション失敗、ロールバック")
         raise
 
-    logger.info("save_raw_news: articles=%d saved=%d", len(articles), saved)
-    return saved
+    logger.info("save_raw_news: articles=%d saved=%d", len(articles), len(new_ids))
+    return new_ids
 
 
 def save_news_symbols(
@@ -442,18 +466,21 @@ def run_news_collection(
         # フェッチと raw_news 保存は一体で扱い、失敗時はソースをスキップ
         try:
             articles = fetch_rss(rss_url, source=source_name, timeout=timeout)
-            saved = save_raw_news(conn, articles)
+            new_ids = save_raw_news(conn, articles)
         except Exception:
             logger.exception("run_news_collection: ソース取得失敗 source=%s", source_name)
             results[source_name] = 0
             continue
 
-        results[source_name] = saved
+        results[source_name] = len(new_ids)
 
-        # 銘柄紐付けは raw_news 保存とは独立してエラーハンドリングする
-        if known_codes and articles:
+        # 銘柄紐付け: 今回新規挿入された記事のみ対象（既存記事の重複処理を省く）
+        if known_codes and new_ids:
+            new_id_set = set(new_ids)
             try:
                 for art in articles:
+                    if art["id"] not in new_id_set:
+                        continue
                     combined = f"{art.get('title', '')} {art.get('content', '')}"
                     codes = extract_stock_codes(combined, known_codes)
                     if codes:

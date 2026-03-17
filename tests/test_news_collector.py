@@ -91,7 +91,7 @@ def test_normalize_url_lowercases_scheme_and_host():
 def test_make_article_id_deterministic():
     url = "https://example.com/article/1"
     assert _make_article_id(url) == _make_article_id(url)
-    assert len(_make_article_id(url)) == 16
+    assert len(_make_article_id(url)) == 32
 
 
 def test_make_article_id_ignores_tracking_params():
@@ -211,12 +211,16 @@ class _MockHeaders:
 
 
 class _MockResponse:
-    def __init__(self, data: bytes):
+    def __init__(self, data: bytes, url: str = "https://dummy.rss"):
         self._data = data
+        self._url = url
         self.headers = _MockHeaders()
 
     def read(self, n=-1):
         return self._data[:n] if n >= 0 else self._data
+
+    def geturl(self) -> str:
+        return self._url
 
     def __enter__(self):
         return self
@@ -236,7 +240,7 @@ def test_fetch_rss_parses_items(monkeypatch):
     assert articles[0]["title"] == "Toyota 7203 surge"
     assert "https://" not in articles[0]["content"]
     assert articles[0]["url"] == "https://news.example.com/article/1"
-    assert len(articles[0]["id"]) == 16
+    assert len(articles[0]["id"]) == 32
 
 
 def test_fetch_rss_skips_items_without_link(monkeypatch):
@@ -295,7 +299,7 @@ def _make_article(idx: int = 1) -> dict:
 def test_save_raw_news_basic(news_db):
     articles = [_make_article(1), _make_article(2)]
     saved = save_raw_news(news_db, articles)
-    assert saved == 2
+    assert len(saved) == 2
     count = news_db.execute("SELECT COUNT(*) FROM raw_news").fetchone()[0]
     assert count == 2
 
@@ -305,7 +309,7 @@ def test_save_raw_news_returns_actual_inserted_count(news_db):
     art = _make_article(1)
     save_raw_news(news_db, [art])
     saved2 = save_raw_news(news_db, [art])
-    assert saved2 == 0  # 重複はスキップ → 0 件
+    assert saved2 == []  # 重複はスキップ → 空リスト
     assert news_db.execute("SELECT COUNT(*) FROM raw_news").fetchone()[0] == 1
 
 
@@ -313,11 +317,11 @@ def test_save_raw_news_skips_missing_id(news_db):
     articles = [{"id": "", "datetime": datetime.now(), "source": "x",
                  "title": "t", "content": "", "url": "u"}]
     saved = save_raw_news(news_db, articles)
-    assert saved == 0
+    assert saved == []
 
 
 def test_save_raw_news_empty(news_db):
-    assert save_raw_news(news_db, []) == 0
+    assert save_raw_news(news_db, []) == []
 
 
 # ---------------------------------------------------------------------------
@@ -389,7 +393,7 @@ def test_run_news_collection_uses_default_sources(monkeypatch, news_db):
         return [_make_article(1)]
 
     monkeypatch.setattr("kabusys.data.news_collector.fetch_rss", fake_fetch_rss)
-    monkeypatch.setattr("kabusys.data.news_collector.save_raw_news", lambda conn, arts: 1)
+    monkeypatch.setattr("kabusys.data.news_collector.save_raw_news", lambda conn, arts: [])
 
     results = run_news_collection(news_db)
     assert set(results.keys()) == set(DEFAULT_RSS_SOURCES.keys())
