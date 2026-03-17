@@ -18,6 +18,7 @@ DataPlatform.md Section 4.2 に基づき、JPX カレンダー（祝日・半日
 
 設計方針:
   - market_calendar が未取得の場合は曜日ベースのフォールバック（土日を非営業日扱い）
+  - DB 登録あり → DB 値優先、未登録日 → 曜日フォールバック（next/prev/get で一貫）
   - 最大探索範囲は _MAX_SEARCH_DAYS 日以内とし無限ループを防ぐ
   - 全ての日付は date オブジェクトで扱い、timezone の混入を防ぐ
 """
@@ -37,11 +38,17 @@ logger = logging.getLogger(__name__)
 # 定数
 # ---------------------------------------------------------------------------
 
-# 営業日探索の最大範囲（祝日連続でも現実的にこの日数を超えない）
+# 営業日探索の最大範囲（祝日連続でも現実的にこの日数を超えない、最長2週間程度）
 _MAX_SEARCH_DAYS = 60
 
 # カレンダー先読み日数（今日から何日先まで取得するか）
 _CALENDAR_LOOKAHEAD_DAYS = 90
+
+# バックフィル日数: 最新時でも直近この日数を再フェッチし、API 側の訂正を取り込む
+_BACKFILL_DAYS = 7
+
+# 健全性チェック: last_date がこれを超えたら異常とみなしスキップする
+_SANITY_MAX_FUTURE_DAYS = 365
 
 # ---------------------------------------------------------------------------
 # 内部ユーティリティ
@@ -52,13 +59,14 @@ def _table_exists(conn: duckdb.DuckDBPyConnection, table: str) -> bool:
     """指定テーブルが存在するか確認する。"""
     row = conn.execute(
         """
-        SELECT COUNT(*) FROM information_schema.tables
+        SELECT 1 FROM information_schema.tables
         WHERE lower(table_name) = lower(?)
           AND table_schema NOT IN ('information_schema')
+        LIMIT 1
         """,
         [table],
     ).fetchone()
-    return bool(row and row[0] > 0)
+    return row is not None
 
 
 def _has_calendar_data(conn: duckdb.DuckDBPyConnection) -> bool:
@@ -78,8 +86,9 @@ def _fetch_is_trading(conn: duckdb.DuckDBPyConnection, d: date) -> bool | None:
     """market_calendar から is_trading_day を取得する。
 
     Returns:
-        テーブルに該当日が存在する場合は bool（NULL 値は None）、
-        行自体が存在しない場合は None。
+        行が存在し値が非 NULL の場合は bool。
+        行が存在しない場合、または is_trading_day が NULL の場合は None。
+        NULL 値は設計上本来想定しないため、発生時は警告ログを出力する。
     """
     row = conn.execute(
         "SELECT is_trading_day FROM market_calendar WHERE date = ?",
@@ -88,7 +97,13 @@ def _fetch_is_trading(conn: duckdb.DuckDBPyConnection, d: date) -> bool | None:
     if not row:
         return None
     val = row[0]
-    return None if val is None else bool(val)
+    if val is None:
+        logger.warning(
+            "_fetch_is_trading: %s の is_trading_day が NULL（未設定）、曜日ベースフォールバックを使用",
+            d,
+        )
+        return None
+    return bool(val)
 
 
 def _to_date(val: object) -> date | None:
@@ -120,8 +135,8 @@ def is_trading_day(conn: duckdb.DuckDBPyConnection, d: date) -> bool:
         result = _fetch_is_trading(conn, d)
         if result is not None:
             return result
-        # カレンダーにない日（取得範囲外）: フォールバック
-        logger.debug("is_trading_day: %s はカレンダー範囲外、曜日ベースで判定", d)
+        # カレンダーにない日（未登録または NULL）: フォールバック
+        logger.debug("is_trading_day: %s はカレンダー未登録、曜日ベースで判定", d)
     return not _is_weekend(d)
 
 
@@ -232,8 +247,10 @@ def get_trading_days(
 ) -> list[date]:
     """start から end（両端含む）の期間内の営業日リストを返す。
 
-    market_calendar データがある場合は DB クエリで一括取得し効率的に処理する。
-    データがない場合は曜日ベースフォールバックで土日を除いた日を返す。
+    market_calendar データがある場合は DB の登録値を優先し、未登録日は曜日
+    ベースフォールバックで補完する。DB がまばらな場合（一部祝日のみ登録等）
+    でも next/prev_trading_day と一貫した結果を返す。
+    データがない場合は曜日ベースフォールバックのみで処理する。
 
     Args:
         conn:  DuckDB 接続。
@@ -247,38 +264,35 @@ def get_trading_days(
         return []
 
     if _has_calendar_data(conn):
-        rows = conn.execute(
+        # 期間内の全 DB 登録日を取得し、date → is_trading_day のマップを構築
+        db_rows = conn.execute(
             """
-            SELECT date FROM market_calendar
-            WHERE date >= ? AND date <= ? AND is_trading_day = true
-            ORDER BY date
+            SELECT date, is_trading_day FROM market_calendar
+            WHERE date >= ? AND date <= ?
             """,
             [start, end],
         ).fetchall()
-        result = [
-            _to_date(row[0]) for row in rows if _to_date(row[0]) is not None
-        ]
+        db_map: dict[date, bool | None] = {}
+        for row in db_rows:
+            d = _to_date(row[0])
+            if d is not None:
+                db_map[d] = None if row[1] is None else bool(row[1])
 
-        # カレンダー範囲外の日付を曜日ベースで補完（MIN/MAX を 1 クエリで取得）
-        minmax = conn.execute("SELECT MIN(date), MAX(date) FROM market_calendar").fetchone()
-        db_min = _to_date(minmax[0]) if minmax else None
-        db_max = _to_date(minmax[1]) if minmax else None
-
-        extra: list[date] = []
-        if db_min and start < db_min:
-            cur = start
-            while cur < db_min and cur <= end:
+        # 各日付について DB 値優先・未登録は曜日フォールバック（next/prev と一貫）
+        result: list[date] = []
+        cur = start
+        while cur <= end:
+            v = db_map.get(cur)
+            if v is True:
+                result.append(cur)
+            elif v is False:
+                pass  # DB 登録の非営業日（休日等）
+            else:
+                # v is None: DB 未登録または NULL → 曜日フォールバック
                 if not _is_weekend(cur):
-                    extra.append(cur)
-                cur += timedelta(days=1)
-        if db_max and end > db_max:
-            cur = max(start, db_max + timedelta(days=1))
-            while cur <= end:
-                if not _is_weekend(cur):
-                    extra.append(cur)
-                cur += timedelta(days=1)
-
-        return sorted(set(result + extra))
+                    result.append(cur)
+            cur += timedelta(days=1)
+        return result
 
     # フォールバック: 土日を除く
     result = []
@@ -305,29 +319,45 @@ def calendar_update_job(
     market_calendar の最終取得日を確認し、今日から lookahead_days 先までを取得する。
     取得済み範囲は上書き（ON CONFLICT DO UPDATE）して最新状態に保つ。
 
+    バックフィル:
+        既に最新の場合でも、直近 _BACKFILL_DAYS 日間は必ず再フェッチする。
+        これにより、API 側でのカレンダーデータ訂正を自動的に取り込める。
+
+    健全性チェック:
+        last_date が today + _SANITY_MAX_FUTURE_DAYS を超える場合は
+        異常とみなし、警告ログを出力してスキップする。
+
     Args:
         conn:           DuckDB 接続。
         lookahead_days: 今日から何日先まで取得するか（デフォルト 90 日）。
 
     Returns:
-        保存したレコード数。API エラー時は 0 を返す。
+        保存したレコード数。最新・異常・API エラー時は 0 を返す。
     """
     today = date.today()
     date_to = today + timedelta(days=lookahead_days)
 
-    # 未取得範囲の開始日を算出（最終取得日の翌日、または基準日）
     if _has_calendar_data(conn):
         row = conn.execute("SELECT MAX(date) FROM market_calendar").fetchone()
         last_date = _to_date(row[0]) if row else None
         if last_date:
-            if last_date >= date_to:
+            # 健全性チェック: 極端に将来の日付は異常とみなしスキップ
+            if last_date > today + timedelta(days=_SANITY_MAX_FUTURE_DAYS):
+                logger.warning(
+                    "calendar_update_job: last_date が異常に将来の日付 last=%s today=%s、安全のためスキップ",
+                    last_date,
+                    today,
+                )
+                return 0
+            # バックフィル: 直近 _BACKFILL_DAYS 日を含めて再フェッチ
+            date_from = last_date - timedelta(days=_BACKFILL_DAYS - 1)
+            if date_from > date_to:
                 logger.info(
                     "calendar_update_job: カレンダーは最新 last=%s date_to=%s",
                     last_date,
                     date_to,
                 )
                 return 0
-            date_from = last_date + timedelta(days=1)
         else:
             date_from = today
     else:

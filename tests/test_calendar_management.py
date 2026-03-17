@@ -314,10 +314,24 @@ class TestGetTradingDays:
         assert date(2025, 1, 17) in result  # 金（フォールバック）
 
     def test_no_duplicates_when_boundary_overlaps(self, mem_db):
-        # DB に 2025-01-13 あり、範囲外補完と重複しないことを確認
+        # DB に 2025-01-13 あり、補完と重複しないことを確認
         _insert_calendar(mem_db, [{"date": date(2025, 1, 13), "is_trading_day": True}])
         result = cm.get_trading_days(mem_db, date(2025, 1, 13), date(2025, 1, 14))
         assert result.count(date(2025, 1, 13)) == 1
+
+    def test_sparse_db_unregistered_weekday_included(self, mem_db):
+        """DB 範囲内の未登録平日は曜日フォールバックで営業日に含まれる。"""
+        # 2025-01-07（火）が休日として登録、前後は未登録
+        _insert_calendar(mem_db, [
+            {"date": date(2025, 1, 7), "is_trading_day": False, "holiday_name": "祝日"},
+        ])
+        # 2025-01-06（月）: 未登録 → フォールバックで含まれる
+        # 2025-01-07（火）: 休日登録 → 除外
+        # 2025-01-08（水）: 未登録 → フォールバックで含まれる
+        result = cm.get_trading_days(mem_db, date(2025, 1, 6), date(2025, 1, 8))
+        assert date(2025, 1, 6) in result
+        assert date(2025, 1, 7) not in result
+        assert date(2025, 1, 8) in result
 
 
 # ---------------------------------------------------------------------------
@@ -360,8 +374,8 @@ class TestCalendarUpdateJob:
         result = cm.calendar_update_job(mem_db)
         assert result == 0
 
-    def test_date_from_is_after_last_saved(self, mem_db, monkeypatch):
-        """差分取得: 既存最終日の翌日から取得することを確認する。"""
+    def test_date_from_includes_backfill_window(self, mem_db, monkeypatch):
+        """バックフィル: date_from は last_date から _BACKFILL_DAYS-1 日遡った日付になる。"""
         import kabusys.data.jquants_client as jq
 
         last_saved = date(2025, 3, 10)
@@ -377,7 +391,41 @@ class TestCalendarUpdateJob:
         monkeypatch.setattr(jq, "save_market_calendar", lambda conn, recs: 0)
 
         cm.calendar_update_job(mem_db)
-        assert captured["date_from"] == (last_saved + timedelta(days=1)).isoformat()
+        expected_from = last_saved - timedelta(days=cm._BACKFILL_DAYS - 1)
+        assert captured["date_from"] == expected_from.isoformat()
+
+    def test_returns_zero_when_sanity_check_fails(self, mem_db, monkeypatch):
+        """健全性チェック: last_date が today + _SANITY_MAX_FUTURE_DAYS を超えたらスキップ。"""
+        import kabusys.data.jquants_client as jq
+
+        # 今日から 400 日先（_SANITY_MAX_FUTURE_DAYS=365 を超える）
+        abnormal_date = date.today() + timedelta(days=400)
+        _insert_calendar(mem_db, [{"date": abnormal_date, "is_trading_day": True}])
+
+        fetch_called = []
+        monkeypatch.setattr(jq, "fetch_market_calendar", lambda **kw: fetch_called.append(kw) or [])
+        monkeypatch.setattr(jq, "save_market_calendar", lambda conn, recs: 0)
+
+        result = cm.calendar_update_job(mem_db)
+        assert result == 0
+        assert fetch_called == []  # 異常なので fetch は呼ばれない
+
+    def test_backfill_refetches_recent_data_when_up_to_date(self, mem_db, monkeypatch):
+        """バックフィル: 最新の場合でも直近データは再フェッチする（date_from <= date_to なら）。"""
+        import kabusys.data.jquants_client as jq
+
+        # last_date を today + lookahead + 3 にして date_from > date_to になるようにする
+        # → これはスキップになる（_BACKFILL_DAYS-1 = 6日戻しても date_to より先）
+        today = date.today()
+        beyond = today + timedelta(days=cm._CALENDAR_LOOKAHEAD_DAYS + cm._BACKFILL_DAYS)
+        _insert_calendar(mem_db, [{"date": beyond, "is_trading_day": True}])
+
+        fetch_called = []
+        monkeypatch.setattr(jq, "fetch_market_calendar", lambda **kw: fetch_called.append(kw) or [])
+
+        result = cm.calendar_update_job(mem_db)
+        assert result == 0
+        assert fetch_called == []
 
     def test_returns_zero_when_fetch_raises(self, mem_db, monkeypatch):
         """fetch_market_calendar が例外を送出しても 0 を返す。"""
