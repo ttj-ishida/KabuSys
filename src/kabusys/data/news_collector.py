@@ -52,6 +52,9 @@ MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 # URL から除去するトラッキングパラメータのプレフィックス
 _TRACKING_PARAM_PREFIXES = ("utm_", "fbclid", "gclid", "ref_", "_ga")
 
+# content:encoded の名前空間 URI
+_CONTENT_NS = "{http://purl.org/rss/1.0/modules/content/}"
+
 # ---------------------------------------------------------------------------
 # 型定義
 # ---------------------------------------------------------------------------
@@ -169,6 +172,9 @@ def _parse_rss_datetime(date_str: str | None) -> datetime:
     if date_str:
         try:
             dt = parsedate_to_datetime(date_str)
+            # naive datetime はタイムゾーン情報なしの RSS フィード由来（UTC とみなす）
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
             return dt.astimezone(timezone.utc).replace(tzinfo=None)
         except Exception:
             logger.warning("_parse_rss_datetime: パース失敗 pubDate=%r、現在時刻で代替", date_str)
@@ -239,13 +245,15 @@ def fetch_rss(
         logger.warning("fetch_rss: <channel> not found in %s", url)
         return []
 
-    # content:encoded の名前空間 URI
-    _CONTENT_NS = "{http://purl.org/rss/1.0/modules/content/}"
-
     articles: list[NewsArticle] = []
     for item in channel.findall("item"):
-        # <link> がなければ <guid> を代替URLとして使用
-        link = (item.findtext("link") or item.findtext("guid") or "").strip()
+        # <link> がなければ <guid> を代替URLとして使用（http/https のみ）
+        link = (item.findtext("link") or "").strip()
+        if not link:
+            guid = (item.findtext("guid") or "").strip()
+            # guid は必ずしも URL ではないため、http/https スキームのものだけを採用
+            if guid and urllib.parse.urlparse(guid).scheme.lower() in ("http", "https"):
+                link = guid
         if not link:
             continue
 
@@ -431,21 +439,29 @@ def run_news_collection(
 
     results: dict[str, int] = {}
     for source_name, rss_url in sources.items():
+        # フェッチと raw_news 保存は一体で扱い、失敗時はソースをスキップ
         try:
             articles = fetch_rss(rss_url, source=source_name, timeout=timeout)
             saved = save_raw_news(conn, articles)
-            results[source_name] = saved
+        except Exception:
+            logger.exception("run_news_collection: ソース取得失敗 source=%s", source_name)
+            results[source_name] = 0
+            continue
 
-            if known_codes and articles:
+        results[source_name] = saved
+
+        # 銘柄紐付けは raw_news 保存とは独立してエラーハンドリングする
+        if known_codes and articles:
+            try:
                 for art in articles:
                     combined = f"{art.get('title', '')} {art.get('content', '')}"
                     codes = extract_stock_codes(combined, known_codes)
                     if codes:
                         save_news_symbols(conn, art["id"], codes)
-
-        except Exception:
-            logger.exception("run_news_collection: ソース取得失敗 source=%s", source_name)
-            results[source_name] = 0
+            except Exception:
+                logger.exception(
+                    "run_news_collection: symbols 紐付け失敗 source=%s", source_name
+                )
 
     logger.info(
         "run_news_collection 完了: %s",
