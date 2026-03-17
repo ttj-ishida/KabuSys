@@ -156,22 +156,41 @@ _AUDIT_DDL: list[str] = [
 # 公開 API
 # ---------------------------------------------------------------------------
 
-def init_audit_schema(conn: duckdb.DuckDBPyConnection) -> None:
+def init_audit_schema(
+    conn: duckdb.DuckDBPyConnection,
+    transactional: bool = True,
+) -> None:
     """監査ログテーブルを初期化する（冪等）。
 
     既存の DuckDB 接続に監査ログテーブルを追加する。
     通常は data.schema.init_schema() で取得した接続を渡す。
 
-    すべての TIMESTAMP は UTC で保存する。
+    すべての TIMESTAMP は UTC で保存する（SET TimeZone='UTC' を実行）。
 
     Args:
-        conn: 初期化済みの DuckDB 接続。
+        conn:          初期化済みの DuckDB 接続。
+        transactional: True（デフォルト）の場合、DDL・インデックス作成を
+                       1 トランザクションで実行し原子性を保証する。
+                       呼び出し元が既にトランザクションを開いている場合は
+                       False を渡してネストを避けること。
     """
     conn.execute("SET TimeZone='UTC'")
-    for ddl in _AUDIT_DDL:
-        conn.execute(ddl)
-    for idx in _AUDIT_INDEXES:
-        conn.execute(idx)
+    if transactional:
+        try:
+            conn.execute("BEGIN")
+            for ddl in _AUDIT_DDL:
+                conn.execute(ddl)
+            for idx in _AUDIT_INDEXES:
+                conn.execute(idx)
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    else:
+        for ddl in _AUDIT_DDL:
+            conn.execute(ddl)
+        for idx in _AUDIT_INDEXES:
+            conn.execute(idx)
 
 
 def init_audit_db(db_path: str | Path) -> duckdb.DuckDBPyConnection:
