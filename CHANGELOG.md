@@ -1,76 +1,77 @@
-KEEP A CHANGELOG
-All notable changes to this project will be documented in this file.
+# CHANGELOG
 
-フォーマットは Keep a Changelog に準拠しています。  
-次のバージョンに向けた未リリースの変更点は "Unreleased" セクションに記載します。
+すべての重要な変更点を記録します。本ファイルは「Keep a Changelog」に準拠しています。
 
-Unreleased
-----------
-- なし（初回リリース）
+全てのバージョンはセマンティックバージョニングに従います。
 
-[0.1.0] - 2026-03-17
--------------------
-Added
-- パッケージ初期実装を追加（kabusys, data, strategy, execution, monitoring を公開）。
-- 環境設定管理（kabusys.config）
-  - .env / .env.local をプロジェクトルート（.git または pyproject.toml 基準）から自動読み込み（KABUSYS_DISABLE_AUTO_ENV_LOAD により無効化可能）。
-  - .env の詳細なパース実装（export プレフィックス、シングル/ダブルクォート、インラインコメント、エスケープ対応）。
-  - Settings クラスを提供し、J-Quants / kabu API / Slack / DB パス（DuckDB/SQLite）/実行環境（development/paper_trading/live）/ログレベルの取得とバリデーションを実装。
-- J-Quants API クライアント（kabusys.data.jquants_client）
-  - 株価日足、財務データ、JPX マーケットカレンダー取得用 API 呼び出しを実装。
-  - レート制限対応（固定間隔スロットリングで 120 req/min を保証）。
-  - リトライロジック（指数バックオフ、最大 3 回、408/429/5xx のリトライ対応、429 の Retry-After 優先）。
-  - 401 の場合はリフレッシュトークンを用いた id_token 自動リフレッシュ（1 回のみ）を実装。
-  - ページネーション対応（pagination_key の連続取得）。
-  - DuckDB への保存関数（save_daily_quotes, save_financial_statements, save_market_calendar）を実装。ON CONFLICT DO UPDATE による冪等化。
-  - データ変換ユーティリティ（_to_float, _to_int）を提供。
-- ニュース収集モジュール（kabusys.data.news_collector）
-  - RSS フィード取得・解析・前処理・DB保存のワークフローを実装（fetch_rss, save_raw_news, save_news_symbols, run_news_collection）。
-  - URL 正規化（トラッキングパラメータ除去、クエリソート、フラグメント除去）と記事 ID の SHA-256（先頭32文字）による冪等化。
-  - defusedxml を使った安全な XML パース（XML Bomb 対策）。
-  - SSRF 対策: スキーム検証（http/https のみ許可）、ホストがプライベート/ループバック/リンクローカルでないことの検証、リダイレクト時の事前検査（カスタム RedirectHandler）。
-  - レスポンスサイズ上限（MAX_RESPONSE_BYTES=10MB）と gzip 解凍後の再チェック（Gzip bomb 対策）。
-  - DB 保存はチャンク化とトランザクションで実施し、INSERT ... RETURNING を用いて実際に挿入された件数を正確に返却。
-  - 日本株の銘柄コード抽出ユーティリティ（extract_stock_codes）。
-- DuckDB スキーマ定義（kabusys.data.schema）
-  - Raw / Processed / Feature / Execution 層に対応するテーブル群を定義（raw_prices, raw_financials, raw_news, raw_executions, prices_daily, market_calendar, fundamentals, news_articles, news_symbols, features, ai_scores, signals, signal_queue, orders, trades, positions, portfolio_performance 等）。
-  - 適切なチェック制約、主キー・外部キーを定義。
-  - 頻出クエリ向けのインデックス定義を追加。
-  - init_schema(db_path) によりディレクトリ作成とテーブル/インデックス作成を行う初期化ユーティリティを実装。get_connection() で既存 DB に接続可能。
-- ETL パイプライン基盤（kabusys.data.pipeline）
-  - ETL 実行結果を表す ETLResult dataclass を実装（品質問題・エラーの集約、辞書化のユーティリティ含む）。
-  - DB の最終取得日取得ユーティリティ（get_last_price_date, get_last_financial_date, get_last_calendar_date）を実装。
-  - 取引日補正ヘルパー（_adjust_to_trading_day: 非営業日の場合は直近営業日に調整）を実装。
-  - run_prices_etl を含む差分更新ロジックを実装（最終取得日からの backfill 処理、_MIN_DATA_DATE, _DEFAULT_BACKFILL_DAYS の概念を導入）。
-  - 品質チェックモジュール（quality）との連携を想定した設計（品質チェックで致命的問題が検出されても全件収集を継続する方針）。
+## [0.1.0] - 2026-03-17
 
-Security
-- RSS パーサーに defusedxml を採用し XML 脅威を軽減。
-- SSRF 対策を多層で実装（スキーム検証・ホストプライベート判定・リダイレクト時検査）。
-- HTTP レスポンス長を制限しメモリ DoS / Gzip bomb を防止。
+初回リリース — 日本株自動売買システムのコアモジュール群を実装しました。以下はコードベースから推測してまとめた主要な追加・実装内容です。
 
-Changed
-- （初回リリースのため該当なし）
+### 追加 (Added)
+- パッケージ構成
+  - kabusys パッケージを導入。サブパッケージとして data, strategy, execution, monitoring を公開（strategy と execution は初期プレースホルダ）。
+  - パッケージバージョンは `0.1.0` に設定。
 
-Fixed
-- （初回リリースのため該当なし）
+- 環境変数／設定管理 (`kabusys.config`)
+  - .env / .env.local の自動読み込み機能を実装（プロジェクトルートは .git または pyproject.toml を探索して特定）。
+  - 読み込み優先度は OS 環境変数 > .env.local > .env。`KABUSYS_DISABLE_AUTO_ENV_LOAD=1` で自動ロードを無効化可能。
+  - .env のパースはシェル形式（export プレフィックス、シングル／ダブルクォート、コメント扱い）に対応。
+  - Settings クラスを提供し、以下の設定をプロパティ経由で取得可能:
+    - J-Quants / kabuステーション / Slack / DB パス（DuckDB/SQLite）等
+  - KABUSYS_ENV と LOG_LEVEL の値検証（許容値チェック）を実装。is_live / is_paper / is_dev の補助メソッドあり。
 
-Deprecated
-- なし
+- J-Quants API クライアント (`kabusys.data.jquants_client`)
+  - 日足（OHLCV）、四半期財務データ、JPX マーケットカレンダーの取得関数を実装（ページネーション対応）。
+  - レート制御: 固定間隔スロットリングにより 120 req/min を遵守する `_RateLimiter` を実装。
+  - リトライ戦略: 指数バックオフで最大 3 回リトライ、HTTP 408/429/5xx を再試行対象とする実装。
+  - 401 受信時の自動トークンリフレッシュ（1 回のみ）とトークンキャッシュを実装。
+  - API 呼び出し共通関数 `_request` により JSON デコード・例外処理を整理。
+  - DuckDB へ冪等に保存する save_* 関数を実装（ON CONFLICT DO UPDATE を利用）。
+  - 型変換ユーティリティ `_to_float` / `_to_int` を追加し、入力データの堅牢な取り扱いを実現。
 
-Removed
-- なし
+- ニュース収集モジュール (`kabusys.data.news_collector`)
+  - RSS フィードから記事収集し DuckDB の raw_news へ保存する機能。
+  - セキュリティ対策:
+    - defusedxml による XML パース（XML Bomb 等への対策）。
+    - SSRF 防止: URL スキーム検証（http/https のみ）、ホストのプライベートアドレス判定とリダイレクト検査（カスタム RedirectHandler）、受信サイズ上限チェック（最大 10MB）を実装。
+    - gzip 解凍時のサイズ検査（Gzip bomb 対策）。
+  - 記事 ID は正規化した URL の SHA-256（先頭 32 文字）で生成し冪等性を担保（utm_* 等のトラッキングパラメータを除去してから正規化）。
+  - テキスト前処理（URL 除去・空白正規化）と RSS pubDate の安全なパースを実装。
+  - DB 保存はトランザクションでまとめて行い、INSERT ... RETURNING を用いて実際に挿入された件数／ID を正確に取得する。
+  - 銘柄コード抽出ロジック（4桁数字、known_codes によるフィルタ）と、一括で news_symbols に保存する仕組みを実装。
 
-Known issues / Notes
-- run_prices_etl の戻り値に関する実装上の問題:
-  - 提供されたコードでは run_prices_etl の末尾が "return len(records)," のように途中で切れており、(fetched, saved) の形で保存件数を返すべき箇所が未完であるため、呼び出し側が期待するタプルを返していません。次回リリースで修正が必要です。
-- pipeline モジュールは quality モジュールを参照していますが、quality の実装はこの差分では含まれていません。統合テスト時に実装/インターフェイス確認が必要です。
-- 初期実装のため、ユニットテスト・エンドツーエンドテストの整備、例外発生時のリトライ/アラートポリシーの調整、監視（monitoring）・実行モジュールの実装が今後の作業項目です。
+- DuckDB スキーマ定義・初期化 (`kabusys.data.schema`)
+  - Data Platform 設計に基づくスキーマを実装（Raw / Processed / Feature / Execution 層）。
+  - 主要テーブル:
+    - raw_prices, raw_financials, raw_news, raw_executions
+    - prices_daily, market_calendar, fundamentals, news_articles, news_symbols
+    - features, ai_scores
+    - signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
+  - 各種制約（PRIMARY KEY / CHECK / FOREIGN KEY）を定義し、データ整合性を担保。
+  - 頻出クエリ向けのインデックスを作成。
+  - init_schema(db_path) でディレクトリ作成・DDL 実行・接続を返す関数を提供。get_connection() で既存 DB へ接続可能。
 
-作者メモ / 次回対応予定
-- run_prices_etl の戻り値バグ修正と単体テスト追加。
-- pipeline の他 ETL ジョブ（financials, calendar）の完成と品質チェック連携の実装。
-- strategy / execution / monitoring パッケージの実装と統合テスト。
-- ドキュメント（DataPlatform.md, API 利用手順、運用手順）の整備。
+- ETL パイプライン基盤 (`kabusys.data.pipeline`)
+  - ETL の設計に沿った差分更新ロジックの基礎を実装。
+  - ETLResult dataclass を導入し、取得件数・保存件数・品質問題・エラー等を集約して返却可能。
+  - DB 上の最終取得日取得ユーティリティ（get_last_price_date / get_last_financial_date / get_last_calendar_date）を実装。
+  - 市場カレンダーがある場合に営業日に調整するヘルパー `_adjust_to_trading_day` を実装。
+  - run_prices_etl の雛形を実装（差分算出、バックフィル、fetch/save の呼び出し）。（詳細な品質チェックや他ジョブとの統合は別実装想定）
 
---- End of changelog ---
+### セキュリティ (Security)
+- ニュース収集に対して SSRF・XML 注入・メモリ DoS（大きなレスポンス）等への対策を導入。
+- .env 読み込みは OS 環境変数を保護する設計（protected set を使って上書きを制御）。
+
+### 改善 (Improvements)
+- API クライアントと ETL が冪等性を保つよう設計（DuckDB 側で ON CONFLICT による更新を行うため再実行可能）。
+- エラー・リトライ・ログ出力を詳細化して運用時のトラブルシュートしやすく設計。
+
+### 既知の制限 / 今後の課題 (Known issues / TODOs)
+- strategy / execution / monitoring はパッケージプレースホルダとして存在。戦略実装や発注ロジックはこれからの実装が想定される。
+- pipeline.run_prices_etl などは骨格実装（品質チェックや全体の ETL オーケストレーションの追加実装が必要）。
+- 単体テストや統合テスト用のモック・テストケースの整備が必要（例: _urlopen をモックして RSS テストを実施）。
+
+---
+
+この CHANGELOG はコード内容から推測して作成しています。実際のリリースノート作成時は運用上の決定や変更履歴の差分を反映してください。
