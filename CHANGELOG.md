@@ -1,98 +1,97 @@
-CHANGELOG
-=========
+# Changelog
 
-すべての注目すべき変更はこのファイルに記録します。
-フォーマットは "Keep a Changelog" に準拠し、セマンティックバージョニングを使用します。
+すべての重要な変更は Keep a Changelog の形式に従って記載します。  
+このファイルはプロジェクトの初回リリース（v0.1.0）の内容をコードベースから推測してまとめたものです。
 
-[Unreleased]
-------------
+フォーマット: https://keepachangelog.com/ja/1.0.0/
 
-- （なし）
+## [Unreleased]
 
-0.1.0 - 2026-03-17
-------------------
+## [0.1.0] - 2026-03-17
+初期リリース。日本株の自動売買プラットフォーム「KabuSys」のコア基盤を実装しました。以下の主要機能と設計方針を含みます。
 
-Added
-- 初回リリース。パッケージ名: KabuSys (バージョン 0.1.0)。
-- パッケージ初期化:
-  - src/kabusys/__init__.py による基本公開 API 定義（data, strategy, execution, monitoring）。
-- 環境設定管理:
-  - src/kabusys/config.py を追加。
-  - .env ファイルまたは環境変数から設定を自動読み込み（プロジェクトルートを .git または pyproject.toml で検出）。
-  - .env/.env.local の読み込み順序（OS 環境変数 > .env.local > .env）。KABUSYS_DISABLE_AUTO_ENV_LOAD による自動ロード無効化機能を提供。
-  - export KEY=val 形式やシングル/ダブルクォート、インラインコメント、エスケープ等に対応した .env パーサーを実装。
-  - OS 環境変数保護（protected set）機能により .env の上書きを制御。
-  - Settings クラスを提供（J-Quants トークン、kabu API、Slack、DB パス、環境種別、ログレベル判定などのプロパティを提供）。
-  - 環境値の検証（KABUSYS_ENV, LOG_LEVEL の許容値チェック）と is_live/is_paper/is_dev 判定。
+### 追加 (Added)
+- パッケージ基盤
+  - pakage メタ情報: src/kabusys/__init__.py に __version__="0.1.0"、主要サブパッケージを公開。
 
-- J-Quants API クライアント:
-  - src/kabusys/data/jquants_client.py を追加。
-  - レート制限制御（固定間隔スロットリング）を持つ内部 RateLimiter 実装（120 req/min に準拠）。
-  - リトライ戦略（指数バックオフ、最大 3 回、HTTP 408/429/5xx に対応）。
-  - 401 応答時は自動でリフレッシュトークンから id_token を再取得して 1 回リトライ（無限再帰防止）。
-  - id_token のモジュールレベルキャッシュを導入し、ページネーション間で再利用。
-  - JSON デコード失敗時の明示的エラー報告。
-  - ページネーション対応のデータ取得関数:
-    - fetch_daily_quotes（株価日足 / OHLCV）
-    - fetch_financial_statements（四半期財務データ）
-    - fetch_market_calendar（JPX マーケットカレンダー）
-  - DuckDB への冪等保存関数（ON CONFLICT DO UPDATE）:
-    - save_daily_quotes, save_financial_statements, save_market_calendar
-  - データ変換ユーティリティ: _to_float, _to_int（不正値や空値を安全に扱う）。
-  - 取得時刻（fetched_at）を UTC で記録して Look-ahead Bias を防止。
+- 環境設定管理 (src/kabusys/config.py)
+  - .env ファイルおよび環境変数を読み込む自動ローダ実装（優先度: OS 環境 > .env.local > .env）。
+  - プロジェクトルート検出: __file__ を起点に .git または pyproject.toml を探索してルートを特定（配布後でも動作）。
+  - .env パーサ: export プレフィックス対応、シングル/ダブルクォートやバックスラッシュエスケープ処理、インラインコメントの扱い等を実装。
+  - 読み込み時に OS 環境変数の保護（protected set）をサポート。自動ロードは環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で無効化可能。
+  - Settings クラスで設定値をプロパティとして提供（J-Quants トークン、kabu API パスワード、Slack トークン/チャンネル、DB パス、環境種別、ログレベル判定、is_live/is_paper/is_dev ヘルパ）。
 
-- ニュース収集モジュール:
-  - src/kabusys/data/news_collector.py を追加。
-  - RSS フィード取得・パース機能（defusedxml を利用して XML 攻撃を防止）。
-  - セキュリティ対策:
-    - HTTP リダイレクト時のスキーム検証・プライベートアドレス（SSRF）検出を行うカスタム RedirectHandler を実装。
-    - 初期 URL と最終 URL のホストを検証し、プライベートアドレス（ループバック/リンクローカル/プライベート/マルチキャスト）を拒否。
-    - URL スキーム制限（http/https のみ許可）。
-    - 最大受信バイト数制限（MAX_RESPONSE_BYTES = 10MB）と gzip 解凍後のサイズ検査（Gzip bomb 対策）。
-  - URL 正規化（トラッキングパラメータ除去、フラグメント削除、クエリソート）を実装。
-  - 記事ID を正規化 URL の SHA-256（先頭32文字）で生成して冪等性を保証。
-  - テキスト前処理（URL 除去・空白正規化）。
+- J-Quants API クライアント (src/kabusys/data/jquants_client.py)
+  - API 基本クライアントを実装。機能:
+    - 株価日足（OHLCV）取得（fetch_daily_quotes）
+    - 財務データ（四半期 BS/PL）取得（fetch_financial_statements）
+    - JPX マーケットカレンダー取得（fetch_market_calendar）
+  - 設計上の特徴:
+    - レート制限保護: 固定間隔スロットリングで 120 req/min を保証する _RateLimiter を採用。
+    - 再試行ロジック: 指数バックオフ（base=2.0）、最大 3 回リトライ。HTTP 408/429 および 5xx を再試行対象。
+    - 401 処理: 401 受信時にリフレッシュを自動で1回試行し再リクエスト（無限再帰を防止）。
+    - ページネーション対応: pagination_key を用いた全ページ取得。
+    - fetched_at: 取得時刻を UTC ISO8601 で記録（Look-ahead Bias 対策）。
+    - DuckDB への保存は冪等性を考慮（ON CONFLICT DO UPDATE）で実装された save_* 関数:
+      - save_daily_quotes: raw_prices へ保存（PK: date, code）。
+      - save_financial_statements: raw_financials へ保存（PK: code, report_date, period_type）。
+      - save_market_calendar: market_calendar へ保存（PK: date）。
+    - 型安全な変換ユーティリティ _to_float/_to_int を提供。
+
+- ニュース収集モジュール (src/kabusys/data/news_collector.py)
+  - RSS フィードからニュースを取得し raw_news に保存する実装。
+  - セキュリティ・耐障害性設計:
+    - defusedxml を用いた XML パースで XML Bomb 等を防御。
+    - SSRF 対策: リダイレクト事前検査用 _SSRFBlockRedirectHandler、スキーム検証（http/https のみ）、プライベートアドレス判定 (_is_private_host)。
+    - レスポンスサイズ制限 (MAX_RESPONSE_BYTES = 10MB) と gzip 解凍後サイズ検査（Gzip bomb 対策）。
+    - URL 正規化: クエリ中のトラッキングパラメータ（utm_ 等）を除去、スキーム/ホスト小文字化、フラグメント除去、並び替え。
+    - 記事ID: 正規化URL の SHA-256 の先頭32文字を記事IDとして生成（冪等性確保）。
   - DB 保存:
-    - save_raw_news: chunk 単位で INSERT ... ON CONFLICT DO NOTHING RETURNING id を用いて新規挿入 ID を返す（トランザクション内で実行）。
-    - save_news_symbols / _save_news_symbols_bulk: 記事と銘柄コードの紐付けを一括保存（ON CONFLICT で重複をスキップ、INSERT ... RETURNING を用いる）。
-  - 銘柄コード抽出（4桁数字パターン、既知銘柄セットでフィルタリング）を実装。
-  - run_news_collection: 複数 RSS ソースを個別にフェッチして DB 保存・銘柄紐付けまで行う統合ジョブ（ソース単位でエラーハンドリングし、1 ソース失敗でも他ソースを継続）。
+    - save_raw_news: INSERT ... ON CONFLICT DO NOTHING RETURNING id を使い、実際に挿入された記事IDを返却。チャンク分割と単一トランザクションで処理。
+    - save_news_symbols / _save_news_symbols_bulk: 記事と銘柄コードの紐付けをチャンク挿入で保存し、挿入数を正確に返却。
+  - 銘柄抽出:
+    - extract_stock_codes: テキストから 4 桁数字候補を抽出し、known_codes セットでフィルタして重複除去。
+  - 統合ジョブ run_news_collection: 複数ソースの収集・保存・銘柄紐付けを実行（ソース毎に独立したエラーハンドリング）。
 
-- DuckDB スキーマ定義と初期化:
-  - src/kabusys/data/schema.py を追加。
-  - Raw / Processed / Feature / Execution 層にまたがるテーブル定義を包括的に用意:
-    - raw_prices, raw_financials, raw_news, raw_executions
-    - prices_daily, market_calendar, fundamentals, news_articles, news_symbols
-    - features, ai_scores
-    - signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
-  - 各種チェック制約（NOT NULL, CHECK 等）や外部キー、主キーを定義。
-  - 頻出クエリ向けのインデックスを定義。
-  - init_schema(db_path) でディレクトリ作成、DDL 実行、インデックス作成を行い接続を返す。get_connection() を提供。
+- DuckDB スキーマ定義・初期化 (src/kabusys/data/schema.py)
+  - Raw / Processed / Feature / Execution 層に分けたスキーマ定義を実装。
+  - 主要テーブル（例: raw_prices, raw_financials, raw_news, market_calendar, prices_daily, features, ai_scores, signal_queue, orders, trades, positions, portfolio_performance など）を含む DDL を提供。
+  - インデックス定義（頻出クエリ向け）を追加。
+  - init_schema(db_path) で親ディレクトリ自動作成のうえ全テーブル/インデックスを作成（冪等）。get_connection() で接続のみ取得。
 
-- ETL パイプライン基礎:
-  - src/kabusys/data/pipeline.py を追加（ETL の骨組み）。
-  - ETLResult dataclass による実行結果の集約（品質問題・エラー一覧を含む）。
-  - 差分更新ヘルパー（テーブル存在確認、最大日付取得）。
-  - 市場カレンダーを用いた営業日調整 (_adjust_to_trading_day)。
-  - 差分更新の実装方針（最終取得日から backfill する、デフォルト backfill_days=3）。
-  - get_last_price_date / get_last_financial_date / get_last_calendar_date ヘルパー。
-  - run_prices_etl の骨組み（差分取得→jquants_client 経由で取得→save して保存件数を返却）。※ run_prices_etl は差分更新のロジックを備える（詳細はコード中）。
+- ETL パイプライン基礎 (src/kabusys/data/pipeline.py)
+  - ETLResult データクラスで ETL 実行結果（取得数・保存数・品質問題・エラー）を構造化。
+  - 差分更新のためのユーティリティ:
+    - get_last_price_date / get_last_financial_date / get_last_calendar_date
+    - _adjust_to_trading_day: 非営業日を直近の営業日に調整（market_calendar を参照、フォールバックあり）。
+  - 個別ジョブ run_prices_etl: 差分更新と backfill（デフォルト backfill_days=3）をサポートし、J-Quants から取得→保存（save_daily_quotes）するフローを実装（差分開始日の自動決定ロジック等）。
+  - 設計方針: 差分更新単位は営業日ベース、品質チェック（quality モジュール）と連携する想定（品質問題は収集を妨げない挙動）。
 
-- その他:
-  - src/kabusys/data/__init__.py, src/kabusys/execution/__init__.py, src/kabusys/strategy/__init__.py を配置（パッケージの準備）。
+- その他
+  - data、strategy、execution、monitoring パッケージのプレースホルダ __init__ を配置（将来拡張用）。
 
-Security
-- RSS パーサで defusedxml を採用し、XML 関連の攻撃を緩和。
-- RSS フェッチで SSRF 対策（スキーム検証、ホストがプライベートアドレスかを判定、リダイレクト先の事前検査）を実装。
-- ネットワーク読み取りサイズ上限と gzip 解凍後サイズ検査によりメモリ DoS を軽減。
+### 変更 (Changed)
+- 初回リリースのため該当なし。
 
-Notes / Known issues
-- ETL パイプラインや品質チェック部分（quality モジュールの呼び出し等）は骨組みを提供しており、個別のチェック実装や運用ポリシーは今後の拡張対象です。
-- run_prices_etl を含む一部関数は引数注入（id_token 等）によりテスト容易性を配慮していますが、リリース時点では更なるユニット／統合テストの追加が推奨されます。
+### 修正 (Fixed)
+- 初回リリースのため該当なし。
 
-導入・移行メモ
-- 初回利用時は init_schema(db_path) を呼んで DuckDB スキーマを作成してください。
-- 環境変数は .env/.env.local または OS 環境で設定可能。テスト等で自動ロードを停止する場合は KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください。
-- J-Quants 用リフレッシュトークン（JQUANTS_REFRESH_TOKEN）や Slack トークン等の必須環境変数は Settings を通して参照され、未設定時は例外が発生します。
+### セキュリティ (Security)
+- ニュース収集での SSRF 対策、defusedxml による XML パース対策、受信サイズ制限、URL スキーム検証などを導入。これにより RSS フィード取込みに関する複数の攻撃ベクトルを軽減。
+
+### 既知の注意点 / 備考
+- Settings の一部プロパティは必須環境変数（例: JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID）を要求します。未設定時は ValueError を送出しますので、.env の用意や環境変数の設定が必要です。
+- DuckDB のデフォルトファイルパスは data/kabusys.duckdb（duckdb_path）および data/monitoring.db（sqlite_path）です。init_schema() はデフォルトでは親ディレクトリを自動作成します。
+- jquants_client のレート制御は厳格に 120 req/min を想定しており、バルク処理・バックフィルなどで API 制限に注意が必要です。
+- run_news_collection は既知コードリスト（known_codes）を与えない場合は銘柄紐付けをスキップします。銘柄抽出のルールは単純な 4 桁数字パターンに基づくため誤抽出の可能性がある点に留意してください。
+- ETL パイプラインでは品質チェック（quality モジュール）と連携して問題を検出しますが、品質問題が検出されても収集自体は継続する設計になっています（呼び出し元での判断を想定）。
 
 ---
+
+今後のリリース案（推奨）
+- strategy / execution モジュールの具体的な戦略・発注実装
+- 監視・アラート（Slack 統合）の実装（Slack トークン/チャンネルは既に設定項目あり）
+- quality モジュールの実装詳細と ETL 連携の強化
+- テストカバレッジ向上（ネットワーク/外部 API のモック、連携テスト）
+
+[0.1.0]: v0.1.0
