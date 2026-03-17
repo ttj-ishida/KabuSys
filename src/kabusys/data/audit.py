@@ -170,7 +170,7 @@ def _apply_audit_schema(conn: duckdb.DuckDBPyConnection) -> None:
 
 def init_audit_schema(
     conn: duckdb.DuckDBPyConnection,
-    transactional: bool = True,
+    transactional: bool = False,
 ) -> None:
     """監査ログテーブルを初期化する（冪等）。
 
@@ -181,11 +181,13 @@ def init_audit_schema(
 
     Args:
         conn:          初期化済みの DuckDB 接続。
-        transactional: True（デフォルト）の場合、BEGIN/COMMIT/ROLLBACK で
-                       DDL・インデックス作成を原子的に実行する。
-                       呼び出し元がすでにトランザクションを開いている場合は
-                       False を渡して既存トランザクションに委ねること
-                       （DuckDB はネストトランザクション非対応）。
+        transactional: True の場合、BEGIN/COMMIT/ROLLBACK で DDL・インデックス
+                       作成を原子的に実行する。新規接続など呼び出し元がトランザ
+                       クションを開いていないことが確実な場合に指定する。
+                       DuckDB はネストトランザクション非対応のため、呼び出し元
+                       がすでにトランザクション中の場合は BEGIN がトランザクショ
+                       ンを破棄してしまう。デフォルト False のため、呼び出し元
+                       がトランザクションを管理する場合はそのまま使用できる。
                        False の場合はトランザクションなしで直接実行するため、
                        途中失敗時に一部のテーブル/インデックスだけ作成された
                        状態になる可能性があることに注意。
@@ -222,5 +224,5 @@ def init_audit_db(db_path: str | Path) -> duckdb.DuckDBPyConnection:
     if db_path_str != ":memory:":
         Path(db_path_str).parent.mkdir(parents=True, exist_ok=True)
     conn = duckdb.connect(db_path_str)
-    init_audit_schema(conn)
+    init_audit_schema(conn, transactional=True)
     return conn

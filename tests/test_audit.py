@@ -28,7 +28,7 @@ from kabusys.data.audit import init_audit_schema, init_audit_db
 def audit_conn():
     """監査テーブル初期化済みのインメモリ DuckDB 接続。"""
     conn = duckdb.connect(":memory:")
-    init_audit_schema(conn)
+    init_audit_schema(conn, transactional=True)
     yield conn
     conn.close()
 
