@@ -286,6 +286,63 @@ def test_fetch_rss_no_channel_returns_empty(monkeypatch):
     assert articles == []
 
 
+def test_fetch_rss_namespace_fallback(monkeypatch):
+    """<channel> がない RSS でも .//item フォールバックで記事を取得できること。"""
+    no_channel_with_items = b"""<?xml version="1.0"?>
+<rss>
+  <item>
+    <link>https://example.com/fallback-article</link>
+    <title>Fallback Article</title>
+  </item>
+</rss>"""
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda req, timeout=30: _MockResponse(no_channel_with_items),
+    )
+    articles = fetch_rss("https://dummy.rss", source="test")
+    assert len(articles) == 1
+    assert articles[0]["url"] == "https://example.com/fallback-article"
+
+
+def test_fetch_rss_invalid_content_length_is_ignored(monkeypatch):
+    """Content-Length が非数値でも ValueError にならず記事を正常取得できること。"""
+    class _BadCLHeaders:
+        def get(self, key, default=None):
+            if key == "Content-Length":
+                return "not-a-number"
+            return default
+
+    class _BadCLResponse(_MockResponse):
+        def __init__(self, data: bytes):
+            super().__init__(data)
+            self.headers = _BadCLHeaders()
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda req, timeout=30: _BadCLResponse(_SAMPLE_RSS),
+    )
+    articles = fetch_rss("https://dummy.rss", source="test")
+    assert len(articles) == 2  # 不正な Content-Length は無視して通常解析
+
+
+def test_fetch_rss_rejects_redirect_to_private_ip(monkeypatch, caplog):
+    """リダイレクト後の最終 URL がプライベート IP の場合は空リストを返すこと。"""
+    import logging
+
+    class _PrivateIPResponse(_MockResponse):
+        def geturl(self) -> str:
+            return "http://127.0.0.1/rss"  # ループバックアドレス
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda req, timeout=30: _PrivateIPResponse(b""),
+    )
+    with caplog.at_level(logging.WARNING):
+        articles = fetch_rss("https://dummy.rss", source="test")
+    assert articles == []
+    assert "プライベートアドレス" in caplog.text
+
+
 def test_fetch_rss_invalid_xml_returns_empty(monkeypatch, caplog):
     import logging
     monkeypatch.setattr(

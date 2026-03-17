@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import ipaddress
 import logging
 import re
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -142,6 +144,39 @@ def _validate_url_scheme(url: str) -> None:
         raise ValueError(f"許可されていないURLスキーム: {scheme!r} (url={url!r})")
 
 
+def _is_private_host(hostname: str | None) -> bool:
+    """ホスト/IP がプライベート・ループバック・リンクローカルかを判定する。
+
+    SSRF 対策としてリダイレクト先の内部アドレスへのアクセスを拒否するために使用する。
+    IP アドレスは直接判定し、ホスト名は DNS 解決して判定する。
+    DNS 解決失敗時は安全側（非プライベート）とみなす。
+
+    Args:
+        hostname: 検査対象のホスト名または IP アドレス文字列。
+
+    Returns:
+        プライベート/ループバック/リンクローカル/マルチキャストの場合 True。
+    """
+    if not hostname:
+        return True
+    # IP アドレスとして直接解析できる場合
+    try:
+        ip = ipaddress.ip_address(hostname)
+        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+    except ValueError:
+        pass
+    # ホスト名の場合: DNS 解決して全 A/AAAA レコードを検査
+    try:
+        for info in socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP):
+            ip = ipaddress.ip_address(info[4][0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast:
+                return True
+    except (OSError, ValueError):
+        # 解決失敗は非プライベートとみなして通過させる
+        pass
+    return False
+
+
 def preprocess_text(text: str | None) -> str:
     """テキストの前処理を行う。
 
@@ -224,15 +259,25 @@ def fetch_rss(
         },
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        # リダイレクト後の最終 URL のスキームを再検証（SSRF 対策）
+        # リダイレクト後の最終 URL を再検証（スキーム + プライベートIP/ホスト）
         final_url = resp.geturl()
-        if urllib.parse.urlparse(final_url).scheme.lower() not in ("http", "https"):
+        parsed_final = urllib.parse.urlparse(final_url)
+        if parsed_final.scheme.lower() not in ("http", "https"):
             logger.warning("fetch_rss: リダイレクト先のスキームが不正 url=%s", final_url)
             return []
+        if _is_private_host(parsed_final.hostname):
+            logger.warning(
+                "fetch_rss: リダイレクト先がプライベートアドレス url=%s", final_url
+            )
+            return []
 
-        # Content-Length の事前チェック
+        # Content-Length の事前チェック（不正値は無視してスキップ）
         content_length = resp.headers.get("Content-Length")
-        if content_length and int(content_length) > MAX_RESPONSE_BYTES:
+        try:
+            clen = int(content_length) if content_length is not None else None
+        except (TypeError, ValueError):
+            clen = None
+        if clen is not None and clen > MAX_RESPONSE_BYTES:
             logger.warning(
                 "fetch_rss: レスポンスサイズ超過 Content-Length=%s > %d source=%s",
                 content_length, MAX_RESPONSE_BYTES, source,
@@ -271,12 +316,17 @@ def fetch_rss(
         return []
 
     channel = root.find("channel")
-    if channel is None:
-        logger.warning("fetch_rss: <channel> not found in %s", url)
-        return []
+    if channel is not None:
+        items = channel.findall("item")
+    else:
+        # 名前空間付きフィードや非標準レイアウトへのフォールバック
+        items = root.findall(".//item")
+        if not items:
+            logger.warning("fetch_rss: <channel>/<item> 要素が見つかりません source=%s url=%s", source, url)
+            return []
 
     articles: list[NewsArticle] = []
-    for item in channel.findall("item"):
+    for item in items:
         # <link> がなければ <guid> を代替URLとして使用（http/https のみ）
         link = (item.findtext("link") or "").strip()
         if not link:
@@ -415,6 +465,46 @@ def save_news_symbols(
     return saved
 
 
+def _save_news_symbols_bulk(
+    conn: duckdb.DuckDBPyConnection,
+    pairs: list[tuple[str, str]],
+) -> int:
+    """複数記事分の銘柄紐付けを一括で保存する（内部用）。
+
+    重複排除済みの (news_id, code) ペアを 1 トランザクション・チャンク INSERT で保存する。
+
+    Args:
+        conn:  DuckDB 接続。
+        pairs: (news_id, code) タプルのリスト（重複あり可）。
+
+    Returns:
+        新規挿入したレコード数。
+    """
+    if not pairs:
+        return 0
+    # 重複を除去しつつ順序を保持
+    unique_pairs = list(dict.fromkeys(pairs))
+    saved = 0
+    conn.begin()
+    try:
+        for i in range(0, len(unique_pairs), _INSERT_CHUNK_SIZE):
+            chunk = unique_pairs[i : i + _INSERT_CHUNK_SIZE]
+            placeholders = ", ".join("(?, ?)" for _ in chunk)
+            flat_values = [v for pair in chunk for v in pair]
+            result = conn.execute(
+                f"INSERT INTO news_symbols (news_id, code) "  # noqa: S608
+                f"VALUES {placeholders} ON CONFLICT (news_id, code) DO NOTHING RETURNING 1",
+                flat_values,
+            )
+            saved += len(result.fetchall())
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("_save_news_symbols_bulk: トランザクション失敗")
+        raise
+    return saved
+
+
 # ---------------------------------------------------------------------------
 # 銘柄コード抽出
 # ---------------------------------------------------------------------------
@@ -486,21 +576,23 @@ def run_news_collection(
 
         results[source_name] = len(new_ids)
 
-        # 銘柄紐付け: 今回新規挿入された記事のみ対象（既存記事の重複処理を省く）
+        # 銘柄紐付け: 新規挿入記事の全ペアを集約して一括 INSERT
         if known_codes and new_ids:
             new_id_set = set(new_ids)
-            try:
-                for art in articles:
-                    if art["id"] not in new_id_set:
-                        continue
-                    combined = f"{art.get('title', '')} {art.get('content', '')}"
-                    codes = extract_stock_codes(combined, known_codes)
-                    if codes:
-                        save_news_symbols(conn, art["id"], codes)
-            except Exception:
-                logger.exception(
-                    "run_news_collection: symbols 紐付け失敗 source=%s", source_name
-                )
+            pairs: list[tuple[str, str]] = []
+            for art in articles:
+                if art["id"] not in new_id_set:
+                    continue
+                combined = f"{art.get('title', '')} {art.get('content', '')}"
+                for code in extract_stock_codes(combined, known_codes):
+                    pairs.append((art["id"], code))
+            if pairs:
+                try:
+                    _save_news_symbols_bulk(conn, pairs)
+                except Exception:
+                    logger.exception(
+                        "run_news_collection: symbols 紐付け失敗 source=%s", source_name
+                    )
 
     logger.info(
         "run_news_collection 完了: %s",
