@@ -153,8 +153,9 @@ def next_trading_day(conn: duckdb.DuckDBPyConnection, d: date) -> date:
     """指定日の翌営業日を返す。
 
     d 自身は含めず、d + 1 日以降で最初の営業日を返す。
-    カレンダーデータがある場合は SQL で O(1) 取得する。
-    カレンダー範囲外または未取得時は曜日ベースフォールバックで探索する。
+    候補日を 1 日ずつ進めながら、DB に登録があればその値を優先し、
+    未登録日は曜日ベースフォールバックで判定する。
+    これにより、DB がまばらな場合でも登録済みの休日を正しくスキップできる。
     _MAX_SEARCH_DAYS 日以内に営業日が見つからない場合は ValueError を送出する。
 
     Args:
@@ -167,22 +168,17 @@ def next_trading_day(conn: duckdb.DuckDBPyConnection, d: date) -> date:
     Raises:
         ValueError: _MAX_SEARCH_DAYS 以内に営業日が見つからない場合。
     """
-    if _has_calendar_data(conn):
-        row = conn.execute(
-            "SELECT MIN(date) FROM market_calendar WHERE date > ? AND is_trading_day = true",
-            [d],
-        ).fetchone()
-        db_result = _to_date(row[0]) if row else None
-        if db_result is not None:
-            return db_result
-        # DB の範囲外（d 以降にカレンダーデータなし）→ フォールバック
-        db_max_row = conn.execute("SELECT MAX(date) FROM market_calendar").fetchone()
-        fallback_start = max(d + timedelta(days=1), (_to_date(db_max_row[0]) or d) + timedelta(days=1))
-    else:
-        fallback_start = d + timedelta(days=1)
-
-    candidate = fallback_start
+    candidate = d + timedelta(days=1)
+    has_data = _has_calendar_data(conn)
     for _ in range(_MAX_SEARCH_DAYS):
+        if has_data:
+            v = _fetch_is_trading(conn, candidate)
+            if v is True:
+                return candidate
+            if v is False:
+                candidate += timedelta(days=1)
+                continue
+        # DB に登録なし（None）または DB データなし → 曜日フォールバック
         if not _is_weekend(candidate):
             return candidate
         candidate += timedelta(days=1)
@@ -195,8 +191,9 @@ def prev_trading_day(conn: duckdb.DuckDBPyConnection, d: date) -> date:
     """指定日の前営業日を返す。
 
     d 自身は含めず、d - 1 日以前で最も近い営業日を返す。
-    カレンダーデータがある場合は SQL で O(1) 取得する。
-    カレンダー範囲外または未取得時は曜日ベースフォールバックで探索する。
+    候補日を 1 日ずつ遡りながら、DB に登録があればその値を優先し、
+    未登録日は曜日ベースフォールバックで判定する。
+    これにより、DB がまばらな場合でも登録済みの休日を正しくスキップできる。
     _MAX_SEARCH_DAYS 日以内に営業日が見つからない場合は ValueError を送出する。
 
     Args:
@@ -209,22 +206,17 @@ def prev_trading_day(conn: duckdb.DuckDBPyConnection, d: date) -> date:
     Raises:
         ValueError: _MAX_SEARCH_DAYS 以内に営業日が見つからない場合。
     """
-    if _has_calendar_data(conn):
-        row = conn.execute(
-            "SELECT MAX(date) FROM market_calendar WHERE date < ? AND is_trading_day = true",
-            [d],
-        ).fetchone()
-        db_result = _to_date(row[0]) if row else None
-        if db_result is not None:
-            return db_result
-        # DB の範囲外（d 以前にカレンダーデータなし）→ フォールバック
-        db_min_row = conn.execute("SELECT MIN(date) FROM market_calendar").fetchone()
-        fallback_start = min(d - timedelta(days=1), (_to_date(db_min_row[0]) or d) - timedelta(days=1))
-    else:
-        fallback_start = d - timedelta(days=1)
-
-    candidate = fallback_start
+    candidate = d - timedelta(days=1)
+    has_data = _has_calendar_data(conn)
     for _ in range(_MAX_SEARCH_DAYS):
+        if has_data:
+            v = _fetch_is_trading(conn, candidate)
+            if v is True:
+                return candidate
+            if v is False:
+                candidate -= timedelta(days=1)
+                continue
+        # DB に登録なし（None）または DB データなし → 曜日フォールバック
         if not _is_weekend(candidate):
             return candidate
         candidate -= timedelta(days=1)

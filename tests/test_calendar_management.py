@@ -176,6 +176,26 @@ class TestNextTradingDay:
         result = cm.next_trading_day(mem_db, date(2025, 1, 6))
         assert result > date(2025, 1, 6)
 
+    def test_skips_registered_holiday_in_sparse_db(self, mem_db):
+        """DB がまばらで休日のみ登録されている場合、登録済み休日を正しくスキップする。"""
+        # 2025-01-08（水）が休日として登録、他は未登録
+        _insert_calendar(mem_db, [
+            {"date": date(2025, 1, 8), "is_trading_day": False, "holiday_name": "振替休日"},
+        ])
+        # DB に 2025-01-07 は未登録 → 曜日フォールバック（火曜=平日）で返すべき
+        result = cm.next_trading_day(mem_db, date(2025, 1, 6))
+        assert result == date(2025, 1, 7)
+
+    def test_skips_registered_holiday_then_falls_back(self, mem_db):
+        """登録済み休日の翌日が未登録の平日 → フォールバックで返す。"""
+        # 2025-01-07（火）が休日として登録
+        _insert_calendar(mem_db, [
+            {"date": date(2025, 1, 7), "is_trading_day": False, "holiday_name": "祝日"},
+        ])
+        # 2025-01-07 はスキップ → 2025-01-08（水）は未登録=曜日フォールバック（平日）
+        result = cm.next_trading_day(mem_db, date(2025, 1, 6))
+        assert result == date(2025, 1, 8)
+
 
 # ---------------------------------------------------------------------------
 # prev_trading_day
@@ -215,6 +235,26 @@ class TestPrevTradingDay:
         ])
         result = cm.prev_trading_day(mem_db, date(2025, 1, 7))
         assert result < date(2025, 1, 7)
+
+    def test_skips_registered_holiday_in_sparse_db(self, mem_db):
+        """DB がまばらで休日のみ登録されている場合、登録済み休日を正しくスキップする。"""
+        # 2025-01-07（火）が休日として登録、他は未登録
+        _insert_calendar(mem_db, [
+            {"date": date(2025, 1, 7), "is_trading_day": False, "holiday_name": "振替休日"},
+        ])
+        # DB に 2025-01-06 は未登録 → 曜日フォールバック（月曜=平日）で返すべき
+        result = cm.prev_trading_day(mem_db, date(2025, 1, 8))
+        assert result == date(2025, 1, 6)
+
+    def test_skips_registered_holiday_then_falls_back(self, mem_db):
+        """登録済み休日の前日が未登録の平日 → フォールバックで返す。"""
+        # 2025-01-07（火）が休日として登録
+        _insert_calendar(mem_db, [
+            {"date": date(2025, 1, 7), "is_trading_day": False, "holiday_name": "祝日"},
+        ])
+        # 2025-01-07 はスキップ → 2025-01-06（月）は未登録=曜日フォールバック（平日）
+        result = cm.prev_trading_day(mem_db, date(2025, 1, 8))
+        assert result == date(2025, 1, 6)
 
 
 # ---------------------------------------------------------------------------
