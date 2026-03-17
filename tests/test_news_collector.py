@@ -257,6 +257,25 @@ def test_fetch_rss_rejects_non_http_scheme():
         fetch_rss("file:///etc/passwd", source="test")
 
 
+def test_fetch_rss_skips_items_with_invalid_link_scheme(monkeypatch, caplog):
+    """<link> が mailto: など非 http/https の item はスキップされること。"""
+    import logging
+    rss_with_bad_link = b"""<?xml version="1.0"?>
+<rss><channel>
+  <item><link>mailto:attacker@evil.com</link><title>Bad</title></item>
+  <item><link>https://good.example.com/article</link><title>Good</title></item>
+</channel></rss>"""
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda req, timeout=30: _MockResponse(rss_with_bad_link),
+    )
+    with caplog.at_level(logging.WARNING):
+        articles = fetch_rss("https://dummy.rss", source="test")
+    assert len(articles) == 1
+    assert articles[0]["url"] == "https://good.example.com/article"
+    assert "不正なlinkスキーム" in caplog.text
+
+
 def test_fetch_rss_no_channel_returns_empty(monkeypatch):
     no_channel = b"<?xml version='1.0'?><rss><title>X</title></rss>"
     monkeypatch.setattr(
@@ -277,6 +296,37 @@ def test_fetch_rss_invalid_xml_returns_empty(monkeypatch, caplog):
         articles = fetch_rss("https://dummy.rss", source="test")
     assert articles == []
     assert "XMLパース失敗" in caplog.text
+
+
+def test_fetch_rss_gzip_decompressed_oversized_returns_empty(monkeypatch, caplog):
+    """gzip 解凍後のサイズが MAX_RESPONSE_BYTES を超える場合は空リストを返すこと。"""
+    import gzip as _gzip
+    import logging
+    from kabusys.data.news_collector import MAX_RESPONSE_BYTES
+
+    # 解凍後が MAX_RESPONSE_BYTES+1 バイトになるデータを gzip 圧縮
+    oversized = b"x" * (MAX_RESPONSE_BYTES + 1)
+    compressed = _gzip.compress(oversized)
+
+    class _GzipMockHeaders:
+        def get(self, key, default=None):
+            if key == "Content-Encoding":
+                return "gzip"
+            return default
+
+    class _GzipMockResponse(_MockResponse):
+        def __init__(self, data: bytes):
+            super().__init__(data)
+            self.headers = _GzipMockHeaders()
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda req, timeout=30: _GzipMockResponse(compressed),
+    )
+    with caplog.at_level(logging.WARNING):
+        articles = fetch_rss("https://dummy.rss", source="test")
+    assert articles == []
+    assert "gzip解凍後サイズ超過" in caplog.text
 
 
 # ---------------------------------------------------------------------------

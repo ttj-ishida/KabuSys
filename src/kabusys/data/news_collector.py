@@ -11,7 +11,7 @@ raw_news テーブルに保存する。
   4. 銘柄コードとの紐付け（news_symbols）
 
 設計方針:
-  - 記事IDはURL正規化後のSHA-256ハッシュ（先頭16文字）で生成し冪等性を保証する
+  - 記事IDはURL正規化後のSHA-256ハッシュ（先頭32文字）で生成し冪等性を保証する
     （utm_* などのトラッキングパラメータを除去してから正規化する）
   - defusedxml を使って XML Bomb 等の攻撃を防ぐ
   - HTTP/HTTPS スキーム以外のURLは拒否し SSRF を防ぐ
@@ -114,13 +114,13 @@ def _normalize_url(url: str) -> str:
 
 
 def _make_article_id(url: str) -> str:
-    """正規化 URL から記事ID（SHA-256 先頭16文字）を生成する。
+    """正規化 URL から記事ID（SHA-256 先頭32文字）を生成する。
 
     Args:
         url: 記事URL（正規化前）。
 
     Returns:
-        16文字の16進数文字列。
+        32文字の16進数文字列。
     """
     return hashlib.sha256(_normalize_url(url).encode()).hexdigest()[:32]
 
@@ -255,6 +255,13 @@ def fetch_rss(
         except Exception:
             logger.warning("fetch_rss: gzip解凍失敗 source=%s", source)
             return []
+        # 解凍後もサイズ上限を検証（Gzip bomb 対策）
+        if len(raw) > MAX_RESPONSE_BYTES:
+            logger.warning(
+                "fetch_rss: gzip解凍後サイズ超過 size=%d > %d source=%s",
+                len(raw), MAX_RESPONSE_BYTES, source,
+            )
+            return []
 
     try:
         root = ET.fromstring(raw)
@@ -277,6 +284,10 @@ def fetch_rss(
             if guid and urllib.parse.urlparse(guid).scheme.lower() in ("http", "https"):
                 link = guid
         if not link:
+            continue
+        # <link> のスキームを検証（mailto:, javascript:, file: 等を排除）
+        if urllib.parse.urlparse(link).scheme.lower() not in ("http", "https"):
+            logger.warning("fetch_rss: 不正なlinkスキームをスキップ url=%r source=%s", link, source)
             continue
 
         title = preprocess_text(item.findtext("title"))
