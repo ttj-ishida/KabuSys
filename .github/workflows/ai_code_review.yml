@@ -36,7 +36,7 @@ jobs:
       - name: Run AI Review
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL_REVIEW || 'gpt-4o' }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL_REVIEW || 'gpt-5' }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
