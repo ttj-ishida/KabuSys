@@ -240,7 +240,7 @@ def test_fetch_rss_and_save_and_extract(monkeypatch, conn):
     fake_resp.geturl.return_value = "http://example.com/rss"
     fake_cm = mock.MagicMock()
     fake_cm.__enter__.return_value = fake_resp
-    monkeypatch.setattr(news_mod.urllib.request, "urlopen", lambda req, timeout=30: fake_cm)
+    monkeypatch.setattr("kabusys.data.news_collector._urlopen", lambda req, timeout=30: fake_cm)
 
     articles = news_mod.fetch_rss("http://example.com/rss", source="testsrc")
     assert len(articles) == 1

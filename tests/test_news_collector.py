@@ -231,7 +231,7 @@ class _MockResponse:
 
 def test_fetch_rss_parses_items(monkeypatch):
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "kabusys.data.news_collector._urlopen",
         lambda req, timeout=30: _MockResponse(_SAMPLE_RSS),
     )
     articles = fetch_rss("https://dummy.rss", source="test")
@@ -245,7 +245,7 @@ def test_fetch_rss_parses_items(monkeypatch):
 
 def test_fetch_rss_skips_items_without_link(monkeypatch):
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "kabusys.data.news_collector._urlopen",
         lambda req, timeout=30: _MockResponse(_SAMPLE_RSS),
     )
     articles = fetch_rss("https://dummy.rss", source="test")
@@ -257,6 +257,12 @@ def test_fetch_rss_rejects_non_http_scheme():
         fetch_rss("file:///etc/passwd", source="test")
 
 
+def test_fetch_rss_rejects_private_initial_url():
+    """初回リクエスト前にホストがプライベートアドレスの場合は ValueError を送出すること。"""
+    with pytest.raises(ValueError, match="プライベートアドレス"):
+        fetch_rss("http://127.0.0.1/feed.rss", source="test")
+
+
 def test_fetch_rss_skips_items_with_invalid_link_scheme(monkeypatch, caplog):
     """<link> が mailto: など非 http/https の item はスキップされること。"""
     import logging
@@ -266,7 +272,7 @@ def test_fetch_rss_skips_items_with_invalid_link_scheme(monkeypatch, caplog):
   <item><link>https://good.example.com/article</link><title>Good</title></item>
 </channel></rss>"""
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "kabusys.data.news_collector._urlopen",
         lambda req, timeout=30: _MockResponse(rss_with_bad_link),
     )
     with caplog.at_level(logging.WARNING):
@@ -279,7 +285,7 @@ def test_fetch_rss_skips_items_with_invalid_link_scheme(monkeypatch, caplog):
 def test_fetch_rss_no_channel_returns_empty(monkeypatch):
     no_channel = b"<?xml version='1.0'?><rss><title>X</title></rss>"
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "kabusys.data.news_collector._urlopen",
         lambda req, timeout=30: _MockResponse(no_channel),
     )
     articles = fetch_rss("https://dummy.rss", source="test")
@@ -296,7 +302,7 @@ def test_fetch_rss_namespace_fallback(monkeypatch):
   </item>
 </rss>"""
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "kabusys.data.news_collector._urlopen",
         lambda req, timeout=30: _MockResponse(no_channel_with_items),
     )
     articles = fetch_rss("https://dummy.rss", source="test")
@@ -318,7 +324,7 @@ def test_fetch_rss_invalid_content_length_is_ignored(monkeypatch):
             self.headers = _BadCLHeaders()
 
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "kabusys.data.news_collector._urlopen",
         lambda req, timeout=30: _BadCLResponse(_SAMPLE_RSS),
     )
     articles = fetch_rss("https://dummy.rss", source="test")
@@ -334,7 +340,7 @@ def test_fetch_rss_rejects_redirect_to_private_ip(monkeypatch, caplog):
             return "http://127.0.0.1/rss"  # ループバックアドレス
 
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "kabusys.data.news_collector._urlopen",
         lambda req, timeout=30: _PrivateIPResponse(b""),
     )
     with caplog.at_level(logging.WARNING):
@@ -346,7 +352,7 @@ def test_fetch_rss_rejects_redirect_to_private_ip(monkeypatch, caplog):
 def test_fetch_rss_invalid_xml_returns_empty(monkeypatch, caplog):
     import logging
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "kabusys.data.news_collector._urlopen",
         lambda req, timeout=30: _MockResponse(b"<not valid xml>>>"),
     )
     with caplog.at_level(logging.WARNING):
@@ -377,7 +383,7 @@ def test_fetch_rss_gzip_decompressed_oversized_returns_empty(monkeypatch, caplog
             self.headers = _GzipMockHeaders()
 
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "kabusys.data.news_collector._urlopen",
         lambda req, timeout=30: _GzipMockResponse(compressed),
     )
     with caplog.at_level(logging.WARNING):

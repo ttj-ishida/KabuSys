@@ -226,6 +226,34 @@ def _parse_rss_datetime(date_str: str | None) -> datetime:
 # ---------------------------------------------------------------------------
 
 
+class _SSRFBlockRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """リダイレクト時にスキームとプライベートアドレスを事前検証するハンドラ。
+
+    接続前にリダイレクト先を検査することで、内部ネットワークへの到達を防ぐ。
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        parsed = urllib.parse.urlparse(newurl)
+        if parsed.scheme.lower() not in ("http", "https"):
+            raise urllib.error.URLError(
+                f"リダイレクト先のスキームが不正: {newurl!r}"
+            )
+        if _is_private_host(parsed.hostname):
+            raise urllib.error.URLError(
+                f"リダイレクト先がプライベートアドレス: {newurl!r}"
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _urlopen(req: urllib.request.Request, timeout: int):
+    """SSRF ブロック用リダイレクトハンドラ付きオープナーで URL を開く。
+
+    テストでは kabusys.data.news_collector._urlopen をモックして差し替える。
+    """
+    opener = urllib.request.build_opener(_SSRFBlockRedirectHandler)
+    return opener.open(req, timeout=timeout)
+
+
 def fetch_rss(
     url: str,
     source: str,
@@ -249,6 +277,9 @@ def fetch_rss(
         urllib.error.URLError: HTTP リクエスト失敗時。
     """
     _validate_url_scheme(url)
+    # 初回リクエスト前にホストがプライベートアドレスでないか検証（SSRF 前置検証）
+    if _is_private_host(urllib.parse.urlparse(url).hostname):
+        raise ValueError(f"許可されていないホスト（プライベートアドレス）: url={url!r}")
     logger.info("fetch_rss: source=%s url=%s", source, url)
 
     req = urllib.request.Request(
@@ -258,16 +289,17 @@ def fetch_rss(
             "Accept-Encoding": "gzip",
         },
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        # リダイレクト後の最終 URL を再検証（スキーム + プライベートIP/ホスト）
+    # _SSRFBlockRedirectHandler がリダイレクト都度スキーム/アドレスを検証する
+    with _urlopen(req, timeout=timeout) as resp:
+        # 最終 URL を再検証（リダイレクトハンドラの後段防衛）
         final_url = resp.geturl()
         parsed_final = urllib.parse.urlparse(final_url)
         if parsed_final.scheme.lower() not in ("http", "https"):
-            logger.warning("fetch_rss: リダイレクト先のスキームが不正 url=%s", final_url)
+            logger.warning("fetch_rss: 最終URLのスキームが不正 url=%s", final_url)
             return []
         if _is_private_host(parsed_final.hostname):
             logger.warning(
-                "fetch_rss: リダイレクト先がプライベートアドレス url=%s", final_url
+                "fetch_rss: 最終URLがプライベートアドレス url=%s", final_url
             )
             return []
 
