@@ -1,98 +1,70 @@
-# Changelog
+CHANGELOG
+=========
 
-すべての変更は Keep a Changelog の形式に従って記載しています。  
-このファイルはコードベース（現行バージョン: 0.1.0）から推測して作成した初期の変更履歴です。
+すべての重要な変更は Keep a Changelog の慣例に従って記載します。
+このプロジェクトはセマンティックバージョニングを採用しています。  
+https://keepachangelog.com/ja/1.0.0/
 
-フォーマット: [Unreleased] とリリース済みバージョンの一覧を含みます。
+[0.1.0] - 2026-03-17
+--------------------
 
-## [Unreleased]
-（現時点で未リリースの変更はありません）
+初回リリース。以下の主要機能・設計方針を実装しています。
 
-## [0.1.0] - 2026-03-17
-初回リリース。日本株自動売買システム "KabuSys" のコア基盤を実装しました。主な追加点は以下の通りです。
-
-### Added
-- パッケージ初期化
-  - パッケージ名: kabusys。バージョンを `__version__ = "0.1.0"` として設定。
-  - public API として `data`, `strategy`, `execution`, `monitoring` をエクスポート。
-
-- 環境設定管理 (`kabusys.config`)
-  - .env ファイルおよび環境変数から設定読み込みを自動化（プロジェクトルート検出: .git または pyproject.toml を基準）。
-  - 読み込み順序: OS 環境変数 > .env.local > .env。
-  - 自動ロード無効化オプション: `KABUSYS_DISABLE_AUTO_ENV_LOAD=1`。
-  - .env パーサ実装: export プレフィックス、クォート、エスケープ、インラインコメント対応。
-  - 環境変数保護: OS の既存環境変数を保護する機構（protected set）。
-  - Settings クラス: 型化されたプロパティを提供（J-Quants / kabuステーション / Slack / DB パス / 環境種別 / ログレベル 等）。
-  - 入力検証: `KABUSYS_ENV` や `LOG_LEVEL` の許容値チェック、必須変数未設定時は明示的なエラー（ValueError）。
-
-- J-Quants API クライアント (`kabusys.data.jquants_client`)
-  - API 呼び出しユーティリティを実装: JSON パース、タイムアウト、クエリパラメータの組立て。
-  - レート制御: 固定間隔スロットリング（120 req/min）を実装する内部 RateLimiter。
-  - リトライ/バックオフ: 指数バックオフ（最大3回）、408/429/5xx に対する再試行処理、429 の場合は Retry-After を尊重。
-  - トークン管理: リフレッシュトークンから ID トークンを取得する get_id_token、モジュールレベルのトークンキャッシュと自動リフレッシュ（401 検知時に1回のみリフレッシュして再試行）。
-  - ページネーション対応の取得関数: fetch_daily_quotes、fetch_financial_statements、fetch_market_calendar。
-  - DuckDB への冪等保存関数: save_daily_quotes、save_financial_statements、save_market_calendar（ON CONFLICT DO UPDATE を利用）。
-  - データ品質に配慮した変換ユーティリティ: _to_float, _to_int（空値や不正値の安全ハンドリング）。
-  - 取得時刻 (fetched_at) を UTC で記録し、Look-ahead bias 対策のためいつデータを取得したかを追跡可能に。
-
-- ニュース収集モジュール (`kabusys.data.news_collector`)
-  - RSS フィード取得と前処理: fetch_rss、preprocess_text。
+Added
+- パッケージ基盤
+  - パッケージ初期化: kabusys パッケージの __version__ = "0.1.0" を定義。__all__ に data, strategy, execution, monitoring を公開。
+- 環境設定 / config
+  - .env ファイルまたは環境変数から設定を自動読み込み（プロジェクトルートを .git または pyproject.toml で探索）。自動ロードは環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で無効化可能。
+  - .env, .env.local の読み込み優先度を実装（.env.local は上書き可能）。OS 環境変数は保護（protected）され、誤って上書きされない。
+  - .env パーサーは export KEY=val 形式やシングル/ダブルクォート、エスケープ、インラインコメントを考慮した堅牢な解析を実装。
+  - Settings クラスを提供し、J-Quants / kabuステーション / Slack / DB パス / システム設定（KABUSYS_ENV, LOG_LEVEL）のプロパティを定義。env と log_level の入力検証あり。
+- データ取得クライアント（data/jquants_client.py）
+  - J-Quants API クライアントを実装。価格（日足）、財務（四半期 BS/PL）、市場カレンダーを取得可能。
+  - レート制限（固定間隔スロットリング）を実装し、デフォルトで 120 req/min を遵守。
+  - リトライ戦略（指数バックオフ、最大 3 回）。HTTP 408/429 とサーバーエラー（5xx）を対象にリトライ。429 の Retry-After ヘッダを優先。
+  - 401 受信時はリフレッシュトークンで自動的に ID token を更新して 1 回リトライ（無限再帰回避のため allow_refresh フラグ設計）。
+  - ページネーション対応（pagination_key によるループ）を実装。
+  - DuckDB への保存関数を提供（save_daily_quotes, save_financial_statements, save_market_calendar）。冪等性のため INSERT ... ON CONFLICT DO UPDATE を使用。
+  - データ取得時刻（fetched_at）を UTC 形式で保存し、look-ahead bias 対策と監査トレースをサポート。
+  - 型変換ユーティリティ（_to_float, _to_int）を実装し、空値や不正値を安全に扱う。
+- ニュース収集モジュール（data/news_collector.py）
+  - RSS フィードからニュースを取得して raw_news に保存する収集パイプラインを実装。
   - セキュリティ対策:
-    - defusedxml を使った XML パース（XML Bomb 等に耐性）。
-    - リダイレクト時の事前検査やホストの私的IP判定による SSRF 防止（_SSRFBlockRedirectHandler、_is_private_host）。
-    - URL スキーム検証（http/https のみ許可）。
-    - レスポンス長の上限チェック（MAX_RESPONSE_BYTES = 10MB）と gzip 解凍後の再検査（Gzip bomb 対策）。
-  - URL 正規化: トラッキングパラメータ（utm_* 等）除去、スキーム/ホストの小文字化、フラグメント削除、クエリソート。
-  - 記事 ID の生成: 正規化 URL の SHA-256（先頭32文字）を記事IDとして使用し冪等性を担保。
+    - defusedxml を利用した XML パース（XML Bomb 等を防止）。
+    - SSRF 対策: URL スキーム検証（http/https のみ許可）、ホストがプライベート/ループバック/リンクローカルでは拒否、リダイレクト時にも事前検証を行う専用ハンドラ導入。
+    - レスポンスサイズ上限（MAX_RESPONSE_BYTES = 10MB）を適用しメモリDoSを防止。gzip 解凍後もサイズチェック。
+  - URL 正規化（トラッキングパラメータ除去、フラグメント削除、クエリソート）と記事ID生成（正規化URL の SHA-256 の先頭32文字）による冪等性保証。
+  - テキスト前処理（URL 除去、空白正規化）を実装。
   - DB 保存:
-    - save_raw_news: INSERT ... RETURNING id を用いたチャンク単位の冪等保存（トランザクション）。
-    - save_news_symbols / _save_news_symbols_bulk: 記事と銘柄コードの紐付けを一括挿入（ON CONFLICT DO NOTHING、INSERT ... RETURNING）。
-  - 銘柄コード抽出: テキストから 4 桁数字候補を抽出し、known_codes に基づくフィルタリング（extract_stock_codes）。
-  - デフォルト RSS ソースとして Yahoo Finance のカテゴリフィードを登録（DEFAULT_RSS_SOURCES）。
+    - raw_news へのチャンク化されたバルク INSERT をトランザクション内で実行（チャンクサイズ 1000）。
+    - INSERT ... RETURNING id を使って新規挿入された記事IDのリストを正確に取得。
+    - news_symbols への銘柄紐付けをバルク挿入（重複除去＆トランザクション）で効率化。ON CONFLICT DO NOTHING を採用。
+  - 銘柄コード抽出機能（4桁数値パターン）と既知銘柄セットによるフィルタリングを提供。
+  - run_news_collection により複数ソースを順次取得し、例外はソース単位で処理して他ソースへ影響を与えない設計。
+- DuckDB スキーマ（data/schema.py）
+  - DataSchema.md に基づく多層スキーマを実装（Raw / Processed / Feature / Execution 層）。
+  - 主要テーブル: raw_prices, raw_financials, raw_news, raw_executions, prices_daily, market_calendar, fundamentals, news_articles, news_symbols, features, ai_scores, signals, signal_queue, orders, trades, positions, portfolio_performance などを定義。
+  - 主キー・外部キー・チェック制約を適切に設定（数値の非負チェック、列値の列挙チェック等）。
+  - 検索頻度の高いカラムに対するインデックスを定義。
+  - init_schema(db_path) によりディレクトリ自動作成と DDL 実行でスキーマ初期化を実現。get_connection() で既存 DB へ接続可能。
+- ETL パイプライン（data/pipeline.py）
+  - ETLResult dataclass を導入し、ETL 実行結果・品質問題・エラー情報を集約・辞書化可能に実装。
+  - 差分更新ユーティリティ: テーブル最終取得日の取得、営業日調整（market_calendar に基づいて過去最終営業日に調整）を提供。
+  - run_prices_etl の基礎実装:
+    - 差分更新ロジック（最終取得日から backfill_days 前を date_from として再取得）を実装。デフォルト backfill_days = 3。
+    - J-Quants クライアントを利用して fetch → save の流れを実行し、取得数と保存数を返す設計（差分ETLの一部機能を実装）。
+  - 市場カレンダーは先読み（デフォルト 90 日）して将来の営業日判定に利用する設計方針を明記。
+- その他
+  - data パッケージ内の主要モジュール構成を整理（jquants_client, news_collector, schema, pipeline）。
+  - strategy/ execution パッケージのプレースホルダを用意（現段階では __init__ が空）。
 
-- DuckDB スキーマ管理 (`kabusys.data.schema`)
-  - DataPlatform 指針に基づくスキーマを実装:
-    - Raw, Processed, Feature, Execution 層のテーブル定義（raw_prices, raw_financials, raw_news, market_calendar, prices_daily, fundamentals, features, ai_scores, signals, signal_queue, orders, trades, positions, portfolio_performance など）。
-    - 制約（PRIMARY KEY, CHECK, FOREIGN KEY）および型指定。
-    - 索引定義（頻出クエリ向けのインデックス）。
-  - init_schema(db_path) による初期化機能（親ディレクトリ自動作成、冪等なテーブル作成）。
-  - get_connection(db_path) による既存 DB への接続取得。
+Security
+- ニュース収集で SSRF 対策、defusedxml による XML 攻撃対策、レスポンスサイズ制限を導入。
+- .env 読み込みで OS 環境変数を保護する protected キーの概念を導入。
 
-- ETL パイプライン基盤 (`kabusys.data.pipeline`)
-  - ETL の設計概要に沿った基礎実装。
-  - ETLResult データクラス: 実行結果・品質問題・エラーを表現。
-  - 差分更新ヘルパー: テーブル存在判定、最大日付取得、取引日調整（_adjust_to_trading_day）。
-  - 最終取得日計算ヘルパー: get_last_price_date、get_last_financial_date、get_last_calendar_date。
-  - run_prices_etl の骨子実装（差分取得ロジック、backfill_days による再取得、J-Quants からの fetch と保存の呼び出し）。
-  - 設計方針コメント: 品質チェックは Fail-Fast ではなく呼び出し元で判断すること、テスト容易性のため id_token 注入可能。
+Notes / Known limitations
+- strategy、execution モジュールはインターフェース定義の段階で、アルゴリズム本体は未実装（プレースホルダ）。
+- ETL パイプラインは主要な差分取得ロジックを実装しているが、完全なスケジュール実行・品質チェックのフルワークフロー統合（quality モジュール呼び出し等）は外部モジュールとの連携を前提としている。
+- コードの一部は今後の拡張（例: 追加の API エンドポイント、詳細な品質チェックルール、Slack 通知など）を想定して設計されています。
 
-- モジュール骨組み
-  - 空のパッケージ初期化ファイルを配置: `kabusys.data.__init__`, `kabusys.strategy.__init__`, `kabusys.execution.__init__`（将来的な拡張箇所）。
-
-### Changed
-- （初回リリースのため該当なし）
-
-### Fixed
-- （初回リリースのため該当なし）
-
-### Security
-- RSS パーサや HTTP クライアント周りに複数のセキュリティ対策を導入:
-  - defusedxml の利用による XML 攻撃緩和。
-  - SSRF 対策: URL スキームのホワイトリスト化、リダイレクト先の検査、プライベート IP 判定。
-  - レスポンスサイズ制限・gzip 解凍後チェックによりメモリ DoS 対策。
-  - 環境変数読み込み時に OS 環境変数の保護機構を用意。
-
-### Performance
-- API レート制御（RateLimiter）で J-Quants のレート制限順守を容易に。
-- DB 書き込みはチャンク分割・トランザクション・ON CONFLICT を利用して効率と冪等性を確保。
-- 取得処理のページネーション対応（pagination_key 共有）で大容量取得に対応。
-
-### Notes / Known limitations / TODO
-- pipeline モジュールは ETL の基盤と一部ジョブ（run_prices_etl の骨子）を実装していますが、完全なフロー（calendar / financials の ETL、品質チェックの実行とハンドリング）は今後の実装が想定されます。quality モジュールは参照されていますが、この差分だけからは内容の全実装が確認できません。
-- strategy / execution / monitoring の各パッケージはエントリポイントを用意していますが、具体的な戦略ロジックや発注連携処理はまだ追加実装が必要です。
-- DEFAULT_RSS_SOURCES は最小構成（Yahoo Finance）で、実運用では追加のソース設定が推奨されます。
-- エラーハンドリング方針として「1ソース失敗でも他ソースは継続する」等の記述があるため、運用時はログ・監視の整備が推奨されます。
-
----
-
-メジャーな追加・設計方針やセキュリティ・性能面の考慮点を中心に記載しました。必要であれば、各モジュール（jquants_client / news_collector / schema / pipeline）ごとにより詳細な変更点や設計コメントを追記できます。どの粒度で追記するか指示してください。
+誤り・改善要望があれば issue を作成してください。
