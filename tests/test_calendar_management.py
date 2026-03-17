@@ -2,7 +2,7 @@
 calendar_management モジュールのユニットテスト
 
 テスト方針:
-  - インメモリ DuckDB（conftest.py の mem_db フィクスチャ）を使用
+  - インメモリ DuckDB（tests/conftest.py の mem_db フィクスチャ）を使用
   - J-Quants API 呼び出し（jq.fetch_market_calendar / jq.save_market_calendar）は
     monkeypatch でモック化し、外部通信なしでテストする
   - テスト用カレンダーデータは直接 INSERT して用意する
@@ -163,8 +163,8 @@ class TestNextTradingDay:
         assert cm.next_trading_day(mem_db, date(2025, 1, 10)) == date(2025, 1, 13)
 
     def test_raises_when_no_trading_day_found(self, mem_db, monkeypatch):
-        # is_trading_day が常に False を返すようにモック
-        monkeypatch.setattr(cm, "is_trading_day", lambda conn, d: False)
+        # _is_weekend が常に True を返す（全日が週末扱い）→ フォールバックでも見つからない
+        monkeypatch.setattr(cm, "_is_weekend", lambda d: True)
         with pytest.raises(ValueError, match="営業日が見つかりません"):
             cm.next_trading_day(mem_db, date(2025, 1, 1))
 
@@ -203,7 +203,8 @@ class TestPrevTradingDay:
         assert cm.prev_trading_day(mem_db, date(2025, 1, 13)) == date(2025, 1, 10)
 
     def test_raises_when_no_trading_day_found(self, mem_db, monkeypatch):
-        monkeypatch.setattr(cm, "is_trading_day", lambda conn, d: False)
+        # _is_weekend が常に True を返す（全日が週末扱い）→ フォールバックでも見つからない
+        monkeypatch.setattr(cm, "_is_weekend", lambda d: True)
         with pytest.raises(ValueError, match="営業日が見つかりません"):
             cm.prev_trading_day(mem_db, date(2025, 1, 31))
 
@@ -299,7 +300,6 @@ class TestCalendarUpdateJob:
         assert fetch_called == []  # 最新なので fetch は呼ばれない
 
     def test_fetches_and_saves_records(self, mem_db, monkeypatch):
-        from datetime import date as _date
         import kabusys.data.jquants_client as jq
 
         fake_records = [
@@ -322,10 +322,9 @@ class TestCalendarUpdateJob:
 
     def test_date_from_is_after_last_saved(self, mem_db, monkeypatch):
         """差分取得: 既存最終日の翌日から取得することを確認する。"""
-        from datetime import date as _date
         import kabusys.data.jquants_client as jq
 
-        last_saved = _date(2025, 3, 10)
+        last_saved = date(2025, 3, 10)
         _insert_calendar(mem_db, [{"date": last_saved, "is_trading_day": True}])
 
         captured = {}
@@ -339,3 +338,29 @@ class TestCalendarUpdateJob:
 
         cm.calendar_update_job(mem_db)
         assert captured["date_from"] == (last_saved + timedelta(days=1)).isoformat()
+
+    def test_returns_zero_when_fetch_raises(self, mem_db, monkeypatch):
+        """fetch_market_calendar が例外を送出しても 0 を返す。"""
+        import kabusys.data.jquants_client as jq
+
+        def bad_fetch(**kw):
+            raise RuntimeError("API 接続失敗")
+
+        monkeypatch.setattr(jq, "fetch_market_calendar", bad_fetch)
+        monkeypatch.setattr(jq, "save_market_calendar", lambda conn, recs: 0)
+
+        result = cm.calendar_update_job(mem_db)
+        assert result == 0
+
+    def test_returns_zero_when_save_raises(self, mem_db, monkeypatch):
+        """save_market_calendar が例外を送出しても 0 を返す。"""
+        import kabusys.data.jquants_client as jq
+
+        fake_records = [
+            {"Date": "2025-03-18", "TradingDay": True, "HalfDay": False, "SQDay": False},
+        ]
+        monkeypatch.setattr(jq, "fetch_market_calendar", lambda **kw: fake_records)
+        monkeypatch.setattr(jq, "save_market_calendar", lambda conn, recs: (_ for _ in ()).throw(RuntimeError("DB 保存失敗")))
+
+        result = cm.calendar_update_job(mem_db)
+        assert result == 0

@@ -51,7 +51,11 @@ _CALENDAR_LOOKAHEAD_DAYS = 90
 def _table_exists(conn: duckdb.DuckDBPyConnection, table: str) -> bool:
     """指定テーブルが存在するか確認する。"""
     row = conn.execute(
-        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
+        """
+        SELECT COUNT(*) FROM information_schema.tables
+        WHERE lower(table_name) = lower(?)
+          AND table_schema NOT IN ('information_schema')
+        """,
         [table],
     ).fetchone()
     return bool(row and row[0] > 0)
@@ -61,8 +65,8 @@ def _has_calendar_data(conn: duckdb.DuckDBPyConnection) -> bool:
     """market_calendar テーブルが存在しデータがあるか確認する。"""
     if not _table_exists(conn, "market_calendar"):
         return False
-    row = conn.execute("SELECT COUNT(*) FROM market_calendar").fetchone()
-    return bool(row and row[0] > 0)
+    row = conn.execute("SELECT 1 FROM market_calendar LIMIT 1").fetchone()
+    return row is not None
 
 
 def _is_weekend(d: date) -> bool:
@@ -74,13 +78,24 @@ def _fetch_is_trading(conn: duckdb.DuckDBPyConnection, d: date) -> bool | None:
     """market_calendar から is_trading_day を取得する。
 
     Returns:
-        テーブルに該当日が存在する場合は bool、存在しない場合は None。
+        テーブルに該当日が存在する場合は bool（NULL 値は None）、
+        行自体が存在しない場合は None。
     """
     row = conn.execute(
         "SELECT is_trading_day FROM market_calendar WHERE date = ?",
         [d],
     ).fetchone()
-    return bool(row[0]) if row is not None else None
+    if not row:
+        return None
+    val = row[0]
+    return None if val is None else bool(val)
+
+
+def _to_date(val: object) -> date | None:
+    """DuckDB から返る日付値を date オブジェクトに変換する。"""
+    if val is None:
+        return None
+    return val if isinstance(val, date) else date.fromisoformat(str(val))
 
 
 # ---------------------------------------------------------------------------
@@ -128,13 +143,18 @@ def is_sq_day(conn: duckdb.DuckDBPyConnection, d: date) -> bool:
         "SELECT is_sq_day FROM market_calendar WHERE date = ?",
         [d],
     ).fetchone()
-    return bool(row[0]) if row is not None else False
+    if not row:
+        return False
+    val = row[0]
+    return False if val is None else bool(val)
 
 
 def next_trading_day(conn: duckdb.DuckDBPyConnection, d: date) -> date:
     """指定日の翌営業日を返す。
 
     d 自身は含めず、d + 1 日以降で最初の営業日を返す。
+    カレンダーデータがある場合は SQL で O(1) 取得する。
+    カレンダー範囲外または未取得時は曜日ベースフォールバックで探索する。
     _MAX_SEARCH_DAYS 日以内に営業日が見つからない場合は ValueError を送出する。
 
     Args:
@@ -147,9 +167,23 @@ def next_trading_day(conn: duckdb.DuckDBPyConnection, d: date) -> date:
     Raises:
         ValueError: _MAX_SEARCH_DAYS 以内に営業日が見つからない場合。
     """
-    candidate = d + timedelta(days=1)
+    if _has_calendar_data(conn):
+        row = conn.execute(
+            "SELECT MIN(date) FROM market_calendar WHERE date > ? AND is_trading_day = true",
+            [d],
+        ).fetchone()
+        db_result = _to_date(row[0]) if row else None
+        if db_result is not None:
+            return db_result
+        # DB の範囲外（d 以降にカレンダーデータなし）→ フォールバック
+        db_max_row = conn.execute("SELECT MAX(date) FROM market_calendar").fetchone()
+        fallback_start = max(d + timedelta(days=1), (_to_date(db_max_row[0]) or d) + timedelta(days=1))
+    else:
+        fallback_start = d + timedelta(days=1)
+
+    candidate = fallback_start
     for _ in range(_MAX_SEARCH_DAYS):
-        if is_trading_day(conn, candidate):
+        if not _is_weekend(candidate):
             return candidate
         candidate += timedelta(days=1)
     raise ValueError(
@@ -161,6 +195,8 @@ def prev_trading_day(conn: duckdb.DuckDBPyConnection, d: date) -> date:
     """指定日の前営業日を返す。
 
     d 自身は含めず、d - 1 日以前で最も近い営業日を返す。
+    カレンダーデータがある場合は SQL で O(1) 取得する。
+    カレンダー範囲外または未取得時は曜日ベースフォールバックで探索する。
     _MAX_SEARCH_DAYS 日以内に営業日が見つからない場合は ValueError を送出する。
 
     Args:
@@ -173,9 +209,23 @@ def prev_trading_day(conn: duckdb.DuckDBPyConnection, d: date) -> date:
     Raises:
         ValueError: _MAX_SEARCH_DAYS 以内に営業日が見つからない場合。
     """
-    candidate = d - timedelta(days=1)
+    if _has_calendar_data(conn):
+        row = conn.execute(
+            "SELECT MAX(date) FROM market_calendar WHERE date < ? AND is_trading_day = true",
+            [d],
+        ).fetchone()
+        db_result = _to_date(row[0]) if row else None
+        if db_result is not None:
+            return db_result
+        # DB の範囲外（d 以前にカレンダーデータなし）→ フォールバック
+        db_min_row = conn.execute("SELECT MIN(date) FROM market_calendar").fetchone()
+        fallback_start = min(d - timedelta(days=1), (_to_date(db_min_row[0]) or d) - timedelta(days=1))
+    else:
+        fallback_start = d - timedelta(days=1)
+
+    candidate = fallback_start
     for _ in range(_MAX_SEARCH_DAYS):
-        if is_trading_day(conn, candidate):
+        if not _is_weekend(candidate):
             return candidate
         candidate -= timedelta(days=1)
     raise ValueError(
@@ -213,26 +263,14 @@ def get_trading_days(
             """,
             [start, end],
         ).fetchall()
-        result = []
-        for row in rows:
-            val = row[0]
-            result.append(val if isinstance(val, date) else date.fromisoformat(str(val)))
+        result = [
+            _to_date(row[0]) for row in rows if _to_date(row[0]) is not None
+        ]
 
-        # カレンダー範囲外の日付を曜日ベースで補完
-        cal_start = conn.execute("SELECT MIN(date) FROM market_calendar").fetchone()
-        cal_end = conn.execute("SELECT MAX(date) FROM market_calendar").fetchone()
-        db_min = (
-            cal_start[0] if cal_start and cal_start[0] else None
-        )
-        db_max = (
-            cal_end[0] if cal_end and cal_end[0] else None
-        )
-        db_min = db_min if isinstance(db_min, date) else (
-            date.fromisoformat(str(db_min)) if db_min else None
-        )
-        db_max = db_max if isinstance(db_max, date) else (
-            date.fromisoformat(str(db_max)) if db_max else None
-        )
+        # カレンダー範囲外の日付を曜日ベースで補完（MIN/MAX を 1 クエリで取得）
+        minmax = conn.execute("SELECT MIN(date), MAX(date) FROM market_calendar").fetchone()
+        db_min = _to_date(minmax[0]) if minmax else None
+        db_max = _to_date(minmax[1]) if minmax else None
 
         extra: list[date] = []
         if db_min and start < db_min:
@@ -280,7 +318,7 @@ def calendar_update_job(
         lookahead_days: 今日から何日先まで取得するか（デフォルト 90 日）。
 
     Returns:
-        保存したレコード数。
+        保存したレコード数。API エラー時は 0 を返す。
     """
     today = date.today()
     date_to = today + timedelta(days=lookahead_days)
@@ -288,9 +326,8 @@ def calendar_update_job(
     # 未取得範囲の開始日を算出（最終取得日の翌日、または基準日）
     if _has_calendar_data(conn):
         row = conn.execute("SELECT MAX(date) FROM market_calendar").fetchone()
-        last_date = row[0] if row and row[0] else None
+        last_date = _to_date(row[0]) if row else None
         if last_date:
-            last_date = last_date if isinstance(last_date, date) else date.fromisoformat(str(last_date))
             if last_date >= date_to:
                 logger.info(
                     "calendar_update_job: カレンダーは最新 last=%s date_to=%s",
@@ -310,15 +347,25 @@ def calendar_update_job(
         date_to,
     )
 
-    records = jq.fetch_market_calendar(
-        date_from=date_from.isoformat(),
-        date_to=date_to.isoformat(),
-    )
+    try:
+        records = jq.fetch_market_calendar(
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+        )
+    except Exception:
+        logger.exception("calendar_update_job: fetch_market_calendar 失敗")
+        return 0
+
     if not records:
         logger.info("calendar_update_job: 取得レコードなし")
         return 0
 
-    saved = jq.save_market_calendar(conn, records)
+    try:
+        saved = jq.save_market_calendar(conn, records)
+    except Exception:
+        logger.exception("calendar_update_job: save_market_calendar 失敗")
+        return 0
+
     logger.info(
         "calendar_update_job: fetched=%d saved=%d", len(records), saved
     )
