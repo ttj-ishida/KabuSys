@@ -1,103 +1,84 @@
 CHANGELOG
 =========
+このファイルは Keep a Changelog の形式に従って作成されています。
+変更履歴は意図的に「注目に値する変更」を記載しています。
 
-すべての重要な変更はこのファイルに記録します。  
-フォーマットは「Keep a Changelog」に準拠します。  
-
-[unreleased]: https://example.com/kabusys/compare/v0.1.0...HEAD
-
-v0.1.0 - 2026-03-18
+[0.1.0] - 2026-03-18
 -------------------
 
 Added
-- 初期リリース: KabuSys — 日本株自動売買システムのベース実装を追加。
-  - パッケージ構成:
-    - kabusys (トップレベルパッケージ)
-    - サブパッケージ: data, strategy, execution, monitoring（エントリのみ含む）
-  - バージョン: 0.1.0（src/kabusys/__init__.py の __version__）
-
-- 環境設定/ロード機能（src/kabusys/config.py）
-  - .env / .env.local ファイルおよび環境変数から設定を読み込む自動ローダー実装。
-  - プロジェクトルート検出ロジック（.git または pyproject.toml を起点）により CWD 非依存でロード。
-  - .env のパース実装:
-    - コメント行 / 空行無視、export KEY=val 形式対応、シングル/ダブルクォート内のバックスラッシュエスケープ処理、インラインコメントの取り扱い。
-    - コメント判定のためのスペース/タブ考慮。
-  - 上書き制御機能:
-    - .env.local が .env より優先。
-    - OS 環境変数を保護する protected セットを使った上書き制御。
-    - KABUSYS_DISABLE_AUTO_ENV_LOAD 環境変数で自動ロードを無効化可能（テスト向け）。
-  - Settings クラス:
-    - J-Quants / kabu / Slack / DB パスなどの設定プロパティ（必須項目は未設定時に ValueError を送出）。
-    - KABUSYS_ENV（development/paper_trading/live）の検証、LOG_LEVEL の検証、ユーティリティプロパティ（is_live, is_paper, is_dev）。
-
-- J-Quants クライアント（src/kabusys/data/jquants_client.py）
-  - API クライアント実装（価格日足・財務データ・カレンダー取得）。
-  - レート制限制御: 固定間隔スロットリングで 120 req/min に対応（_RateLimiter）。
-  - 再試行ロジック: 指数バックオフ、最大 3 回、HTTP 408/429/5xx を対象。
-  - トークン自動リフレッシュ: 401 受信時にリフレッシュして 1 回のみ再試行（無限再帰防止）。
-  - ページネーション対応: pagination_key によるループ取得。
-  - DuckDB への保存関数:
-    - save_daily_quotes / save_financial_statements / save_market_calendar：ON CONFLICT DO UPDATE による冪等保存。
-    - fetched_at を UTC ISO8601 (Z) で記録し、データ取得時刻を記録（Look-ahead Bias 対策）。
-  - 型変換ユーティリティ: _to_float/_to_int（空文字や不正値を None に変換、int 変換時の小数切捨て回避）。
-
-- ニュース収集モジュール（src/kabusys/data/news_collector.py）
-  - RSS フィードからの記事収集と DuckDB への堅牢な保存処理を実装。
-  - 主要機能:
-    - RSS 取得（gzip 対応）、XML パース（defusedxml を利用）、記事前処理（URL 除去・空白正規化）。
-    - 記事ID は URL 正規化後の SHA-256 の先頭 32 文字で生成し冪等性を担保（UTM 等トラッキングパラメータ削除、クエリソート、フラグメント除去）。
-    - SSRF 対策:
-      - URL スキーム検証（http/https のみ許可）。
-      - リダイレクト時にスキーム・ホストを検証するカスタムリダイレクトハンドラ（_SSRFBlockRedirectHandler）。
-      - ホスト名の DNS 解決→IP 評価や直接 IP 解析によるプライベートアドレス判定。
-    - リソース保護:
-      - 受信バイト数上限（MAX_RESPONSE_BYTES = 10MB）によるメモリ DoS / Gzip Bomb 対策。
-    - DB 保存:
-      - save_raw_news: チャンク挿入、INSERT ... ON CONFLICT DO NOTHING RETURNING id で実際に挿入された記事IDを返す。トランザクションでまとめて処理。
-      - save_news_symbols / _save_news_symbols_bulk: 記事と銘柄コードの紐付けを重複排除してチャンク単位で保存。INSERT ... RETURNING を利用して挿入数を正確に返却。
-    - 銘柄コード抽出:
-      - extract_stock_codes: 正規表現で 4 桁の候補を抽出し、known_codes に基づいてフィルタ、順序保持で重複除去。
-    - run_news_collection: 複数 RSS ソースからの収集を統括。ソースごとに失敗を分離して継続。新規挿入記事に対して銘柄紐付けを一括で保存。
-
-- DuckDB スキーマ定義・初期化（src/kabusys/data/schema.py）
-  - Raw / Processed / Feature / Execution 層を含む豊富なテーブル定義を追加。
-    - raw_prices, raw_financials, raw_news, raw_executions
-    - prices_daily, market_calendar, fundamentals, news_articles, news_symbols
-    - features, ai_scores
-    - signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance
-  - 各テーブルに適切な型チェック／制約（CHECK、PRIMARY KEY、FOREIGN KEY）を設定。
-  - インデックス定義（頻出クエリ向け）を追加。
-  - init_schema(db_path): DB ファイル親ディレクトリの自動作成、全 DDL 実行、インデックス作成（冪等）。
-
-- ETL パイプライン（src/kabusys/data/pipeline.py）
-  - ETL 設計のベース実装:
-    - 差分更新ロジック（最終取得日を参照して未取得分のみ取得）と backfill_days による後出し修正吸収方針。
-    - 市場カレンダーの先読み（_CALENDAR_LOOKAHEAD_DAYS）。
-    - ETL 実行結果を表す ETLResult dataclass（品質問題 list やエラー list を含む）。
-    - テーブル存在チェックと最大日付取得ユーティリティ。
-    - get_last_price_date / get_last_financial_date / get_last_calendar_date。
-    - run_prices_etl: 差分取得→jquants_client による取得→保存、ログ出力を実装（差分計算、backfill を考慮）。
-
-Changed
-- N/A（初回リリースのため既存変更点はなし）。
-
-Fixed
-- N/A（初回リリース）。
+- 初回リリース: KabuSys v0.1.0
+- パッケージ構成を追加
+  - モジュール: kabusys.config, kabusys.data, kabusys.data.jquants_client, kabusys.data.news_collector, kabusys.data.schema, kabusys.data.pipeline, など。
+  - パッケージの __version__ を 0.1.0 として定義。
+- 環境設定管理
+  - .env ファイルまたは環境変数から設定値を自動読み込み（プロジェクトルート判定: .git / pyproject.toml）。  
+  - 読み込み順序: OS 環境 > .env.local > .env。KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で自動ロードを無効化可能。
+  - .env パーサーを実装: export プレフィックス、シングル/ダブルクォート、エスケープ、コメント処理に対応。
+  - Settings クラスでアプリ設定をプロパティ経由で取得。必須変数は未設定時に ValueError を送出。KABUSYS_ENV と LOG_LEVEL の値検証を実装。
+- J-Quants API クライアント（kabusys.data.jquants_client）
+  - 日足（OHLCV）、財務データ（四半期 BS/PL）、JPX マーケットカレンダーの取得関数を実装（ページネーション対応）。
+  - レート制限制御（_RateLimiter）: 120 req/min を固定間隔スロットリングで順守。
+  - 再試行ロジック（最大 3 回、指数バックオフ、HTTP 408/429/5xx 対象）。
+  - 401 受信時にリフレッシュトークンで自動的に ID トークンをリフレッシュして 1 回リトライ。
+  - ID トークンのモジュールキャッシュを用意し、ページネーション間で共有。
+  - DuckDB への保存関数（save_daily_quotes / save_financial_statements / save_market_calendar）: ON CONFLICT DO UPDATE による冪等保存。
+  - JSON デコード失敗時の明示的エラーハンドリング、タイムアウト・ログ出力等。
+- ニュース収集（kabusys.data.news_collector）
+  - RSS フィードの取得と記事整形機能を実装（fetch_rss / save_raw_news / save_news_symbols / run_news_collection）。
+  - セキュリティ対策: defusedxml を使った安全な XML パース、SSRF 対策（ホストのプライベートアドレス判定、リダイレクト時の検証を行う専用 HTTPRedirectHandler）。
+  - URL 正規化機能: トラッキングパラメータ除去（utm_*, fbclid 等）、スキーム/ホスト小文字化、フラグメント除去、クエリソート。
+  - 記事ID は正規化 URL の SHA-256（先頭32文字）で生成し冪等性を担保。
+  - レスポンスサイズ上限チェック（MAX_RESPONSE_BYTES = 10MB）、gzip 解凍後のサイズ検査、Content-Length の事前チェック。
+  - DB 保存はチャンク化（最大チャンクサイズ 1000）してトランザクションで実行。INSERT ... RETURNING を用いて実際に挿入された件数を返す実装。
+  - テキスト前処理（URL 除去、空白正規化）および記事中からの銘柄コード抽出（4桁数字かつ known_codes に存在するもののみ）。
+- DuckDB スキーマ（kabusys.data.schema）
+  - Raw / Processed / Feature / Execution 層のテーブル定義を実装（raw_prices, raw_financials, raw_news, raw_executions, prices_daily, market_calendar, fundamentals, news_articles, news_symbols, features, ai_scores, signals, signal_queue, portfolio_targets, orders, trades, positions, portfolio_performance 等）。
+  - 各テーブルに制約（PRIMARY KEY, CHECK, FOREIGN KEY）を設定。
+  - 典型的クエリ向けインデックスを作成。
+  - init_schema(db_path) によりディレクトリ自動作成＆スキーマ初期化（冪等）、get_connection() を提供。
+- ETL パイプライン（kabusys.data.pipeline）
+  - ETLResult dataclass による実行結果表現（取得件数、保存件数、品質問題、エラー一覧）。
+  - 差分更新ロジック: 最終取得日を基に自動で date_from を計算（backfill_days による後出し修正吸収）。
+  - 市場カレンダー先読み（デフォルト 90 日）、最小データ日付の定義（2017-01-01）。
+  - 品質チェック（quality モジュール連携）を行う設計（重大度を保持しつつ ETL は継続する方針）。
+- ユーティリティ
+  - 型変換ユーティリティ (_to_float / _to_int) を実装。空値・不正値を安全に None として扱う。float 文字列からの int 変換時は小数部がある場合は None を返す（意図しない切り捨て防止）。
 
 Security
-- 複数箇所でセキュリティ対策を実装:
-  - RSS パーサで defusedxml を使用して XML ベースの攻撃を軽減。
-  - RSS フェッチで SSRF 対策（スキーム検証、プライベートIPのブロック、リダイレクト前検査）。
-  - ネットワーク呼び出しでタイムアウトと最大受信サイズチェックを行い資源枯渇攻撃を軽減。
-  - 環境変数ロードで OS 環境変数の保護（protected セット）を提供。
+- RSS/XML 処理で defusedxml を採用し XML Bomb 等を防御。
+- SSRF 対策を多層で実装:
+  - URL スキーム検証（http/https のみ許可）。
+  - ホストがプライベート/ループバック/リンクローカル/マルチキャストであればアクセスを拒否（IP 直解析 + DNS 解決で A/AAAA を検査）。
+  - リダイレクト先検証用ハンドラを設け、接続前にスキームとホストをチェック。
+- .env 自動読み込み時に OS 環境変数を保護（読み込み順と protected set による上書き制御）。
 
-Notes / Known issues
-- run_prices_etl は差分取得～保存の主要処理を実装していますが、ファイル末尾の処理が途中で終わっている可能性があります（返却タプル等の実装確認を推奨）。本番導入前に ETL の統合テストを強く推奨します。
-- strategy / execution / monitoring サブパッケージはエントリのみで、戦略ロジックや発注実行、監視の実装は別途追加が必要です。
-- J-Quants / kabu / Slack の各機能は設定（環境変数）に依存します。README/.env.example を用意して設定方法を明記することを推奨します。
+Performance
+- API 呼び出しでレート制限（スロットリング）を導入し、レート違反による 429 リスクを低減。
+- J-Quants クライアントはページネーションを透過的に扱う。
+- DB 保存はバルク実行 / チャンク化 / トランザクションでオーバーヘッドを最小化。
+- news_collector の記事・シンボル保存は INSERT ... RETURNING とチャンク化で実行数を削減。
 
-Migration
-- 既存データがない初期導入向けのリリースです。データベースは init_schema() で初期化してください。既存 DuckDB を使用する場合はスキーマ互換性に注意してください（主にカラム名・制約）。
+Notes / Design Decisions
+- ETL の品質チェックは「検出して報告しつつ ETL 自体は継続する」方針（呼び出し元がアクションを決定）。
+- DuckDB スキーマは外部キー依存を考慮した順序で作成され、init_schema は冪等性を重視。
+- ID トークンの自動リフレッシュは 401→1 回のリトライまで許容（無限再帰防止のため allow_refresh フラグを利用）。
+- news_collector は記事 ID の衝突を避けるため URL の正規化を重視（UTM 等のトラッキングパラメータを削除）。
 
-Acknowledgements
-- 本実装はデータ取得・保存・前処理・スキーマ設計を中心とした基盤であり、戦略や注文の実行ロジックは今後のリリースで順次追加予定です。
+Fixed
+- （初回リリースのため「Fixed」項目はありません）
+
+Changed / Deprecated / Removed
+- （初回リリースのため該当なし）
+
+Acknowledgements / References
+- 内部設計は DataPlatform.md / DataSchema.md の方針に基づく箇所があります（実装コメント参照）。
+
+今後の予定（未リリース機能例）
+- ETL の完全な品質チェック実装（quality モジュールとの連携詳細）
+- strategy / execution モジュールの実装（戦略生成・発注ロジックの追加）
+- モニタリング・Slack 通知など運用周りの強化
+
+----- 
+
+注: 本 CHANGELOG はリポジトリ内のコードと docstring コメントから推測して作成しています。実際のリリースノートとして公開する際は、担当者による確認・加筆を推奨します。
