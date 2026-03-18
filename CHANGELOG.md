@@ -1,105 +1,101 @@
-# CHANGELOG
+# Changelog
 
-すべての変更は [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) の形式に従って記載します。  
-バージョン番号はパッケージの __version__（src/kabusys/__init__.py）に合わせています。
+すべての変更は Keep a Changelog の慣習に準拠して記載しています。  
+このファイルはリポジトリのコードベースから推測して作成された初回のリリースノートです。
+
+フォーマット:
+- Unreleased: 今後の変更（現時点では空）
+- 各バージョン: 日付付きで主要な追加・改善点を列挙
+
+## [Unreleased]
+- （なし）
 
 ## [0.1.0] - 2026-03-18
+初回公開リリース。日本株自動売買システム "KabuSys" の基盤機能を実装しました。主な追加点と設計上の方針は以下の通りです。
 
-初回リリース。日本株自動売買システム「KabuSys」のコアライブラリを追加しました。主な追加点・設計方針は以下の通りです。
-
-### 追加 (Added)
+### Added
 - パッケージ基礎
-  - パッケージ初期化（src/kabusys/__init__.py）。公開モジュール: data, strategy, execution, monitoring。
-  - バージョン 0.1.0 を定義。
+  - パッケージメタ情報: src/kabusys/__init__.py に __version__ = "0.1.0" および主要サブパッケージを __all__ で公開（data, strategy, execution, monitoring）。
 
-- 設定/環境変数管理（src/kabusys/config.py）
-  - .env ファイルおよび環境変数からの設定読み込みを自動化（プロジェクトルートを .git / pyproject.toml で検出）。
-  - .env と .env.local の読み込み順序を実装（OS 環境 > .env.local > .env）。環境変数上書き制御（protected set）をサポート。
-  - .env の行パーサを強化:
-    - `export KEY=val` 形式に対応
-    - シングル/ダブルクォート内のバックスラッシュエスケープに対応
-    - インラインコメントの取り扱い規則（クォート無し時の '#' の扱い）
-  - 自動ロードを無効化するフラグ KABUSYS_DISABLE_AUTO_ENV_LOAD をサポート（テスト等で利用可能）。
-  - Settings クラスを実装（J-Quants トークン、kabuステーション設定、Slack トークン/チャネル、DB パス、環境判定、ログレベル検証など）。
+- 環境設定/ロード機能（src/kabusys/config.py）
+  - .env ファイルおよび環境変数からの設定読み込みロジックを実装。
+  - 自動ロード優先順位: OS 環境変数 > .env.local > .env。
+  - プロジェクトルート検出: __file__ を起点に .git または pyproject.toml を探索してルートを特定（配布後も動作するよう CWD に依存しない実装）。
+  - 自動ロード無効化フラグ KABUSYS_DISABLE_AUTO_ENV_LOAD。
+  - .env パーサ: export プレフィックス、シングル/ダブルクォート、バックスラッシュエスケープ、インラインコメントの扱いなどに対応。
+  - protected オプションを使った上書き制御（OS 環境変数保護）。
+  - Settings クラス: 必須変数取得（_require）と検証付きプロパティを提供（J-Quants トークン、kabu API 設定、Slack、DB パス、環境/ログレベルの検証など）。
+  - KABUSYS_ENV と LOG_LEVEL の妥当性チェック（許容値を検証して不正値は例外）。
 
-- Data レイヤ（src/kabusys/data/*）
-  - J-Quants API クライアント（src/kabusys/data/jquants_client.py）
-    - レート制御（固定間隔スロットリング）を実装（120 req/min の遵守）。
-    - 再試行ロジック（指数バックオフ、最大 3 回。HTTP 408/429 および 5xx を対象）。429 の場合は Retry-After ヘッダを尊重。
-    - 401 受信時にリフレッシュトークンで自動的に id_token を再取得して 1 回リトライ（無限ループ回避）。
-    - ページネーション対応の取得関数（fetch_daily_quotes / fetch_financial_statements）を実装。
-    - DuckDB への保存関数（save_daily_quotes / save_financial_statements / save_market_calendar）を実装。fetched_at を UTC ISO8601 で記録し、ON CONFLICT による冪等性を担保。
-    - 型変換ユーティリティ（_to_float / _to_int）を実装し、入力の堅牢性を向上。
-  - ニュース収集（RSS）モジュール（src/kabusys/data/news_collector.py）
-    - RSS 取得（fetch_rss）、前処理、ID 生成、DuckDB への冪等保存を提供。
-    - 記事 ID を正規化 URL の SHA-256（先頭32文字）で生成し冪等性を保証。
-    - URL 正規化: スキーム/ホスト小文字化、トラッキングパラメータ除去（utm_* 等）、フラグメント削除、クエリソート。
-    - 前処理: URL 除去、空白正規化。
-    - RSS の XML パースに defusedxml を使用して安全性を強化。
-    - SSRF 対策:
-      - URL スキーム検証（http/https のみ許可）
-      - リダイレクト先スキーム・ホスト検証（カスタム RedirectHandler）
-      - ホスト名の DNS 解決結果を含めたプライベート IP 判定（ローカルネットワークへのアクセスを拒否）
-    - レスポンスサイズ上限（デフォルト 10 MiB）と gzip 解凍後のサイズ検査を実装（DoS/Bomb 対策）。
-    - バルク挿入のチャンク化（デフォルト 1000 件）とトランザクション管理。INSERT ... RETURNING を使用して実際に挿入された件数/ID を正確に返す。
-    - 銘柄コード抽出ユーティリティ（4桁数字パターン）と news_symbols への紐付け処理を実装。
-    - デフォルト RSS ソース（Yahoo Finance のビジネスカテゴリ）を定義。
+- データ取得/保存（src/kabusys/data/jquants_client.py）
+  - J-Quants API クライアント実装:
+    - 固定間隔の RateLimiter（120 req/min）を導入してレート制限を保護。
+    - リトライロジック（指数バックオフ、最大 3 回、408/429/5xx を対象）。
+    - 401 (Unauthorized) 受信時はリフレッシュトークンで自動的に ID トークンを更新して再試行（1 回のみ）。
+    - ページネーション対応で API の次ページを順次取得。
+    - fetch_daily_quotes / fetch_financial_statements / fetch_market_calendar を実装。
+  - DuckDB への保存関数（冪等）:
+    - save_daily_quotes / save_financial_statements / save_market_calendar: INSERT ... ON CONFLICT DO UPDATE を用いた冪等保存。
+    - fetched_at（UTC ISO）を記録してデータ取得時点をトレース可能に。
+  - ユーティリティ: 安全な型変換関数 _to_float, _to_int（不正値や空文字列を None にする等）。
 
-  - DuckDB スキーマ定義（src/kabusys/data/schema.py）
-    - Raw レイヤのテーブル DDL を追加:
-      - raw_prices（生株価）
-      - raw_financials（生財務データ）
-      - raw_news（収集ニュース）
-      - raw_executions（発注/約定用テーブルの DDL 断片を含む）
-    - DataModel（Raw/Processed/Feature/Execution 層）に基づくスキーマ設計の骨子を実装。
+- ニュース収集（src/kabusys/data/news_collector.py）
+  - RSS フィードからのニュース収集および DuckDB への保存パイプラインを実装。
+  - セキュリティ/堅牢化:
+    - defusedxml を利用し XML 攻撃（XML bomb 等）を回避。
+    - SSRF 対策: URL スキーム検証（http/https のみ）、ホストがプライベート/ループバック/リンクローカルでないことをチェック。リダイレクト時にも検証。
+    - 応答サイズ制限（MAX_RESPONSE_BYTES = 10MB）と gzip の扱い（解凍後も上限チェック）。
+    - HTTP ヘッダ Content-Length の事前チェック、最大バイト数を超える応答は破棄。
+    - リダイレクト時の追加検査を行うカスタム RedirectHandler を導入。
+  - RSS パーシング:
+    - title / content（content:encoded 優先）を抽出し、URL 除去・空白正規化などの前処理を行う preprocess_text。
+    - pubDate のパースと UTC 変換（パース失敗時は警告ログと現在時刻で代替）。
+    - 記事 ID は URL 正規化（トラッキングパラメータ除去、キーソート、フラグメント除去）後に SHA-256 の先頭 32 文字で生成して冪等性を確保。
+  - DB 保存:
+    - save_raw_news: チャンク化して INSERT ... ON CONFLICT DO NOTHING RETURNING id を利用し、実際に挿入された記事 ID を返却（トランザクションでまとめる）。
+    - save_news_symbols / _save_news_symbols_bulk: ニュースと銘柄の紐付けを一括で安全に保存（重複削除・チャンク挿入・トランザクション）。
+  - 銘柄抽出: テキスト中の 4 桁数字を抽出し、既知銘柄セットでフィルタして重複を除去して返す extract_stock_codes。
+  - 統合ジョブ run_news_collection: 複数ソースを順次処理し、各ソースは独立して例外処理。known_codes があれば新規記事について銘柄紐付けを行う。
 
-- Research レイヤ（src/kabusys/research/*）
-  - 特徴量探索モジュール（src/kabusys/research/feature_exploration.py）
-    - 将来リターン計算（calc_forward_returns）
-      - DuckDB の prices_daily を参照して複数ホライズン（デフォルト: 1,5,21 営業日）の将来リターンを一度のクエリで取得。
-      - ホライズン検証（正の整数かつ <= 252）やパフォーマンスのためのスキャン範囲制限を実装。
-    - IC（Information Coefficient）計算（calc_ic）
-      - ファクターと将来リターンを code で結合し、スピアマンのランク相関（ρ）を計算。十分なレコードがない場合は None を返す。
-      - ties を平均ランクで処理するランク付けユーティリティ（rank）を提供。
-    - ファクター統計サマリー（factor_summary）を実装（count/mean/std/min/max/median）。
-  - ファクター計算モジュール（src/kabusys/research/factor_research.py）
-    - モメンタム（calc_momentum）
-      - mom_1m, mom_3m, mom_6m, ma200_dev（200日移動平均乖離）の計算を実装。必要なデータ不足時は None を返す。
-    - ボラティリティ/流動性（calc_volatility）
-      - 20日 ATR（atr_20）、相対 ATR（atr_pct）、20日平均売買代金（avg_turnover）、出来高比率（volume_ratio）を計算。
-      - true_range の NULL 伝播制御やカウントによる十分データ判定を実装。
-    - バリュー（calc_value）
-      - raw_financials から target_date 以前の最新財務データを取得して PER（pclose/eps）と ROE を算出。EPS が 0/欠損の場合は None。
-    - 研究モジュールの公開 API をまとめる __init__ を用意（calc_momentum/calc_volatility/calc_value/calc_forward_returns/calc_ic/factor_summary/rank と zscore_normalize をエクスポート）。
+- リサーチ / ファクター計算（src/kabusys/research/）
+  - feature_exploration.py:
+    - calc_forward_returns: DuckDB の prices_daily テーブルを参照して、指定日から指定営業日ホライズン先の将来リターンを一括で算出（LEAD を利用）。horizons の妥当性チェック（正の整数かつ <= 252）。
+    - calc_ic: ファクター値と将来リターンの Spearman ランク相関（IC）を計算。None/非有限値を除外、十分なサンプル数（>=3）以外は None を返す。
+    - rank: 同順位は平均ランクを割り当てる実装（浮動小数点の丸めで ties 検出漏れを防止）。
+    - factor_summary: 指定列について count/mean/std/min/max/median を算出（None 値は除外）。
+  - factor_research.py:
+    - calc_momentum: mom_1m / mom_3m / mom_6m / ma200_dev を計算。200 日移動平均はデータ数不足時に None。
+    - calc_volatility: 20 日 ATR（true range を正しく扱う）、ATR 比率（atr_pct）、20 日平均売買代金、出来高比率を計算。必要なデータ数が不足する場合は None。
+    - calc_value: raw_financials から target_date 以前の最新財務データを取得し PER（eps ベース）および ROE を計算。財務データ・株価を組み合わせて出力。
+    - 共通方針: DuckDB 接続を受け取り、prices_daily / raw_financials のみ参照。外部 API へのアクセスは行わない。出力は (date, code) ベースの dict リスト。
 
-- その他
-  - ロギングを多用し処理状況や警告を出力。
-  - 外部依存は最小限（DuckDB と defusedxml のみ明示）。Research モジュールは pandas 等に依存しない設計。
+- DuckDB スキーマ初期定義（src/kabusys/data/schema.py）
+  - Raw layer の DDL 定義を追加:
+    - raw_prices, raw_financials, raw_news の CREATE TABLE 文を実装（主キー・型・制約を含む）。
+    - raw_executions のスキーマ定義開始（途中まで実装あり）。
+  - ドキュメント的に Raw / Processed / Feature / Execution レイヤーを区別して設計。
 
-### 修正 (Fixed)
-- 初回リリースのため該当なし（設計段階での堅牢性・エラーハンドリングを実装）。
+### Changed
+- （初回リリースのため変更履歴はなし）
 
-### セキュリティ (Security)
-- ニュース収集で SSRF 対策を導入（スキーム検証、プライベート IP 判定、リダイレクト時の検査）。
-- RSS パースに defusedxml を利用して XML による攻撃を軽減。
-- J-Quants クライアントのトークンリフレッシュ時に無限再帰しない設計を導入。
+### Fixed
+- （初回リリースのため修正履歴はなし）
 
-### パフォーマンス (Performance)
-- API 呼び出しのレートリミッタ実装により API 制限を順守。
-- DuckDB へのバルク挿入をチャンク化してオーバーヘッドを削減。
-- 一度の SQL で複数ホライズン/ウィンドウ集計を行うことでクエリ回数を削減。
+### Security
+- ニュース収集モジュールにおいて複数のセキュリティ対策を導入:
+  - defusedxml による XML パースの安全化
+  - SSRF 対応（スキーム制限、プライベート IP/ホストチェック、リダイレクト検査）
+  - レスポンスサイズ制限および gzip 解凍後のサイズチェック（DoS 対策）
+- J-Quants クライアント: レート制限とリトライ・トークン自動更新により堅牢性を向上。
 
-### 既知の制限 (Known issues / Limitations)
-- Research モジュールは pandas 等に依存していないため、非常に大規模データでは追加最適化が必要な場合があります。
-- 一部機能（例: PBR・配当利回り）は現バージョンで未実装（calc_value の注記）。
-- raw_executions の DDL がソース中で途中まで（ファイル末端が断片的）に見られます。今後のリリースで Execution 層の完全なスキーマを追加予定。
-- Strategy / Execution / Monitoring の具体的な発注ロジック・kabuステーション連携は本リリースでは実装の土台を提供しており、実運用に用いる場合は追加実装と十分なテストが必要です。
-
-今後の予定:
-- Execution 層（kabuステーション連携・発注ロジック）の実装。
-- Feature/Processed レイヤの ETL と定期バッチ処理。
-- 単体テスト・統合テストの整備と CI ワークフロー導入。
+### Notes / Implementation details
+- 設計ドキュメント参照: 各モジュールに docstring で設計方針や DataPlatform.md / StrategyModel.md などを参照する旨の記載あり（実装はコード内にドキュメントとして含まれる）。
+- 依存性:
+  - DuckDB（duckdb パッケージ）を想定。
+  - defusedxml をニュースパーサーで使用。
+  - 外部ライブラリに頼らないユーティリティの実装に注意（例: research モジュールは標準ライブラリ主体で実装）。
+- 現状のスキーマ実装は Raw layer を中心に整備済みで、Execution / Strategy 周りの実装はパッケージ骨組み（ディレクトリ）として存在するが、詳細ロジック（発注処理等）は別途実装が必要。
 
 ---
 
-注: 本 CHANGELOG はコードベースから推測して作成しています。実際の変更履歴やリリースノートはプロジェクト管理情報（コミット履歴・リリースノート）に基づいて補完してください。
+この CHANGELOG はコードの現状から推測して作成したものであり、実際の開発履歴やコミットログに基づくものではありません。追加の変更点や日付調整が必要な場合はお知らせください。
