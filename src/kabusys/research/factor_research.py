@@ -200,11 +200,11 @@ def calc_value(
 
     raw_financials テーブルから target_date 以前の最新財務データを取得し、
     prices_daily の株価と組み合わせて以下を計算する。
-      - pbr : 株価 / BPS（= close / (net_income / eps * pbr_proxy）※ EPS ベース簡易計算）
-      - per : 株価 / EPS
+      - per : 株価 / EPS（EPS が 0 または欠損の場合は None）
       - roe : ROE（raw_financials から直接取得）
 
-    EPS が 0 または欠損の場合は per = None を返す。
+    Note:
+        PBR・配当利回りは現バージョンでは未実装。
 
     Args:
         conn:        DuckDB 接続。prices_daily / raw_financials テーブルを参照する。

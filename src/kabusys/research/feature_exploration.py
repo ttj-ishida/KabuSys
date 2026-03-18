@@ -127,17 +127,22 @@ def calc_ic(
     if len(pairs) < 3:
         return None
 
-    n = len(pairs)
     factor_vals = [p[0] for p in pairs]
     return_vals = [p[1] for p in pairs]
 
-    factor_ranks = _rank(factor_vals)
-    return_ranks = _rank(return_vals)
+    xs = _rank(factor_vals)
+    ys = _rank(return_vals)
+    n = len(xs)
 
-    # スピアマンのρ = 1 - 6*Σd²/(n*(n²-1))
-    d_sq_sum = sum((fr - rr) ** 2 for fr, rr in zip(factor_ranks, return_ranks))
-    rho = 1.0 - 6.0 * d_sq_sum / (n * (n * n - 1))
-    return rho
+    # ties があっても正確なスピアマン ρ = Pearson(ランク)
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    vx = sum((x - mx) ** 2 for x in xs)
+    vy = sum((y - my) ** 2 for y in ys)
+    if vx == 0 or vy == 0:
+        return None
+    cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    return cov / (vx ** 0.5 * vy ** 0.5)
 
 
 def _rank(values: list[float]) -> list[float]:

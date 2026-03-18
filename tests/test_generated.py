@@ -153,10 +153,14 @@ def test_calc_forward_returns_basic():
         """
     )
     # target_date and future dates
+    # LEAD(close, 5) は5行後を参照するため、中間行を補完して index=5 が 2020-01-06 になるよう挿入
     t = date(2020, 1, 1)
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [t, "0001", 100.0])
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 2), "0001", 110.0])
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 6), "0001", 120.0])
+    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [t, "0001", 100.0])            # index 0
+    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 2), "0001", 110.0])  # index 1
+    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 3), "0001", 105.0])  # index 2
+    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 4), "0001", 108.0])  # index 3
+    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 5), "0001", 112.0])  # index 4
+    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 6), "0001", 120.0])  # index 5
     # another code missing future -> returns None
     conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [t, "0002", 50.0])
 
