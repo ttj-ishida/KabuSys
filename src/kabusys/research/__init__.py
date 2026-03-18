@@ -1,5 +1,5 @@
 from .factor_research import calc_momentum, calc_value, calc_volatility, zscore_normalize
-from .feature_exploration import _rank, calc_forward_returns, calc_ic, factor_summary
+from .feature_exploration import calc_forward_returns, calc_ic, factor_summary, rank
 
 __all__ = [
     "calc_momentum",
@@ -9,5 +9,5 @@ __all__ = [
     "calc_forward_returns",
     "calc_ic",
     "factor_summary",
-    "_rank",
+    "rank",
 ]

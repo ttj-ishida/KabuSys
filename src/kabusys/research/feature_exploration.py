@@ -93,7 +93,7 @@ def calc_forward_returns(
 
     cols = ["date", "code"] + col_names
     result = [dict(zip(cols, r)) for r in rows]
-    logger.info("calc_forward_returns: %d 銘柄 date=%s horizons=%s", len(result), target_date, horizons)
+    logger.debug("calc_forward_returns: %d 銘柄 date=%s horizons=%s", len(result), target_date, horizons)
     return result
 
 
@@ -140,8 +140,8 @@ def calc_ic(
     factor_vals = [p[0] for p in pairs]
     return_vals = [p[1] for p in pairs]
 
-    xs = _rank(factor_vals)
-    ys = _rank(return_vals)
+    xs = rank(factor_vals)
+    ys = rank(return_vals)
     n = len(xs)
 
     # ties があっても正確なスピアマン ρ = Pearson(ランク)
@@ -155,7 +155,7 @@ def calc_ic(
     return cov / (vx ** 0.5 * vy ** 0.5)
 
 
-def _rank(values: list[float]) -> list[float]:
+def rank(values: list[float]) -> list[float]:
     """値のリストをランクに変換する（同順位は平均ランク）。"""
     indexed = sorted(enumerate(values), key=lambda x: x[1])
     ranks = [0.0] * len(values)

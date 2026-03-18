@@ -15,7 +15,7 @@ from kabusys.config import _parse_env_line, _require, Settings
 from kabusys.research import (
     calc_forward_returns,
     calc_ic,
-    _rank,
+    rank,
     factor_summary,
 )
 
@@ -97,7 +97,7 @@ def test_settings_env_and_log_level(monkeypatch):
 
 def test_rank_with_ties():
     vals = [10.0, 20.0, 20.0, 30.0]
-    ranks = _rank(vals)
+    ranks = rank(vals)
     # expected ranks: 1.0, 2.5, 2.5, 4.0
     assert pytest.approx(ranks[0]) == 1.0
     assert pytest.approx(ranks[1]) == 2.5

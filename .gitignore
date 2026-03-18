@@ -39,6 +39,5 @@ data/*
 # OS
 .DS_Store
 Thumbs.db
-Keys
 Order.txt
 
