@@ -1,227 +1,244 @@
 # KabuSys
 
-日本株向けの自動売買・データ基盤ライブラリ / フレームワークです。  
-Data（DuckDBベース）とResearch（ファクター計算）、ETL、ニュース収集、J-Quants APIクライアント、監査ログスキーマなどを提供します。
+日本株向け自動売買プラットフォームのモジュール群（ライブラリ）です。  
+本リポジトリはデータ収集・ETL、特徴量生成、ファクター調査、ニュース収集、監査ログスキーマなど、量的運用に必要な基盤処理を提供します。
+
+バージョン: 0.1.0
 
 ---
 
 ## 概要
 
-KabuSys は以下を目的としたモジュール群を含むパッケージです。
+KabuSys は以下の層をサポートする Python モジュール群です。
 
-- J-Quants API からの市場データ / 財務データ / カレンダー取得（レート制御・リトライ・トークン自動リフレッシュ対応）
-- DuckDB を用いたデータスキーマ（Raw / Processed / Feature / Execution 層）と初期化ユーティリティ
-- 日次 ETL パイプライン（差分取得・バックフィル・品質チェック）
-- RSS ベースのニュース収集（SSRF対策・トラッキングパラメータ除去・冪等保存）
-- 研究用ファクター計算（モメンタム・ボラティリティ・バリュー 等）、IC 計算、統計ユーティリティ
-- マーケットカレンダー管理、監査ログ（トレーサビリティ）スキーマ
+- データ取得（J-Quants API）：株価日足、財務データ、マーケットカレンダー
+- ETL パイプライン：差分取得、保存、品質チェック
+- DuckDB ベースのスキーマ定義・初期化（Raw / Processed / Feature / Execution / Audit）
+- ニュース収集（RSS）と記事→銘柄の紐付け
+- 研究用ユーティリティ：ファクター計算（モメンタム / ボラティリティ / バリュー）、IC 計算、Z スコア正規化
+- 監査ログ（signal → order → execution のトレーサビリティ）
+- マーケットカレンダー管理（営業日判定、次/前営業日探索）
+- データ品質チェック（欠損・スパイク・重複・日付不整合）
 
-パッケージは本番口座の発注処理等にアクセスするモジュール（execution/strategy 等）を想定していますが、提示されたコードでは主に Data / Research / ETL に重点を置いています。
+設計方針として、本ライブラリは本番発注APIや外部ブローカーへ直接アクセスしないパーツ（データ取得・研究・ETL 等）と、監査・発注／実行を管理するスキーマ類を分離して提供します。外部依存を極力限定し、DuckDB と標準ライブラリベースでの実装を行っています。
 
 ---
 
 ## 主な機能一覧
 
-- 環境変数管理（.env/.env.local 自動ロード、必須変数チェック）
-- J-Quants API クライアント
-  - ページネーション対応、レートリミット制御、再試行（指数バックオフ）、401 時の自動トークンリフレッシュ
-  - fetch/save の冪等処理（DuckDB への ON CONFLICT 更新）
-- ETL パイプライン
-  - 市場カレンダー / 株価日足 / 財務データの差分更新（バックフィル対応）
-  - 品質チェック（欠損・重複・スパイク・日付不整合）
-- ニュース収集（RSS）
-  - URL 正規化、トラッキングパラメータ除去、SSRF 対策、gzip 制限、記事ID ハッシュ化、冪等保存
-  - 銘柄コード抽出と news_symbols への紐付け
-- DuckDB スキーマ初期化（init_schema）
-- 監査ログ（order_requests / executions / signal_events 等）の初期化（init_audit_schema / init_audit_db）
-- Research
-  - calc_momentum, calc_volatility, calc_value（prices_daily / raw_financials に基づく）
-  - calc_forward_returns, calc_ic, factor_summary, rank
-  - zscore_normalize（data.stats）
+- data/jquants_client.py
+  - J-Quants API クライアント（レートリミット、リトライ、トークンリフレッシュ対応）
+  - fetch_daily_quotes / fetch_financial_statements / fetch_market_calendar
+  - 保存用関数: save_daily_quotes / save_financial_statements / save_market_calendar
+- data/schema.py
+  - DuckDB スキーマの全DDL（raw / processed / feature / execution 層）を作成する init_schema()
+- data/pipeline.py
+  - 差分ETL（run_daily_etl）・個別ETL（run_prices_etl / run_financials_etl / run_calendar_etl）
+  - ETL 結果を表す ETLResult
+- data/news_collector.py
+  - RSS フィード取得、記事前処理、raw_news 保存、銘柄抽出・紐付け
+  - SSRF 対策、サイズ制限、XML の安全パースなどを実装
+- data/quality.py
+  - 欠損・スパイク・重複・日付不整合チェック。run_all_checks で一括実行
+- data/calendar_management.py
+  - カレンダーの差分更新ジョブ（calendar_update_job）と営業日ユーティリティ（is_trading_day 等）
+- research/
+  - factor_research.py: calc_momentum, calc_volatility, calc_value
+  - feature_exploration.py: calc_forward_returns, calc_ic, factor_summary, rank
+- data/stats.py
+  - zscore_normalize（クロスセクションでのZスコア正規化）
+- audit.py
+  - 監査ログ用DDL と init_audit_schema / init_audit_db
 
 ---
 
-## 要件
+## 前提・依存
 
-- Python 3.9+
-- 主要依存ライブラリ（例）
+- Python 3.10 以上（型アノテーションで `|` を使用）
+- 主要外部パッケージ（インストール必須）：
   - duckdb
   - defusedxml
 
-（実行環境により追加ライブラリが必要になる場合があります）
+pip での最低インストール例:
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install "duckdb" "defusedxml"
+# パッケージとしてインストールする場合（setup.py/pyproject があれば）:
+# pip install -e .
+```
+
+※プロジェクトによっては追加パッケージ（例: requests 等）を導入する可能性があります。必要に応じて pyproject.toml / requirements ファイルを参照してください。
 
 ---
 
-## セットアップ手順
+## 環境変数（設定）
 
-1. リポジトリをクローン / コピー
-2. 仮想環境の作成（推奨）
+自動でプロジェクトルートの `.env` と `.env.local` を読み込みます（ただしテスト等で無効化可能）。
+必須となる環境変数（Settings クラス参照）:
+
+- JQUANTS_REFRESH_TOKEN  — J-Quants のリフレッシュトークン（必須）
+- KABU_API_PASSWORD     — kabuステーション API のパスワード（必須）
+- SLACK_BOT_TOKEN       — Slack 通知用 Bot トークン（必須）
+- SLACK_CHANNEL_ID      — Slack チャンネル ID（必須）
+
+オプション:
+
+- KABUSYS_ENV           — "development" / "paper_trading" / "live"（デフォルト: development）
+- LOG_LEVEL             — "DEBUG"/"INFO"/"WARNING"/"ERROR"/"CRITICAL"（デフォルト: INFO）
+- KABU_API_BASE_URL     — kabuAPI のベース URL（デフォルト: http://localhost:18080/kabusapi）
+- DUCKDB_PATH           — DuckDB ファイルパス（デフォルト: data/kabusys.duckdb）
+- SQLITE_PATH           — 監視用 SQLite パス（デフォルト: data/monitoring.db）
+- KABUSYS_DISABLE_AUTO_ENV_LOAD — 1 を設定すると自動 .env 読み込みを無効化
+
+例（.env）:
+```
+JQUANTS_REFRESH_TOKEN=your_refresh_token_here
+KABU_API_PASSWORD=your_kabu_password
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_CHANNEL_ID=C01234567
+KABUSYS_ENV=development
+LOG_LEVEL=INFO
+DUCKDB_PATH=data/kabusys.duckdb
+```
+
+---
+
+## セットアップ手順（ローカル）
+
+1. リポジトリをクローン
+   ```bash
+   git clone <repo-url>
+   cd <repo-root>
+   ```
+
+2. 仮想環境を作成して有効化
+   ```bash
    python -m venv .venv
-   source .venv/bin/activate  # UNIX
-3. 必要パッケージをインストール（例）
+   source .venv/bin/activate  # macOS / Linux
+   .venv\Scripts\activate     # Windows
+   ```
+
+3. 必要パッケージをインストール
+   ```bash
    pip install duckdb defusedxml
-   # 追加で HTTP クライアントやテストツールを入れること
+   ```
 
-4. 環境変数を準備
-   - プロジェクトルートに `.env` または `.env.local` を置くと自動的にロードされます（読み込み優先度: OS環境 > .env.local > .env）。
-   - 自動ロードを無効にする場合は環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定してください。
+   ※プロジェクトに pyproject.toml / requirements.txt がある場合はそちらを利用してください。
 
-5. .env に最低限必要な値（例）
-   JQUANTS_REFRESH_TOKEN=<your_jquants_refresh_token>
-   KABU_API_PASSWORD=<kabu_api_password>
-   SLACK_BOT_TOKEN=<slack_bot_token>
-   SLACK_CHANNEL_ID=<slack_channel_id>
-   # 任意:
-   DUCKDB_PATH=data/kabusys.duckdb
-   SQLITE_PATH=data/monitoring.db
-   KABUSYS_ENV=development
-   LOG_LEVEL=INFO
+4. 環境変数（.env）を作成
+   - 上記の必須環境変数を .env または .env.local に設定してください。
 
-注意: Settings クラスは必須環境変数が未設定の場合 ValueError を送出します。
+5. DuckDB スキーマ初期化
+   Python REPL やスクリプトから:
+   ```python
+   from kabusys.data.schema import init_schema
+   conn = init_schema("data/kabusys.duckdb")  # ディレクトリがなければ自動作成
+   ```
 
----
-
-## 使い方（代表的な例）
-
-以下は基本的な利用フローのサンプルコード例です。
-
-- DuckDB スキーマ初期化（ETL 前に実行）
-
-```python
-from kabusys.data.schema import init_schema
-conn = init_schema("data/kabusys.duckdb")
-```
-
-- 監査ログ専用 DB 初期化
-
-```python
-from kabusys.data.audit import init_audit_db
-audit_conn = init_audit_db("data/kabusys_audit.duckdb")
-```
-
-- 日次 ETL の実行
-
-```python
-from kabusys.data.pipeline import run_daily_etl
-from kabusys.data.schema import init_schema
-from datetime import date
-
-conn = init_schema("data/kabusys.duckdb")
-result = run_daily_etl(conn, target_date=date.today())
-print(result.to_dict())
-```
-
-- News（RSS）収集ジョブ実行（既知銘柄コードを渡して紐付けを行う例）
-
-```python
-from kabusys.data.news_collector import run_news_collection, DEFAULT_RSS_SOURCES
-from kabusys.data.schema import init_schema
-
-conn = init_schema("data/kabusys.duckdb")
-known_codes = {"7203", "6758", "9984"}  # 例: 有効な銘柄コードセット
-result = run_news_collection(conn, sources=DEFAULT_RSS_SOURCES, known_codes=known_codes)
-print(result)
-```
-
-- Research: モメンタム等の計算例
-
-```python
-import duckdb
-from datetime import date
-from kabusys.research import calc_momentum, calc_volatility, calc_value, zscore_normalize
-
-conn = duckdb.connect("data/kabusys.duckdb")
-target = date(2024, 1, 31)
-
-mom = calc_momentum(conn, target)
-vol = calc_volatility(conn, target)
-val = calc_value(conn, target)
-
-# Zスコア正規化例
-normed = zscore_normalize(mom, ["mom_1m", "mom_3m", "mom_6m"])
-```
-
-- J-Quants API からデータを直接フェッチして保存する例
-
-```python
-from kabusys.data import jquants_client as jq
-import duckdb
-from datetime import date
-
-conn = duckdb.connect("data/kabusys.duckdb")
-records = jq.fetch_daily_quotes(date_from=date(2024,1,1), date_to=date(2024,1,31))
-saved = jq.save_daily_quotes(conn, records)
-```
+6. 監査DBが必要な場合:
+   ```python
+   from kabusys.data.audit import init_audit_db
+   audit_conn = init_audit_db("data/kabusys_audit.duckdb")
+   ```
 
 ---
 
-## 設定項目（主要な環境変数）
+## 基本的な使い方（例）
 
-- JQUANTS_REFRESH_TOKEN: J-Quants のリフレッシュトークン（必須）
-- KABU_API_PASSWORD: kabu API パスワード（必須）
-- KABU_API_BASE_URL: kabu API のベースURL（デフォルト: http://localhost:18080/kabusapi）
-- SLACK_BOT_TOKEN, SLACK_CHANNEL_ID: Slack 通知用（必須）
-- DUCKDB_PATH: DuckDB ファイルパス（デフォルト: data/kabusys.duckdb）
-- SQLITE_PATH: SQLite（監視用）パス（デフォルト: data/monitoring.db）
-- KABUSYS_ENV: 実行環境 (development | paper_trading | live)
-- LOG_LEVEL: ログレベル（DEBUG, INFO, WARNING, ERROR, CRITICAL）
-- KABUSYS_DISABLE_AUTO_ENV_LOAD: 自動 .env ロードを無効化するには 1 を設定
+- 日次 ETL を実行する（J-Quants から差分取得して DuckDB に保存し、品質チェックを実行）:
+  ```python
+  from datetime import date
+  import duckdb
+  from kabusys.data.schema import init_schema
+  from kabusys.data.pipeline import run_daily_etl
 
-Settings で未設定の必須変数にアクセスすると ValueError が発生します。
+  conn = init_schema("data/kabusys.duckdb")
+  result = run_daily_etl(conn, target_date=date.today())
+  print(result.to_dict())
+  ```
+
+- ニュース収集を実行する:
+  ```python
+  from kabusys.data.news_collector import run_news_collection
+  # conn は DuckDB 接続、known_codes は有効な銘柄コードの set
+  stats = run_news_collection(conn, sources=None, known_codes={"7203","6758"})
+  print(stats)  # {source_name: inserted_count}
+  ```
+
+- 研究（ファクター）計算例:
+  ```python
+  from datetime import date
+  from kabusys.research import calc_momentum, calc_volatility, calc_value, zscore_normalize
+  conn = duckdb.connect("data/kabusys.duckdb")
+  target = date(2024, 1, 5)
+  mom = calc_momentum(conn, target)
+  vol = calc_volatility(conn, target)
+  val = calc_value(conn, target)
+  # zscore_normalize の例
+  mom_norm = zscore_normalize(mom, ["mom_1m", "mom_3m", "mom_6m", "ma200_dev"])
+  ```
+
+- J-Quants API から任意期間の株価をフェッチ:
+  ```python
+  from kabusys.data.jquants_client import fetch_daily_quotes
+  quotes = fetch_daily_quotes(code="7203", date_from=date(2023,1,1), date_to=date(2023,12,31))
+  ```
+
+- 管理用ユーティリティ
+  - calendar_update_job でカレンダーを先読みして更新
+  - data.quality.run_all_checks で品質チェック（ETL 後の検査）
 
 ---
 
-## ディレクトリ構成
+## ディレクトリ構成（抜粋）
 
-（主要ファイル・モジュールを抜粋）
-
-- src/kabusys/
+src/kabusys/
+- __init__.py
+- config.py  — 環境変数 / 設定管理
+- data/
   - __init__.py
-  - config.py                    # 環境変数・設定管理 (.env 自動ロード / Settings)
-  - data/
-    - __init__.py
-    - jquants_client.py          # J-Quants API クライアント（fetch / save）
-    - news_collector.py         # RSS ニュース収集・前処理・DB保存
-    - schema.py                 # DuckDB スキーマ定義・init_schema / get_connection
-    - stats.py                  # 統計ユーティリティ（zscore_normalize）
-    - pipeline.py               # ETL パイプライン / run_daily_etl 等
-    - features.py               # features 公開インターフェース（zscore 再エクスポート）
-    - calendar_management.py    # マーケットカレンダー管理（is_trading_day 等）
-    - audit.py                  # 監査ログスキーマ（signal_events / order_requests / executions）
-    - etl.py                    # ETL 公開インターフェース（ETLResult 再エクスポート）
-    - quality.py                # 品質チェック（欠損・スパイク・重複・日付整合性）
-  - research/
-    - __init__.py               # 研究用ユーティリティの公開
-    - feature_exploration.py    # 将来リターン計算・IC・統計サマリー
-    - factor_research.py        # モメンタム/ボラティリティ/バリュー計算
-  - strategy/                    # 戦略関連（未実装のエントリ）
-    - __init__.py
-  - execution/                   # 発注・ブローカー接続（未実装のエントリ）
-    - __init__.py
-  - monitoring/                  # モニタリング（未実装のエントリ）
-    - __init__.py
+  - jquants_client.py  — J-Quants API クライアント
+  - news_collector.py  — RSS ニュース収集
+  - schema.py  — DuckDB スキーマ定義と init_schema
+  - pipeline.py  — ETL パイプライン（run_daily_etl 等）
+  - quality.py  — データ品質チェック
+  - stats.py  — zscore_normalize など
+  - features.py
+  - calendar_management.py
+  - audit.py  — 監査ログスキーマ初期化
+  - etl.py
+- research/
+  - __init__.py
+  - factor_research.py  — calc_momentum / calc_volatility / calc_value
+  - feature_exploration.py  — calc_forward_returns / calc_ic / factor_summary
+- strategy/
+  - __init__.py
+- execution/
+  - __init__.py
+- monitoring/
+  - __init__.py
+
+（上記は主要ファイルの抜粋です。詳しい実装は src/kabusys 以下の各ファイルを参照してください。）
 
 ---
 
-## 開発・運用時の注意点
+## 開発・テスト時の注意
 
-- DuckDB の SQL 実行ではパラメータバインド（?）を多用しており、SQL インジェクションリスクは低く設計されていますが、外部データの取り扱いには注意してください。
-- RSS の取得は SSRF 対策を施していますが、外部 URL 取得時のタイムアウトやレスポンスサイズ上限（10MB）などが設定されています。
-- J-Quants API はレート制限（120 req/min）を守るため内部にスロットリングがあります。大量取得時は時間がかかることに注意してください。
-- ETL は各ステップでエラーをハンドリングし続行する設計（Fail-Fast ではない）です。result の quality_issues / errors を確認して運用判断してください。
-- 本番環境（KABUSYS_ENV=live）での実行前に、paper_trading 環境で十分な検証を行ってください。
-
----
-
-## 参考
-
-- 設定管理: src/kabusys/config.py（.env パーサ実装、優先順位、保護キー）
-- スキーマ / 初期化: src/kabusys/data/schema.py（init_schema, get_connection）
-- ETL 実行: src/kabusys/data/pipeline.py（run_daily_etl 等）
-- J-Quants クライアント: src/kabusys/data/jquants_client.py（fetch_*/save_*）
-- ニュース収集: src/kabusys/data/news_collector.py
-- 研究関連: src/kabusys/research/*.py
+- 自動的に .env をロードしますが、テスト中にこれを無効化したい場合は環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください。
+- DuckDB の接続はスレッドセーフではない点に注意してください。複数スレッドから同一接続を使う場合は適切に排他を行ってください。
+- J-Quants API 呼び出しはレート制限（120 req/min）とリトライロジックを組み込んでいます。大量取得時は API の制約を尊重してください。
+- news_collector は外部の RSS をダウンロードします。SSRF 対策や受信サイズ制限が組み込まれていますが、運用時は取得先の信頼性を確認してください。
 
 ---
 
-必要があれば README にサンプル .env.example、より詳細な API 使用例（fetch のページネーション・id_token 注入やテストのためのフック）、または CI / デプロイ手順を追加できます。どの情報を優先して追加しますか？
+## 参考・今後の拡張予定（例）
+
+- strategy / execution 層の発注ロジック、ブローカーラッパーの実装
+- Slack 通知やモニタリングの実装（monitoring パッケージ）
+- AI スコア生成パイプラインの統合
+- テストカバレッジ強化（ユニット/統合テスト）
+
+---
+
+必要であれば README にサンプル .env.example、より詳細な API 使用例、運用手順（cron / CI での ETL 実行例）、あるいは設計ドキュメント（DataPlatform.md / StrategyModel.md）への参照を追記します。どの情報を優先して追加しましょうか？
