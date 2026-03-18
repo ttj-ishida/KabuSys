@@ -7,6 +7,7 @@ data / research 双方から参照される汎用統計関数を提供する。
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -33,7 +34,13 @@ def zscore_normalize(
     result = [r.copy() for r in records]
 
     for col in columns:
-        values = [r[col] for r in result if r.get(col) is not None]
+        # None・非数値・NaN/Inf を除外して計算（TypeError/NaN汚染防止）
+        values = [
+            v for r in result
+            if (v := r.get(col)) is not None
+            and isinstance(v, (int, float))
+            and math.isfinite(v)
+        ]
         if len(values) <= 1:
             continue
         mean = sum(values) / len(values)
@@ -42,7 +49,8 @@ def zscore_normalize(
         if std == 0:
             continue
         for r in result:
-            if r.get(col) is not None:
-                r[col] = (r[col] - mean) / std
+            v = r.get(col)
+            if v is not None and isinstance(v, (int, float)) and math.isfinite(v):
+                r[col] = (v - mean) / std
 
     return result

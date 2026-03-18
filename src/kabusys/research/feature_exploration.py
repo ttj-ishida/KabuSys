@@ -133,7 +133,9 @@ def calc_ic(
         fval = r.get(factor_col)
         rval = fwd_map.get(r["code"])
         if fval is not None and rval is not None:
-            pairs.append((float(fval), float(rval)))
+            fv, rv = float(fval), float(rval)
+            if math.isfinite(fv) and math.isfinite(rv):
+                pairs.append((fv, rv))
 
     if len(pairs) < 3:
         return None
