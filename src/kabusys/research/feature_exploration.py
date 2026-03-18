@@ -52,6 +52,8 @@ def calc_forward_returns(
     """
     if horizons is None:
         horizons = [1, 5, 21]
+    if any(not isinstance(h, int) or h <= 0 or h > 252 for h in horizons):
+        raise ValueError("horizons must be positive integers <= 252")
 
     # 全ホライズンをまとめて1クエリで取得
     lag_exprs = ", ".join(

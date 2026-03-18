@@ -66,18 +66,18 @@ def calc_momentum(
         [{"date": date, "code": str, "mom_1m": float|None, ...}, ...] のリスト。
     """
     rows = conn.execute(
-        """
+        f"""
         WITH base AS (
             SELECT
                 code,
                 close,
                 date,
-                LAG(close, ?) OVER (PARTITION BY code ORDER BY date) AS close_1m_ago,
-                LAG(close, ?) OVER (PARTITION BY code ORDER BY date) AS close_3m_ago,
-                LAG(close, ?) OVER (PARTITION BY code ORDER BY date) AS close_6m_ago,
+                LAG(close, {_MOMENTUM_SHORT_DAYS}) OVER (PARTITION BY code ORDER BY date) AS close_1m_ago,
+                LAG(close, {_MOMENTUM_MID_DAYS}) OVER (PARTITION BY code ORDER BY date) AS close_3m_ago,
+                LAG(close, {_MOMENTUM_LONG_DAYS}) OVER (PARTITION BY code ORDER BY date) AS close_6m_ago,
                 AVG(close) OVER (
                     PARTITION BY code ORDER BY date
-                    ROWS BETWEEN ? PRECEDING AND CURRENT ROW
+                    ROWS BETWEEN {_MA_LONG_DAYS - 1} PRECEDING AND CURRENT ROW
                 ) AS ma200
             FROM prices_daily
             WHERE date <= ?
@@ -97,14 +97,7 @@ def calc_momentum(
         WHERE date = ?
         ORDER BY code
         """,
-        [
-            _MOMENTUM_SHORT_DAYS,
-            _MOMENTUM_MID_DAYS,
-            _MOMENTUM_LONG_DAYS,
-            _MA_LONG_DAYS - 1,
-            target_date,
-            target_date,
-        ],
+        [target_date, target_date],
     ).fetchall()
 
     cols = ["date", "code", "mom_1m", "mom_3m", "mom_6m", "ma200_dev"]
@@ -138,7 +131,7 @@ def calc_volatility(
         [{"date": date, "code": str, "atr_20": float|None, ...}, ...] のリスト。
     """
     rows = conn.execute(
-        """
+        f"""
         WITH tr AS (
             SELECT
                 date,
@@ -148,8 +141,8 @@ def calc_volatility(
                 turnover,
                 GREATEST(
                     high - low,
-                    ABS(high - LAG(close) OVER (PARTITION BY code ORDER BY date)),
-                    ABS(low  - LAG(close) OVER (PARTITION BY code ORDER BY date))
+                    COALESCE(ABS(high - LAG(close) OVER (PARTITION BY code ORDER BY date)), 0),
+                    COALESCE(ABS(low  - LAG(close) OVER (PARTITION BY code ORDER BY date)), 0)
                 ) AS true_range
             FROM prices_daily
             WHERE date <= ?
@@ -161,15 +154,15 @@ def calc_volatility(
                 close,
                 AVG(true_range) OVER (
                     PARTITION BY code ORDER BY date
-                    ROWS BETWEEN ? PRECEDING AND CURRENT ROW
+                    ROWS BETWEEN {_ATR_DAYS - 1} PRECEDING AND CURRENT ROW
                 ) AS atr_20,
                 AVG(turnover) OVER (
                     PARTITION BY code ORDER BY date
-                    ROWS BETWEEN ? PRECEDING AND CURRENT ROW
+                    ROWS BETWEEN {_VOLUME_DAYS - 1} PRECEDING AND CURRENT ROW
                 ) AS avg_turnover,
                 AVG(volume) OVER (
                     PARTITION BY code ORDER BY date
-                    ROWS BETWEEN ? PRECEDING AND CURRENT ROW
+                    ROWS BETWEEN {_VOLUME_DAYS - 1} PRECEDING AND CURRENT ROW
                 ) AS avg_volume,
                 volume AS curr_volume
             FROM tr
@@ -185,13 +178,7 @@ def calc_volatility(
         WHERE date = ?
         ORDER BY code
         """,
-        [
-            target_date,
-            _ATR_DAYS - 1,
-            _VOLUME_DAYS - 1,
-            _VOLUME_DAYS - 1,
-            target_date,
-        ],
+        [target_date, target_date],
     ).fetchall()
 
     cols = ["date", "code", "atr_20", "atr_pct", "avg_turnover", "volume_ratio"]
@@ -229,14 +216,15 @@ def calc_value(
     rows = conn.execute(
         """
         WITH latest_fin AS (
-            -- target_date 以前の最新財務レコードを銘柄ごとに1件取得
-            SELECT DISTINCT ON (code)
-                code,
-                eps,
-                roe
-            FROM raw_financials
-            WHERE report_date <= ?
-            ORDER BY code, report_date DESC
+            -- target_date 以前の最新財務レコードを銘柄ごとに1件取得（DuckDB 互換: ROW_NUMBER 使用）
+            SELECT code, eps, roe
+            FROM (
+                SELECT code, eps, roe,
+                       ROW_NUMBER() OVER (PARTITION BY code ORDER BY report_date DESC) AS rn
+                FROM raw_financials
+                WHERE report_date <= ?
+            ) t
+            WHERE rn = 1
         ),
         price_on_date AS (
             SELECT code, close
