@@ -253,7 +253,9 @@ def calc_value(
             SELECT code, eps, roe
             FROM (
                 SELECT code, eps, roe,
-                       ROW_NUMBER() OVER (PARTITION BY code ORDER BY report_date DESC) AS rn
+                       ROW_NUMBER() OVER (
+                           PARTITION BY code ORDER BY report_date DESC, fetched_at DESC
+                       ) AS rn
                 FROM raw_financials
                 WHERE report_date <= ?
             ) t

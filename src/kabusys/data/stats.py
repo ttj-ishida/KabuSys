@@ -34,11 +34,13 @@ def zscore_normalize(
     result = [r.copy() for r in records]
 
     for col in columns:
-        # None・非数値・NaN/Inf を除外して計算（TypeError/NaN汚染防止）
+        # None・bool・非数値・NaN/Inf を除外して計算（TypeError/NaN汚染防止）
+        # bool は int のサブクラスのため明示的に除外する
         values = [
             v for r in result
             if (v := r.get(col)) is not None
             and isinstance(v, (int, float))
+            and not isinstance(v, bool)
             and math.isfinite(v)
         ]
         if len(values) <= 1:
@@ -46,11 +48,11 @@ def zscore_normalize(
         mean = sum(values) / len(values)
         variance = sum((v - mean) ** 2 for v in values) / len(values)
         std = variance ** 0.5
-        if std == 0:
+        if std <= 1e-15:  # 浮動小数誤差による過大スケールを防止
             continue
         for r in result:
             v = r.get(col)
-            if v is not None and isinstance(v, (int, float)) and math.isfinite(v):
+            if v is not None and isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
                 r[col] = (v - mean) / std
 
     return result

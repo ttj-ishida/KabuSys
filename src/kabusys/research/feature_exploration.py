@@ -159,8 +159,14 @@ def calc_ic(
 
 
 def rank(values: list[float]) -> list[float]:
-    """値のリストをランクに変換する（同順位は平均ランク）。"""
-    indexed = sorted(enumerate(values), key=lambda x: x[1])
+    """値のリストをランクに変換する（同順位は平均ランク）。
+
+    浮動小数の丸め誤差による ties 検出漏れを防ぐため、
+    比較前に round(v, 12) で丸めた値を使用する。
+    """
+    # 丸め済みの値でソート・比較する（元の値はランク配置に使わない）
+    rounded = [round(v, 12) for v in values]
+    indexed = sorted(enumerate(rounded), key=lambda x: x[1])
     ranks = [0.0] * len(values)
     i = 0
     while i < len(indexed):
