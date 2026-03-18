@@ -4,6 +4,9 @@
 .env.*.local
 Keys/
 
+# Claude Code ローカル設定（トークン・allow設定を含む可能性があるため除外）
+.claude/settings.local.json
+
 # ログ・作業ファイル
 OrderLogs/
 logs/
@@ -36,3 +39,5 @@ data/*
 # OS
 .DS_Store
 Thumbs.db
+Order.txt
+

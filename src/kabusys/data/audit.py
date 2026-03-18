@@ -25,9 +25,12 @@ UUID 連鎖によって完全にトレース可能にする監査テーブルを
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import duckdb
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # DDL 定義
@@ -201,8 +204,8 @@ def init_audit_schema(
         except Exception:
             try:
                 conn.execute("ROLLBACK")
-            except Exception:
-                pass  # ROLLBACK 失敗は元の例外を優先して無視
+            except Exception as rb_exc:
+                logger.warning("init_audit_schema: ROLLBACK failed: %s", rb_exc)
             raise
     else:
         _apply_audit_schema(conn)

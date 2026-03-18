@@ -1,8 +1,0 @@
-@CLAUDE.md
-
-OPENAI_MODEL_REVIEW = gpt-5
-OPENAI_MODEL_TEST   = gpt-5-mini
-OPENAI_MODEL_DOC    = gpt-5-mini
-OPENAI_MODEL_FIX    = gpt-5
-
-にしてコストを削減してください。
