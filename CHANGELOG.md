@@ -1,102 +1,110 @@
-Keep a Changelog 準拠の CHANGELOG.md（日本語）を以下に作成しました。
+CHANGELOG
+=========
 
-CHANGELOG.md
+すべての重要な変更はこのファイルに記録します。  
+フォーマットは "Keep a Changelog" に準拠しています。  
 
-All notable changes to this project will be documented in this file.
-
-フォーマット: https://keepachangelog.com/ja/1.0.0/
+注: この CHANGELOG はリポジトリ内のコードから推測して作成しています。実際のコミット履歴やリリースノートと差異がある可能性があります。
 
 Unreleased
 ----------
-（現在差分はありません）
 
-0.1.0 - 2026-03-18
------------------
+- （なし）
+
+[0.1.0] - 2026-03-18
+--------------------
+
+初回公開リリース。日本株自動売買システム「KabuSys」の基礎機能を実装しています。以下はコードベースから推測してまとめた主要な追加項目です。
+
 Added
-- 基本パッケージ初期リリース (kabusys v0.1.0)
-  - パッケージ公開情報
-    - __version__ = "0.1.0"
-    - パッケージ公開モジュール: data, strategy, execution, monitoring
+- パッケージ初期化
+  - pakage version: 0.1.0（src/kabusys/__init__.py）
+  - 公開サブパッケージ: data, strategy, execution, monitoring を __all__ に定義。
 
-- 設定/環境変数管理 (kabusys.config)
-  - .env/.env.local の自動読み込み機能
-    - プロジェクトルートを .git または pyproject.toml から探索して自動ロード（CWD 非依存）
-    - 読み込み優先順位: OS 環境変数 > .env.local > .env
-    - 自動ロードを無効化する環境変数: KABUSYS_DISABLE_AUTO_ENV_LOAD=1
-  - .env 行パーサ実装
-    - コメント、export プレフィックス、シングル/ダブルクォート、エスケープ、インラインコメント処理に対応
-  - 上書き制御・保護キー機能
-    - override フラグと protected キーセットにより OS 環境変数の保護が可能
-  - Settings クラス
-    - J-Quants / kabu API / Slack / DB パス 等のプロパティを提供
-    - 必須環境変数取得時に未設定で ValueError を発生させる _require 実装
-    - KABUSYS_ENV（development/paper_trading/live）および LOG_LEVEL（DEBUG/INFO/...）の検証
+- 環境設定管理（src/kabusys/config.py）
+  - .env ファイルまたは環境変数から設定を読み込む自動ロード機構（プロジェクトルートを .git / pyproject.toml で探索）。
+  - .env と .env.local の読み込み優先度制御（OS 環境変数を保護する protected ロジック）。
+  - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動ロード無効化。
+  - .env パーサ（export 形式、クォート、インラインコメント対応）。
+  - 必須設定取得ヘルパ（_require）および Settings クラス:
+    - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID を必須として要求。
+    - KABUSYS_ENV の検証（development / paper_trading / live）。
+    - LOG_LEVEL 検証（DEBUG/INFO/WARNING/ERROR/CRITICAL）。
+    - デフォルト DB パス: DUCKDB_PATH と SQLITE_PATH を提供。
 
-- データ取得・保存 (kabusys.data.jquants_client)
-  - J-Quants API クライアント実装
-    - レートリミット厳守（120 req/min）を固定間隔スロットリングで制御（内部 _RateLimiter）
-    - リトライロジック（指数バックオフ、最大3回、408/429/5xx 対象）
-    - 401 受信時のトークン自動リフレッシュ（1回のみ）とトークンキャッシュ
-    - ページネーション対応の取得関数:
-      - fetch_daily_quotes (株価日足)
-      - fetch_financial_statements (財務データ)
-      - fetch_market_calendar (JPX カレンダー)
+- データ取得・保存（src/kabusys/data/）
+  - J-Quants API クライアント（jquants_client.py）
+    - 固定間隔レートリミッタ（120 req/min）を実装。
+    - リトライ（指数バックオフ、最大3回）・HTTP ステータス別の挙動制御（408/429/5xx 対応）。
+    - 401 時のトークン自動リフレッシュ（1 回のみ）とモジュールレベルのトークンキャッシュ。
+    - ページネーション対応の fetch 関数:
+      - fetch_daily_quotes, fetch_financial_statements, fetch_market_calendar。
     - DuckDB への冪等保存関数（ON CONFLICT DO UPDATE）:
-      - save_daily_quotes, save_financial_statements, save_market_calendar
-    - 入出力変換ユーティリティ: _to_float, _to_int
-    - Look-ahead bias 対策として fetched_at を UTC ISO8601 で記録
+      - save_daily_quotes, save_financial_statements, save_market_calendar。
+    - 型変換ユーティリティ: _to_float, _to_int（不正値を安全に None に変換）。
 
-- ニュース収集 (kabusys.data.news_collector)
-  - RSS フィードからの記事収集機能
-    - fetch_rss: RSS 取得・解析（gzip 対応、受信サイズ制限、defusedxml を使用）
-    - 前処理: URL 除去、空白正規化（preprocess_text）
-    - 記事ID: URL 正規化後の SHA-256 の先頭32文字を使用して冪等性を保証
-    - URL 正規化: トラッキングパラメータ（utm_* 等）削除、クエリソート、フラグメント削除
+  - ニュース収集（news_collector.py）
+    - RSS 取得と前処理パイプライン（fetch_rss, preprocess_text）。
+    - XML パースに defusedxml を利用して安全性確保。
     - SSRF 対策:
-      - リダイレクト検査用ハンドラ (_SSRFBlockRedirectHandler)
-      - 初期と最終 URL のスキーム検証（http/https のみ許可）
-      - ホストがプライベート/ループバック/リンクローカルでないことを検査
-    - サイズ安全対策: 最大受信バイト数（MAX_RESPONSE_BYTES = 10MB）チェック、gzip 後のサイズ検査
-    - XML パース失敗は警告ログを出して空リストを返す設計
-  - DB 保存・紐付け
-    - save_raw_news: INSERT ... RETURNING を使い、実際に挿入された記事 ID リストを返す（チャンク・トランザクション）
-    - save_news_symbols / _save_news_symbols_bulk: news_symbols への (news_id, code) 一括保存（重複排除・トランザクション）
-    - run_news_collection: 複数ソースの統合ジョブ（ソース単位で独立ハンドリング、known_codes を利用した銘柄抽出と紐付け）
-  - 銘柄コード抽出ユーティリティ
-    - extract_stock_codes: テキスト中の 4 桁数字候補を known_codes と照合して抽出
+      - URL スキーム検証（http/https のみ許可）。
+      - リダイレクト検査ハンドラ（_SSRFBlockRedirectHandler）でリダイレクト先のスキーム/プライベートアドレスを拒否。
+      - ホストのプライベート/ループバック判定（_is_private_host）。
+    - レスポンスサイズ制限（MAX_RESPONSE_BYTES、gzip 解凍後も検査）および圧縮解凍の耐性チェック。
+    - URL 正規化とトラッキングパラメータ除去（_normalize_url, _make_article_id）。
+    - 記事IDは正規化 URL の SHA-256（先頭32文字）で一意化。
+    - DuckDB への冪等保存:
+      - save_raw_news（チャンク挿入、INSERT ... RETURNING で実際に挿入された id を返す）。
+      - save_news_symbols / _save_news_symbols_bulk（銘柄紐付け、重複除去、チャンク処理）。
+    - 銘柄コード抽出ユーティリティ（extract_stock_codes）: 4桁数字と known_codes に基づく抽出。
+    - run_news_collection: 複数 RSS ソースの収集をまとめて実行（ソース単位で失敗を隔離）。
 
-- DuckDB スキーマ (kabusys.data.schema)
-  - Raw Layer テーブル定義（DDL）
-    - raw_prices, raw_financials, raw_news, raw_executions（定義の一部掲載）
-  - スキーマ初期化を目的としたモジュール骨格
+  - DuckDB スキーマ定義（data/schema.py）
+    - Raw レイヤーのテーブル DDL（raw_prices, raw_financials, raw_news, raw_executions の定義を含む）。
+    - 初期化用の DDL 定義が含まれており、データレイヤー構造の土台を提供。
 
-- リサーチ・特徴量計算 (kabusys.research)
-  - feature_exploration モジュール
-    - calc_forward_returns: DuckDB の prices_daily を参照して将来リターン（horizons 指定可）を一括 SQL で計算
-    - calc_ic: ファクターと将来リターンのスピアマンランク相関（IC）計算（同順位は平均ランク、データ不足時は None）
-    - rank: 同順位の平均ランク処理（浮動小数丸めによる ties の検出向上）
-    - factor_summary: 各ファクター列の count/mean/std/min/max/median を算出
-  - factor_research モジュール
-    - calc_momentum: mom_1m, mom_3m, mom_6m, ma200_dev（200日移動平均乖離）を DuckDB SQL ウィンドウ関数で計算
-    - calc_volatility: atr_20（20日 ATR 平均）、atr_pct、avg_turnover、volume_ratio を計算（真の TR の NULL 伝播を注意深く扱う）
-    - calc_value: latest_fin（raw_financials の target_date 以前最新）と価格を結合して PER/ROE 等を算出
-  - すべてのリサーチ関数は DuckDB 接続を受け取り prices_daily/raw_financials のみ参照（外部 API へのアクセスなし）
+- リサーチ用ファクター計算（src/kabusys/research/）
+  - feature_exploration.py
+    - 将来リターン計算（calc_forward_returns）。
+    - IC（Information Coefficient、Spearman ρ）計算（calc_ic）。
+    - ファクター統計サマリー（factor_summary）。
+    - ランク計算ユーティリティ（rank）。
+    - 設計方針: DuckDB の prices_daily を参照、外部 API にアクセスしない、標準ライブラリのみで実装。
+  - factor_research.py
+    - モメンタムファクター（calc_momentum）: mom_1m, mom_3m, mom_6m, ma200_dev（200日移動平均乖離）。
+    - ボラティリティ / 流動性ファクター（calc_volatility）: atr_20, atr_pct, avg_turnover, volume_ratio。
+    - バリューファクター（calc_value）: per, roe（raw_financials と当日の価格を組み合わせて計算）。
+    - 各関数はデータ不足時に None を返す設計（安全性重視）。
+  - research パッケージ初期化で主要関数をエクスポート（zscore_normalize を data.stats から利用する想定）。
 
-- パッケージ公開インターフェース (kabusys.research.__init__)
-  - 主要関数を __all__ で公開 (calc_momentum, calc_volatility, calc_value, zscore_normalize, calc_forward_returns, calc_ic, factor_summary, rank)
+Changed
+- （初回リリースのため該当なし）
+
+Fixed
+- （初回リリースのため該当なし）
 
 Security
-- ニュース収集での安全対策強化
-  - defusedxml を利用した XML パース（XML Bomb 等の対策）
-  - SSRF 対策: URL スキーム制限（http/https）、プライベートアドレス検出、リダイレクト時の事前検証
-  - HTTP レスポンスサイズ上限と gzip 解凍後サイズ検査によるメモリ DoS 対策
+- ニュース収集での SSRF 対策、XML パースの安全化、受信サイズ上限、gzip 解凍後サイズ検査など、多層の安全対策を実装。
+- J-Quants クライアントはトークンの自動リフレッシュを適切に行い、401 の無限ループを回避するロジックを採用。
 
-Notes
-- 必須環境変数例（Settings で _require により必須扱い）
-  - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID など
-- DuckDB / SQLite のデフォルトパスは Settings.duckdb_path / sqlite_path で設定可能（環境変数 DUCKDB_PATH/SQLITE_PATH）
-- J-Quants API のレート制限・リトライ・トークン更新の設計は本番の長時間実行を想定
-- strategy / execution / monitoring パッケージは存在するが（__init__.py がある）具体的実装は本バージョンでは未実装または外部化されている
+Notes / 注意点
+- 研究モジュール（research/*）は外部ライブラリ（pandas 等）に依存しない実装方針。ただし、実運用ではパフォーマンスや利便性のために pandas 等の導入を検討する余地あり。
+- DuckDB がランタイム依存として必要（duckdb モジュールをインポート）。
+- jquants_client は urllib を使用しており、システムの TLS 設定やネットワーク環境に依存する可能性あり。
+- save_* 系関数は DuckDB 接続を受け取り、ON CONFLICT による更新を行うため、DB のスキーマと主キー制約が前提となる。
+- Settings に定義された必須環境変数が未設定の場合、ValueError を送出するためデプロイ前に .env を適切に設定してください。
+- research パッケージは data.stats.zscore_normalize を参照しているため、data.stats の実装が必要。
 
-Acknowledgements
-- 本 CHANGELOG はコードベースから推測して記載しています。動作・仕様の詳細は該当モジュールの実装・ドキュメントを参照してください。
+Migration / Upgrade
+- 初回リリースのためアップグレード手順はありません。既存のユーザーは以下を確認してください:
+  - 必須環境変数（JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID）を設定。
+  - DuckDB スキーマを初期化（schema モジュールを用いる）。
+  - 外部 API 利用時は J-Quants の利用規約・レート制限に従う。
+
+Contributors
+- コードベースからは明示的な著者情報は得られません。リポジトリのコミット履歴を参照してください。
+
+ライセンス
+- コード内にライセンス表記は見つかりません。実際の配布時は LICENSE ファイルを確認してください。
+
+---
