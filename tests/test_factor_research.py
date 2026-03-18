@@ -15,11 +15,11 @@ import duckdb
 import pytest
 
 from kabusys.data.schema import init_schema
+from kabusys.data.stats import zscore_normalize
 from kabusys.research.factor_research import (
     calc_momentum,
     calc_volatility,
     calc_value,
-    zscore_normalize,
 )
 from kabusys.research.feature_exploration import (
     calc_forward_returns,

@@ -54,6 +54,7 @@ def calc_forward_returns(
         horizons = [1, 5, 21]
     if any(not isinstance(h, int) or h <= 0 or h > 252 for h in horizons):
         raise ValueError("horizons must be positive integers <= 252")
+    horizons = sorted(set(horizons))  # 重複を除去してSQL エイリアス衝突を防ぐ
 
     # 全ホライズンをまとめて1クエリで取得
     # パフォーマンス: max_horizon の 2 倍のカレンダー日数でスキャン範囲を限定
@@ -196,7 +197,12 @@ def factor_summary(
     """
     result: dict[str, dict[str, float | int | None]] = {}
     for col in columns:
-        values = sorted(r[col] for r in records if r.get(col) is not None)
+        values = sorted(
+            v for r in records
+            if (v := r.get(col)) is not None
+            and isinstance(v, (int, float))
+            and math.isfinite(v)
+        )
         n = len(values)
         if n == 0:
             result[col] = {"count": 0, "mean": None, "std": None,

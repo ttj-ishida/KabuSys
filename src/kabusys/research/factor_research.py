@@ -25,8 +25,6 @@ from typing import Any
 
 import duckdb
 
-from kabusys.data.stats import zscore_normalize  # noqa: F401 (re-export)
-
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -154,20 +152,29 @@ def calc_volatility(
 
     rows = conn.execute(
         f"""
-        WITH tr AS (
+        WITH base AS (
+            -- prev_close を事前計算することで true_range の NULL 伝播を正確に制御する
             SELECT
-                date,
-                code,
-                close,
-                volume,
-                turnover,
-                GREATEST(
-                    COALESCE(high - low, 0),
-                    COALESCE(ABS(high - LAG(close) OVER (PARTITION BY code ORDER BY date)), 0),
-                    COALESCE(ABS(low  - LAG(close) OVER (PARTITION BY code ORDER BY date)), 0)
-                ) AS true_range
+                date, code, high, low, close, volume, turnover,
+                LAG(close) OVER (PARTITION BY code ORDER BY date) AS prev_close
             FROM prices_daily
             WHERE date BETWEEN ? AND ?
+        ),
+        tr AS (
+            SELECT
+                date, code, close, volume, turnover,
+                -- high/low/prev_close のいずれかが NULL なら true_range も NULL とする
+                -- （COALESCE で 0 に潰すと cnt_atr が過大評価されるため）
+                CASE
+                    WHEN high IS NULL OR low IS NULL OR prev_close IS NULL
+                        THEN NULL
+                    ELSE GREATEST(
+                        high - low,
+                        ABS(high - prev_close),
+                        ABS(low  - prev_close)
+                    )
+                END AS true_range
+            FROM base
         ),
         agg AS (
             SELECT

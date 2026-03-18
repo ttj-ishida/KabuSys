@@ -7,7 +7,6 @@ data / research 双方から参照される汎用統計関数を提供する。
 
 from __future__ import annotations
 
-import copy
 from typing import Any
 
 
@@ -24,13 +23,14 @@ def zscore_normalize(
     None 値はスキップして計算し、正規化後も None を返す。
 
     Args:
-        records: ファクター計算関数の戻り値リスト。
+        records: ファクター計算関数の戻り値リスト。各要素はフラットな dict。
         columns: 正規化対象のカラム名リスト。
 
     Returns:
         正規化済みのレコードリスト（元のリストを変更しない）。
     """
-    result = copy.deepcopy(records)
+    # フラットな dict のため浅いコピーで十分（deepcopy より軽量）
+    result = [r.copy() for r in records]
 
     for col in columns:
         values = [r[col] for r in result if r.get(col) is not None]

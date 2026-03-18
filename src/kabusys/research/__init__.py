@@ -1,4 +1,5 @@
-from .factor_research import calc_momentum, calc_value, calc_volatility, zscore_normalize
+from kabusys.data.stats import zscore_normalize
+from .factor_research import calc_momentum, calc_value, calc_volatility
 from .feature_exploration import calc_forward_returns, calc_ic, factor_summary, rank
 
 __all__ = [
