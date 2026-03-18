@@ -132,6 +132,8 @@ CREATE TABLE IF NOT EXISTS news_symbols (
     news_id     VARCHAR     NOT NULL,
     code        VARCHAR     NOT NULL,
     PRIMARY KEY (news_id, code),
+    -- Note: ON DELETE CASCADE は DuckDB 1.5.0 非サポートのため省略。
+    --       news_articles 削除時はアプリ側で先に news_symbols を削除すること。
     FOREIGN KEY (news_id) REFERENCES news_articles(id)
 )
 """
@@ -217,6 +219,8 @@ CREATE TABLE IF NOT EXISTS orders (
     price       DECIMAL(18,4)          CHECK (price >= 0),
     status      VARCHAR       NOT NULL DEFAULT 'created'
                               CHECK (status IN ('created','sent','filled','cancelled','rejected')),
+    -- Note: ON DELETE SET NULL は DuckDB 1.5.0 非サポートのため省略。
+    --       signal_queue 削除時はアプリ側で orders.signal_id を NULL に更新してから削除すること。
     FOREIGN KEY (signal_id) REFERENCES signal_queue(signal_id)
 )
 """
@@ -229,6 +233,8 @@ CREATE TABLE IF NOT EXISTS trades (
     code        VARCHAR       NOT NULL,
     price       DECIMAL(18,4) NOT NULL CHECK (price >= 0),
     size        BIGINT        NOT NULL CHECK (size > 0),
+    -- Note: ON DELETE CASCADE は DuckDB 1.5.0 非サポートのため省略。
+    --       orders 削除時はアプリ側で先に trades を削除すること。
     FOREIGN KEY (order_id) REFERENCES orders(order_id)
 )
 """

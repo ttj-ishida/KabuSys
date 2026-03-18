@@ -56,6 +56,11 @@ def calc_forward_returns(
         raise ValueError("horizons must be positive integers <= 252")
 
     # 全ホライズンをまとめて1クエリで取得
+    # パフォーマンス: max_horizon の 2 倍のカレンダー日数でスキャン範囲を限定
+    # （営業日は週 5 日のため 2 倍バッファで十分カバーできる）
+    max_h = max(horizons)
+    end_date = target_date + timedelta(days=max_h * 2)
+
     lag_exprs = ", ".join(
         f"LEAD(close, {h}) OVER (PARTITION BY code ORDER BY date) AS fwd_close_{h}"
         for h in horizons
@@ -69,16 +74,21 @@ def calc_forward_returns(
 
     rows = conn.execute(
         f"""
-        WITH leads AS (
-            SELECT date, code, close, {lag_exprs}
+        WITH base AS (
+            SELECT date, code, close
             FROM prices_daily
+            WHERE date BETWEEN ? AND ?
+        ),
+        leads AS (
+            SELECT date, code, close, {lag_exprs}
+            FROM base
         )
         SELECT date, code, {return_exprs}
         FROM leads
         WHERE date = ?
         ORDER BY code
         """,  # noqa: S608
-        [target_date],
+        [target_date, end_date, target_date],
     ).fetchall()
 
     cols = ["date", "code"] + col_names
