@@ -169,7 +169,7 @@ def _generate_sell_signals(
         )
         SELECT p.code, CAST(p.avg_price AS DOUBLE), pr.close
         FROM latest_pos p
-        JOIN latest_price pr ON pr.code = p.code
+        LEFT JOIN latest_price pr ON pr.code = p.code
         WHERE p.position_size > 0
         """,
         [target_date, target_date],
@@ -177,22 +177,24 @@ def _generate_sell_signals(
 
     sell_signals: list[dict[str, Any]] = []
     for code, avg_price, close in pos_rows:
-        if avg_price is None or avg_price <= 0 or close is None:
+        if avg_price is None or avg_price <= 0:
             continue
-        pnl_rate = (close - avg_price) / avg_price
-        final_score = score_map.get(code)
+        # features に存在しない保有銘柄は final_score = 0.0 と見なす（threshold 未満 → SELL 対象）
+        final_score = score_map.get(code, 0.0)
 
-        # 1. ストップロス（最優先）
-        if pnl_rate < _STOP_LOSS_RATE:
-            sell_signals.append({
-                "code": code,
-                "score": final_score if final_score is not None else 0.0,
-                "reason": "stop_loss",
-            })
-            continue
+        # 1. ストップロス（最優先）: 価格が取得できた場合のみ判定
+        if close is not None:
+            pnl_rate = (close - avg_price) / avg_price
+            if pnl_rate < _STOP_LOSS_RATE:
+                sell_signals.append({
+                    "code": code,
+                    "score": final_score,
+                    "reason": "stop_loss",
+                })
+                continue
 
-        # 2. スコア低下
-        if final_score is not None and final_score < threshold:
+        # 2. スコア低下（価格が取得できなくても判定する）
+        if final_score < threshold:
             sell_signals.append({
                 "code": code,
                 "score": final_score,
@@ -228,7 +230,10 @@ def generate_signals(
         signals テーブルへ書き込んだシグナル数（BUY + SELL の合計）。
     """
     # weights を _DEFAULT_WEIGHTS でフォールバック補完し、合計が 1.0 でなければ再スケール
-    merged_weights = {**_DEFAULT_WEIGHTS, **(weights or {})}
+    # 未知キーは無視して既知キー（_DEFAULT_WEIGHTS）のみを受け付ける
+    allowed = set(_DEFAULT_WEIGHTS)
+    user_w = {k: v for k, v in (weights or {}).items() if k in allowed}
+    merged_weights = {**_DEFAULT_WEIGHTS, **user_w}
     total_w = sum(merged_weights.values())
     if total_w <= 0:
         logger.warning("generate_signals: weights の合計が 0 以下です。_DEFAULT_WEIGHTS にフォールバックします。")
@@ -250,8 +255,7 @@ def generate_signals(
     features = [dict(zip(feat_cols, r)) for r in feat_rows]
 
     if not features:
-        logger.warning("generate_signals: features が空 date=%s", target_date)
-        return 0
+        logger.warning("generate_signals: features が空 date=%s — BUY シグナルなし、SELL 判定のみ実施", target_date)
 
     # 2. AI スコア読み込み（未登録の場合は空辞書）
     ai_rows = conn.execute(

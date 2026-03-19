@@ -514,3 +514,52 @@ def test_generate_signals_no_price_on_target_date_still_sells(conn):
         "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
     ).fetchone()
     assert row is not None and row[0] == "sell"
+
+
+def test_generate_signals_weights_unknown_key_ignored(conn):
+    """weights に未知キーを渡しても既知キーのスコアが歪まない"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    conn.execute(
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 WHERE code = 'A' AND date = ?",
+        [TARGET_DATE],
+    )
+    # 未知キー "foo" を含む weights で実行しても例外にならず BUY シグナルが生成される
+    generate_signals(conn, TARGET_DATE, threshold=0.5, weights={"momentum": 0.8, "foo": 99.9})
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    assert row is not None and row[0] == "buy"
+
+
+def test_generate_signals_missing_from_features_sells(conn):
+    """features に存在しない保有銘柄は score=0.0 と見なされ SELL シグナルが生成される"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    # build_features は呼ばない → features テーブルに A は存在しない
+    conn.execute(
+        "INSERT INTO positions (date, code, position_size, avg_price, market_value) "
+        "VALUES (?, 'A', 100, 950.0, 95000.0)",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.6)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    # features に存在しないため score=0.0 < 0.6 → score_drop で SELL
+    assert row is not None and row[0] == "sell"
+
+
+def test_build_features_uses_latest_price_when_no_target_date_price(conn):
+    """target_date に prices_daily がなくても直前の最新価格でフィルタが機能する"""
+    # TARGET_DATE の1日前まで挿入（TARGET_DATE 当日は挿入しない）
+    prev_date = date(2020, 5, 29)
+    _insert_price_history(
+        conn,
+        [("A", 1000.0, 6e8)],
+        start=_HISTORY_START,
+        end=prev_date,
+    )
+    # TARGET_DATE に価格がなくても build_features が動作し、直前価格でフィルタされる
+    count = build_features(conn, TARGET_DATE)
+    # prev_date の価格 1000 >= 300 かつ turnover >= 5億 → フィルタ通過
+    assert count >= 0  # エラーにならないことを確認

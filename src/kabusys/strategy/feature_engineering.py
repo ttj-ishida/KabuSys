@@ -99,8 +99,18 @@ def build_features(
     val_map: dict[str, dict] = {r["code"]: r for r in val_list}
 
     # 2. current close prices（ユニバースフィルタ用）
+    # target_date 以前の最新価格を参照（休場日・当日欠損に対応）
     price_rows = conn.execute(
-        "SELECT code, CAST(close AS DOUBLE) FROM prices_daily WHERE date = ?",
+        """
+        SELECT pd.code, CAST(pd.close AS DOUBLE)
+        FROM prices_daily pd
+        INNER JOIN (
+            SELECT code, MAX(date) AS max_date
+            FROM prices_daily
+            WHERE date <= ?
+            GROUP BY code
+        ) m ON pd.code = m.code AND pd.date = m.max_date
+        """,
         [target_date],
     ).fetchall()
     price_map: dict[str, float] = {code: close for code, close in price_rows}
@@ -155,15 +165,16 @@ def build_features(
     conn.execute("BEGIN")
     try:
         conn.execute("DELETE FROM features WHERE date = ?", [target_date])
-        conn.executemany(
-            """
-            INSERT INTO features
-                (date, code, momentum_20, momentum_60, volatility_20, volume_ratio,
-                 per, ma200_dev, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
-            """,
-            params,
-        )
+        if params:
+            conn.executemany(
+                """
+                INSERT INTO features
+                    (date, code, momentum_20, momentum_60, volatility_20, volume_ratio,
+                     per, ma200_dev, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
+                """,
+                params,
+            )
         conn.execute("COMMIT")
     except Exception:
         try:
