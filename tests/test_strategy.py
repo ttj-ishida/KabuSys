@@ -549,6 +549,47 @@ def test_generate_signals_missing_from_features_sells(conn):
     assert row is not None and row[0] == "sell"
 
 
+def test_generate_signals_no_buy_sell_conflict(conn):
+    """同日同銘柄に BUY と SELL が同時に出ないこと（SELL 優先）"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8), ("B", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    # A に高いスコアを設定（BUY 候補）
+    conn.execute(
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 WHERE code = 'A' AND date = ?",
+        [TARGET_DATE],
+    )
+    # A にストップロスを発動させる（avg_price=1100、終値=1000 → -9.1%）
+    conn.execute(
+        "INSERT INTO positions (date, code, position_size, avg_price, market_value) "
+        "VALUES (?, 'A', 100, 1100.0, 110000.0)",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.5)
+    rows = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchall()
+    sides = {r[0] for r in rows}
+    # SELL のみが存在し BUY は除外されていること
+    assert "sell" in sides
+    assert "buy" not in sides
+
+
+def test_generate_signals_weights_invalid_values_ignored(conn):
+    """weights に NaN/Inf/負値が含まれてもフォールバックして正常動作する"""
+    import math as _math
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    invalid_weights = {
+        "momentum": float("nan"),
+        "value": float("inf"),
+        "volatility": -0.5,
+        "liquidity": 0.15,
+        "news": 0.10,
+    }
+    count = generate_signals(conn, TARGET_DATE, weights=invalid_weights)
+    assert isinstance(count, int)
+
+
 def test_build_features_uses_latest_price_when_no_target_date_price(conn):
     """target_date に prices_daily がなくても直前の最新価格でフィルタが機能する"""
     # TARGET_DATE の1日前まで挿入（TARGET_DATE 当日は挿入しない）

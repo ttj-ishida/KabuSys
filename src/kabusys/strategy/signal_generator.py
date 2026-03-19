@@ -230,9 +230,16 @@ def generate_signals(
         signals テーブルへ書き込んだシグナル数（BUY + SELL の合計）。
     """
     # weights を _DEFAULT_WEIGHTS でフォールバック補完し、合計が 1.0 でなければ再スケール
-    # 未知キーは無視して既知キー（_DEFAULT_WEIGHTS）のみを受け付ける
+    # 未知キー・非数値・NaN/Inf・負値は無視して既知キー（_DEFAULT_WEIGHTS）のみを受け付ける
     allowed = set(_DEFAULT_WEIGHTS)
-    user_w = {k: v for k, v in (weights or {}).items() if k in allowed}
+    user_w: dict[str, float] = {}
+    for k, v in (weights or {}).items():
+        if k not in allowed:
+            continue
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or v < 0:
+            logger.warning("generate_signals: weights[%s]=%r は無効な値のためスキップします。", k, v)
+            continue
+        user_w[k] = float(v)
     merged_weights = {**_DEFAULT_WEIGHTS, **user_w}
     total_w = sum(merged_weights.values())
     if total_w <= 0:
@@ -308,6 +315,10 @@ def generate_signals(
 
     # 7. SELL シグナル生成（エグジット条件）
     sell_signals = _generate_sell_signals(conn, target_date, score_map, threshold)
+
+    # SELL 対象銘柄は BUY から除外（SELL 優先ポリシー）
+    sell_codes = {s["code"] for s in sell_signals}
+    buy_signals = [b for b in buy_signals if b["code"] not in sell_codes]
 
     # 8. signals テーブルへ日付単位の置換（トランザクション＋バルク挿入で原子性を保証）
     buy_params = [
