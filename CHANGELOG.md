@@ -1,102 +1,88 @@
 # CHANGELOG
 
-全ての注目すべき変更をこのファイルに記録します。  
-フォーマットは Keep a Changelog に準拠します。
-
-## [Unreleased]
+すべての変更は Keep a Changelog の形式に準拠しています。  
+このファイルはコードベースから推測して作成しています。
 
 ## [0.1.0] - 2026-03-19
-初回リリース。日本株自動売買システム「KabuSys」の基盤機能を実装しました。主な追加・実装点は以下の通りです。
+初回リリース（初期実装）。
 
-### 追加 (Added)
-- パッケージ初期化
-  - kabusys パッケージを追加。バージョンは 0.1.0。
-  - パッケージ公開 API に data / strategy / execution / monitoring を追加。
+### 追加
+- パッケージ基盤
+  - パッケージ情報: kabusys v0.1.0 を追加（src/kabusys/__init__.py）。
+  - モジュール分割: data, strategy, execution, research, monitoring 等の名前空間を想定した構成を導入。
 
-- 環境設定管理 (`kabusys.config`)
-  - .env / .env.local の自動読み込み機能を実装（プロジェクトルートを .git または pyproject.toml から検出）。
-  - KABUSYS_DISABLE_AUTO_ENV_LOAD により自動ロードを無効化可能。
-  - 高度な .env パーサを実装:
-    - export プレフィックス、シングル/ダブルクォート、バックスラッシュエスケープに対応。
-    - インラインコメントの扱い（クォート有無による振る舞いの違い）を実装。
-  - .env の上書き挙動:
-    - .env は OS 環境変数を保護しつつロード（.env.local は override=True で上書き）。
-  - Settings クラスを提供し、J-Quants トークン、kabu API 設定、Slack トークン、DB パス、環境種別（development/paper_trading/live）、ログレベル等の取得・検証を行う。
+- 設定・環境読み込み（src/kabusys/config.py）
+  - .env ファイルまたは環境変数から設定を読み込む Settings クラスを実装。
+  - プロジェクトルート自動検出: .git または pyproject.toml を基準にプロジェクトルートを探索し、自動的に .env/.env.local を読み込む。
+  - .env パーサ実装: export 形式の対応、クォート/エスケープ、インラインコメント処理などを細かく処理。
+  - 自動ロードの無効化フラグ: KABUSYS_DISABLE_AUTO_ENV_LOAD=1 により自動ロードを抑制可能。
+  - 必須設定の取得時に _require による ValueError 投げる仕組みを提供。
+  - 設定例（必須環境変数）: JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID。
+  - DB パス設定（既定値）: DUCKDB_PATH= data/kabusys.duckdb、SQLITE_PATH= data/monitoring.db。
+  - 環境（KABUSYS_ENV）とログレベル（LOG_LEVEL）のバリデーションを実装（許容値の定義あり）。
 
-- J-Quants API クライアント (`kabusys.data.jquants_client`)
-  - API 呼び出しユーティリティを実装（認証、ページネーション、データ取得関数を含む）。
-  - レート制限実装: 固定間隔スロットリングで 120 req/min を遵守する _RateLimiter を導入。
-  - 再試行ロジック: 指数バックオフによる最大 3 回のリトライ（408/429/5xx 対象）を実装。
-  - 401 受信時は自動で ID トークンをリフレッシュして 1 回再試行する機能を実装（無限再帰防止あり）。
-  - ページネーション対応のデータ取得関数を実装:
-    - fetch_daily_quotes（株価日足）
-    - fetch_financial_statements（財務データ）
-    - fetch_market_calendar（JPX カレンダー）
-  - DuckDB への保存関数（冪等）を実装:
-    - save_daily_quotes / save_financial_statements / save_market_calendar
-    - ON CONFLICT を用いた更新/重複排除を行う。
-  - 型変換ユーティリティ _to_float / _to_int を実装（厳密な変換ルールを適用）。
+- データ取得クライアント（src/kabusys/data/jquants_client.py）
+  - J-Quants API クライアントを実装:
+    - 固定間隔の RateLimiter（120 req/min）でレート制限を厳守。
+    - 再試行ロジック（指数バックオフ、最大3回）を実装。対象ステータス（408, 429, 5xx）への対応。
+    - 401 受信時はトークンを自動でリフレッシュして 1 回リトライ（無限再帰防止）。
+    - ページネーション対応で fetch_daily_quotes / fetch_financial_statements を実装。
+    - JPX マーケットカレンダー取得 fetch_market_calendar 実装。
+    - DuckDB への保存ユーティリティ（save_daily_quotes, save_financial_statements, save_market_calendar）を提供し、ON CONFLICT DO UPDATE による冪等性を確保。
+    - 型変換ユーティリティ: _to_float, _to_int（文字列/浮動小数点対応、無効値は None）。
 
-- ニュース収集モジュール (`kabusys.data.news_collector`)
-  - RSS フィード収集・前処理・DB 保存ワークフローを実装。
-  - セキュリティ対策:
-    - defusedxml を用いた XML パース（XML Bomb 対策）。
-    - SSRF 対策: リダイレクト検査、ホストのプライベートアドレス判定（DNS 解決を含む）を実装。
-    - URL スキーム検証（http/https のみ許可）。
-    - レスポンスサイズ上限（MAX_RESPONSE_BYTES、デフォルト 10 MB）と gzip 解凍後のチェックを実装（Gzip bomb 対策）。
-  - URL 正規化（トラッキングパラメータ除去、クエリソート、フラグメント削除）と記事 ID（SHA-256 の先頭32文字）生成。
-  - テキスト前処理（URL 除去、空白正規化）と銘柄コード抽出（4桁数字、既知コードセットでフィルタ）。
-  - DB 保存の効率化:
-    - INSERT ... RETURNING を使った新規挿入 ID の取得。
-    - チャンク分割（_INSERT_CHUNK_SIZE）と単一トランザクションでの挿入。
-    - news_symbols の一括保存および重複排除済み挿入を実装。
-  - run_news_collection により複数ソースを順次収集し、新規保存数を返す。
+- ニュース収集（src/kabusys/data/news_collector.py）
+  - RSS フィードからの記事収集ライブラリ実装:
+    - RSS フェッチ fetch_rss、XML の安全パース（defusedxml）対応。
+    - SSRF 対策: URL スキーム検証、リダイレクト時のスキーム/ホスト検査、プライベートIP/ループバックの拒否。
+    - レスポンスサイズ上限 (MAX_RESPONSE_BYTES = 10MB) と gzip 展開後のサイズ検査（Gzip bomb 対策）。
+    - URL 正規化とトラッキングパラメータ除去(_normalize_url)、記事ID は正規化 URL の SHA-256（先頭32文字）。
+    - テキスト前処理（URL 除去・空白正規化）。
+    - raw_news テーブルへの冪等保存（save_raw_news）および挿入済み ID の返却（INSERT ... RETURNING を利用）。
+    - 銘柄コード抽出（4桁数字）と一括紐付け保存（save_news_symbols / _save_news_symbols_bulk）。
+    - run_news_collection: 複数ソースを順次処理し、ソース単位で失敗を隔離して継続するジョブ実装。
 
-- リサーチ / ファクター計算 (`kabusys.research`)
-  - feature_exploration:
-    - calc_forward_returns: DuckDB の prices_daily を参照して翌日/翌週等の将来リターンを計算。
-    - calc_ic: ファクターと将来リターンのスピアマンランク相関（IC）計算。データ不足時は None を返す。
-    - rank: 同順位は平均ランクとし、丸め誤差対策で round(v, 12) を用いたランク付け。
-    - factor_summary: count/mean/std/min/max/median を標準ライブラリのみで計算。
-  - factor_research:
+- DuckDB スキーマ定義（src/kabusys/data/schema.py）
+  - Raw layer 用の DDL を追加:
+    - raw_prices, raw_financials, raw_news, raw_executions 等のテーブル定義（スキーマ・制約を含む）。
+  - 初期化/DDL 管理を想定したモジュール化。
+
+- リサーチ（特徴量・ファクター計算）モジュール（src/kabusys/research）
+  - feature_exploration.py:
+    - calc_forward_returns: 指定日の終値を基準に複数ホライズンの将来リターンを一括取得する関数。
+    - calc_ic: ファクターと将来リターンのスピアマンランク相関（IC）計算。未経由/非有限値の除外、レコード不足時は None を返す。
+    - rank: 同順位は平均ランクを割り当てるランク化ユーティリティ（丸めにより ties 検出を安定化）。
+    - factor_summary: 各ファクター列の count/mean/std/min/max/median を計算する統計サマリー。
+    - 設計上、DuckDB の prices_daily テーブルのみ参照し、本番口座や発注 API にはアクセスしない方針。
+  - factor_research.py:
     - calc_momentum: mom_1m/mom_3m/mom_6m、ma200_dev（200日移動平均乖離）を計算。
-    - calc_volatility: 20日 ATR、相対 ATR、20日平均売買代金、出来高比率を計算（true_range の NULL 伝播を注意して処理）。
-    - calc_value: raw_financials から最新財務を取得し PER / ROE を計算（EPS が無効な場合 PER は None）。
-  - すべてのリサーチ関数は DuckDB 接続を受け取り、prices_daily / raw_financials テーブルのみを参照。pandas 等の外部ライブラリに依存しない設計。
+    - calc_volatility: atr_20（20日 ATR）、atr_pct（相対 ATR）、avg_turnover（20日平均売買代金）、volume_ratio を計算。
+    - calc_value: raw_financials から最新財務を取得して PER / ROE を計算（EPS=0 や欠損時は None）。
+    - 全関数は DuckDB の prices_daily/raw_financials のみ参照。外部ライブラリ（pandas 等）に依存しない実装。
 
-- DuckDB スキーマ定義 (`kabusys.data.schema`)
-  - Raw Layer の DDL を実装:
-    - raw_prices, raw_financials, raw_news, raw_executions（Raw Layer の主要テーブル定義を含む）。
-  - DataSchema に基づく三層（Raw / Processed / Feature）設計方針を採用（初期は Raw レイヤ中心の定義）。
+- research パッケージのエクスポート（src/kabusys/research/__init__.py）
+  - 主なユーティリティ関数（calc_momentum, calc_volatility, calc_value, zscore_normalize, calc_forward_returns, calc_ic, factor_summary, rank）を公開。
 
-### 改善 (Changed)
-- ログ・情報出力を各主要処理に追加
-  - データ取得や保存、RSS 取得、リサーチ計算などで INFO/DEBUG ログを出力し、処理状況を追跡可能に。
+### 変更
+- （初版のため履歴的な「変更」は無し。全て新規追加）
 
-- 再試行 / エラーハンドリング
-  - ネットワークエラーや HTTP エラー時の詳細ログとリトライ挙動を整備。
-  - ニュース収集と DB 保存はソース単位／トランザクション単位で失敗を局所化（1 ソースの失敗で全体停止しない）。
+### 修正
+- （初版のため既知のバグ修正履歴は無し）
 
-### 修正 (Fixed)
-- データ整合性を意識した NULL / 欠損値の扱いを改善
-  - true_range 計算や ATR カウントで NULL の伝播を明示的に制御（誤った 0 埋めを防止）。
-  - save_* 系関数は PK 欠損レコードをスキップしログ出力するように変更。
+### 既知の注意点 / 移行メモ
+- 自動で .env をプロジェクトルートから読み込みますが、CI/テスト環境などでは KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定して自動読み込みを無効化してください。
+- 必須の環境変数が未設定の場合、Settings のアクセサで ValueError が発生します（例: settings.jquants_refresh_token）。
+- J-Quants クライアントは内部でトークンキャッシュを保持します。トークンの強制更新が必要な場合は get_id_token を明示的に呼ぶことが可能です。
+- DuckDB テーブル名や列の制約（CHECK / PRIMARY KEY）が厳密に定義されています。不正なデータを INSERT するとエラーになりますので、保存関数は事前にデータ整形・型変換を行います。
+- ニュース収集は defusedxml と SSRF/サイズチェックなど多層の防御を行っていますが、外部フィードの多様性によるパース失敗はあり得ます（その場合はログ出力してスキップ）。
 
-### セキュリティ (Security)
-- RSS パーサで defusedxml を採用し XML ベース攻撃を緩和。
-- HTTP/HTTPS 以外のスキームやプライベート IP/ホストへのアクセスをブロックして SSRF を防止。
-- 外部 API 呼び出しでトークンの安全なリフレッシュとキャッシュを実装（無限再帰防止の設計に注意）。
+### セキュリティ
+- ニュース収集:
+  - defusedxml を用いた XML パースで XML Bomb 等の攻撃を軽減。
+  - リダイレクト前後にスキームとホスト検証を行い、プライベートIP/ループバック/IPマルチキャスト等へのアクセスを拒否（SSRF 対策）。
+  - レスポンスサイズ上限・gzip 解凍後の上限チェックで DoS / Gzip Bomb 対策を実施。
+- J-Quants クライアント:
+  - 認証トークンの自動リフレッシュは allow_refresh フラグで制御し、無限再帰を回避。
+  - レート制限と再試行ロジックにより API の健全性を保護。
 
-### パフォーマンス (Performance)
-- J-Quants API のレート制限と固定間隔スロットリングで API 制限に依存した安定動作を実現。
-- ニュース保存・紐付けをチャンク化して DB へのオーバーヘッドを低減。
-- DuckDB 側のウィンドウ関数を活用してリサーチ計算を SQL 側で効率化。
-
-### 既知の制限 (Known issues / Notes)
-- Strategy / execution / monitoring パッケージは初期スケルトンのみ（機能の実装は継続予定）。
-- schema モジュールは Raw Layer の主要テーブルを定義済みだが、Applied/Execution レイヤの完全な定義やマイグレーション管理は今後追加予定。
-- jquants_client の _BASE_URL 等はコード内定数で設定されているため、運用時は環境変数や設定での上書きを検討してください（Settings による管理は一部のみ）。
-
----
-
-今後のリリースでは以下を予定しています: Strategy 実装（発注ロジック・ポジション管理）、Execution 層の発注連携（kabu ステーション API 統合）、Monitoring（Slack 通知等）の整備、Processed/Feature レイヤの DDL 拡充と migration 機構の導入。
+もし追加で「リリース日を変更したい」「各ファイルごとの細かい差分注釈を含めたい」「英語版 CHANGELOG を併記したい」等の要望があれば教えてください。
