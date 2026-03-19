@@ -138,27 +138,39 @@ def build_features(
             else:
                 r[col] = None
 
-    # 7. features テーブルへ UPSERT（DELETE + INSERT で冪等性を保証）
-    conn.execute("DELETE FROM features WHERE date = ?", [target_date])
-    for r in normalized:
-        conn.execute(
+    # 7. features テーブルへ UPSERT（トランザクション＋バルク挿入で原子性を保証）
+    params = [
+        (
+            target_date,
+            r["code"],
+            r.get("mom_1m"),
+            r.get("mom_3m"),
+            r.get("atr_pct"),
+            r.get("volume_ratio"),
+            r.get("per"),
+            r.get("ma200_dev"),
+        )
+        for r in normalized
+    ]
+    conn.execute("BEGIN")
+    try:
+        conn.execute("DELETE FROM features WHERE date = ?", [target_date])
+        conn.executemany(
             """
             INSERT INTO features
                 (date, code, momentum_20, momentum_60, volatility_20, volume_ratio,
                  per, ma200_dev, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
             """,
-            [
-                target_date,
-                r["code"],
-                r.get("mom_1m"),
-                r.get("mom_3m"),
-                r.get("atr_pct"),
-                r.get("volume_ratio"),
-                r.get("per"),
-                r.get("ma200_dev"),
-            ],
+            params,
         )
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception as rb_exc:
+            logger.warning("build_features: ROLLBACK failed: %s", rb_exc)
+        raise
 
     count = len(normalized)
     logger.info("build_features: %d 銘柄 date=%s", count, target_date)

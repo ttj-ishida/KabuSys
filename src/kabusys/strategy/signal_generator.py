@@ -147,11 +147,16 @@ def _generate_sell_signals(
     """
     pos_rows = conn.execute(
         """
+        WITH latest_pos AS (
+            SELECT *
+            FROM positions
+            WHERE date <= ?
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY code ORDER BY date DESC) = 1
+        )
         SELECT p.code, CAST(p.avg_price AS DOUBLE), CAST(pd.close AS DOUBLE)
-        FROM positions p
+        FROM latest_pos p
         JOIN prices_daily pd ON pd.code = p.code AND pd.date = ?
-        WHERE p.date = ?
-          AND p.position_size > 0
+        WHERE p.position_size > 0
         """,
         [target_date, target_date],
     ).fetchall()
@@ -208,8 +213,12 @@ def generate_signals(
     Returns:
         signals テーブルへ書き込んだシグナル数（BUY + SELL の合計）。
     """
-    if weights is None:
-        weights = _DEFAULT_WEIGHTS
+    # weights を _DEFAULT_WEIGHTS でフォールバック補完し、合計が 1.0 でなければ再スケール
+    merged_weights = {**_DEFAULT_WEIGHTS, **(weights or {})}
+    total_w = sum(merged_weights.values())
+    if total_w > 0 and not math.isclose(total_w, 1.0):
+        merged_weights = {k: v / total_w for k, v in merged_weights.items()}
+    weights = merged_weights
 
     # 1. features 読み込み
     feat_rows = conn.execute(
@@ -279,18 +288,35 @@ def generate_signals(
     # 7. SELL シグナル生成（エグジット条件）
     sell_signals = _generate_sell_signals(conn, target_date, score_map, threshold)
 
-    # 8. signals テーブルへ書き込み（DELETE + INSERT で冪等性を保証）
-    conn.execute("DELETE FROM signals WHERE date = ?", [target_date])
-    for r in buy_signals:
-        conn.execute(
-            "INSERT INTO signals (date, code, side, score, signal_rank) VALUES (?, ?, 'buy', ?, ?)",
-            [target_date, r["code"], r["score"], r["rank"]],
-        )
-    for r in sell_signals:
-        conn.execute(
-            "INSERT INTO signals (date, code, side, score, signal_rank) VALUES (?, ?, 'sell', ?, NULL)",
-            [target_date, r["code"], r["score"]],
-        )
+    # 8. signals テーブルへ書き込み（トランザクション＋バルク挿入で原子性を保証）
+    buy_params = [
+        (target_date, r["code"], r["score"], r["rank"])
+        for r in buy_signals
+    ]
+    sell_params = [
+        (target_date, r["code"], r["score"])
+        for r in sell_signals
+    ]
+    conn.execute("BEGIN")
+    try:
+        conn.execute("DELETE FROM signals WHERE date = ?", [target_date])
+        if buy_params:
+            conn.executemany(
+                "INSERT INTO signals (date, code, side, score, signal_rank) VALUES (?, ?, 'buy', ?, ?)",
+                buy_params,
+            )
+        if sell_params:
+            conn.executemany(
+                "INSERT INTO signals (date, code, side, score, signal_rank) VALUES (?, ?, 'sell', ?, NULL)",
+                sell_params,
+            )
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception as rb_exc:
+            logger.warning("generate_signals: ROLLBACK failed: %s", rb_exc)
+        raise
 
     total = len(buy_signals) + len(sell_signals)
     logger.info(

@@ -445,3 +445,45 @@ def test_generate_signals_isolation():
             if "kabusys.execution" in getattr(getattr(mod, name, None), "__module__", "")
         ]
         assert forbidden == [], f"{mod_name} が execution 層に依存している: {forbidden}"
+
+
+def test_generate_signals_weights_partial(conn):
+    """weights を部分指定しても KeyError にならない"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    # news キーのみ指定（他は _DEFAULT_WEIGHTS で補完される）
+    count = generate_signals(conn, TARGET_DATE, weights={"news": 0.05})
+    assert isinstance(count, int)
+
+
+def test_generate_signals_weights_rescaled(conn):
+    """合計が 1.0 でない weights は再スケールされ final_score が [0,1] 範囲に収まる"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    # 合計 2.0 の weights を渡す
+    w = {"momentum": 0.80, "value": 0.40, "volatility": 0.30, "liquidity": 0.30, "news": 0.20}
+    generate_signals(conn, TARGET_DATE, threshold=0.0, weights=w)
+    rows = conn.execute(
+        "SELECT score FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
+    ).fetchall()
+    for (score,) in rows:
+        assert 0.0 <= score <= 1.0, f"score={score} が [0,1] 範囲外"
+
+
+def test_generate_signals_stale_position_sell(conn):
+    """positions の日付が target_date より古くても最新スナップショットで SELL 判定される"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    # positions は TARGET_DATE より前の日付で登録（avg_price=1100、現在値=1000 → -9.1% → stop-loss）
+    stale_date = date(2020, 5, 1)
+    conn.execute(
+        "INSERT INTO positions (date, code, position_size, avg_price, market_value) "
+        "VALUES (?, 'A', 100, 1100.0, 110000.0)",
+        [stale_date],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.6)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'",
+        [TARGET_DATE],
+    ).fetchone()
+    assert row is not None and row[0] == "sell"
