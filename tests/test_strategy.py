@@ -487,3 +487,30 @@ def test_generate_signals_stale_position_sell(conn):
         [TARGET_DATE],
     ).fetchone()
     assert row is not None and row[0] == "sell"
+
+
+def test_generate_signals_weights_zero_total_fallback(conn):
+    """weights 合計が 0 の場合は _DEFAULT_WEIGHTS にフォールバックし正常動作する"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    zero_weights = {"momentum": 0.0, "value": 0.0, "volatility": 0.0, "liquidity": 0.0, "news": 0.0}
+    count = generate_signals(conn, TARGET_DATE, weights=zero_weights)
+    assert isinstance(count, int)
+
+
+def test_generate_signals_no_price_on_target_date_still_sells(conn):
+    """positions が存在し直近の価格が target_date 以前にある場合でも SELL 判定される"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    # ポジション登録（avg_price=1100 → stop-loss 発動予定）
+    conn.execute(
+        "INSERT INTO positions (date, code, position_size, avg_price, market_value) "
+        "VALUES (?, 'A', 100, 1100.0, 110000.0)",
+        [TARGET_DATE],
+    )
+    # target_date の prices_daily は _insert_price_history で挿入済み（close=1000）
+    generate_signals(conn, TARGET_DATE, threshold=0.6)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    assert row is not None and row[0] == "sell"

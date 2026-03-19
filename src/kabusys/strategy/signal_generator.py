@@ -148,14 +148,28 @@ def _generate_sell_signals(
     pos_rows = conn.execute(
         """
         WITH latest_pos AS (
-            SELECT *
-            FROM positions
-            WHERE date <= ?
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY code ORDER BY date DESC) = 1
+            SELECT p.*
+            FROM positions p
+            INNER JOIN (
+                SELECT code, MAX(date) AS max_date
+                FROM positions
+                WHERE date <= ?
+                GROUP BY code
+            ) m ON p.code = m.code AND p.date = m.max_date
+        ),
+        latest_price AS (
+            SELECT pd.code, CAST(pd.close AS DOUBLE) AS close
+            FROM prices_daily pd
+            INNER JOIN (
+                SELECT code, MAX(date) AS max_date
+                FROM prices_daily
+                WHERE date <= ?
+                GROUP BY code
+            ) mp ON pd.code = mp.code AND pd.date = mp.max_date
         )
-        SELECT p.code, CAST(p.avg_price AS DOUBLE), CAST(pd.close AS DOUBLE)
+        SELECT p.code, CAST(p.avg_price AS DOUBLE), pr.close
         FROM latest_pos p
-        JOIN prices_daily pd ON pd.code = p.code AND pd.date = ?
+        JOIN latest_price pr ON pr.code = p.code
         WHERE p.position_size > 0
         """,
         [target_date, target_date],
@@ -202,7 +216,7 @@ def generate_signals(
 ) -> int:
     """features テーブルを読み込み、売買シグナルを生成して signals テーブルへ書き込む。
 
-    既存の target_date 分はすべて削除してから挿入する（冪等）。
+    target_date 分をすべて削除してから挿入する日付単位の置換（冪等）。
 
     Args:
         conn:        DuckDB 接続。features / ai_scores / positions テーブルを参照する。
@@ -216,7 +230,10 @@ def generate_signals(
     # weights を _DEFAULT_WEIGHTS でフォールバック補完し、合計が 1.0 でなければ再スケール
     merged_weights = {**_DEFAULT_WEIGHTS, **(weights or {})}
     total_w = sum(merged_weights.values())
-    if total_w > 0 and not math.isclose(total_w, 1.0):
+    if total_w <= 0:
+        logger.warning("generate_signals: weights の合計が 0 以下です。_DEFAULT_WEIGHTS にフォールバックします。")
+        merged_weights = dict(_DEFAULT_WEIGHTS)
+    elif not math.isclose(total_w, 1.0):
         merged_weights = {k: v / total_w for k, v in merged_weights.items()}
     weights = merged_weights
 
@@ -288,7 +305,7 @@ def generate_signals(
     # 7. SELL シグナル生成（エグジット条件）
     sell_signals = _generate_sell_signals(conn, target_date, score_map, threshold)
 
-    # 8. signals テーブルへ書き込み（トランザクション＋バルク挿入で原子性を保証）
+    # 8. signals テーブルへ日付単位の置換（トランザクション＋バルク挿入で原子性を保証）
     buy_params = [
         (target_date, r["code"], r["score"], r["rank"])
         for r in buy_signals

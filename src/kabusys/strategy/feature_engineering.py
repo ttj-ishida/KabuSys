@@ -80,7 +80,7 @@ def build_features(
 ) -> int:
     """ファクターを計算・正規化し features テーブルへ書き込む。
 
-    既存の target_date 分はすべて削除してから挿入する（冪等）。
+    target_date 分をすべて削除してから挿入する日付単位の置換（冪等）。
 
     Args:
         conn:        DuckDB 接続。prices_daily / raw_financials テーブルを参照する。
@@ -138,7 +138,7 @@ def build_features(
             else:
                 r[col] = None
 
-    # 7. features テーブルへ UPSERT（トランザクション＋バルク挿入で原子性を保証）
+    # 7. features テーブルへ日付単位の置換（トランザクション＋バルク挿入で原子性を保証）
     params = [
         (
             target_date,
