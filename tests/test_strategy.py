@@ -590,6 +590,80 @@ def test_generate_signals_weights_invalid_values_ignored(conn):
     assert isinstance(count, int)
 
 
+def test_generate_signals_rank_consecutive_after_sell_exclusion(conn):
+    """SELL 除外後も BUY の signal_rank が連番（1,2,3…）になること"""
+    _insert_price_history(conn, [
+        ("A", 1000.0, 6e8),
+        ("B", 1000.0, 6e8),
+        ("C", 1000.0, 6e8),
+        ("D", 1000.0, 6e8),
+    ])
+    build_features(conn, TARGET_DATE)
+    # A > B > C > D の順にスコアを設定
+    conn.execute(
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 WHERE code = 'A' AND date = ?",
+        [TARGET_DATE],
+    )
+    conn.execute(
+        "UPDATE features SET momentum_20 = 2.0, momentum_60 = 2.0 WHERE code = 'B' AND date = ?",
+        [TARGET_DATE],
+    )
+    conn.execute(
+        "UPDATE features SET momentum_20 = 1.0, momentum_60 = 1.0 WHERE code = 'C' AND date = ?",
+        [TARGET_DATE],
+    )
+    # B にストップロスを発動（SELL 対象 → BUY から除外されるべき）
+    conn.execute(
+        "INSERT INTO positions (date, code, position_size, avg_price, market_value) "
+        "VALUES (?, 'B', 100, 1100.0, 110000.0)",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.0)
+    rows = conn.execute(
+        "SELECT code, signal_rank FROM signals WHERE date = ? AND side = 'buy' ORDER BY signal_rank",
+        [TARGET_DATE],
+    ).fetchall()
+    ranks = [r[1] for r in rows]
+    # ランクが連番であること（1,2,3... で欠番なし）
+    assert ranks == list(range(1, len(ranks) + 1))
+    # B は除外されていること
+    codes = [r[0] for r in rows]
+    assert "B" not in codes
+
+
+def test_generate_signals_stop_loss_exact_threshold(conn):
+    """ちょうど -8% の下落でストップロスが発動すること（<= 比較）"""
+    _insert_price_history(conn, [("A", 920.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    # avg_price = 1000、終値 = 920 → pnl = -8.0% → stop-loss 発動すべき
+    conn.execute(
+        "INSERT INTO positions (date, code, position_size, avg_price, market_value) "
+        "VALUES (?, 'A', 100, 1000.0, 92000.0)",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.6)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'",
+        [TARGET_DATE],
+    ).fetchone()
+    assert row is not None and row[0] == "sell"
+
+
+def test_generate_signals_weights_bool_ignored(conn):
+    """weights に bool 値が含まれる場合は無効値として無視されること"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    # True/False は isinstance(v, bool) チェックでスキップされる
+    bool_weights = {
+        "momentum": True,
+        "value": False,
+        "liquidity": 0.15,
+        "news": 0.10,
+    }
+    count = generate_signals(conn, TARGET_DATE, weights=bool_weights)
+    assert isinstance(count, int)
+
+
 def test_build_features_uses_latest_price_when_no_target_date_price(conn):
     """target_date に prices_daily がなくても直前の最新価格でフィルタが機能する"""
     # TARGET_DATE の1日前まで挿入（TARGET_DATE 当日は挿入しない）

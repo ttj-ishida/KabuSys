@@ -185,7 +185,7 @@ def _generate_sell_signals(
         # 1. ストップロス（最優先）: 価格が取得できた場合のみ判定
         if close is not None:
             pnl_rate = (close - avg_price) / avg_price
-            if pnl_rate < _STOP_LOSS_RATE:
+            if pnl_rate <= _STOP_LOSS_RATE:
                 sell_signals.append({
                     "code": code,
                     "score": final_score,
@@ -316,9 +316,12 @@ def generate_signals(
     # 7. SELL シグナル生成（エグジット条件）
     sell_signals = _generate_sell_signals(conn, target_date, score_map, threshold)
 
-    # SELL 対象銘柄は BUY から除外（SELL 優先ポリシー）
+    # SELL 対象銘柄は BUY から除外し、ランクを連番で再付与（SELL 優先ポリシー）
     sell_codes = {s["code"] for s in sell_signals}
     buy_signals = [b for b in buy_signals if b["code"] not in sell_codes]
+    buy_signals.sort(key=lambda x: x["score"], reverse=True)
+    for i, b in enumerate(buy_signals, 1):
+        b["rank"] = i
 
     # 8. signals テーブルへ日付単位の置換（トランザクション＋バルク挿入で原子性を保証）
     buy_params = [
