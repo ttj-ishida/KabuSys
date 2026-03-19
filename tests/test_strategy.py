@@ -173,8 +173,16 @@ def test_is_bear_regime_bull():
 
 
 def test_is_bear_regime_bear():
-    ai = {"A": {"regime_score": -0.5}, "B": {"regime_score": -0.3}}
+    # _BEAR_MIN_SAMPLES=3 を満たすため3銘柄用意
+    ai = {"A": {"regime_score": -0.5}, "B": {"regime_score": -0.3}, "C": {"regime_score": -0.1}}
     assert _is_bear_regime(ai) is True
+
+
+def test_is_bear_regime_insufficient_samples():
+    """サンプル数が _BEAR_MIN_SAMPLES 未満の場合は Bear とみなさない"""
+    # 2銘柄（< 3）では Bear 判定しない
+    ai = {"A": {"regime_score": -0.5}, "B": {"regime_score": -0.3}}
+    assert _is_bear_regime(ai) is False
 
 
 def test_is_bear_regime_all_none():
@@ -325,17 +333,19 @@ def test_generate_signals_below_threshold_no_buy(conn):
 
 def test_generate_signals_bear_regime_suppresses_buy(conn):
     """Bear レジーム時は BUY シグナルが抑制される"""
-    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    _insert_price_history(conn, [("A", 1000.0, 6e8), ("B", 1000.0, 6e8), ("C", 1000.0, 6e8)])
     build_features(conn, TARGET_DATE)
     conn.execute(
         "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 WHERE date = ?",
         [TARGET_DATE],
     )
-    conn.execute(
-        "INSERT INTO ai_scores (date, code, sentiment_score, regime_score, ai_score) "
-        "VALUES (?, 'A', -0.5, -0.8, -0.5)",
-        [TARGET_DATE],
-    )
+    # _BEAR_MIN_SAMPLES=3 を満たすため3銘柄分の regime_score を登録（全て負）
+    for code in ("A", "B", "C"):
+        conn.execute(
+            "INSERT INTO ai_scores (date, code, sentiment_score, regime_score, ai_score) "
+            "VALUES (?, ?, -0.5, -0.8, -0.5)",
+            [TARGET_DATE, code],
+        )
     generate_signals(conn, TARGET_DATE, threshold=0.1)
     rows = conn.execute(
         "SELECT side FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
@@ -678,3 +688,31 @@ def test_build_features_uses_latest_price_when_no_target_date_price(conn):
     count = build_features(conn, TARGET_DATE)
     # prev_date の価格 1000 >= 300 かつ turnover >= 5億 → フィルタ通過
     assert count >= 0  # エラーにならないことを確認
+
+
+def test_generate_signals_no_price_suppresses_sell(conn):
+    """positions に対応する価格が prices_daily に一切存在しない場合は SELL を出さない"""
+    # prices_daily に価格を登録しない → LEFT JOIN で close = NULL になる
+    # ただし positions だけ登録する
+    conn.execute(
+        "INSERT INTO positions (date, code, position_size, avg_price, market_value) "
+        "VALUES (?, 'Z', 100, 1000.0, 100000.0)",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.6)
+    rows = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'Z'", [TARGET_DATE]
+    ).fetchall()
+    # close=None → SELL 判定全体をスキップ → シグナルなし
+    assert len(rows) == 0
+
+
+def test_is_bear_regime_exactly_min_samples(conn):
+    """_BEAR_MIN_SAMPLES ちょうどのサンプル数で Bear 判定が有効になること"""
+    # 3銘柄（= _BEAR_MIN_SAMPLES）すべて負 → Bear とみなす
+    ai = {
+        "A": {"regime_score": -0.5},
+        "B": {"regime_score": -0.3},
+        "C": {"regime_score": -0.1},
+    }
+    assert _is_bear_regime(ai) is True

@@ -44,8 +44,9 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
     "news": 0.10,
 }
 
-_DEFAULT_THRESHOLD: float = 0.60  # BUY シグナル閾値
-_STOP_LOSS_RATE: float = -0.08    # ストップロス閾値（Section 5.2）
+_DEFAULT_THRESHOLD: float = 0.60   # BUY シグナル閾値
+_STOP_LOSS_RATE: float = -0.08     # ストップロス閾値（Section 5.2）
+_BEAR_MIN_SAMPLES: int = 3         # Bear 判定に必要な最小サンプル数（不足時は Bear とみなさない）
 
 
 # ---------------------------------------------------------------------------
@@ -109,14 +110,15 @@ def _is_bear_regime(ai_map: dict[str, dict[str, Any]]) -> bool:
     """AI スコアのレジームスコアを集計し、Bear 相場か否かを判定する。
 
     市場全体のレジームスコア平均が負の場合を Bear 相場とみなす。
-    ai_scores が未登録の場合は Bear とみなさない（Conservative 側に倒す）。
+    ai_scores が未登録、またはサンプル数が _BEAR_MIN_SAMPLES 未満の場合は
+    Bear とみなさない（サンプル不足での誤判定を防ぐ）。
     """
     scores = [
         v["regime_score"]
         for v in ai_map.values()
         if v.get("regime_score") is not None and math.isfinite(v["regime_score"])
     ]
-    if not scores:
+    if len(scores) < _BEAR_MIN_SAMPLES:
         return False
     return sum(scores) / len(scores) < 0.0
 
@@ -179,21 +181,34 @@ def _generate_sell_signals(
     for code, avg_price, close in pos_rows:
         if avg_price is None or avg_price <= 0:
             continue
+
+        # 価格が取得できない場合は SELL 判定全体をスキップ（価格欠損時の誤クローズ防止）
+        if close is None:
+            logger.warning(
+                "_generate_sell_signals: %s の価格が取得できないため SELL 判定をスキップ date=%s",
+                code, target_date,
+            )
+            continue
+
         # features に存在しない保有銘柄は final_score = 0.0 と見なす（threshold 未満 → SELL 対象）
+        if code not in score_map:
+            logger.warning(
+                "_generate_sell_signals: %s は features に存在しません。score=0.0 として SELL 判定します date=%s",
+                code, target_date,
+            )
         final_score = score_map.get(code, 0.0)
 
-        # 1. ストップロス（最優先）: 価格が取得できた場合のみ判定
-        if close is not None:
-            pnl_rate = (close - avg_price) / avg_price
-            if pnl_rate <= _STOP_LOSS_RATE:
-                sell_signals.append({
-                    "code": code,
-                    "score": final_score,
-                    "reason": "stop_loss",
-                })
-                continue
+        # 1. ストップロス（最優先）
+        pnl_rate = (close - avg_price) / avg_price
+        if pnl_rate <= _STOP_LOSS_RATE:
+            sell_signals.append({
+                "code": code,
+                "score": final_score,
+                "reason": "stop_loss",
+            })
+            continue
 
-        # 2. スコア低下（価格が取得できなくても判定する）
+        # 2. スコア低下
         if final_score < threshold:
             sell_signals.append({
                 "code": code,
