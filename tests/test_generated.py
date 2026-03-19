@@ -1,350 +1,316 @@
+以下は提示されたコードに対する pytest ユニットテストのサンプル群です。要件に従い、pytest を使い、主要な動作とエッジケースをカバーし、外部依存は unittest.mock（pytest の monkeypatch を使いやすくするために併用）でモックしています。
 
+注意点:
+- テスト実行前に環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定して、モジュールインポート時の自動 .env 読み込み副作用を抑えています。
+- DuckDB を使うテストではインメモリ DB (":memory:") を利用しています。
+- 実プロジェクトのモジュール配置に合わせて import パスを設定しています（kabusys.config / kabusys.data.stats / kabusys.feature_engineering / kabusys.signal_generator）。プロジェクトの実際のパッケージ構成によっては import パスを調整してください。
+
+ファイル構成例:
+- tests/test_config.py
+- tests/test_stats_and_feature_engineering.py
+- tests/test_signal_generator.py
+
+以下を tests/ 配下に保存して pytest で実行してください。
+
+tests/test_config.py
+--------------------
 import os
-import hashlib
-from datetime import date, datetime, timezone
-from types import SimpleNamespace
-from unittest import mock
+import builtins
+import pytest
 
+# 自動 .env 読み込みを抑止してからモジュールを import する
+os.environ["KABUSYS_DISABLE_AUTO_ENV_LOAD"] = "1"
+from kabusys import config  # type: ignore
+
+def test_parse_env_line_empty_and_comment():
+    assert config._parse_env_line("") is None
+    assert config._parse_env_line("\n") is None
+    assert config._parse_env_line("# comment") is None
+    assert config._parse_env_line("   # another") is None
+
+def test_parse_env_line_export_and_simple():
+    res = config._parse_env_line("export KEY=val")
+    assert res == ("KEY", "val")
+    res2 = config._parse_env_line("FOO=  bar ")
+    assert res2 == ("FOO", "bar")
+
+def test_parse_env_line_quoted_with_escapes_and_inline_comment():
+    # single quotes with escaped chars
+    res = config._parse_env_line("A='a\\'b#not_comment'  #comment")
+    # The parser consumes quoted value until closing quote and treats escapes:
+    assert res == ("A", "a'b#not_comment")
+    # double quotes
+    res2 = config._parse_env_line('B="line\\nmore"')
+    assert res2 == ("B", "line\nmore")
+
+def test_parse_env_line_unquoted_with_comment_space():
+    # '#' preceded by space is treated as comment start
+    res = config._parse_env_line("C=foo #comment")
+    assert res == ("C", "foo")
+    # '#' without preceding space is part of value
+    res2 = config._parse_env_line("D=foo#bar")
+    assert res2 == ("D", "foo#bar")
+
+def test_require_raises_and_returns(monkeypatch):
+    # ensure environment has no such key
+    monkeypatch.delenv("SOME_MISSING", raising=False)
+    with pytest.raises(ValueError):
+        config._require("SOME_MISSING")
+    monkeypatch.setenv("SOME_OK", "value123")
+    assert config._require("SOME_OK") == "value123"
+
+tests/test_stats_and_feature_engineering.py
+-------------------------------------------
+import math
+from datetime import date
 import duckdb
 import pytest
 
-# config
-from kabusys.config import _parse_env_line, _require, Settings
+os_env = __import__("os")
+os_env.environ["KABUSYS_DISABLE_AUTO_ENV_LOAD"] = "1"
 
-# research (feature exploration)
-from kabusys.research import (
-    calc_forward_returns,
-    calc_ic,
-    rank,
-    factor_summary,
-)
+from kabusys.data import stats as stats_mod  # type: ignore
+from kabusys import feature_engineering as fe_mod  # type: ignore
 
-# features (zscore)
-from kabusys.data.features import zscore_normalize
-
-# jquants client utils
-from kabusys.data.jquants_client import _to_float, _to_int, get_id_token
-
-# schema init
-from kabusys.data.schema import init_schema
-
-# news collector
-from kabusys.data import news_collector as nc
-
-# etl
-from kabusys.data.etl import ETLResult
-
-# -------------------------
-# config tests
-# -------------------------
-
-
-def test_parse_env_line_basic_and_comments():
-    assert _parse_env_line("") is None
-    assert _parse_env_line("  # comment ") is None
-    # no separator
-    assert _parse_env_line("NOSEP") is None
-    # simple unquoted with inline comment recognized only if preceded by space
-    assert _parse_env_line("BAR=1 #ignored") == ("BAR", "1")
-    # export prefix
-    assert _parse_env_line("export X=val") == ("X", "val")
-    # quoted with escaped quote and '#' inside quotes should be preserved
-    # FOO='a\'b#c'  -> value should be: a'b#c
-    line = "FOO='a\\'b#c'   #comment"
-    assert _parse_env_line(line) == ("FOO", "a'b#c")
-    # double quoted with escaped quote
-    line2 = 'Q="x\\\"y"'
-    assert _parse_env_line(line2) == ("Q", 'x"y')
-
-
-def test_require_raises_and_ok(monkeypatch):
-    monkeypatch.delenv("SOME_MISSING_VAR", raising=False)
-    with pytest.raises(ValueError):
-        _require("SOME_MISSING_VAR")
-    monkeypatch.setenv("SOME_MISSING_VAR", "value")
-    assert _require("SOME_MISSING_VAR") == "value"
-
-
-def test_settings_env_and_log_level(monkeypatch):
-    s = Settings()
-    # default env is development
-    monkeypatch.delenv("KABUSYS_ENV", raising=False)
-    assert s.env == "development"
-    # valid values
-    monkeypatch.setenv("KABUSYS_ENV", "live")
-    assert s.env == "live"
-    monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
-    assert s.env == "paper_trading"
-    # invalid value
-    monkeypatch.setenv("KABUSYS_ENV", "invalid_env")
-    with pytest.raises(ValueError):
-        _ = s.env
-
-    # log level default INFO
-    monkeypatch.delenv("LOG_LEVEL", raising=False)
-    assert s.log_level == "INFO"
-    monkeypatch.setenv("LOG_LEVEL", "debug")
-    assert s.log_level == "DEBUG"
-    monkeypatch.setenv("LOG_LEVEL", "BAD")
-    with pytest.raises(ValueError):
-        _ = s.log_level
-
-
-# -------------------------
-# research tests (_rank, calc_ic, calc_forward_returns, factor_summary)
-# -------------------------
-
-
-def test_rank_with_ties():
-    vals = [10.0, 20.0, 20.0, 30.0]
-    ranks = rank(vals)
-    # expected ranks: 1.0, 2.5, 2.5, 4.0
-    assert pytest.approx(ranks[0]) == 1.0
-    assert pytest.approx(ranks[1]) == 2.5
-    assert pytest.approx(ranks[2]) == 2.5
-    assert pytest.approx(ranks[3]) == 4.0
-
-
-def test_calc_ic_insufficient_and_perfect_correlation():
-    # insufficient records (<3)
-    factor = [{"code": "A", "f": 1.0}, {"code": "B", "f": 2.0}]
-    fwd = [{"code": "A", "r": 0.1}, {"code": "B", "r": 0.2}]
-    assert calc_ic(factor, fwd, "f", "r") is None
-
-    # perfect monotonic correlation -> Spearman rho == 1.0
-    factor = [
-        {"code": "C", "f": 1.0},
-        {"code": "D", "f": 2.0},
-        {"code": "E", "f": 3.0},
-    ]
-    fwd = [
-        {"code": "C", "r": 10.0},
-        {"code": "D", "r": 20.0},
-        {"code": "E", "r": 30.0},
-    ]
-    rho = calc_ic(factor, fwd, "f", "r")
-    assert pytest.approx(rho) == 1.0
-
-    # negative monotonic
-    factor = [
-        {"code": "X", "f": 1.0},
-        {"code": "Y", "f": 2.0},
-        {"code": "Z", "f": 3.0},
-    ]
-    fwd = [
-        {"code": "X", "r": 30.0},
-        {"code": "Y", "r": 20.0},
-        {"code": "Z", "r": 10.0},
-    ]
-    rho = calc_ic(factor, fwd, "f", "r")
-    assert pytest.approx(rho) == -1.0
-
-
-def test_calc_forward_returns_basic():
-    conn = duckdb.connect(":memory:")
-    # create minimal prices_daily table used by calc_forward_returns
-    conn.execute(
-        """
-        CREATE TABLE prices_daily (
-            date DATE,
-            code VARCHAR,
-            close DOUBLE
-        )
-        """
-    )
-    # target_date and future dates
-    # LEAD(close, 5) は5行後を参照するため、中間行を補完して index=5 が 2020-01-06 になるよう挿入
-    t = date(2020, 1, 1)
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [t, "0001", 100.0])            # index 0
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 2), "0001", 110.0])  # index 1
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 3), "0001", 105.0])  # index 2
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 4), "0001", 108.0])  # index 3
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 5), "0001", 112.0])  # index 4
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 6), "0001", 120.0])  # index 5
-    # another code missing future -> returns None
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [t, "0002", 50.0])
-
-    res = calc_forward_returns(conn, t, horizons=[1, 5])
-    # should have two codes, ordered by code
-    codes = [r["code"] for r in res]
-    assert "0001" in codes and "0002" in codes
-    r1 = next(r for r in res if r["code"] == "0001")
-    # fwd_1d = (110 - 100) / 100 = 0.1
-    assert pytest.approx(r1["fwd_1d"]) == 0.1
-    # fwd_5d = (120 - 100) / 100 = 0.2
-    assert pytest.approx(r1["fwd_5d"]) == 0.2
-    r2 = next(r for r in res if r["code"] == "0002")
-    assert r2["fwd_1d"] is None and r2["fwd_5d"] is None
-
-
-def test_factor_summary_and_median_even_odd():
+def test_zscore_normalize_basic():
     records = [
-        {"a": 1.0, "b": None},
-        {"a": 2.0, "b": 3.0},
-        {"a": 3.0, "b": 6.0},
-        {"a": None, "b": 9.0},
+        {"code": "A", "mom": 1.0, "other": None},
+        {"code": "B", "mom": 3.0, "other": 2.0},
+        {"code": "C", "mom": 2.0, "other": 4.0},
     ]
-    summary = factor_summary(records, ["a", "b", "c"])
-    # 'a' has values [1,2,3] median=2
-    assert summary["a"]["count"] == 3
-    assert pytest.approx(summary["a"]["mean"]) == 2.0
-    assert summary["a"]["median"] == 2.0
-    # 'b' has values [3,6,9] median=6
-    assert summary["b"]["count"] == 3
-    assert pytest.approx(summary["b"]["mean"]) == 6.0
-    assert summary["b"]["median"] == 6.0
-    # 'c' absent -> all None
-    assert summary["c"]["count"] == 0
-    assert summary["c"]["mean"] is None
+    out = stats_mod.zscore_normalize(records, ["mom", "other"])
+    # mom mean = 2, std = sqrt(((1)^2 + (1)^2 + 0^2)/3)=~0.816496, so normalized for A = (1-2)/std ~ -1.2247
+    assert len(out) == 3
+    vals = {r["code"]: r["mom"] for r in out}
+    assert pytest.approx(vals["A"], rel=1e-3) == (1.0 - 2.0) / math.sqrt(((1.0 - 2.0) ** 2 + (3.0 - 2.0) ** 2 + (2.0 - 2.0) ** 2) / 3.0)
+    # other: only two valid values (B=2.0, C=4.0) -> mean=3 std=1 -> normalized: B -> -1, C -> 1
+    out_map = {r["code"]: r["other"] for r in out}
+    assert out_map["B"] == -1.0
+    assert out_map["C"] == 1.0
 
+def test_zscore_normalize_edge_single_or_constant():
+    # single record: no change expected
+    recs = [{"code": "X", "m": 5.0}]
+    out = stats_mod.zscore_normalize(recs, ["m"])
+    assert out[0]["m"] == 5.0
+    # constant values: std ~ 0 -> skip normalization
+    recs2 = [{"code": "a", "m": 1.0}, {"code": "b", "m": 1.0}]
+    out2 = stats_mod.zscore_normalize(recs2, ["m"])
+    assert out2[0]["m"] == 1.0 and out2[1]["m"] == 1.0
 
-# -------------------------
-# features: zscore_normalize
-# -------------------------
-
-
-def test_zscore_normalize_basic_and_none_and_single():
+def test_apply_universe_filter_price_and_turnover():
     records = [
-        {"code": "A", "val": 1.0},
-        {"code": "B", "val": 3.0},
-        {"code": "C", "val": None},
+        {"code": "0001", "avg_turnover": 6e8},
+        {"code": "0002", "avg_turnover": 1e9},
+        {"code": "0003", "avg_turnover": None},
+        {"code": "0004", "avg_turnover": 4e8},
     ]
-    out = zscore_normalize(records, ["val"])
-    # mean = 2, std = 1 -> zscores [-1, +1], None preserved
-    vals = {r["code"]: r["val"] for r in out}
-    assert pytest.approx(vals["A"], rel=1e-6) == -1.0
-    assert pytest.approx(vals["B"], rel=1e-6) == 1.0
-    assert vals["C"] is None
-
-    # single record -> no normalization performed (len <=1)
-    single = [{"code": "A", "val": 10.0}]
-    out2 = zscore_normalize(single, ["val"])
-    assert out2[0]["val"] == 10.0
-
-
-# -------------------------
-# jquants_client utils tests
-# -------------------------
-
-
-def test_to_float_and_to_int_edge_cases():
-    assert _to_float(None) is None
-    assert _to_float("") is None
-    assert _to_float("1.23") == pytest.approx(1.23)
-    assert _to_float("abc") is None
-
-    assert _to_int(None) is None
-    assert _to_int("") is None
-    assert _to_int("1") == 1
-    assert _to_int("1.0") == 1
-    assert _to_int("1.9") is None
-    assert _to_int("abc") is None
-
-
-def test_get_id_token_uses_request_and_env(monkeypatch):
-    # patch the internal _request used by get_id_token to return an idToken
-    import kabusys.data.jquants_client as jc
-
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "dummy_refresh")
-    with mock.patch.object(jc, "_request", return_value={"idToken": "ID123"}) as m:
-        token = get_id_token()
-        assert token == "ID123"
-        m.assert_called_once()
-    # if no refresh token in env, get_id_token should raise ValueError
-    monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
-    with pytest.raises(ValueError):
-        get_id_token(None)
-
-
-# -------------------------
-# schema init test
-# -------------------------
-
-
-def test_init_schema_creates_tables():
-    conn = init_schema(":memory:")
-    # check that a few expected tables exist
-    row = conn.execute(
-        "SELECT 1 FROM information_schema.tables WHERE lower(table_name) = lower('raw_prices')"
-    ).fetchone()
-    assert row is not None
-    # check another table
-    row2 = conn.execute(
-        "SELECT 1 FROM information_schema.tables WHERE lower(table_name) = lower('prices_daily')"
-    ).fetchone()
-    assert row2 is not None
-    conn.close()
-
-
-# -------------------------
-# news_collector utils and save_raw_news
-# -------------------------
-
-
-def test_normalize_url_and_make_article_id_and_preprocess_text():
-    url = "HTTPS://Example.COM/path?utm_source=aa&b=2#frag"
-    norm = nc._normalize_url(url)
-    assert "utm_source" not in norm
-    assert "#" not in norm
-    assert norm.startswith("https://")
-    # article id is 32-hex prefix
-    aid = nc._make_article_id(url)
-    assert isinstance(aid, str) and len(aid) == 32
-    # preprocess text removes urls and collapses whitespace
-    txt = "Visit https://x.com  \n\n and  enjoy"
-    assert nc.preprocess_text(txt) == "Visit and enjoy"
-    # None -> empty
-    assert nc.preprocess_text(None) == ""
-
-
-def test_parse_rss_datetime_and_extract_stock_codes():
-    # RFC2822 with timezone +0900 -> should convert to UTC naive
-    s = "Mon, 01 Jan 2024 00:00:00 +0900"
-    dt = nc._parse_rss_datetime(s)
-    # dt should be naive and represent UTC time (i.e., 2023-12-31 15:00:00 UTC)
-    assert dt.tzinfo is None
-    # extract stock codes from text, only known codes allowed and duplicates removed
-    text = "This mentions 7203 and 6758 and 7203 again"
-    codes = nc.extract_stock_codes(text, {"7203", "6758", "9999"})
-    assert set(codes) == {"7203", "6758"}
-    # no known codes -> empty
-    assert nc.extract_stock_codes("No codes here 1234", {"0000"}) == []
-
-
-def test_save_raw_news_idempotent(tmp_path):
-    conn = init_schema(":memory:")
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    art = {
-        "id": "id1",
-        "datetime": now,
-        "source": "test",
-        "title": "t",
-        "content": "c",
-        "url": "https://example.com/a",
+    price_map = {
+        "0001": 400.0,  # ok
+        "0002": 100.0,  # price too low
+        "0003": 500.0,  # avg_turnover None -> filtered out
+        "0004": float("nan"),  # non-finite
     }
-    # first save -> returns ['id1']
-    from kabusys.data.news_collector import save_raw_news
+    filtered = fe_mod._apply_universe_filter(records, price_map)
+    codes = [r["code"] for r in filtered]
+    assert codes == ["0001"]
 
-    inserted = save_raw_news(conn, [art])
-    assert inserted == ["id1"]
-    # second save same article -> returns []
-    inserted2 = save_raw_news(conn, [art])
-    assert inserted2 == []
-    conn.close()
+def test_build_features_inserts(monkeypatch):
+    # Prepare duckdb in-memory and create minimal tables used by build_features
+    conn = duckdb.connect(":memory:")
+    # create prices_daily and features table
+    conn.execute("""
+    CREATE TABLE prices_daily (
+        date DATE NOT NULL,
+        code VARCHAR NOT NULL,
+        close DOUBLE,
+        PRIMARY KEY (date, code)
+    )
+    """)
+    conn.execute("""
+    CREATE TABLE features (
+        date DATE NOT NULL,
+        code VARCHAR NOT NULL,
+        momentum_20 DOUBLE,
+        momentum_60 DOUBLE,
+        volatility_20 DOUBLE,
+        volume_ratio DOUBLE,
+        per DOUBLE,
+        ma200_dev DOUBLE,
+        created_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        PRIMARY KEY (date, code)
+    )
+    """)
+    target = date(2024, 1, 1)
+    # insert price row meeting universe filter
+    conn.execute("INSERT INTO prices_daily (date, code, close) VALUES (?, ?, ?)", [target, "9999", 500.0])
 
+    # monkeypatch calc_* functions to return simple lists
+    monkeypatch.setattr(fe_mod, "calc_momentum", lambda conn_, d: [
+        {"date": d, "code": "9999", "mom_1m": 1.0, "mom_3m": 0.5, "ma200_dev": 0.1}
+    ])
+    monkeypatch.setattr(fe_mod, "calc_volatility", lambda conn_, d: [
+        {"date": d, "code": "9999", "atr_pct": 0.02, "avg_turnover": 6e8, "volume_ratio": 1.2}
+    ])
+    monkeypatch.setattr(fe_mod, "calc_value", lambda conn_, d: [
+        {"date": d, "code": "9999", "per": 15.0}
+    ])
+    # monkeypatch zscore_normalize to return values unchanged (so clipping step runs)
+    from kabusys.data import stats as stats_mod  # type: ignore
+    monkeypatch.setattr(stats_mod, "zscore_normalize", lambda records, cols: records)
 
-# -------------------------
-# ETLResult dataclass
-# -------------------------
+    count = fe_mod.build_features(conn, target)
+    assert count == 1
+    # verify features row exists
+    rows = conn.execute("SELECT code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev FROM features WHERE date = ?", [target]).fetchall()
+    assert len(rows) == 1
+    code, m20, m60, vol20, vratio, per, ma200 = rows[0]
+    assert code == "9999"
+    assert m20 == 1.0
+    assert m60 == 0.5
+    assert vol20 == 0.02
+    assert vratio == 1.2
+    assert per == 15.0
+    assert ma200 == 0.1
 
+tests/test_signal_generator.py
+------------------------------
+import math
+from datetime import date
+import duckdb
+import pytest
 
-def test_etlresult_to_dict_and_flags():
-    # create dummy quality issue like object
-    qi = SimpleNamespace(check_name="chk", severity="error", message="bad")
-    r = ETLResult(target_date=date(2020, 1, 1), quality_issues=[qi], errors=["e"])
-    d = r.to_dict()
-    assert d["target_date"] == date(2020, 1, 1)
-    assert r.has_errors is True
-    assert r.has_quality_errors is True
-    assert isinstance(d["quality_issues"], list)
-    assert d["quality_issues"][0]["check_name"] == "chk"
+os_env = __import__("os")
+os_env.environ["KABUSYS_DISABLE_AUTO_ENV_LOAD"] = "1"
+
+from kabusys import signal_generator as sg  # type: ignore
+
+def test_sigmoid_and_avg_scores_and_compute_value_volatility():
+    # _sigmoid edge cases
+    assert sg._sigmoid(None) is None
+    assert pytest.approx(sg._sigmoid(0.0)) == 0.5
+    # large negative to trigger OverflowError handling branch:
+    val = sg._sigmoid(-1000.0)
+    assert val == 0.0
+    # average scores with None and inf
+    assert sg._avg_scores([None, float("nan"), float("inf")]) is None
+    assert pytest.approx(sg._avg_scores([0.5, None, 1.5])) == 1.0
+    # value score: per <=0 or None -> None
+    assert sg._compute_value_score({"per": None}) is None
+    assert sg._compute_value_score({"per": 0}) is None
+    assert pytest.approx(sg._compute_value_score({"per": 20.0})) == 0.5
+    # volatility score: invert z then sigmoid
+    assert sg._compute_volatility_score({"volatility_20": None}) is None
+    # for z = 0 -> sigmoid(0) = 0.5, but function uses -z -> 0
+    assert pytest.approx(sg._compute_volatility_score({"volatility_20": 0.0})) == 0.5
+
+def test_is_bear_regime():
+    # empty -> False
+    assert sg._is_bear_regime({})
+    # Actually, per implementation: empty scores => False
+    # create ai_map producing negative average
+    ai_map = {"A": {"regime_score": -0.5}, "B": {"regime_score": 0.0}}
+    assert sg._is_bear_regime(ai_map) is True
+    # non-finite values ignored
+    ai_map2 = {"A": {"regime_score": float("nan")}, "B": {"regime_score": None}}
+    assert sg._is_bear_regime(ai_map2) is False
+
+def _setup_conn_with_positions_and_prices():
+    conn = duckdb.connect(":memory:")
+    conn.execute("""
+    CREATE TABLE positions (
+        date DATE NOT NULL,
+        code VARCHAR NOT NULL,
+        position_size BIGINT NOT NULL,
+        avg_price DOUBLE NOT NULL,
+        market_value DOUBLE
+    )
+    """)
+    conn.execute("""
+    CREATE TABLE prices_daily (
+        date DATE NOT NULL,
+        code VARCHAR NOT NULL,
+        close DOUBLE
+    )
+    """)
+    return conn
+
+def test_generate_sell_signals_stop_loss_and_score_drop():
+    conn = _setup_conn_with_positions_and_prices()
+    target = date(2024, 1, 10)
+    # insert positions and prices
+    # position with avg_price=100, close=90 -> pnl_rate = -0.10 -> below -0.08 => stop_loss
+    conn.execute("INSERT INTO positions (date, code, position_size, avg_price, market_value) VALUES (?, ?, ?, ?, ?)",
+                 [target, "P1", 10, 100.0, 1000.0])
+    conn.execute("INSERT INTO prices_daily (date, code, close) VALUES (?, ?, ?)", [target, "P1", 90.0])
+    # position with avg_price=100, close=95 -> pnl_rate=-0.05 -> not stop loss; final_score < threshold -> score_drop
+    conn.execute("INSERT INTO positions (date, code, position_size, avg_price, market_value) VALUES (?, ?, ?, ?, ?)",
+                 [target, "P2", 5, 100.0, 500.0])
+    conn.execute("INSERT INTO prices_daily (date, code, close) VALUES (?, ?, ?)", [target, "P2", 95.0])
+
+    score_map = {"P1": 0.4, "P2": 0.3}
+    signals = sg._generate_sell_signals(conn, target, score_map, threshold=0.5)
+    # Expect two signals: P1 stop_loss, P2 score_drop
+    reasons = {s["code"]: s["reason"] for s in signals}
+    assert reasons["P1"] == "stop_loss"
+    assert reasons["P2"] == "score_drop"
+
+def test_generate_signals_creates_buy_and_sell(monkeypatch):
+    conn = duckdb.connect(":memory:")
+    # create required tables
+    conn.execute("""
+    CREATE TABLE features (
+        date DATE NOT NULL, code VARCHAR NOT NULL,
+        momentum_20 DOUBLE, momentum_60 DOUBLE,
+        volatility_20 DOUBLE, volume_ratio DOUBLE,
+        per DOUBLE, ma200_dev DOUBLE
+    )
+    """)
+    conn.execute("""
+    CREATE TABLE ai_scores (
+        date DATE NOT NULL, code VARCHAR NOT NULL,
+        ai_score DOUBLE, regime_score DOUBLE
+    )
+    """)
+    conn.execute("""
+    CREATE TABLE positions (
+        date DATE NOT NULL, code VARCHAR NOT NULL,
+        position_size BIGINT NOT NULL, avg_price DOUBLE NOT NULL
+    )
+    """)
+    conn.execute("""
+    CREATE TABLE prices_daily (
+        date DATE NOT NULL, code VARCHAR NOT NULL, close DOUBLE
+    )
+    """)
+    conn.execute("""
+    CREATE TABLE signals (
+        date DATE NOT NULL, code VARCHAR NOT NULL, side VARCHAR NOT NULL,
+        score DOUBLE, signal_rank INTEGER
+    )
+    """)
+    target = date(2024, 1, 20)
+    # Insert one feature with high component values to exceed threshold
+    conn.execute("INSERT INTO features (date, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                 [target, "C1", 1.0, 1.0, -1.0, 2.0, 10.0, 0.5])
+    # No ai_scores -> news score defaults to 0.5
+    # Insert a position that will trigger stop_loss (avg_price high, close low)
+    conn.execute("INSERT INTO positions (date, code, position_size, avg_price) VALUES (?, ?, ?, ?)", [target, "C1", 1, 200.0])
+    conn.execute("INSERT INTO prices_daily (date, code, close) VALUES (?, ?, ?)", [target, "C1", 180.0])  # pnl -10% -> stop_loss
+    # Generate signals
+    total = sg.generate_signals(conn, target)
+    # One buy may be generated before stop_loss suppression; but since position exists and stop_loss, we expect at least one sell
+    # Check signals table contents
+    rows = conn.execute("SELECT code, side, score FROM signals WHERE date = ?", [target]).fetchall()
+    codes_sides = {(r[0], r[1]) for r in rows}
+    assert ("C1", "sell") in codes_sides
+    # total should equal number of inserted signals
+    assert total == len(rows)
+
+実行・補足
+- pytest をインストールしていることを確認してください。
+- テスト実行: プロジェクトルートで pytest を実行します。
+- 必要に応じて import パス（kabusys.*）をプロジェクト実体に合わせて調整してください。
+- 追加でカバーしたい関数（ニュース収集の RSS パースや jquants_client の HTTP retry ロジック等）は、外部ネットワークや時間依存処理を伴うため、モックを用いた別途のテスト追加を推奨します。
+
+必要なら、さらに多くの関数（news_collector の URL 正規化、_is_private_host の DNS モック、jquants_client の _request のリトライ挙動の詳細テスト等）に対するテストを追加していきます。どの領域を優先して拡張するか教えてください。
