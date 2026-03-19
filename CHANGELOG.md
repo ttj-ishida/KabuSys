@@ -1,105 +1,94 @@
 # Changelog
 
-すべての注目すべき変更をこのファイルに記録します。  
-フォーマットは「Keep a Changelog」に準拠します。
-
-全般なポリシー:
-- バージョン番号は semver を想定します。
-- 日付はリリース日を示します。
+すべての重要な変更はこのファイルに記録します。フォーマットは「Keep a Changelog」に準拠します。
 
 ## [Unreleased]
 
 ## [0.1.0] - 2026-03-19
-初回リリース。日本株自動売買システム「KabuSys」のコア機能を実装しました。主な追加点は以下の通りです。
+
+初回リリース。日本株自動売買システム "KabuSys" のコア機能を実装しました。主な追加点と設計上の注意事項は以下の通りです。
 
 ### Added
-- パッケージ基盤
-  - パッケージ初期化を追加（kabusys.__version__ = 0.1.0、公開 API の __all__ を定義）。
-  - モジュール分割: data, research, strategy, execution, monitoring（execution/monitoring はプレースホルダ）。
+- パッケージ構成
+  - kabusys パッケージの公開インターフェースを整備（data, strategy, execution, monitoring をエクスポート）。
+  - バージョン番号を `__version__ = "0.1.0"` として設定。
 
-- 設定管理（kabusys.config）
-  - .env ファイルまたは環境変数から設定を自動ロードする機能を実装。読み込み優先順位は OS 環境 > .env.local > .env。
-  - プロジェクトルート検出ロジックを追加（.git または pyproject.toml を探索）。これにより CWD に依存しない自動ロードを実現。
-  - .env パーサーの実装:
-    - コメント・空行スキップ、export KEY=val 形式対応。
-    - シングル／ダブルクォート内のバックスラッシュエスケープ処理対応。
-    - クォートなしでのインラインコメント処理（直前が空白/タブの場合に # をコメント扱い）。
-  - 自動ロード無効化フラグ: KABUSYS_DISABLE_AUTO_ENV_LOAD。
-  - Settings クラスでアプリケーション設定をプロパティとして提供（J-Quants トークン、kabu API パスワード、Slack トークン/チャンネル、DB パスなど）。
-  - env/log_level のバリデーション（許容値のチェック）を実装。
-  - duckdb/sqlite のデフォルトパス設定を含む。
+- 設定管理 (kabusys.config)
+  - Settings クラスによる環境変数ラッパーを実装（J-Quants トークン、kabu API、Slack、DB パス、実行環境等を取得）。
+  - .env 自動読み込み機能を実装（プロジェクトルートを .git または pyproject.toml で探索）。
+  - .env / .env.local の優先順位と上書き / 保護ロジックを実装（OS 環境変数を保護）。
+  - .env パーサを強化: export プレフィックス対応、シングル/ダブルクォートのエスケープ、インラインコメント処理などに対応。
+  - 環境変数による自動ロード無効化フラグ `KABUSYS_DISABLE_AUTO_ENV_LOAD` を追加。
 
-- データ取得・保存（kabusys.data.jquants_client）
+- データ取得・保存 (kabusys.data.jquants_client)
   - J-Quants API クライアントを実装。
-  - レート制限制御（固定間隔スロットリング）を実装（120 req/min を想定）。
-  - 再試行ロジック（指数バックオフ、最大 3 回）と HTTP ステータス処理（408/429/5xx のリトライ処理）。
-  - 401 受信時のリフレッシュトークン自動更新（1 回のみ）とキャッシュ化。
-  - ページネーション対応の fetch_* 関数（fetch_daily_quotes, fetch_financial_statements, fetch_market_calendar）。
-  - DuckDB への冪等保存関数（save_daily_quotes, save_financial_statements, save_market_calendar）を追加。ON CONFLICT を使って更新を行う。
-  - 入力変換ユーティリティ (_to_float, _to_int) を実装し、不正値に対して安全に None を返す。
+  - 固定間隔スロットリングによるレート制御（120 req/min 相当）。
+  - 冪等性のある DuckDB への保存（ON CONFLICT DO UPDATE）を実装（raw_prices / raw_financials / market_calendar）。
+  - ページネーション対応の fetch 関数（fetch_daily_quotes / fetch_financial_statements / fetch_market_calendar）。
+  - リトライ戦略（指数バックオフ、最大 3 回、HTTP 408/429/5xx をリトライの対象）。
+  - 401 発生時にリフレッシュトークンで自動更新して 1 回リトライする仕組みを実装（トークンキャッシュあり）。
+  - JSON デコードの失敗に対するエラー整備とログ出力。
+  - 型変換ユーティリティ `_to_float` / `_to_int` により入力データの堅牢な処理を実装。
 
-- ニュース収集（kabusys.data.news_collector）
-  - RSS フィード収集機能を実装。デフォルトで Yahoo Finance のビジネスカテゴリを指定。
-  - URL 正規化機能（トラッキングパラメータ除去、クエリのソート、スキーム/ホスト小文字化、フラグメント除去）。
-  - セキュリティ対策:
-    - defusedxml による XML パース（XML Bomb 等の防止）。
-    - 受信サイズ上限（10 MB）。
-    - 不適切なスキームや SSRF を防ぐための URL 検証を想定（コード内に注意点）。
-  - 記事 ID の生成方針（正規化 URL の SHA-256 ハッシュ先頭など）をドキュメント化。
-  - raw_news への冪等保存戦略（ON CONFLICT DO NOTHING）やバルク挿入のチャンク処理を設計。
+- ニュース収集 (kabusys.data.news_collector)
+  - RSS フィード収集基盤を実装（デフォルトに Yahoo Finance のカテゴリ RSS）。
+  - URL 正規化（トラッキングパラメータ除去、クエリソート、フラグメント削除）と記事 ID を SHA-256 で生成して冪等性を確保する方針を導入。
+  - defusedxml を用いて XML 攻撃を防御、受信サイズ制限（最大 10MB）、HTTP スキームチェック等を実装。
+  - DB へのバルク挿入をチャンク化してパフォーマンスと SQL 長制限に配慮。
+  - raw_news / news_symbols 等への保存を想定した実装方針を記載（実装の一部は注釈として記述）。
 
-- リサーチ機能（kabusys.research）
-  - ファクター計算・探索モジュールを提供。
-  - calc_momentum: 1M/3M/6M リターン、200 日移動平均乖離の計算を実装（窓不足時は None）。
-  - calc_volatility: 20 日 ATR / 相対 ATR（atr_pct）、20 日平均売買代金、出来高比率を計算。
-  - calc_value: raw_financials と prices_daily を組み合わせて PER/ROE を計算（最新の財務レコードを取得）。
-  - calc_forward_returns: 指定ホライズン（デフォルト [1,5,21]）の将来リターンを一括で取得する機能。
-  - calc_ic: Spearman のランク相関（Information Coefficient）計算の実装（結合・None 除外・最小サンプルチェック）。
-  - rank / factor_summary: ランク付け（同順位は平均ランク）、基本統計量（count/mean/std/min/max/median）を実装。
-  - すべて DuckDB 接続を受け取り prices_daily / raw_financials を参照する純粋な分析 API として実装（本番口座や発注 API にはアクセスしない設計）。
+- リサーチ機能 (kabusys.research)
+  - ファクター計算モジュールを実装:
+    - calc_momentum: 1M/3M/6M リターン、200日移動平均乖離率（ma200_dev）など。
+    - calc_volatility: 20日 ATR、atr_pct、20日平均売買代金、出来高比率等。
+    - calc_value: PER/ROE の計算（raw_financials と prices_daily を組み合わせて取得）。
+  - 特徴量探索・評価ユーティリティを実装:
+    - calc_forward_returns: 任意ホライズンの将来リターン（複数ホライズンを一度に取得）。
+    - calc_ic: スピアマンの rank 相関（IC）計算（同順位は平均ランクで処理）。
+    - factor_summary: 基本統計量（count/mean/std/min/max/median）集計。
+    - rank: 値リストを平均順位でランク付けするユーティリティ。
+  - 外部ライブラリに依存せず、DuckDB のみを使う設計。
 
-- 特徴量エンジニアリング（kabusys.strategy.feature_engineering）
-  - build_features(conn, target_date) を実装:
-    - research モジュールの calc_momentum/calc_volatility/calc_value を呼び出して生ファクターを取得。
-    - ユニバースフィルタ（最低株価 300 円、20 日平均売買代金 5 億円）を適用。
-    - 指定カラムを Z スコア正規化して ±3 でクリップ（kabusys.data.stats の zscore_normalize を利用）。
-    - features テーブルへ日付単位で置換（DELETE + INSERT をトランザクションで実行し冪等性を確保）。
-    - 休場日や当日欠損を考慮して target_date 以前の最新価格を参照。
+- 戦略（Strategy）レイヤ (kabusys.strategy)
+  - feature_engineering.build_features:
+    - research モジュールの生ファクターを統合して正規化（zscore_normalize を利用）。
+    - ユニバースフィルタ（価格 >= 300 円、20日平均売買代金 >= 5 億円）を実装。
+    - Z スコアを ±3 でクリップし、features テーブルへ日付単位で置換（トランザクションで原子性確保）。
+  - signal_generator.generate_signals:
+    - features と ai_scores を統合してコンポーネントスコア（momentum/value/volatility/liquidity/news）を算出。
+    - シグモイド変換・欠損補完（中立値 0.5）・重み合成の実装（デフォルト重みは StrategyModel.md に準拠）。
+    - weights のバリデーション・フォールバック・再スケール処理を実装。
+    - Bear レジーム判定（AI の regime_score 平均が負）により BUY を抑制するロジックを実装。
+    - エグジット（SELL）判定: ストップロス（-8%）や final_score が閾値未満の場合を判定。SELL を優先して BUY から除外するポリシー。
+    - signals テーブルへ日付単位で置換（トランザクションで原子性確保）。
+    - 使いやすさのため generate_signals は threshold / weights を引数で上書き可能。
 
-- シグナル生成（kabusys.strategy.signal_generator）
-  - generate_signals(conn, target_date, threshold=0.6, weights=None) を実装:
-    - features と ai_scores を統合してモメンタム／バリュー／ボラティリティ／流動性／ニュース コンポーネントを計算。
-    - コンポーネント値をシグモイド変換して重み付き合算により final_score を算出（既定重みを定義）。
-    - weights パラメータの入力検証（既知キーのみ、非数値や負値を排除、合計を 1 に正規化）。
-    - Bear レジーム判定（ai_scores の regime_score 平均が負の場合）。Bear 時は BUY を抑制。
-    - BUY シグナルは threshold を超える銘柄、SELL は保有ポジションに対するストップロス（-8%）やスコア低下（threshold 未満）で判定。
-    - SELL 優先ポリシー: SELL 対象は BUY から除外し、BUY のランクは再付与。
-    - signals テーブルへ日付単位で置換（冪等）。
+- ロギング・エラーハンドリング
+  - 各所で詳細な logger 呼び出しを追加（情報・警告・デバッグ・例外時のロールバック失敗警告など）。
+  - DB 操作はトランザクション管理（BEGIN/COMMIT/ROLLBACK）で原子性を確保。
 
-### Changed
-- この初回リリースでは過去の変更点はありません（初版の追加一覧のみ）。
-
-### Fixed
-- この初回リリースではバグ修正履歴はありません。
+### Fixed / Robustness improvements
+- データ保存系関数で PK 欠損行をスキップし、その件数を警告ログとして出力するようにした（save_daily_quotes / save_financial_statements / save_market_calendar）。
+- API リクエストで JSON デコードに失敗した場合に原文を含むエラーメッセージを出力し調査を容易にした。
+- レートリミッタやリトライ処理で再帰的トークンリフレッシュを防ぐため allow_refresh フラグを導入。
+- 数値変換ユーティリティが不正な浮動小数（例: "1.9" を int に変換しない）を安全に扱うようにした。
+- features/signal の処理において欠損や非有限値の扱いを厳密化（None / NaN / Inf の特殊処理）。
 
 ### Security
-- news_collector で defusedxml を採用し XML パース攻撃対策を実装。
-- J-Quants クライアントで 401 時の安全なトークンリフレッシュとリトライ・レート制限を実装し、外部 API 呼び出しでの誤動作を抑制。
-- .env 読み込み時に OS 環境変数を保護する protected 引数を使用し、意図しない上書きを防止。
+- RSS 解析に defusedxml を採用して XML ベースの攻撃（XML Bomb 等）を緩和。
+- ニュース収集で受信サイズ制限を実装しメモリ DoS を防止。
+- URL 正規化時にスキーム・クエリ検査を行い SSRF や想定外スキームを排除する方針を採用。
+- J-Quants クライアントはトークンを明示的にキャッシュし、トークン取扱いの再帰を避ける安全設計。
 
-### Known issues / Not implemented
-- signal_generator のエグジット条件としてコメントに記載の以下は未実装:
-  - トレーリングストップ（peak_price が positions テーブルに必要）
-  - 時間決済（保有 60 営業日超過）
-- execution / monitoring パッケージは現時点では未実装（プレースホルダ）。
-- news_collector の SSRF/ネットワーク検査は注意点がコード中にあるが、外部実行環境に応じた追加のネットワーク制約の導入を推奨。
-- zscore_normalize の実装は kabusys.data.stats に依存（本リリースでは参照のみ）。テストデータでの検証を推奨。
+### Notes / Known limitations
+- execution パッケージはインポート可能だが具体的な発注ロジック（kabu ステーションへの発注処理等）はこのリリースでは未実装／薄め。戦略層は発注 API に依存しない設計になっている。
+- 一部仕様（トレーリングストップや時間決済など）は positions テーブルの追加情報（peak_price / entry_date 等）が必要で、現時点では未実装として注記。
+- feature_engineering は zscore_normalize を外部ユーティリティ（kabusys.data.stats）に依存する。該当実装はパッケージ内で提供されている前提。
+- NewsCollector の記事 ID は設計方針に記載。実際の DB スキーマや紐付けロジックは運用に合わせて調整が必要。
+
+### Breaking Changes
+- なし（初回リリース）
 
 ---
 
-開発者向けメモ:
-- 自動環境変数ロードはテスト時に KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定して無効化可能です。
-- DuckDB 接続を渡す設計になっているため、ユニットテストではインメモリまたはテスト用 DB を用いて簡単に検証できます。
-- ロギングは各モジュールに組み込まれており、INFO/DEBUG レベルで処理の追跡が可能です。
-
-（以上）
+ご要望があれば、各モジュールごとの変更点をより細かく分割したバージョン履歴や、将来のマイグレーション注意点（DB スキーマ変更時の移行手順など）を追記します。
