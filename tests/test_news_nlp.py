@@ -312,3 +312,52 @@ def test_score_news_response_validation_unknown_code(conn):
     assert conn.execute(
         "SELECT COUNT(*) FROM ai_scores WHERE date = ? AND code = ?", [TARGET_DATE, "9999"]
     ).fetchone()[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# calc_news_window() のテスト
+# ---------------------------------------------------------------------------
+
+
+def test_calc_news_window_values():
+    """target_date=2026-03-20 → (2026-03-19 06:00, 2026-03-19 23:30) を返す。"""
+    from datetime import datetime
+    from kabusys.ai.news_nlp import calc_news_window
+
+    start, end = calc_news_window(TARGET_DATE)
+    assert start == datetime(2026, 3, 19, 6, 0, 0)
+    assert end == datetime(2026, 3, 19, 23, 30, 0)
+
+
+def test_calc_news_window_boundary_inclusive_start(conn):
+    """ウィンドウ開始時刻ちょうどの記事は対象に含まれる。"""
+    from datetime import datetime
+    from kabusys.ai.news_nlp import score_news, calc_news_window
+
+    window_start, _ = calc_news_window(TARGET_DATE)
+    # window_start ちょうど（含む）
+    _insert_article(conn, "art_start", window_start, "開始時刻記事")
+    _link_code(conn, "art_start", "1111")
+
+    mock_resp = _make_api_response([{"code": "1111", "score": 0.5}])
+    with patch("kabusys.ai.news_nlp._call_openai_api", return_value=mock_resp):
+        count = score_news(conn, TARGET_DATE, api_key="test-key")
+
+    assert count == 1
+
+
+def test_calc_news_window_boundary_exclusive_end(conn):
+    """ウィンドウ終了時刻ちょうどの記事は対象外（排他的上端）。"""
+    from kabusys.ai.news_nlp import score_news, calc_news_window
+
+    _, window_end = calc_news_window(TARGET_DATE)
+    # window_end ちょうど（含まない）
+    _insert_article(conn, "art_end", window_end, "終了時刻記事")
+    _link_code(conn, "art_end", "2222")
+
+    with patch("kabusys.ai.news_nlp._call_openai_api") as mock_api:
+        count = score_news(conn, TARGET_DATE, api_key="test-key")
+
+    # 対象記事がないため API 未コール・0件
+    assert count == 0
+    mock_api.assert_not_called()
