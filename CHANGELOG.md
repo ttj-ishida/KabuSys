@@ -1,86 +1,116 @@
-CHANGELOG
-=========
+# CHANGELOG
 
-すべての重要な変更点をこのファイルに記載します。  
-フォーマットは「Keep a Changelog」に準拠し、安定した公開リリース履歴を示します。
+すべての重要な変更をここに記載します。本ファイルは Keep a Changelog の形式に準拠しています。
 
-リンク: https://keepachangelog.com/ja/1.0.0/
+現在のリリースポリシー: セマンティックバージョニングに従います。
 
-[Unreleased]
-------------
+## [Unreleased]
 
-（なし）
+（今後の変更をここに記載）
 
-[0.1.0] - 2026-03-20
--------------------
+---
 
-Added
-- 初回公開: KabuSys 日本株自動売買ライブラリの初期実装を追加。
-  - パッケージ構成:
-    - kabusys: パッケージエントリ（version=0.1.0, __all__ に data/strategy/execution/monitoring を公開）
-  - 設定/環境管理:
-    - src/kabusys/config.py
-      - .env / .env.local の自動読み込み機能を実装（プロジェクトルートを .git / pyproject.toml から検出）。
-      - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動ロード無効化対応。
-      - .env パース機能を実装（export プレフィックス対応、クォート内のエスケープ、インラインコメント処理）。
-      - OS 環境変数を保護する protected オプション（.env.local は override=True で上書き可能だが OS 環境変数は保護）。
-      - Settings クラスを追加し、J-Quants / kabuAPI / Slack / DB パス / 実行環境（development/paper_trading/live）等のプロパティを提供。
-      - env / log_level の検証（許容値チェック）と is_live/is_paper/is_dev フラグを提供。
-  - データ取得・保存:
-    - src/kabusys/data/jquants_client.py
-      - J-Quants API クライアント実装。
-      - 固定間隔スロットリングによるレート制限（120 req/min）を実装する RateLimiter。
-      - 再試行（指数バックオフ、最大3回）と 401 自動リフレッシュのロジックを実装。
-      - fetch_* API（fetch_daily_quotes / fetch_financial_statements / fetch_market_calendar）を実装（ページネーション対応）。
-      - DuckDB へ冪等保存する save_* 関数を実装（raw_prices / raw_financials / market_calendar、ON CONFLICT DO UPDATE を使用）。
-      - 型変換ユーティリティ _to_float / _to_int を提供（堅牢な空値・フォーマット処理）。
-  - ニュース収集:
-    - src/kabusys/data/news_collector.py
-      - RSS フィードからの記事収集処理を実装（デフォルトに Yahoo Finance のカテゴリRSSを含む）。
-      - URL 正規化（トラッキングパラメータ除去、クエリソート、フラグメント削除）と記事 ID 生成（SHA-256 ベース）で冪等性を確保。
-      - defusedxml を使用した XML の安全なパース、受信サイズ上限（10MB）、HTTP スキーム/SSRF 対策などの防御措置を設計。
-      - バルク INSERT チャンク（_INSERT_CHUNK_SIZE）とトランザクションまとめでパフォーマンス/一貫性を確保。
-  - 研究系ユーティリティ:
-    - src/kabusys/research/feature_exploration.py
-      - 将来リターン計算 calc_forward_returns（複数ホライズン対応、入力検証、パフォーマンス配慮のクエリ）。
-      - スピアマンIC（calc_ic）／ランク関数（rank）／ファクター統計要約（factor_summary）を実装。
-      - pandas 等に依存せず、標準ライブラリのみで実装。
-    - src/kabusys/research/factor_research.py
-      - モメンタム（calc_momentum）、ボラティリティ（calc_volatility）、バリュー（calc_value）ファクター計算を実装。
-      - prices_daily / raw_financials を参照して、MA200、ATR20、出来高比、PER/ROE 等を計算。データ不足時の None ハンドリング。
-  - 戦略関連:
-    - src/kabusys/strategy/feature_engineering.py
-      - 研究環境で算出した生ファクターをマージし、ユニバースフィルタ（最低株価・平均売買代金）を適用。
-      - 指数的に Z スコア正規化（kabusys.data.stats.zscore_normalize を利用）、±3 でクリップ、features テーブルへ日付単位の置換（トランザクションで原子性確保）。
-    - src/kabusys/strategy/signal_generator.py
-      - features と ai_scores を統合して各銘柄のコンポーネントスコア（momentum/value/volatility/liquidity/news）を計算。
-      - デフォルト重み・閾値を持ち、ユーザー重みは検証・正規化して合計 1.0 に再スケール。
-      - Bear レジーム判定（ai_scores の regime_score 平均が負の場合）で BUY を抑制。
-      - BUY（threshold 超）と SELL（ストップロスやスコア低下）を生成し signals テーブルへ日付単位で置換（トランザクション）。
-      - SELL 優先ポリシー（SELL 銘柄は BUY から除外してランクを再付与）。
-  - パッケージ公開:
-    - src/kabusys/strategy/__init__.py で build_features / generate_signals を公開。
-    - src/kabusys/research/__init__.py で研究用 API をまとめて公開。
+## [0.1.0] - 2026-03-20
 
-Changed
-- 初回リリースのため該当なし（設計・実装内容の集約）。
+初回公開リリース。
 
-Fixed
-- .env パースの堅牢化:
-  - export プレフィックス、クォート内のエスケープ、インラインコメントの適切な扱いを実装して不正な行をスキップ。
-- DuckDB 書き込みの原子性確保:
-  - feature_engineering / signal_generator / jquants_client の save 系でトランザクションと ROLLBACK のフォールバックログを実装。
+### 追加 (Added)
+- パッケージの基本構成を追加
+  - kabusys パッケージとサブモジュール群を導入（data, strategy, execution, monitoring を公開）。
+  - パッケージバージョン: 0.1.0
 
-Security
-- RSS パーシングに defusedxml を使用して XML Bomb 等を防御。
-- ニュース収集で受信サイズ上限（10MB）、URL 正規化、追跡パラメータ除去、HTTP/HTTPS スキームの前提などを導入し SSRF・メモリDoS を軽減。
-- J-Quants クライアントの HTTP エラー再試行は Retry-After を尊重（429 時）し、トークン自動リフレッシュは再帰を避ける設計。
+- 環境・設定管理 (kabusys.config)
+  - .env ファイルおよび環境変数から設定を自動読み込みする機能を実装。
+    - 読み込み優先順位: OS 環境変数 > .env.local > .env
+    - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動読み込み無効化対応
+    - プロジェクトルートの自動検出 (.git または pyproject.toml を基準)
+  - .env の行パーサを実装（コメント、`export KEY=...`、シングル/ダブルクォート、エスケープ文字対応、インラインコメント処理など）。
+  - 環境変数の保護（既存 OS 環境変数を protected として上書き制御）。
+  - Settings クラスを提供し、必須変数のチェックや型/値検証を行うプロパティを実装。
+    - J-Quants / kabuステーション / Slack / DB パスなどの設定を取得。
+    - KABUSYS_ENV / LOG_LEVEL の検証（許容値チェック）。
+    - duckdb/sqlite パスを Path 型で返却。
 
-Known limitations / TODO
-- execution パッケージ（発注層）は初期状態では実装がない、または空のエントリ（将来的に発注 API 実装予定）。
-- 一部戦略条件（トレーリングストップ、時間決済など）は positions テーブルに追加情報（peak_price / entry_date）を持たせる必要があり、未実装。
-- news_collector 内の低レベルネットワーク/ホスト検証ロジックは設計注記を含むが、運用に合わせた評価が必要。
-- research の一部関数は DuckDB のスキーマ（prices_daily, raw_financials, features, ai_scores, positions, signals 等）に依存するため、スキーマ準備が必須。
+- データ収集・保存 (kabusys.data.jquants_client)
+  - J-Quants API クライアントを実装。
+    - 固定間隔のレート制限（120 req/min）を守る RateLimiter を実装。
+    - リトライロジック（指数バックオフ、最大 3 回、指定ステータスでリトライ）を実装。
+    - 401 発生時は id_token を自動リフレッシュして再試行（1 回のみ）。
+    - id_token のモジュールレベルキャッシュを実装し、ページネーション間で共有。
+    - JSON デコード検出・エラー処理、Retry-After ヘッダ考慮。
+  - データ取得関数を実装
+    - fetch_daily_quotes（株価日足、ページネーション対応）
+    - fetch_financial_statements（財務データ、ページネーション対応）
+    - fetch_market_calendar（マーケットカレンダー）
+  - DuckDB への保存（冪等）関数を実装
+    - save_daily_quotes / save_financial_statements / save_market_calendar
+    - ON CONFLICT（重複時更新）を用いた冪等保存
+    - 型変換ユーティリティ (_to_float / _to_int)
+    - PK 欠損行のスキップとログ出力
 
-Notes
-- DuckDB を使ったデータベース操作は SQL 実行を直接行うため、実行環境の DuckDB バージョンや SQL 方言に依存する可能性があります。README やスキーマ定義を参照してください。
+- ニュース収集 (kabusys.data.news_collector)
+  - RSS フィードからの記事収集モジュールを追加。
+    - デフォルトソース（Yahoo Finance ビジネス RSS）を含む。
+    - defusedxml を用いた XML パース（XML Bomb 等への対策）。
+    - 受信サイズ上限（10MB）によるメモリ DoS 対策。
+    - URL 正規化機能を実装（スキーム/ホスト小文字化、トラッキングパラメータ除去、フラグメント除去、クエリソート）。
+    - 記事 ID を正規化 URL の SHA-256（先頭32文字）で生成して冪等性を確保。
+    - SSRF 対策のため HTTP/HTTPS スキームのみ許可、ソケット/IP 検証など（設計指針）。
+    - DB へのバルク挿入とチャンク処理を採用。
+
+- 研究（research）モジュール
+  - ファクター計算 (kabusys.research.factor_research)
+    - calc_momentum: 1M/3M/6M リターン、200 日移動平均乖離を計算。
+    - calc_volatility: 20 日 ATR、相対 ATR（atr_pct）、20 日平均売買代金、出来高比率を計算。
+    - calc_value: raw_financials と prices_daily を組み合わせて PER / ROE を計算。
+    - 各関数は DuckDB を受け取り prices_daily / raw_financials のみ参照。
+    - データ不足時の None ハンドリングを実装。
+  - 特徴量探索 (kabusys.research.feature_exploration)
+    - calc_forward_returns: 指定ホライズン (デフォルト [1,5,21]) の将来リターン計算（LEAD を使用）。
+    - calc_ic: ファクターと将来リターンの Spearman ランク相関（IC）を計算。
+    - rank: 同順位は平均ランクで扱うランク関数（浮動小数の丸めで ties を安定化）。
+    - factor_summary: 各ファクター列の count/mean/std/min/max/median を計算。
+  - research パッケージの __all__ に主要関数を公開。
+
+- 特徴量エンジニアリング (kabusys.strategy.feature_engineering)
+  - build_features を実装
+    - research の calc_momentum / calc_volatility / calc_value を組み合わせて features を作成。
+    - ユニバースフィルタ（最低株価 300 円、20 日平均売買代金 5 億円）を適用。
+    - 指定カラムを Z スコア正規化し ±3 でクリップ（外れ値抑制）。
+    - 日付単位での置換（DELETE + INSERT）をトランザクションで行い冪等性を確保。
+    - DuckDB 上の prices_daily を参照し、target_date 以前の最新価格を使用（ルックアヘッド回避）。
+
+- シグナル生成 (kabusys.strategy.signal_generator)
+  - generate_signals を実装
+    - features と ai_scores を統合して各銘柄の最終スコア（final_score）を算出。
+    - コンポーネントスコア: momentum/value/volatility/liquidity/news（AI）。
+    - デフォルト重みと閾値を実装（DEFAULT_WEIGHTS、DEFAULT_THRESHOLD=0.60）。
+    - ユーザー指定 weights の検証と正規化（合計が 1.0 に再スケール、無効値は無視）。
+    - Bear レジーム判定（ai_scores の regime_score 平均が負かつサンプル数 >= 3 の場合 BUY 抑制）。
+    - BUY シグナル生成（threshold 超過かつ Bear でない場合）。
+    - SELL シグナル（エグジット）生成ロジックを実装
+      - ストップロス（終値/avg_price - 1 <= -8%）
+      - final_score の閾値割れ
+      - 価格欠損時の判定スキップ、features 未存在時は score=0 として扱う等の安全策
+    - BUY / SELL を signals テーブルへ日付単位の置換（トランザクション内で DELETE + INSERT）。
+    - 欠損コンポーネントは中立値 0.5 で補完して降格を防止。
+
+### 変更 (Changed)
+- 初期設計での安全性・冪等性を重視した実装方針を採用（.env 読み込みの保護、DuckDB への ON CONFLICT、トランザクションでの日付単位置換など）。
+- API レート・エラーハンドリング方針を明文化（RateLimiter、指数バックオフ、Retry-After 優先）。
+
+### 修正 (Fixed)
+- （初回リリースのため該当なし）
+
+### 削除 (Removed)
+- （初回リリースのため該当なし）
+
+### 既知の制限 / TODO
+- signal_generator の一部エグジット条件は未実装（トレーリングストップ、時間決済など。positions テーブルに peak_price / entry_date が必要）。
+- news_collector の具体的な SSRF/IP 検証や HTTP レスポンスの制限は設計に言及しているが、実装の詳細に依存する。実運用前の追加テストを推奨。
+- research モジュールは外部ライブラリ（pandas 等）に依存しない実装だが、大規模データでのパフォーマンス評価・チューニングが必要。
+- execution / monitoring の具体的な発注・監視実装は未実装（execution パッケージは存在するが中身は空）。
+
+---
+
+貢献・バグ報告・要望は issue を作成してください。
