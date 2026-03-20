@@ -172,10 +172,13 @@ def score_news(
     codes_to_write = list(all_scores.keys())
     conn.execute("BEGIN")
     try:
-        conn.execute(
-            "DELETE FROM ai_scores WHERE date = ? AND code = ANY(?)",
-            [target_date, codes_to_write],
-        )
+        # code = ANY(?) は DuckDB バージョンによりリスト型バインドが不安定なため
+        # executemany で個別 DELETE する（最も互換性が高い）
+        if codes_to_write:  # DuckDB 0.10: executemany に空リスト不可
+            conn.executemany(
+                "DELETE FROM ai_scores WHERE date = ? AND code = ?",
+                [(target_date, c) for c in codes_to_write],
+            )
         if params:  # DuckDB 0.10: executemany に空リスト不可
             conn.executemany(
                 """
@@ -336,32 +339,32 @@ def _score_chunk(
         {"role": "user", "content": user_content},
     ]
 
+    # _MAX_RETRIES 回のリトライ（初回試行含め最大 _MAX_RETRIES + 1 回）
+    # attempt: 0 = 初回, 1..._MAX_RETRIES = 各リトライ
     for attempt in range(_MAX_RETRIES + 1):
         try:
             resp = _call_openai_api(client, messages)
             break
         except (RateLimitError, APIConnectionError, APITimeoutError) as e:
-            if attempt < _MAX_RETRIES:
-                wait = _RETRY_BASE_SECONDS * (2 ** attempt)
-                logger.warning(
-                    "score_news: 一時エラー(%s) リトライ %d/%d (%.1f秒待機)",
-                    type(e).__name__, attempt + 1, _MAX_RETRIES, wait,
-                )
-                time.sleep(wait)
-            else:
+            if attempt >= _MAX_RETRIES:
                 logger.warning("score_news: リトライ上限超過 → スキップ: %s", e)
                 return {}
+            wait = _RETRY_BASE_SECONDS * (2 ** attempt)
+            logger.warning(
+                "score_news: 一時エラー(%s) リトライ %d/%d (%.1f秒待機)",
+                type(e).__name__, attempt + 1, _MAX_RETRIES, wait,
+            )
+            time.sleep(wait)
         except APIError as e:
-            if getattr(e, 'status_code', 0) >= 500 and attempt < _MAX_RETRIES:
-                wait = _RETRY_BASE_SECONDS * (2 ** attempt)
-                logger.warning(
-                    "score_news: サーバーエラー(5xx) リトライ %d/%d (%.1f秒待機)",
-                    attempt + 1, _MAX_RETRIES, wait,
-                )
-                time.sleep(wait)
-            else:
+            if getattr(e, 'status_code', 0) < 500 or attempt >= _MAX_RETRIES:
                 logger.warning("score_news: API エラー → スキップ: %s", e)
                 return {}
+            wait = _RETRY_BASE_SECONDS * (2 ** attempt)
+            logger.warning(
+                "score_news: サーバーエラー(5xx) リトライ %d/%d (%.1f秒待機)",
+                attempt + 1, _MAX_RETRIES, wait,
+            )
+            time.sleep(wait)
         except Exception as e:
             logger.warning("score_news: API呼び出し失敗 → スキップ: %s", e)
             return {}
