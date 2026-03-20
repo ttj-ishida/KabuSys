@@ -12,7 +12,9 @@ raw_news テーブルのニュース記事を OpenAI API（gpt-4o-mini）で
   4. 429・ネットワーク断・タイムアウト・5xx はエクスポネンシャルバックオフでリトライ
   5. レスポンスをバリデーション（results キー・型・既知コード・スコア数値型）
   6. スコアを ±1.0 にクリップ
-  7. 全チャンク処理後、ai_scores テーブルへ日付単位の置換（DELETE → INSERT）
+  7. 全チャンク処理後、ai_scores テーブルへスコア取得済みコードのみ置換
+     （DELETE WHERE date=? AND code=ANY(codes) → INSERT）
+     ※ code を絞ることで部分失敗時に他コードの既存スコアを保護する
 
 設計方針:
   - datetime.today() / date.today() を参照しない（ルックアヘッドバイアス防止）
@@ -160,15 +162,20 @@ def score_news(
         logger.info("score_news: スコア取得失敗 date=%s", target_date)
         return 0
 
-    # 6. ai_scores テーブルへ日付単位の置換（DELETE → INSERT）
+    # 6. ai_scores テーブルへスコア取得済みコードのみ置換（DELETE → INSERT）
+    # code を絞り込むことで、部分失敗時に他コードの既存スコアを消さない。
     # sentiment_score と ai_score は同値（現フェーズ）
     params = [
         (target_date, code, score, score)
         for code, score in all_scores.items()
     ]
+    codes_to_write = list(all_scores.keys())
     conn.execute("BEGIN")
     try:
-        conn.execute("DELETE FROM ai_scores WHERE date = ?", [target_date])
+        conn.execute(
+            "DELETE FROM ai_scores WHERE date = ? AND code = ANY(?)",
+            [target_date, codes_to_write],
+        )
         if params:  # DuckDB 0.10: executemany に空リスト不可
             conn.executemany(
                 """
@@ -241,6 +248,7 @@ def _call_openai_api(client: Any, messages: list[dict]) -> Any:
         messages=messages,
         response_format={"type": "json_object"},
         temperature=0,
+        timeout=30,
     )
 
 
