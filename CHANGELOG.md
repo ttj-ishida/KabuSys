@@ -1,103 +1,112 @@
-# CHANGELOG
+# Changelog
 
-すべての重要な変更をここに記録します。  
-フォーマットは "Keep a Changelog" に準拠しています。
+すべての注目すべき変更点をこのファイルに記録します。  
+この変更履歴は「Keep a Changelog」の形式に従っています。  
 
-全般:
-- このリポジトリは日本株自動売買システム「KabuSys」の初期リリースを表します。
-- 主要な目的はデータ収集（J-Quants / RSS）、ファクター計算、特徴量生成、シグナル生成、および設定管理を提供することです。
-- 実際の発注（execution）や外部モニタリング（monitoring）はパッケージのエクスポート対象に含まれますが、発注層はこの段階ではプレースホルダ / 初期実装です。
+現在のパッケージバージョン: 0.1.0
+
+## [Unreleased]
+- （なし）
 
 ## [0.1.0] - 2026-03-20
+初回公開リリース。
 
 ### Added
-- パッケージ構成
-  - `kabusys` パッケージの初期実装。公開 API として `data`, `strategy`, `execution`, `monitoring` をエクスポート（`execution` は現時点でモジュール初期化のみ）。
-  - パッケージバージョンは `0.1.0` に設定。
+- パッケージ基盤
+  - kabusys パッケージを追加。バージョンは 0.1.0（src/kabusys/__init__.py）。
+  - サブモジュールのエクスポートを定義（data, strategy, execution, monitoring）。
 
-- 環境設定管理 (`kabusys.config`)
-  - `.env` / `.env.local` をプロジェクトルート（`.git` または `pyproject.toml`）から自動ロードする仕組みを実装。
-  - 自動ロードは環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` により無効化可能。
-  - `.env` パーサーは以下に対応:
-    - コメント行・空行の無視、`export KEY=val` 形式の対応
-    - シングル／ダブルクォート内のエスケープ処理
-    - クォートなし値のインラインコメント取り扱い（直前が空白/タブの `#` をコメントと判定）
-  - アプリケーション設定 (`Settings`) を提供。主要な必須環境変数をプロパティで取得（例: `JQUANTS_REFRESH_TOKEN`, `KABU_API_PASSWORD`, `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID`）。
-  - `KABUSYS_ENV` と `LOG_LEVEL` の値検証（許容値チェック）・ユーティリティプロパティ（`is_live`, `is_paper`, `is_dev`）。
-  - デフォルト DB パス設定 (`DUCKDB_PATH`, `SQLITE_PATH`) をプロパティ経由で提供。
+- 設定 / 環境変数管理（src/kabusys/config.py）
+  - .env / .env.local を自動ロード（プロジェクトルートは .git または pyproject.toml を基準に探索）。
+  - .env パース機能を実装（コメント行・export 形式・クォート・エスケープ・インラインコメント処理対応）。
+  - 自動ロードを無効化する環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD をサポート（テスト用途）。
+  - Settings クラスを提供し、以下の設定取得プロパティを実装：
+    - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, KABU_API_BASE_URL（デフォルト値あり）
+    - SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
+    - DUCKDB_PATH, SQLITE_PATH
+    - KABUSYS_ENV（development/paper_trading/live のバリデーション）
+    - LOG_LEVEL（DEBUG/INFO/... のバリデーション）
+    - is_live / is_paper / is_dev ヘルパープロパティ
+  - 必須環境変数未設定時は明示的な ValueError を送出。
 
-- データ取得 / 保存（J-Quants クライアント） (`kabusys.data.jquants_client`)
-  - J-Quants API クライアントを実装:
-    - 固定間隔スロットリングによるレート制限（120 req/min）を守る `_RateLimiter`。
-    - 再試行ロジック（指数バックオフ、最大 3 回、対象ステータスコード 408/429/5xx）。
-    - 401 発生時の ID トークン自動リフレッシュ（1 回のみ）とトークンキャッシュ共有。
-    - ページネーション対応のフェッチ関数:
-      - `fetch_daily_quotes`（日足 OHLCV）
-      - `fetch_financial_statements`（四半期財務）
-      - `fetch_market_calendar`（JPX カレンダー）
-    - DuckDB への保存関数（冪等化、ON CONFLICT を用いた更新）:
-      - `save_daily_quotes` → `raw_prices`
-      - `save_financial_statements` → `raw_financials`
-      - `save_market_calendar` → `market_calendar`
-    - データ変換ユーティリティ `_to_float`, `_to_int`（厳密な変換ルールを定義）。
+- Data: J‑Quants API クライアント（src/kabusys/data/jquants_client.py）
+  - 固定間隔スロットリングによるレート制限実装（120 req/min, RateLimiter）。
+  - HTTP リクエストユーティリティ：JSON デコード、タイムアウト、ページネーション対応。
+  - 再試行（指数バックオフ、最大 3 回）および 408/429/5xx のリトライロジック。
+  - 401 応答時の自動トークンリフレッシュ（1 回）とモジュールレベルの ID トークンキャッシュ。
+  - 公開 API：
+    - get_id_token(refresh_token=None)
+    - fetch_daily_quotes(...)
+    - fetch_financial_statements(...)
+    - fetch_market_calendar(...)
+  - DuckDB への保存ユーティリティ（冪等性を考慮した INSERT ... ON CONFLICT 実装）：
+    - save_daily_quotes(conn, records)
+    - save_financial_statements(conn, records)
+    - save_market_calendar(conn, records)
+  - 型変換ユーティリティ：_to_float / _to_int（安全な変換処理）
 
-- ニュース収集モジュール (`kabusys.data.news_collector`)
-  - RSS フィードから記事を取得して `raw_news` テーブルへ保存するためのユーティリティを実装。
-  - セキュリティ／堅牢性設計:
-    - defusedxml を用いた XML パース（XML Bomb 等の防御）。
-    - 受信サイズ上限（`MAX_RESPONSE_BYTES = 10 MB`）によるメモリ DoS 緩和。
-    - URL 正規化（スキーム/ホスト小文字化、トラッキングパラメータ除去、フラグメント削除、クエリソート）。
-    - 記事 ID は正規化 URL の SHA-256（先頭 32 文字）で生成し冪等性を確保。
-    - バルク INSERT のチャンク化（`_INSERT_CHUNK_SIZE`）を導入。
-  - デフォルト RSS ソース（例: Yahoo Finance のビジネスカテゴリ）を定義。
+- Data: ニュース収集（src/kabusys/data/news_collector.py）
+  - RSS フィード取得 & 記事抽出機能（デフォルトソース: Yahoo Finance ビジネスカテゴリ）。
+  - URL 正規化（トラッキングパラメータ除去、スキーム/ホスト小文字化、フラグメント除去、クエリソート）。
+  - セキュリティ配慮: defusedxml の使用、受信サイズ上限（MAX_RESPONSE_BYTES）など。
+  - バルク INSERT 用のチャンク処理、記事IDは正規化 URL のハッシュを利用する方針（冪等性）。
+  - DB への保存は ON CONFLICT DO NOTHING / トランザクションでまとめて実行（挿入数を正確に把握）。
 
-- 研究用 / データ処理ユーティリティ (`kabusys.research`, `kabusys.data.stats` を期待)
-  - ファクター計算モジュール (`kabusys.research.factor_research`):
-    - Momentum ファクター（1M/3M/6M リターン、MA200 乖離）。
-    - Volatility / Liquidity ファクター（20 日 ATR、相対 ATR、20 日平均売買代金、出来高比率）。
-    - Value ファクター（PER, ROE：`raw_financials` と `prices_daily` の組合せ）。
-    - DuckDB のウィンドウ関数を活用した実装。データ不足時の None ハンドリング。
-  - 特徴量探索ユーティリティ (`kabusys.research.feature_exploration`):
-    - 将来リターン計算（horizons デフォルト [1,5,21]、単一クエリで取得）。
-    - IC（Spearman のランク相関）計算 `calc_ic`。
-    - 基本統計量サマリー `factor_summary`。
-    - ランキング `rank`（同順位は平均ランク、丸め誤差対策あり）。
-  - これらは外部ライブラリに依存せず標準ライブラリ + DuckDB で実装。
+- Research（研究用ユーティリティ、src/kabusys/research/）
+  - factor_research: 株価データからファクターを計算する関数を追加：
+    - calc_momentum(conn, target_date)：mom_1m/3m/6m、ma200_dev（200 日のデータ不足時は None）
+    - calc_volatility(conn, target_date)：atr_20, atr_pct, avg_turnover, volume_ratio（窓不足時は None）
+    - calc_value(conn, target_date)：per, roe（raw_financials と prices_daily を組み合わせ）
+  - feature_exploration:
+    - calc_forward_returns(conn, target_date, horizons=[1,5,21])：将来リターン取得（営業日ベース）
+    - calc_ic(factor_records, forward_records, factor_col, return_col)：Spearman（ランク相関）IC 計算
+    - factor_summary(records, columns)：count/mean/std/min/max/median の統計サマリー
+    - rank(values)：同順位の平均ランクを使うランク変換（丸め処理で tie の検出精度を向上）
+  - いずれも DuckDB を直接使用し、外部依存（pandas 等）を持たない実装。
 
-- 特徴量生成 / 戦略 (`kabusys.strategy`)
-  - 特徴量エンジニアリング (`feature_engineering.build_features`):
-    - `research` モジュールの生ファクター（momentum / volatility / value）を取得しマージ。
-    - ユニバースフィルタ（最低株価 300 円、20 日平均売買代金 5 億円）を適用。
-    - 数値ファクターを Z スコア正規化後 ±3 でクリップ（外れ値抑制）。
-    - `features` テーブルへ日付単位で置換（トランザクション + バルク挿入で原子性）。
-  - シグナル生成 (`signal_generator.generate_signals`):
-    - `features` と `ai_scores` を統合してコンポーネントスコア（momentum/value/volatility/liquidity/news）を計算。
-    - シグモイド変換や欠損コンポーネントの中立値（0.5）補完を実施。
-    - デフォルト重み・閾値を提供（デフォルト閾値 0.60）。
-    - Bear レジーム判定（AI の regime_score 平均が負の場合、サンプル数要件あり）で BUY を抑制。
-    - エグジット判定（ストップロス -8% / スコア低下）を実装し SELL シグナルを生成。
-    - `signals` テーブルへ日付単位で置換（トランザクション + バルク挿入）。
-    - 重みはユーザ入力で部分的上書き可能で、合計が 1.0 になるよう正規化される。無効値は警告してスキップ。
+- Strategy（戦略ロジック、src/kabusys/strategy/）
+  - feature_engineering.build_features(conn, target_date)
+    - research モジュールから生ファクターを取得してマージ
+    - ユニバースフィルタ（最低株価 300 円、20 日平均売買代金 >= 5 億円）
+    - Z スコア正規化（kabusys.data.stats.zscore_normalize を利用）、±3 でクリップ
+    - features テーブルへ日付単位で置換（DELETE + bulk INSERT、トランザクションで原子性）
+  - signal_generator.generate_signals(conn, target_date, threshold=0.60, weights=None)
+    - features と ai_scores を統合し、各銘柄のコンポーネントスコア（momentum/value/volatility/liquidity/news）を算出
+    - シグモイドや平均化によるスコア変換、欠損コンポーネントは中立 0.5 で補完
+    - デフォルト重みを実装（momentum 0.40 等）。与えられた weights は検証・補完・正規化（合計 1.0 に再スケール）される
+    - Bear レジーム判定（ai_scores の regime_score 平均が負かつサンプル数閾値を満たす場合）
+    - BUY（threshold 以上）・SELL（ストップロスまたはスコア低下）シグナル生成
+    - SELL 優先（SELL 対象は BUY から除外）、signals テーブルへ日付単位で置換（トランザクション）
+    - 標準の停止損失閾値: -8%（_STOP_LOSS_RATE）
+
+- API エクスポート
+  - strategy パッケージの公開関数 build_features / generate_signals を __all__ に追加。
+  - research パッケージの代表ユーティリティを __all__ に追加。
 
 ### Changed
-- （初版のため該当なし）
+- （初回リリースのため該当なし）
 
 ### Fixed
-- （初版のため該当なし）
+- （初回リリースのため該当なし）
 
 ### Security
-- RSS パースに defusedxml を使用して XML 関連の攻撃リスクを低減。
-- ニュース URL 正規化とトラッキングパラメータ除去、受信サイズ制限により情報の一貫性・資源消費攻撃に配慮。
-- J-Quants クライアントでトークン自動リフレッシュと厳格なリトライ制御を実装。
+- ニュースパーシングで defusedxml を使用して XML による攻撃（XML bomb 等）を軽減。
+- news_collector で受信サイズを制限（MAX_RESPONSE_BYTES）し、メモリ DoS を緩和する方針を導入。
+- jquants_client の HTTP エラー・ネットワーク障害に対するリトライ実装により一時的なエラー影響を低減。
+- .env 読み込みでは OS 環境変数保護や上書き制御（protected set）を採用。
 
-### Notes / Known limitations
-- execution（発注）層はパッケージのエクスポート対象に含まれるが、実装は初期段階（プレースホルダ）です。実際の発注ロジック・API 統合は今後の作業。
-- 戦略の SELL 条件の一部（トレーリングストップ、時間決済）はコメントで未実装と明記されています。これらは `positions` テーブルに `peak_price` / `entry_date` 等の情報が追加され次第実装予定です。
-- news_collector のドキュメントでは「INSERT RETURNING を用いて挿入数を正確に返す」とありますが、実装はチャンク化した executemany を使用する方式です（将来の最適化候補）。
-- 外部依存をできるだけ排した設計（pandas など非依存）だが、実運用ではデータ量や性能要件に応じて最適化が必要。
+### Known limitations / TODO
+- signal_generator._generate_sell_signals の一部のエグジット条件は未実装（コメント記載）:
+  - トレーリングストップ（peak_price が positions テーブルに必要）
+  - 時間決済（保有 60 営業日超過）
+- calc_value: PBR / 配当利回りは現バージョンでは未実装。
+- news_collector の SSRF / IP ブラックリスト等の具体的なネットワーク層チェックはコメント・方針あり（コード断片のため実装箇所は要確認）。
+- positions テーブルのスキーマ（peak_price / entry_date 等）に依存する追加ロジックはまだ未着手。
+- AI スコア（ai_scores）が欠損している場合、news スコアは中立 0.5 で補完される点に注意。
 
-### Migration / Upgrade notes
-- なし（初回リリース）
+### Breaking Changes
+- （初回リリースのため該当なし）
 
-Contributors:
-- 初期実装（リポジトリ作成者）による開発。
+---
+
+注: 上記はリポジトリ内のコード・コメントから推測して作成した初回リリースの変更履歴です。実際の運用や今後のコミットによって差異が生じる可能性があります。必要であれば各モジュールごとに詳細なリリースノート（例: 入力/出力スキーマ、DB テーブル定義、例外仕様）を追記します。
