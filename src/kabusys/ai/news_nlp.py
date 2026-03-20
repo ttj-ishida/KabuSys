@@ -209,20 +209,23 @@ def _fetch_articles(
     """
     rows = conn.execute(
         """
-        SELECT ns.code, n.title, n.content
-        FROM raw_news n
-        JOIN news_symbols ns ON ns.news_id = n.id
-        WHERE n.datetime >= ? AND n.datetime < ?
-        ORDER BY n.datetime DESC
+        SELECT code, title, content
+        FROM (
+            SELECT ns.code, n.title, n.content,
+                   row_number() OVER (PARTITION BY ns.code ORDER BY n.datetime DESC) AS rn
+            FROM raw_news n
+            JOIN news_symbols ns ON ns.news_id = n.id
+            WHERE n.datetime >= ? AND n.datetime < ?
+        ) t
+        WHERE rn <= ?
+        ORDER BY code, rn
         """,
-        [window_start, window_end],
+        [window_start, window_end, _MAX_ARTICLES_PER_STOCK],
     ).fetchall()
 
     article_map: dict[str, list[str]] = {}
     for code, title, content in rows:
         texts = article_map.setdefault(code, [])
-        if len(texts) >= _MAX_ARTICLES_PER_STOCK:
-            continue  # 最新 N 件を超えた古い記事はスキップ
         text = f"{title or ''} {content or ''}".strip()
         texts.append(text)
     return article_map
@@ -237,6 +240,7 @@ def _call_openai_api(client: Any, messages: list[dict]) -> Any:
         model=_MODEL,
         messages=messages,
         response_format={"type": "json_object"},
+        temperature=0,
     )
 
 
