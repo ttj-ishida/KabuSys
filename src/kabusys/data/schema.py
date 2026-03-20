@@ -136,8 +136,8 @@ CREATE TABLE IF NOT EXISTS news_symbols (
     code        VARCHAR     NOT NULL,
     PRIMARY KEY (news_id, code),
     -- Note: ON DELETE CASCADE は DuckDB 1.5.0 非サポートのため省略。
-    --       news_articles 削除時はアプリ側で先に news_symbols を削除すること。
-    FOREIGN KEY (news_id) REFERENCES news_articles(id)
+    --       raw_news 削除時はアプリ側で先に news_symbols を削除すること。
+    FOREIGN KEY (news_id) REFERENCES raw_news(id)
 )
 """
 

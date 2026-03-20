@@ -118,26 +118,47 @@ def score_news(
 
     # 5. チャンク単位で API コール
     all_scores: dict[str, float] = {}
+    api_call_count = 0
     codes = list(article_map.keys())
     for i in range(0, len(codes), _BATCH_SIZE):
         chunk_codes = codes[i : i + _BATCH_SIZE]
         chunk_scores = _score_chunk(client, chunk_codes, article_map)
+        api_call_count += 1
         all_scores.update(chunk_scores)
+
+    logger.info(
+        "score_news: OpenAI API コール数=%d スコア取得銘柄数=%d date=%s",
+        api_call_count, len(all_scores), target_date,
+    )
 
     if not all_scores:
         logger.info("score_news: スコア取得失敗 date=%s", target_date)
         return 0
 
-    # 6. ai_scores テーブルへ書き込み（DELETE → INSERT）
-    conn.execute("DELETE FROM ai_scores WHERE date = ?", [target_date])
+    # 6. ai_scores テーブルへ日付単位の置換（DELETE → INSERT）
+    # sentiment_score と ai_score は同値（現フェーズ）
     params = [
-        (target_date, code, score) for code, score in all_scores.items()
+        (target_date, code, score, score)
+        for code, score in all_scores.items()
     ]
-    conn.executemany(
-        "INSERT INTO ai_scores (date, code, score) VALUES (?, ?, ?)",
-        params,
-    )
-    conn.commit()
+    conn.execute("BEGIN")
+    try:
+        conn.execute("DELETE FROM ai_scores WHERE date = ?", [target_date])
+        if params:  # DuckDB 0.10: executemany に空リスト不可
+            conn.executemany(
+                """
+                INSERT INTO ai_scores (date, code, sentiment_score, ai_score)
+                VALUES (?, ?, ?, ?)
+                """,
+                params,
+            )
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception as rb_exc:
+            logger.warning("score_news: ROLLBACK failed: %s", rb_exc)
+        raise
 
     logger.info(
         "score_news: 完了 書込み銘柄数=%d date=%s",
