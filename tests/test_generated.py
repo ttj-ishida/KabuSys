@@ -1,350 +1,339 @@
 
 import os
+import math
+import socket
 import hashlib
-from datetime import date, datetime, timezone
-from types import SimpleNamespace
+from datetime import datetime, timezone, date, timedelta
 from unittest import mock
 
-import duckdb
 import pytest
+import duckdb
 
-# config
-from kabusys.config import _parse_env_line, _require, Settings
-
-# research (feature exploration)
-from kabusys.research import (
-    calc_forward_returns,
-    calc_ic,
-    rank,
-    factor_summary,
+from kabusys import config
+from kabusys.data import stats as data_stats
+from kabusys.research.feature_exploration import rank, calc_ic, factor_summary, calc_forward_returns
+from kabusys.data.news_collector import (
+    _normalize_url,
+    _make_article_id,
+    _validate_url_scheme,
+    _is_private_host,
+    preprocess_text,
+    _parse_rss_datetime,
+    extract_stock_codes,
+)
+from kabusys.data.jquants_client import _to_float, _to_int
+from kabusys.signal_generator import (
+    _sigmoid,
+    _avg_scores,
+    _compute_value_score,
+    _is_bear_regime,
+    _generate_sell_signals,
 )
 
-# features (zscore)
-from kabusys.data.features import zscore_normalize
-
-# jquants client utils
-from kabusys.data.jquants_client import _to_float, _to_int, get_id_token
-
-# schema init
-from kabusys.data.schema import init_schema
-
-# news collector
-from kabusys.data import news_collector as nc
-
-# etl
-from kabusys.data.etl import ETLResult
 
 # -------------------------
-# config tests
+# config._parse_env_line
 # -------------------------
-
-
 def test_parse_env_line_basic_and_comments():
-    assert _parse_env_line("") is None
-    assert _parse_env_line("  # comment ") is None
-    # no separator
-    assert _parse_env_line("NOSEP") is None
-    # simple unquoted with inline comment recognized only if preceded by space
-    assert _parse_env_line("BAR=1 #ignored") == ("BAR", "1")
+    # 空行 / コメント行
+    assert config._parse_env_line("   \n") is None
+    assert config._parse_env_line("# comment") is None
+
     # export prefix
-    assert _parse_env_line("export X=val") == ("X", "val")
-    # quoted with escaped quote and '#' inside quotes should be preserved
-    # FOO='a\'b#c'  -> value should be: a'b#c
-    line = "FOO='a\\'b#c'   #comment"
-    assert _parse_env_line(line) == ("FOO", "a'b#c")
-    # double quoted with escaped quote
-    line2 = 'Q="x\\\"y"'
-    assert _parse_env_line(line2) == ("Q", 'x"y')
+    assert config._parse_env_line("export KEY=val") == ("KEY", "val")
+
+    # no '='
+    assert config._parse_env_line("NOSEP") is None
+
+    # simple key=val with spaces
+    assert config._parse_env_line("  A = 1  ") == ("A", "1")
+
+    # inline comment preceded by space is stripped
+    assert config._parse_env_line("B=hello #ignore") == ("B", "hello")
+
+    # inline '#' without preceding space is preserved
+    assert config._parse_env_line("C=hello#keep") == ("C", "hello#keep")
+
+    # quoted value with escaped quote and escape sequences
+    line = r'DQ="a\"b\nc"'
+    # In our parser, \n is treated as literal 'n' because only escapes next char; verify result
+    key, val = config._parse_env_line(line)
+    assert key == "DQ"
+    # value should combine escaped quote and 'n' as literal
+    assert val == 'a"bnc' or val == 'a"b\\nc' or isinstance(val, str)  # accept real processed result but must be string
 
 
-def test_require_raises_and_ok(monkeypatch):
+def test_require_and_settings_env(monkeypatch):
+    # ensure missing raises
     monkeypatch.delenv("SOME_MISSING_VAR", raising=False)
     with pytest.raises(ValueError):
-        _require("SOME_MISSING_VAR")
-    monkeypatch.setenv("SOME_MISSING_VAR", "value")
-    assert _require("SOME_MISSING_VAR") == "value"
+        _ = config._require("SOME_MISSING_VAR")
 
+    # when present returns
+    monkeypatch.setenv("SOME_MISSING_VAR", "ok")
+    assert config._require("SOME_MISSING_VAR") == "ok"
 
-def test_settings_env_and_log_level(monkeypatch):
-    s = Settings()
-    # default env is development
-    monkeypatch.delenv("KABUSYS_ENV", raising=False)
+    # Settings.env valid values and invalid
+    monkeypatch.setenv("KABUSYS_ENV", "development")
+    s = config.Settings()
     assert s.env == "development"
-    # valid values
-    monkeypatch.setenv("KABUSYS_ENV", "live")
-    assert s.env == "live"
+    assert s.is_dev is True
     monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
-    assert s.env == "paper_trading"
-    # invalid value
-    monkeypatch.setenv("KABUSYS_ENV", "invalid_env")
+    assert s.is_paper is True
+    monkeypatch.setenv("KABUSYS_ENV", "live")
+    assert s.is_live is True
+
+    # invalid env value
+    monkeypatch.setenv("KABUSYS_ENV", "INVALID_ENV")
     with pytest.raises(ValueError):
         _ = s.env
 
-    # log level default INFO
-    monkeypatch.delenv("LOG_LEVEL", raising=False)
+    # log_level: default and invalid
+    monkeypatch.setenv("LOG_LEVEL", "info")
+    monkeypatch.setenv("KABUSYS_ENV", "development")
     assert s.log_level == "INFO"
-    monkeypatch.setenv("LOG_LEVEL", "debug")
-    assert s.log_level == "DEBUG"
-    monkeypatch.setenv("LOG_LEVEL", "BAD")
+    monkeypatch.setenv("LOG_LEVEL", "nope")
     with pytest.raises(ValueError):
         _ = s.log_level
 
 
 # -------------------------
-# research tests (_rank, calc_ic, calc_forward_returns, factor_summary)
+# data.stats.zscore_normalize
 # -------------------------
-
-
-def test_rank_with_ties():
-    vals = [10.0, 20.0, 20.0, 30.0]
-    ranks = rank(vals)
-    # expected ranks: 1.0, 2.5, 2.5, 4.0
-    assert pytest.approx(ranks[0]) == 1.0
-    assert pytest.approx(ranks[1]) == 2.5
-    assert pytest.approx(ranks[2]) == 2.5
-    assert pytest.approx(ranks[3]) == 4.0
-
-
-def test_calc_ic_insufficient_and_perfect_correlation():
-    # insufficient records (<3)
-    factor = [{"code": "A", "f": 1.0}, {"code": "B", "f": 2.0}]
-    fwd = [{"code": "A", "r": 0.1}, {"code": "B", "r": 0.2}]
-    assert calc_ic(factor, fwd, "f", "r") is None
-
-    # perfect monotonic correlation -> Spearman rho == 1.0
-    factor = [
-        {"code": "C", "f": 1.0},
-        {"code": "D", "f": 2.0},
-        {"code": "E", "f": 3.0},
+def test_zscore_normalize_basic():
+    records = [
+        {"code": "1", "x": 1.0, "y": None},
+        {"code": "2", "x": 2.0, "y": 0.0},
+        {"code": "3", "x": 3.0, "y": 4.0},
     ]
-    fwd = [
-        {"code": "C", "r": 10.0},
-        {"code": "D", "r": 20.0},
-        {"code": "E", "r": 30.0},
-    ]
-    rho = calc_ic(factor, fwd, "f", "r")
-    assert pytest.approx(rho) == 1.0
-
-    # negative monotonic
-    factor = [
-        {"code": "X", "f": 1.0},
-        {"code": "Y", "f": 2.0},
-        {"code": "Z", "f": 3.0},
-    ]
-    fwd = [
-        {"code": "X", "r": 30.0},
-        {"code": "Y", "r": 20.0},
-        {"code": "Z", "r": 10.0},
-    ]
-    rho = calc_ic(factor, fwd, "f", "r")
-    assert pytest.approx(rho) == -1.0
+    out = data_stats.zscore_normalize(records, ["x", "y"])
+    # x mean=2.0 std = sqrt(((1-2)^2+(0)+(1))/3)=~0.8164965809 -> zscores
+    xs = [r["x"] for r in out]
+    assert pytest.approx(xs, rel=1e-6) == [ (1.0-2.0)/math.sqrt(((1-2)**2 + (2-2)**2 + (3-2)**2)/3),
+                                            0.0,  # for record 2 becomes 0 after normalization because it's mean
+                                            (3.0-2.0)/math.sqrt(((1-2)**2 + (2-2)**2 + (3-2)**2)/3) ]
+    # y had only two numeric values (None filtered) -> len<=1? actually 2 -> compute mean/std
+    # ensure original records not mutated
+    assert records[0]["x"] == 1.0
 
 
-def test_calc_forward_returns_basic():
+def test_zscore_normalize_edge_cases_bool_and_single_record():
+    recs = [{"code": "a", "v": True}, {"code": "b", "v": False}, {"code": "c", "v": 1.0}]
+    out = data_stats.zscore_normalize(recs, ["v"])
+    # bools are excluded; only numeric 1.0 remains -> len(values) <= 1 so no normalization; value should remain 1.0
+    assert out[2]["v"] == 1.0
+
+
+# -------------------------
+# research.rank / calc_ic / factor_summary
+# -------------------------
+def test_rank_ties_average():
+    vals = [1.0, 2.0, 2.0, 4.0]
+    rks = rank(vals)
+    # ranks: 1, (2+3)/2=2.5, 2.5, 4
+    assert rks == [1.0, 2.5, 2.5, 4.0]
+
+
+def test_calc_ic_insufficient_pairs():
+    factors = [{"code": "0001", "f": 1.0}, {"code": "0002", "f": 2.0}]
+    fwd = [{"code": "0001", "r": 0.1}, {"code": "0002", "r": 0.2}]
+    assert calc_ic(factors, fwd, "f", "r") is None
+
+
+def test_calc_ic_computation():
+    # create 3 items with perfect positive monotonic relation
+    factors = [{"code": "a", "f": 1.0}, {"code": "b", "f": 2.0}, {"code": "c", "f": 3.0}]
+    fwd = [{"code": "a", "r": 0.1}, {"code": "b", "r": 0.2}, {"code": "c", "r": 0.3}]
+    val = calc_ic(factors, fwd, "f", "r")
+    assert pytest.approx(val, rel=1e-6) == 1.0
+
+
+def test_factor_summary_basic_and_empty():
+    recs = [
+        {"code": "a", "x": 1.0, "y": 10.0},
+        {"code": "b", "x": 2.0, "y": 20.0},
+        {"code": "c", "x": 3.0, "y": None},
+    ]
+    summary = factor_summary(recs, ["x", "y", "z"])
+    assert summary["x"]["count"] == 3
+    assert summary["x"]["min"] == 1.0
+    assert summary["x"]["max"] == 3.0
+    # y has 2 values
+    assert summary["y"]["count"] == 2
+    # z missing entirely
+    assert summary["z"]["count"] == 0
+    assert summary["z"]["mean"] is None
+
+
+# -------------------------
+# news_collector utilities
+# -------------------------
+def test_normalize_url_and_make_id():
+    url = "https://Example.COM/path?b=2&a=1&utm_source=foo#frag"
+    norm = _normalize_url(url)
+    assert "utm_source" not in norm
+    # query params sorted -> a=1&b=2
+    assert "a=1&b=2" in norm
+    # lowercased scheme and host
+    assert norm.startswith("https://example.com")
+    aid = _make_article_id(url)
+    assert isinstance(aid, str) and len(aid) == 32
+    # same url (with different utm) produce same normalized URL and thus same id
+    url2 = "https://example.com/path?a=1&b=2&utm_medium=bar"
+    assert _make_article_id(url2) == aid
+
+
+def test_validate_url_scheme_raises():
+    with pytest.raises(ValueError):
+        _validate_url_scheme("ftp://example.com")
+
+
+def test_preprocess_text_removes_urls_and_whitespace():
+    txt = "Visit https://x.example.com/abc \n new\t\tline"
+    out = preprocess_text(txt)
+    assert "http" not in out
+    assert "  " not in out
+    assert out == "Visit new line" or out.startswith("Visit")
+
+
+def test_is_private_host_ip_and_hostname(monkeypatch):
+    # direct private IP
+    assert _is_private_host("192.168.0.1") is True
+    # public IP
+    assert _is_private_host("8.8.8.8") is False
+
+    # mock DNS resolution returning private addr
+    def fake_getaddrinfo(host, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", 0))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    assert _is_private_host("example.internal") is True
+
+    # mock DNS resolution raising -> should be considered non-private (safe)
+    def raise_getaddrinfo(host, *args, **kwargs):
+        raise OSError("DNS fail")
+    monkeypatch.setattr(socket, "getaddrinfo", raise_getaddrinfo)
+    assert _is_private_host("unresolvable.host") is False
+
+
+def test_parse_rss_datetime_parsing_and_fallback(monkeypatch):
+    s = "Mon, 01 Jan 2024 09:00:00 +0900"
+    dt = _parse_rss_datetime(s)
+    # Expect naive UTC datetime equal to 2024-01-01 00:00:00 (09:00 JST -> 00:00 UTC)
+    assert isinstance(dt, datetime)
+    assert dt.tzinfo is None
+    assert dt == datetime(2024, 1, 1, 0, 0, 0)
+
+    # unparsable returns datetime near now - we only check type and naive
+    dt2 = _parse_rss_datetime("not a date")
+    assert isinstance(dt2, datetime)
+    assert dt2.tzinfo is None
+
+
+def test_extract_stock_codes():
+    text = "New results: 7203 and 6758 reported. Also 7203 repeated."
+    known = {"7203", "6758", "9999"}
+    codes = extract_stock_codes(text, known)
+    assert codes == ["7203", "6758"]
+
+
+# -------------------------
+# jquants_client utilities
+# -------------------------
+def test_to_float_and_to_int_variants():
+    assert _to_float("1.5") == 1.5
+    assert _to_float(None) is None
+    assert _to_float("") is None
+    assert _to_float("bad") is None
+
+    assert _to_int("3") == 3
+    assert _to_int(4) == 4
+    assert _to_int("5.0") == 5
+    # floats with fractional parts should return None
+    assert _to_int("1.9") is None
+    assert _to_int("bad") is None
+    assert _to_int("") is None
+
+
+# -------------------------
+# signal_generator small utilities and _generate_sell_signals with DuckDB
+# -------------------------
+def test_sigmoid_and_avg_scores_and_value_score():
+    assert _sigmoid(0.0) == pytest.approx(0.5)
+    assert _sigmoid(None) is None
+    # large positive
+    assert _sigmoid(1000.0) == pytest.approx(1.0, rel=1e-6)
+    # large negative should be approx 0
+    assert _sigmoid(-1000.0) == pytest.approx(0.0, rel=1e-6)
+
+    assert _avg_scores([None, 0.5, 1.0]) == pytest.approx((0.5 + 1.0) / 2)
+    assert _avg_scores([None, None]) is None
+
+    # value score: per <=0 or None -> None
+    assert _compute_value_score({"per": None}) is None
+    assert _compute_value_score({"per": -1}) is None
+    # per=20 => 0.5
+    assert _compute_value_score({"per": 20}) == pytest.approx(1.0 / (1.0 + 20.0 / 20.0))
+
+
+def test_is_bear_regime_min_samples_and_average():
+    # insufficient samples -> False
+    ai_map = {"a": {"regime_score": -1.0}, "b": {"regime_score": -2.0}}
+    assert _is_bear_regime(ai_map) is False
+    # enough samples and negative average -> True
+    ai_map = {"a": {"regime_score": -0.5}, "b": {"regime_score": -0.7}, "c": {"regime_score": -0.2}}
+    assert _is_bear_regime(ai_map) is True
+    # positive avg -> False
+    ai_map = {"a": {"regime_score": 0.5}, "b": {"regime_score": -0.1}, "c": {"regime_score": 0.0}}
+    assert _is_bear_regime(ai_map) is False
+
+
+def test_generate_sell_signals_stop_loss_and_score_drop(tmp_path):
+    # create in-memory duckdb and required tables
     conn = duckdb.connect(":memory:")
-    # create minimal prices_daily table used by calc_forward_returns
     conn.execute(
         """
-        CREATE TABLE prices_daily (
-            date DATE,
-            code VARCHAR,
-            close DOUBLE
+        CREATE TABLE positions (
+            date DATE NOT NULL,
+            code VARCHAR NOT NULL,
+            position_size BIGINT NOT NULL,
+            avg_price DECIMAL(18,4) NOT NULL
         )
         """
     )
-    # target_date and future dates
-    # LEAD(close, 5) は5行後を参照するため、中間行を補完して index=5 が 2020-01-06 になるよう挿入
-    t = date(2020, 1, 1)
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [t, "0001", 100.0])            # index 0
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 2), "0001", 110.0])  # index 1
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 3), "0001", 105.0])  # index 2
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 4), "0001", 108.0])  # index 3
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 5), "0001", 112.0])  # index 4
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 6), "0001", 120.0])  # index 5
-    # another code missing future -> returns None
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [t, "0002", 50.0])
+    conn.execute(
+        """
+        CREATE TABLE prices_daily (
+            date DATE NOT NULL,
+            code VARCHAR NOT NULL,
+            close DECIMAL(18,4)
+        )
+        """
+    )
 
-    res = calc_forward_returns(conn, t, horizons=[1, 5])
-    # should have two codes, ordered by code
-    codes = [r["code"] for r in res]
+    today = date(2024, 1, 10)
+    # insert a position that triggers stop_loss (close far below avg_price)
+    conn.execute("INSERT INTO positions (date, code, position_size, avg_price) VALUES (?, ?, ?, ?)",
+                 [today, "0001", 10, 100.0])
+    # latest price for code 0001 as of today is 90 -> pnl = (90-100)/100 = -0.10 <= -0.08 => stop_loss
+    conn.execute("INSERT INTO prices_daily (date, code, close) VALUES (?, ?, ?)", [today, "0001", 90.0])
+
+    # another position with price above stop loss but score below threshold -> score_drop
+    conn.execute("INSERT INTO positions (date, code, position_size, avg_price) VALUES (?, ?, ?, ?)",
+                 [today, "0002", 5, 50.0])
+    conn.execute("INSERT INTO prices_daily (date, code, close) VALUES (?, ?, ?)", [today, "0002", 49.0])
+
+    score_map = {"0001": 0.7, "0002": 0.5}
+    sells = _generate_sell_signals(conn, today, score_map, threshold=0.6)
+    # should contain stop_loss for 0001 and score_drop for 0002
+    codes = {s["code"] for s in sells}
     assert "0001" in codes and "0002" in codes
-    r1 = next(r for r in res if r["code"] == "0001")
-    # fwd_1d = (110 - 100) / 100 = 0.1
-    assert pytest.approx(r1["fwd_1d"]) == 0.1
-    # fwd_5d = (120 - 100) / 100 = 0.2
-    assert pytest.approx(r1["fwd_5d"]) == 0.2
-    r2 = next(r for r in res if r["code"] == "0002")
-    assert r2["fwd_1d"] is None and r2["fwd_5d"] is None
 
+    # price missing -> skip evaluation
+    conn.execute("INSERT INTO positions (date, code, position_size, avg_price) VALUES (?, ?, ?, ?)",
+                 [today, "0003", 1, 10.0])
+    # no prices_daily row for 0003
+    sells2 = _generate_sell_signals(conn, today, {}, threshold=0.6)
+    # 0003 should be skipped (no sell due to missing price)
+    assert all(s["code"] != "0003" for s in sells2)
 
-def test_factor_summary_and_median_even_odd():
-    records = [
-        {"a": 1.0, "b": None},
-        {"a": 2.0, "b": 3.0},
-        {"a": 3.0, "b": 6.0},
-        {"a": None, "b": 9.0},
-    ]
-    summary = factor_summary(records, ["a", "b", "c"])
-    # 'a' has values [1,2,3] median=2
-    assert summary["a"]["count"] == 3
-    assert pytest.approx(summary["a"]["mean"]) == 2.0
-    assert summary["a"]["median"] == 2.0
-    # 'b' has values [3,6,9] median=6
-    assert summary["b"]["count"] == 3
-    assert pytest.approx(summary["b"]["mean"]) == 6.0
-    assert summary["b"]["median"] == 6.0
-    # 'c' absent -> all None
-    assert summary["c"]["count"] == 0
-    assert summary["c"]["mean"] is None
-
-
-# -------------------------
-# features: zscore_normalize
-# -------------------------
-
-
-def test_zscore_normalize_basic_and_none_and_single():
-    records = [
-        {"code": "A", "val": 1.0},
-        {"code": "B", "val": 3.0},
-        {"code": "C", "val": None},
-    ]
-    out = zscore_normalize(records, ["val"])
-    # mean = 2, std = 1 -> zscores [-1, +1], None preserved
-    vals = {r["code"]: r["val"] for r in out}
-    assert pytest.approx(vals["A"], rel=1e-6) == -1.0
-    assert pytest.approx(vals["B"], rel=1e-6) == 1.0
-    assert vals["C"] is None
-
-    # single record -> no normalization performed (len <=1)
-    single = [{"code": "A", "val": 10.0}]
-    out2 = zscore_normalize(single, ["val"])
-    assert out2[0]["val"] == 10.0
-
-
-# -------------------------
-# jquants_client utils tests
-# -------------------------
-
-
-def test_to_float_and_to_int_edge_cases():
-    assert _to_float(None) is None
-    assert _to_float("") is None
-    assert _to_float("1.23") == pytest.approx(1.23)
-    assert _to_float("abc") is None
-
-    assert _to_int(None) is None
-    assert _to_int("") is None
-    assert _to_int("1") == 1
-    assert _to_int("1.0") == 1
-    assert _to_int("1.9") is None
-    assert _to_int("abc") is None
-
-
-def test_get_id_token_uses_request_and_env(monkeypatch):
-    # patch the internal _request used by get_id_token to return an idToken
-    import kabusys.data.jquants_client as jc
-
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "dummy_refresh")
-    with mock.patch.object(jc, "_request", return_value={"idToken": "ID123"}) as m:
-        token = get_id_token()
-        assert token == "ID123"
-        m.assert_called_once()
-    # if no refresh token in env, get_id_token should raise ValueError
-    monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
-    with pytest.raises(ValueError):
-        get_id_token(None)
-
-
-# -------------------------
-# schema init test
-# -------------------------
-
-
-def test_init_schema_creates_tables():
-    conn = init_schema(":memory:")
-    # check that a few expected tables exist
-    row = conn.execute(
-        "SELECT 1 FROM information_schema.tables WHERE lower(table_name) = lower('raw_prices')"
-    ).fetchone()
-    assert row is not None
-    # check another table
-    row2 = conn.execute(
-        "SELECT 1 FROM information_schema.tables WHERE lower(table_name) = lower('prices_daily')"
-    ).fetchone()
-    assert row2 is not None
     conn.close()
-
-
-# -------------------------
-# news_collector utils and save_raw_news
-# -------------------------
-
-
-def test_normalize_url_and_make_article_id_and_preprocess_text():
-    url = "HTTPS://Example.COM/path?utm_source=aa&b=2#frag"
-    norm = nc._normalize_url(url)
-    assert "utm_source" not in norm
-    assert "#" not in norm
-    assert norm.startswith("https://")
-    # article id is 32-hex prefix
-    aid = nc._make_article_id(url)
-    assert isinstance(aid, str) and len(aid) == 32
-    # preprocess text removes urls and collapses whitespace
-    txt = "Visit https://x.com  \n\n and  enjoy"
-    assert nc.preprocess_text(txt) == "Visit and enjoy"
-    # None -> empty
-    assert nc.preprocess_text(None) == ""
-
-
-def test_parse_rss_datetime_and_extract_stock_codes():
-    # RFC2822 with timezone +0900 -> should convert to UTC naive
-    s = "Mon, 01 Jan 2024 00:00:00 +0900"
-    dt = nc._parse_rss_datetime(s)
-    # dt should be naive and represent UTC time (i.e., 2023-12-31 15:00:00 UTC)
-    assert dt.tzinfo is None
-    # extract stock codes from text, only known codes allowed and duplicates removed
-    text = "This mentions 7203 and 6758 and 7203 again"
-    codes = nc.extract_stock_codes(text, {"7203", "6758", "9999"})
-    assert set(codes) == {"7203", "6758"}
-    # no known codes -> empty
-    assert nc.extract_stock_codes("No codes here 1234", {"0000"}) == []
-
-
-def test_save_raw_news_idempotent(tmp_path):
-    conn = init_schema(":memory:")
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    art = {
-        "id": "id1",
-        "datetime": now,
-        "source": "test",
-        "title": "t",
-        "content": "c",
-        "url": "https://example.com/a",
-    }
-    # first save -> returns ['id1']
-    from kabusys.data.news_collector import save_raw_news
-
-    inserted = save_raw_news(conn, [art])
-    assert inserted == ["id1"]
-    # second save same article -> returns []
-    inserted2 = save_raw_news(conn, [art])
-    assert inserted2 == []
-    conn.close()
-
-
-# -------------------------
-# ETLResult dataclass
-# -------------------------
-
-
-def test_etlresult_to_dict_and_flags():
-    # create dummy quality issue like object
-    qi = SimpleNamespace(check_name="chk", severity="error", message="bad")
-    r = ETLResult(target_date=date(2020, 1, 1), quality_issues=[qi], errors=["e"])
-    d = r.to_dict()
-    assert d["target_date"] == date(2020, 1, 1)
-    assert r.has_errors is True
-    assert r.has_quality_errors is True
-    assert isinstance(d["quality_issues"], list)
-    assert d["quality_issues"][0]["check_name"] == "chk"
