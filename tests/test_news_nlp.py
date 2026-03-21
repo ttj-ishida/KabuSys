@@ -361,3 +361,51 @@ def test_calc_news_window_boundary_exclusive_end(conn):
     # 対象記事がないため API 未コール・0件
     assert count == 0
     mock_api.assert_not_called()
+
+
+def test_score_news_code_as_integer(conn):
+    """LLM が銘柄コードを整数で返した場合も str 正規化して一致させる。"""
+    from kabusys.ai.news_nlp import score_news
+
+    _insert_article(conn, "art1", _WINDOW_DT, "日立製作所")
+    _link_code(conn, "art1", "6501")
+
+    # code を int で返すモックレスポンス
+    mock_resp = MagicMock()
+    mock_resp.choices[0].message.content = json.dumps(
+        {"results": [{"code": 6501, "score": 0.7}]}
+    )
+    with patch("kabusys.ai.news_nlp._call_openai_api", return_value=mock_resp):
+        count = score_news(conn, TARGET_DATE, api_key="test-key")
+
+    assert count == 1
+    row = conn.execute(
+        "SELECT sentiment_score FROM ai_scores WHERE date = ? AND code = ?",
+        [TARGET_DATE, "6501"],
+    ).fetchone()
+    assert row is not None
+    assert abs(row[0] - 0.7) < 1e-9
+
+
+def test_score_news_text_truncation(conn):
+    """_MAX_CHARS_PER_STOCK を超える記事テキストはトリムされてプロンプトに含まれる。"""
+    from kabusys.ai.news_nlp import score_news, _MAX_CHARS_PER_STOCK
+
+    long_content = "あ" * (_MAX_CHARS_PER_STOCK + 500)
+    _insert_article(conn, "art1", _WINDOW_DT, "長文記事", long_content)
+    _link_code(conn, "art1", "9984")
+
+    captured = {}
+
+    def capture_call(client, messages):
+        captured["user"] = messages[-1]["content"]
+        return _make_api_response([{"code": "9984", "score": 0.3}])
+
+    with patch("kabusys.ai.news_nlp._call_openai_api", side_effect=capture_call):
+        count = score_news(conn, TARGET_DATE, api_key="test-key")
+
+    assert count == 1
+    # 銘柄9984 のテキスト部分が _MAX_CHARS_PER_STOCK + 1（末尾 '…'）に収まっている
+    stock_text_start = captured["user"].index("銘柄9984: ") + len("銘柄9984: ")
+    stock_text = captured["user"][stock_text_start:]
+    assert len(stock_text) <= _MAX_CHARS_PER_STOCK + 1  # +1 は '…'

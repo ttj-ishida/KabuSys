@@ -293,7 +293,9 @@ def _validate_and_extract(resp: Any, requested_codes: set[str]) -> dict[str, flo
     for item in results:
         if not isinstance(item, dict):
             continue
-        code = item.get("code")
+        code_raw = item.get("code")
+        # LLM が整数で返すケースに備えて str に正規化してから照合する
+        code = str(code_raw).strip() if code_raw is not None else None
         raw_score = item.get("score")
         if code not in requested_codes:
             continue  # 未知コードは無視
@@ -356,7 +358,8 @@ def _score_chunk(
             )
             time.sleep(wait)
         except APIError as e:
-            if getattr(e, 'status_code', 0) < 500 or attempt >= _MAX_RETRIES:
+            # status_code が無い APIError は安全側（5xx扱い）でリトライ対象にする
+            if getattr(e, 'status_code', 500) < 500 or attempt >= _MAX_RETRIES:
                 logger.warning("score_news: API エラー → スキップ: %s", e)
                 return {}
             wait = _RETRY_BASE_SECONDS * (2 ** attempt)
