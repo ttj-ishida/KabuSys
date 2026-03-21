@@ -125,15 +125,39 @@ JPXのカレンダー情報（祝日・半休・SQ等）。
 
 ## ai_scores
 
-AI分析結果。
+銘柄ごとのAI分析結果。
 
   column            type     description
-  ----------------- -------- ----------------------
+  ----------------- -------- ----------------------------------------
   date              date     評価日
   code              string   銘柄コード
-  sentiment_score   float    ニュースセンチメント
-  regime_score      float    市場レジーム
+  sentiment_score   float    ニュースセンチメント（score_news が生成）
+  regime_score      float    市場レジーム（現在は NULL。market_regime を参照）
   ai_score          float    総合AIスコア
+
+注: regime_score は market_regime テーブルで管理する設計に変更。
+    ai_scores.regime_score カラムは将来の拡張用として保持するが現在は使用しない。
+
+------------------------------------------------------------------------
+
+## market_regime
+
+市場全体のレジーム判定結果（日次・1行）。score_regime() が生成。
+
+  column            type      description
+  ----------------- --------- ------------------------------------------
+  date              date      判定日（PRIMARY KEY）
+  regime_score      float     市場レジームスコア（-1.0〜1.0）
+  regime_label      string    'bull' / 'neutral' / 'bear'
+  ma200_ratio       float     ETF1321終値 / 200日移動平均（診断用）
+  macro_sentiment   float     LLMマクロニューススコア（診断用）
+  created_at        timestamp 書込み日時
+
+判定ロジック:
+  regime_score = clip(0.7 * (ma200_ratio - 1.0) * 10 + 0.3 * macro_sentiment, -1, 1)
+  score >= +0.2 → 'bull'（積極的な買い戦略を許可）
+  score <= -0.2 → 'bear'（新規買いシグナルを全遮断）
+  それ以外      → 'neutral'
 
 ------------------------------------------------------------------------
 

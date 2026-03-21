@@ -97,7 +97,7 @@
 
 ------------------------------------------------------------------------
 
-## 3.3 AIニュース分析
+## 3.3 AI分析
 
 **時刻**
 
@@ -109,12 +109,15 @@
 
 処理
 
--   ニュースセンチメント
--   市場レジーム判定
+-   ニュースセンチメント分析: score_news(conn, target_date)
+    - raw_news + news_symbols → gpt-4o-mini → 銘柄ごとの sentiment_score
+-   市場レジーム判定: score_regime(conn, target_date)
+    - ETF1321の200日MA乖離（70%）+ マクロニュースLLM（30%）→ regime_score / regime_label
 
 保存
 
-    ai_scores
+    ai_scores      （sentiment_score: 銘柄単位）
+    market_regime  （regime_score / regime_label: 日次1行）
 
 ------------------------------------------------------------------------
 
