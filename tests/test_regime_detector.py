@@ -41,8 +41,12 @@ def _insert_price(conn, code: str, d: date, close: float) -> None:
 
 
 def _insert_prices_uniform(conn, code: str, days: int, close: float, before_date: date) -> None:
-    """before_date の直前 days 日間を同一終値で挿入するヘルパー。"""
-    for i in range(days, 0, -1):
+    """before_date の直前 days 日間を同一終値で挿入するヘルパー。
+
+    挿入される日付は before_date - (days+1) から before_date - 2 までの days 日間。
+    before_date - 1 は呼び出し側が別途 _insert_price で最終値をセットできるよう空けておく。
+    """
+    for i in range(days + 1, 1, -1):
         d = before_date - timedelta(days=i)
         _insert_price(conn, code, d, close)
 
@@ -93,3 +97,58 @@ def test_market_regime_columns(conn):
     assert row[2] == "bull"
     assert abs(row[1] - 0.5) < 1e-9
     assert row[5] is not None  # created_at は自動設定
+
+
+# ---------------------------------------------------------------------------
+# Task 2: _calc_ma200_ratio()
+# ---------------------------------------------------------------------------
+
+def test_bear_by_ma(conn):
+    """1321 が 200MA を大きく下回る → ma200_ratio が 1.0 未満 → score が bear に十分低い。"""
+    from kabusys.ai.regime_detector import _calc_ma200_ratio
+
+    # 199 日は 100 円、最終日は 85 円（乖離 -15%）
+    _insert_prices_uniform(conn, "1321", 199, 100.0, TARGET_DATE)
+    _insert_price(conn, "1321", TARGET_DATE - timedelta(days=1), 85.0)
+
+    ratio = _calc_ma200_ratio(conn, TARGET_DATE)
+
+    # avg ≈ (199*100 + 85)/200 = 99.925, latest=85 → ratio≈0.8506
+    assert ratio < 1.0, f"ratio={ratio} が 1.0 以上"
+    # regime_score = 0.7*(ratio-1)*10 が -0.2 以下になることを確認
+    score = 0.7 * (ratio - 1.0) * 10
+    assert score <= -0.2, f"score={score} が -0.2 より大きい"
+
+
+def test_bull_by_ma(conn):
+    """1321 が 200MA を大きく上回る → ma200_ratio が 1.0 超 → score が bull に十分高い。"""
+    from kabusys.ai.regime_detector import _calc_ma200_ratio
+
+    # 199 日は 100 円、最終日は 130 円（乖離 +30%）
+    _insert_prices_uniform(conn, "1321", 199, 100.0, TARGET_DATE)
+    _insert_price(conn, "1321", TARGET_DATE - timedelta(days=1), 130.0)
+
+    ratio = _calc_ma200_ratio(conn, TARGET_DATE)
+
+    assert ratio > 1.0, f"ratio={ratio} が 1.0 以下"
+    score = 0.7 * (ratio - 1.0) * 10
+    assert score >= 0.2, f"score={score} が 0.2 より小さい"
+
+
+def test_insufficient_prices(conn):
+    """1321 のデータが _MA_WINDOW 日未満 → ma200_ratio=1.0 フォールバック。"""
+    from kabusys.ai.regime_detector import _calc_ma200_ratio, _MA_WINDOW
+
+    # 100 日分のみ挿入
+    _insert_prices_uniform(conn, "1321", 100, 100.0, TARGET_DATE)
+
+    ratio = _calc_ma200_ratio(conn, TARGET_DATE)
+    assert ratio == 1.0, f"ratio={ratio}（期待: 1.0 フォールバック）"
+
+
+def test_no_prices(conn):
+    """1321 のデータが 0 件 → ma200_ratio=1.0 フォールバック。"""
+    from kabusys.ai.regime_detector import _calc_ma200_ratio
+
+    ratio = _calc_ma200_ratio(conn, TARGET_DATE)
+    assert ratio == 1.0
