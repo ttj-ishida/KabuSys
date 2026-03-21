@@ -139,7 +139,7 @@ def _fetch_macro_news(
     if not _MACRO_KEYWORDS:
         return []
 
-    conditions = " OR ".join(["title LIKE ?" for _ in _MACRO_KEYWORDS])
+    conditions = " OR ".join(["title ILIKE ?" for _ in _MACRO_KEYWORDS])
     like_params = [f"%{kw}%" for kw in _MACRO_KEYWORDS]
 
     rows = conn.execute(
@@ -170,7 +170,7 @@ def _call_openai_api(client: Any, messages: list[dict]) -> Any:
     )
 
 
-def _score_macro(client: Any, titles: list[str]) -> float:
+def _score_macro(client: Any, titles: list[str], *, _sleep_fn: Any = time.sleep) -> float:
     """マクロニュースタイトルを LLM に渡し、市場センチメントスコアを返す。
 
     titles が空の場合は LLM を呼ばず 0.0 を返す。
@@ -203,8 +203,10 @@ def _score_macro(client: Any, titles: list[str]) -> float:
                 return 0.0
             wait = _RETRY_BASE_SECONDS * (2 ** attempt)
             logger.warning("_score_macro: リトライ %d/%d: %s", attempt + 1, _MAX_RETRIES, exc)
-            time.sleep(wait)
+            _sleep_fn(wait)
         except APIError as exc:
+            # openai v1 SDK では APIStatusError（APIError のサブクラス）が status_code を持つ。
+            # getattr で安全に取得し、未来の SDK 変化にも対応。
             status = getattr(exc, "status_code", 500)
             if status is not None and 500 <= status < 600:
                 if attempt >= _MAX_RETRIES - 1:
@@ -216,7 +218,7 @@ def _score_macro(client: Any, titles: list[str]) -> float:
                 logger.warning(
                     "_score_macro: リトライ %d/%d: %s", attempt + 1, _MAX_RETRIES, exc
                 )
-                time.sleep(wait)
+                _sleep_fn(wait)
             else:
                 logger.warning(
                     "_score_macro: API失敗（非5xx）: %s, macro_sentiment=0.0", exc

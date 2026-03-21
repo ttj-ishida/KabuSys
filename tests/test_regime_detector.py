@@ -256,7 +256,7 @@ def test_score_macro_api_failure_fallback():
         "kabusys.ai.regime_detector._call_openai_api",
         side_effect=APIConnectionError(request=MagicMock()),
     ):
-        score = _score_macro(mock_client, ["Fed が利上げ"])
+        score = _score_macro(mock_client, ["Fed が利上げ"], _sleep_fn=lambda _: None)
 
     assert score == 0.0
 
@@ -401,7 +401,7 @@ def test_api_failure(conn):
     with patch(
         "kabusys.ai.regime_detector._call_openai_api",
         side_effect=APIConnectionError(request=MagicMock()),
-    ):
+    ), patch("kabusys.ai.regime_detector._RETRY_BASE_SECONDS", 0):
         result = score_regime(conn, TARGET_DATE, api_key="test-key")
 
     assert result == 1
