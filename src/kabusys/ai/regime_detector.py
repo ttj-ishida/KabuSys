@@ -153,3 +153,79 @@ def _fetch_macro_news(
     ).fetchall()
 
     return [r[0] for r in rows if r[0]]
+
+
+def _call_openai_api(client: Any, messages: list[dict]) -> Any:
+    """OpenAI Chat Completions API を呼び出す。
+
+    テスト時は unittest.mock.patch("kabusys.ai.regime_detector._call_openai_api") で差し替える。
+    news_nlp._call_openai_api とは意図的に別実装（モジュール間でプライベート関数を共有しない）。
+    """
+    return client.chat.completions.create(
+        model=_MODEL,
+        messages=messages,
+        response_format={"type": "json_object"},
+        temperature=0,
+        timeout=30,
+    )
+
+
+def _score_macro(client: Any, titles: list[str]) -> float:
+    """マクロニュースタイトルを LLM に渡し、市場センチメントスコアを返す。
+
+    titles が空の場合は LLM を呼ばず 0.0 を返す。
+    API 失敗・JSON パース失敗時は 0.0 にフォールバックし WARNING ログを出す（例外を上げない）。
+
+    Returns:
+        macro_sentiment: -1.0〜1.0 のスコア（クリップ済み）。
+    """
+    if not titles:
+        return 0.0
+
+    user_content = "\n".join(f"- {t}" for t in titles)
+    messages = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+    for attempt in range(_MAX_RETRIES):
+        try:
+            resp = _call_openai_api(client, messages)
+            content = resp.choices[0].message.content
+            data = json.loads(content)
+            raw_score = float(data["macro_sentiment"])
+            return max(-1.0, min(1.0, raw_score))
+        except (RateLimitError, APIConnectionError, APITimeoutError) as exc:
+            if attempt >= _MAX_RETRIES - 1:
+                logger.warning(
+                    "_score_macro: API失敗（全リトライ消費）: %s, macro_sentiment=0.0", exc
+                )
+                return 0.0
+            wait = _RETRY_BASE_SECONDS * (2 ** attempt)
+            logger.warning("_score_macro: リトライ %d/%d: %s", attempt + 1, _MAX_RETRIES, exc)
+            time.sleep(wait)
+        except APIError as exc:
+            status = getattr(exc, "status_code", 500)
+            if status is not None and 500 <= status < 600:
+                if attempt >= _MAX_RETRIES - 1:
+                    logger.warning(
+                        "_score_macro: API失敗（全リトライ消費）: %s, macro_sentiment=0.0", exc
+                    )
+                    return 0.0
+                wait = _RETRY_BASE_SECONDS * (2 ** attempt)
+                logger.warning(
+                    "_score_macro: リトライ %d/%d: %s", attempt + 1, _MAX_RETRIES, exc
+                )
+                time.sleep(wait)
+            else:
+                logger.warning(
+                    "_score_macro: API失敗（非5xx）: %s, macro_sentiment=0.0", exc
+                )
+                return 0.0
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
+            logger.warning(
+                "_score_macro: レスポンスパース失敗: %s, macro_sentiment=0.0", exc
+            )
+            return 0.0
+
+    return 0.0

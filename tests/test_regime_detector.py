@@ -216,3 +216,71 @@ def test_fetch_macro_news_limit(conn):
 
     titles = _fetch_macro_news(conn, window_start, window_end)
     assert len(titles) <= _MAX_MACRO_ARTICLES
+
+
+# ---------------------------------------------------------------------------
+# Task 4: _score_macro()
+# ---------------------------------------------------------------------------
+
+def test_score_macro_returns_float():
+    """正常系：LLM が {"macro_sentiment": -0.7} を返す → -0.7 が返される。"""
+    from kabusys.ai.regime_detector import _score_macro
+
+    mock_client = MagicMock()
+    mock_resp = _make_macro_response(-0.7)
+    with patch("kabusys.ai.regime_detector._call_openai_api", return_value=mock_resp):
+        score = _score_macro(mock_client, ["日銀が利上げ"])
+
+    assert abs(score - (-0.7)) < 1e-9
+
+
+def test_score_macro_no_titles():
+    """タイトルリストが空 → LLM を呼ばず 0.0 を返す。"""
+    from kabusys.ai.regime_detector import _score_macro
+
+    mock_client = MagicMock()
+    with patch("kabusys.ai.regime_detector._call_openai_api") as mock_api:
+        score = _score_macro(mock_client, [])
+
+    mock_api.assert_not_called()
+    assert score == 0.0
+
+
+def test_score_macro_api_failure_fallback():
+    """API 失敗（全リトライ消費）→ macro_sentiment=0.0 で継続。"""
+    from kabusys.ai.regime_detector import _score_macro
+    from openai import APIConnectionError
+
+    mock_client = MagicMock()
+    with patch(
+        "kabusys.ai.regime_detector._call_openai_api",
+        side_effect=APIConnectionError(request=MagicMock()),
+    ):
+        score = _score_macro(mock_client, ["Fed が利上げ"])
+
+    assert score == 0.0
+
+
+def test_score_macro_json_parse_failure():
+    """JSON パース失敗 → 0.0 フォールバック。"""
+    from kabusys.ai.regime_detector import _score_macro
+
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.choices[0].message.content = "invalid json"
+    with patch("kabusys.ai.regime_detector._call_openai_api", return_value=mock_resp):
+        score = _score_macro(mock_client, ["CPI が予想超え"])
+
+    assert score == 0.0
+
+
+def test_score_macro_clip():
+    """スコアが範囲外 → ±1.0 にクリップされる。"""
+    from kabusys.ai.regime_detector import _score_macro
+
+    mock_client = MagicMock()
+    mock_resp = _make_macro_response(2.5)  # 範囲外
+    with patch("kabusys.ai.regime_detector._call_openai_api", return_value=mock_resp):
+        score = _score_macro(mock_client, ["リセッション懸念"])
+
+    assert score == 1.0
