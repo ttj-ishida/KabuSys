@@ -172,6 +172,17 @@ CREATE TABLE IF NOT EXISTS ai_scores (
 )
 """
 
+_MARKET_REGIME = """
+CREATE TABLE IF NOT EXISTS market_regime (
+    date             DATE      NOT NULL PRIMARY KEY,
+    regime_score     DOUBLE    NOT NULL,
+    regime_label     VARCHAR   NOT NULL,
+    ma200_ratio      DOUBLE,
+    macro_sentiment  DOUBLE,
+    created_at       TIMESTAMP NOT NULL DEFAULT current_timestamp
+)
+"""
+
 # ---- Execution Layer -------------------------------------------------------
 
 _SIGNALS = """
@@ -298,6 +309,7 @@ _ALL_DDL: list[str] = [
     # Feature
     _FEATURES,
     _AI_SCORES,
+    _MARKET_REGIME,
     # Execution
     _SIGNALS,
     _SIGNAL_QUEUE,
