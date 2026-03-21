@@ -229,3 +229,81 @@ def _score_macro(client: Any, titles: list[str]) -> float:
             return 0.0
 
     return 0.0
+
+
+# ---------------------------------------------------------------------------
+# パブリック API
+# ---------------------------------------------------------------------------
+
+def score_regime(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+    api_key: str | None = None,
+) -> int:
+    """市場レジームスコアを計算し market_regime テーブルへ書き込む。
+
+    Args:
+        conn:        DuckDB 接続。prices_daily / raw_news / market_regime を参照。
+        target_date: 判定対象日。内部では datetime.today() を参照しない（ルックアヘッドバイアス防止）。
+        api_key:     OpenAI API キー。None の場合は環境変数 OPENAI_API_KEY を参照。
+
+    Returns:
+        1（成功）
+
+    Raises:
+        ValueError: api_key が未設定かつ環境変数 OPENAI_API_KEY も未設定の場合。
+        Exception:  DB 書き込み失敗時（ROLLBACK 後に上位へ伝播）。
+    """
+    # [1] API キー解決
+    resolved_key = api_key or os.environ.get("OPENAI_API_KEY")
+    if not resolved_key:
+        raise ValueError(
+            "OpenAI API キーが未設定です。api_key 引数または環境変数 OPENAI_API_KEY を設定してください。"
+        )
+
+    # [2] 1321 の 200 日 MA 乖離を計算
+    ma200_ratio = _calc_ma200_ratio(conn, target_date)
+
+    # [3] マクロニュース取得
+    window_start, window_end = calc_news_window(target_date)
+    titles = _fetch_macro_news(conn, window_start, window_end)
+
+    # [4] LLM でマクロセンチメントを評価（記事あり時のみ）
+    client = OpenAI(api_key=resolved_key)
+    macro_sentiment = _score_macro(client, titles)
+
+    # [5] レジームスコア合成
+    raw_score = _MA_WEIGHT * (ma200_ratio - 1.0) * _MA_SCALE + _MACRO_WEIGHT * macro_sentiment
+    regime_score = max(-1.0, min(1.0, raw_score))
+
+    if regime_score >= _BULL_THRESHOLD:
+        regime_label = "bull"
+    elif regime_score <= -_BEAR_THRESHOLD:
+        regime_label = "bear"
+    else:
+        regime_label = "neutral"
+
+    # [6] market_regime テーブルへ冪等書き込み（BEGIN / DELETE / INSERT / COMMIT）
+    conn.execute("BEGIN")
+    try:
+        conn.execute("DELETE FROM market_regime WHERE date = ?", [target_date])
+        conn.execute(
+            """
+            INSERT INTO market_regime (date, regime_score, regime_label, ma200_ratio, macro_sentiment)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [target_date, regime_score, regime_label, ma200_ratio, macro_sentiment],
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception as rb_exc:
+            logger.warning("score_regime: ROLLBACK failed: %s", rb_exc)
+        raise
+
+    logger.info(
+        "score_regime: 完了 date=%s label=%s score=%.3f ma200_ratio=%.4f macro=%.3f",
+        target_date, regime_label, regime_score, ma200_ratio, macro_sentiment,
+    )
+    return 1
