@@ -122,7 +122,26 @@ for trading_day in get_trading_days(bt_conn, start_date, end_date):
     4. 翌日用シグナルを生成
        → generate_signals(bt_conn, target_date=trading_day)
        ※ bt_conn の positions テーブルを読んで SELL 判定を行う
-       → signals_prev = _read_signals(bt_conn, trading_day)
+       ※ generate_signals() は int（書き込み件数）を返す。シグナル内容は signals テーブルを別途クエリ
+
+    5. 翌日の発注リストを組み立て（ポジションサイジング）
+       → buy_signals = SELECT code, signal_rank FROM signals
+                        WHERE date = trading_day AND side = 'buy'
+                        ORDER BY signal_rank
+       → sell_signals = SELECT code FROM signals
+                         WHERE date = trading_day AND side = 'sell'
+       → num_buy_signals = len(buy_signals)
+       → prior_portfolio_value = simulator.history[-1].portfolio_value
+                                  if simulator.history else initial_cash
+       → alloc = min(prior_portfolio_value * max_position_pct,
+                     simulator.cash / num_buy_signals)  # num_buy_signals=0 なら BUY なし
+       → signals_prev = [
+             {"code": s.code, "side": "buy",
+              "alloc": alloc}          for s in buy_signals
+           ] + [
+             {"code": s.code, "side": "sell"} for s in sell_signals
+           ]
+       ※ execute_orders は翌営業日 open 価格を受け取り shares = floor(alloc / entry_price) で計算
 ```
 
 ---
