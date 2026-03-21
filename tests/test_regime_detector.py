@@ -152,3 +152,67 @@ def test_no_prices(conn):
 
     ratio = _calc_ma200_ratio(conn, TARGET_DATE)
     assert ratio == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Task 3: _fetch_macro_news()
+# ---------------------------------------------------------------------------
+
+from datetime import datetime as dt_class
+
+# news_nlp.calc_news_window に合わせたウィンドウ（TARGET_DATE=2026-03-21 の場合）
+# window_start = 2026-03-20 06:00 UTC, window_end = 2026-03-20 23:30 UTC
+_MACRO_WINDOW_DT = dt_class(2026, 3, 20, 12, 0, 0)   # ウィンドウ内
+_OUT_OF_WINDOW_DT = dt_class(2026, 3, 18, 12, 0, 0)  # ウィンドウ外
+
+
+def test_fetch_macro_news_keyword_match(conn):
+    """マクロキーワードを含む記事のみが返される。"""
+    from kabusys.ai.regime_detector import _fetch_macro_news
+    from kabusys.ai.news_nlp import calc_news_window
+
+    window_start, window_end = calc_news_window(TARGET_DATE)
+    _insert_raw_news(conn, "n1", _MACRO_WINDOW_DT, "日銀が政策金利を引き上げ")
+    _insert_raw_news(conn, "n2", _MACRO_WINDOW_DT, "トヨタが業績上方修正")  # マクロ外
+
+    titles = _fetch_macro_news(conn, window_start, window_end)
+
+    assert len(titles) == 1
+    assert "日銀が政策金利を引き上げ" in titles
+
+
+def test_fetch_macro_news_no_match(conn):
+    """マクロキーワードなし → 空リストを返す。"""
+    from kabusys.ai.regime_detector import _fetch_macro_news
+    from kabusys.ai.news_nlp import calc_news_window
+
+    window_start, window_end = calc_news_window(TARGET_DATE)
+    _insert_raw_news(conn, "n1", _MACRO_WINDOW_DT, "ソニーが新製品発表")
+
+    titles = _fetch_macro_news(conn, window_start, window_end)
+    assert titles == []
+
+
+def test_fetch_macro_news_out_of_window(conn):
+    """ウィンドウ外の記事は含まれない。"""
+    from kabusys.ai.regime_detector import _fetch_macro_news
+    from kabusys.ai.news_nlp import calc_news_window
+
+    window_start, window_end = calc_news_window(TARGET_DATE)
+    _insert_raw_news(conn, "n1", _OUT_OF_WINDOW_DT, "FOMCが利上げを決定")  # 古すぎる
+
+    titles = _fetch_macro_news(conn, window_start, window_end)
+    assert titles == []
+
+
+def test_fetch_macro_news_limit(conn):
+    """_MAX_MACRO_ARTICLES 件を超える場合は上限で切り捨てる。"""
+    from kabusys.ai.regime_detector import _fetch_macro_news, _MAX_MACRO_ARTICLES
+    from kabusys.ai.news_nlp import calc_news_window
+
+    window_start, window_end = calc_news_window(TARGET_DATE)
+    for i in range(_MAX_MACRO_ARTICLES + 5):
+        _insert_raw_news(conn, f"n{i}", _MACRO_WINDOW_DT, f"日銀が会合 {i}")
+
+    titles = _fetch_macro_news(conn, window_start, window_end)
+    assert len(titles) <= _MAX_MACRO_ARTICLES

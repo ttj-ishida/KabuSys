@@ -26,7 +26,7 @@ import json
 import logging
 import os
 import time
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 import duckdb
@@ -121,3 +121,35 @@ def _calc_ma200_ratio(
     latest_close = closes[0]
     ma200 = sum(closes) / len(closes)
     return latest_close / ma200
+
+
+def _fetch_macro_news(
+    conn: duckdb.DuckDBPyConnection,
+    window_start: datetime,
+    window_end: datetime,
+) -> list[str]:
+    """raw_news からマクロキーワードに一致するタイトルを取得する。
+
+    ウィンドウは [window_start, window_end) の半開区間。
+    0 件の場合は空リストを返す（LLM コールなし）。
+
+    Returns:
+        タイトル文字列のリスト（最大 _MAX_MACRO_ARTICLES 件、新しい順）。
+    """
+    if not _MACRO_KEYWORDS:
+        return []
+
+    conditions = " OR ".join(["title LIKE ?" for _ in _MACRO_KEYWORDS])
+    like_params = [f"%{kw}%" for kw in _MACRO_KEYWORDS]
+
+    rows = conn.execute(
+        f"""
+        SELECT title FROM raw_news
+        WHERE datetime >= ? AND datetime < ?
+          AND ({conditions})
+        ORDER BY datetime DESC LIMIT ?
+        """,
+        [window_start, window_end] + like_params + [_MAX_MACRO_ARTICLES],
+    ).fetchall()
+
+    return [r[0] for r in rows if r[0]]
