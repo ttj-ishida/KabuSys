@@ -315,9 +315,9 @@ Executionの処理フロー:
 
     Market Data / News
     ↓
-    prices_daily / news_articles
+    prices_daily / raw_news（ニュース生データ）
     ↓
-    features / ai_scores
+    features / ai_scores（raw_news + news_symbols から直接生成）
     ↓
     signals
     ↓
