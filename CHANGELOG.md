@@ -1,107 +1,96 @@
-CHANGELOG
-=========
+# Changelog
 
-すべての重要な変更点はこのファイルに記録します。  
-フォーマットは「Keep a Changelog」に準拠しています。
+すべての変更は「Keep a Changelog」準拠で記載しています。  
+セマンティックバージョニングを採用しています。
 
-なお、本CHANGELOGは提供されたコードベースの内容から推測して作成した初回リリース向けの要約です。
+## [Unreleased]
 
-[Unreleased]
--------------
+## [0.1.0] - 2026-03-22
+初回リリース。本リポジトリの基礎機能を実装しました。主に日本株自動売買システム（バックテスト／研究／シグナル生成／設定管理）に必要なコアコンポーネントを含みます。
 
-- 今後の予定 / 既知の改善点・未実装事項（参考）
-  - エグジット条件: トレーリングストップや保有期間による時間決済の実装（コード内で未実装である旨のコメントあり）。
-  - バリュー指標: PBR・配当利回りなどの追加計算は現バージョンでは未実装。
-  - execution / monitoring パッケージの実装（パッケージは __all__ に含まれるが実装ファイルは空）。
-  - AI ニューススコアやレジーム判定の学習・更新フロー（現状は ai_scores テーブル読み込みとシグモイド補完のみ）。
-  - テスト用の追加ユニットテスト・統合テストの整備。
+### Added
+- パッケージ初期化
+  - kabusys パッケージの公開 API を定義（data, strategy, execution, monitoring を __all__ に設定）。
+  - バージョン情報を __version__ = "0.1.0" に設定。
 
-[0.1.0] - 2026-03-22
---------------------
+- 設定管理（kabusys.config）
+  - .env / .env.local ファイルおよび環境変数の自動読み込み機能を実装。
+    - プロジェクトルートを .git または pyproject.toml から探索して自動ロード（CWD 非依存）。
+    - KABUSYS_DISABLE_AUTO_ENV_LOAD 環境変数で自動ロードを無効化可能。
+  - POSIX 風の .env パーサを実装（コメント、export プレフィックス、シングル/ダブルクォート、エスケープに対応）。
+  - OS 環境変数を保護する protected オプションを導入（.env.local で OS 環境変数を上書きしないよう配慮）。
+  - Settings クラスを提供し、J-Quants / kabu API / Slack / DB パス / 環境種別 / ログレベルなどをプロパティで取得。
+  - 環境変数のバリデーション（KABUSYS_ENV, LOG_LEVEL 等の許容値チェック）と必須変数取得時の明示的エラーを実装。
 
-Added
-- パッケージ基盤
-  - kabusys パッケージ初期バージョンを追加。バージョンは 0.1.0。
-  - public API を想定したパッケージレイアウト（data, strategy, execution, monitoring を __all__ に含む）。
+- 戦略（kabusys.strategy）
+  - 特徴量エンジニアリング（feature_engineering.build_features）
+    - research で算出した生ファクターを統合・正規化して features テーブルへ UPSERT（日付単位の置換）する機能を実装。
+    - ユニバースフィルタ（最低株価 / 20日平均売買代金）を実装。
+    - Zスコア正規化・±3 クリップを実装（外れ値対策）。
+    - DuckDB トランザクションを用いた原子性のある置換処理（BEGIN/COMMIT/ROLLBACK）。
+  - シグナル生成（signal_generator.generate_signals）
+    - features と ai_scores を統合して final_score を計算し BUY/SELL シグナルを生成。
+    - コンポーネントスコア（momentum / value / volatility / liquidity / news）を計算するユーティリティを実装。
+    - 重みの取り扱い（デフォルト重み、ユーザ重みの検証・補完・再スケール）を実装。
+    - Bear レジーム検知（ai_scores の regime_score 平均が負なら BUY 抑制）を実装。
+    - エグジット条件（ストップロス、スコア低下）に基づく SELL 生成を実装。
+    - signals テーブルへの日付単位置換（トランザクション + バルク挿入）を実装。
+    - 欠損データに対する安全装置（存在しない features の銘柄は score=0、AI スコア欠損は中立補完など）を実装。
 
-- 環境設定管理 (kabusys.config)
-  - .env ファイルおよび環境変数から設定を読み込む自動ローダを実装。
-    - プロジェクトルートの自動検出（.git または pyproject.toml を基準）。
-    - .env と .env.local の読み込み順序（OS 環境変数を保護、.env.local は上書き可）。
-    - KABUSYS_DISABLE_AUTO_ENV_LOAD により自動読み込みを無効化可能。
-  - .env のパース機能を実装（export プレフィックス、クォート文字列、インラインコメント処理、エスケープ対応）。
-  - Settings クラスを提供し、主要設定値をプロパティで参照可能にした。
-    - J-Quants / kabuAPI / Slack / DB パスなどの必須 / 既定値の管理。
-    - KABUSYS_ENV / LOG_LEVEL の検証（許容値のチェック）。
-    - duckdb/sqlite のパスの Path オブジェクト化。
+- 研究モジュール（kabusys.research）
+  - ファクター計算（research.factor_research）
+    - calc_momentum: mom_1m/mom_3m/mom_6m/ma200_dev を DuckDB SQL で計算。
+    - calc_volatility: 20日 ATR / atr_pct / 20日平均売買代金 / volume_ratio を計算。true_range の NULL 伝播を考慮した実装。
+    - calc_value: raw_financials から最新財務データを取得して PER / ROE を計算。
+    - いずれも prices_daily / raw_financials のみを参照（外部 API にはアクセスしない設計）。
+  - 特徴量探索（research.feature_exploration）
+    - calc_forward_returns: 指定日から複数ホライズン先までの将来リターンを一括クエリで取得（ホライズン検証あり）。
+    - calc_ic: ファクターと将来リターンのスピアマンランク相関（IC）計算（同順位の平均ランク対応）。
+    - factor_summary: 各ファクター列の count/mean/std/min/max/median を計算。
+    - rank ユーティリティ: 同順位は平均ランクとするランク化を実装。
+  - research パッケージの公開 API を整備（calc_momentum/calc_volatility/calc_value/zscore_normalize/etc. をエクスポート）。
 
-- 研究用ファクター計算 (kabusys.research)
-  - factor_research モジュール: 定量ファクターの計算を実装。
-    - calc_momentum: 1M/3M/6M リターン、MA200 乖離率（データ不足時は None）。
-    - calc_volatility: 20日 ATR、ATR 比率（atr_pct）、20日平均売買代金、volume_ratio。
-    - calc_value: EPS を用いた PER、ROE（raw_financials から target_date 以前の最新値）。
-  - feature_exploration モジュール:
-    - calc_forward_returns: 指定ホライズン（デフォルト [1,5,21]）の将来リターン計算。
-    - calc_ic: スピアマンのランク相関（Information Coefficient）計算。
-    - factor_summary: 各ファクター列の基本統計量（count/mean/std/min/max/median）。
-    - rank: 同順位を平均ランクで扱うランク付けユーティリティ。
-  - すべて DuckDB 接続を受け取り prices_daily / raw_financials を参照する実装で、外部ライブラリに依存しない設計。
+- データ・スキーマ連携（参照実装を想定）
+  - DuckDB を前提とした各種関数で prices_daily, features, ai_scores, positions, raw_financials, market_calendar 等のテーブルを操作・参照する実装。
 
-- 特徴量エンジニアリング (kabusys.strategy.feature_engineering)
-  - build_features を実装:
-    - research モジュールの生ファクターを取得し、ユニバースフィルタ（最低株価・最低平均売買代金）を適用。
-    - 指定カラムを Z スコア正規化（zscore_normalize を利用）、±3 でクリップ。
-    - features テーブルへ日付単位で UPSERT（DELETE + INSERT）を行い、トランザクションにより原子性を確保。
+- バックテスト（kabusys.backtest）
+  - engine.run_backtest: 本番 DB からインメモリ DuckDB へ必要データをコピーし、日次ループでシミュレーションを実行するバックテストエンジンを実装。
+    - コピー対象テーブルの範囲指定コピー（start_date - 300日 から end_date まで）により本番データの汚染を防止。
+    - market_calendar 全件コピーの実装。
+    - signals/positions の読み書き、open/close 価格取得ユーティリティを実装。
+    - ポジションサイジング（max_position_pct に基づく割当）処理の呼び出し準備を実装（コードの続きで割当適用想定）。
+  - ポートフォリオシミュレータ（backtest.simulator）
+    - PortfolioSimulator: cash, positions, cost_basis を管理し、約定（simulate）と時価評価を実装。
+    - execute_orders: SELL を先、BUY を後に処理。SELL は全量クローズ、BUY は alloc に基づく購入と再計算による手数料考慮の株数調整を実施。
+    - スリッページ・手数料モデルを実装（engine の既定値と整合）。
+    - mark_to_market による DailySnapshot 記録。
+    - TradeRecord / DailySnapshot のデータクラス定義。
+  - バックテストメトリクス（backtest.metrics）
+    - calc_metrics と BacktestMetrics データクラスを実装（CAGR, Sharpe, Max Drawdown, Win Rate, Payoff Ratio, Total Trades）。
+    - 各内部計算関数（_calc_cagr, _calc_sharpe, _calc_max_drawdown, _calc_win_rate, _calc_payoff_ratio）を実装。
 
-- シグナル生成 (kabusys.strategy.signal_generator)
-  - generate_signals を実装:
-    - features と ai_scores を統合し、momentum/value/volatility/liquidity/news のコンポーネントスコアを計算。
-    - コンポーネント欠損値は中立値（0.5）で補完。
-    - 重み（デフォルト値は StrategyModel に準拠）を受け付け、検証・正規化を行う。
-    - Bear レジーム判定（ai_scores の regime_score 平均が負かつサンプル数閾値を満たす場合）により BUY を抑制。
-    - BUY（閾値デフォルト 0.60）/SELL（ストップロス -8% / スコア低下）を生成。
-    - signals テーブルへ日付単位の置換（DELETE + INSERT）で書き込み、冪等性を確保。
-    - SELL 優先ポリシー（SELL 対象は BUY から除外しランクを再付与）。
+### Changed
+- （初回リリースのため履歴なし）
 
-- バックテストフレームワーク (kabusys.backtest)
-  - simulator モジュール:
-    - PortfolioSimulator を実装。メモリ内で現金・ポジション・平均取得単価を管理。
-    - 約定ロジック（execute_orders）を実装: SELL を先に処理、BUY は配分（alloc）に基づく株数計算、スリッページ・手数料の適用。
-    - mark_to_market により DailySnapshot を記録。
-    - TradeRecord / DailySnapshot のデータ構造を提供。
-  - metrics モジュール:
-    - バックテスト評価指標の計算（CAGR, Sharpe, Max Drawdown, Win Rate, Payoff Ratio, total trades）。
-  - engine モジュール:
-    - run_backtest を実装。実DB からバックテスト用インメモリ DuckDB へデータコピーして日次ループを実行。
-    - _build_backtest_conn: 必要テーブル（prices_daily, features, ai_scores, market_regime, market_calendar）を日付フィルタ付きでコピー。
-    - 日次の価格取得・positions 書き戻し・シグナル生成呼び出し・発注（ポジションサイジング）処理を統合。
-    - 既存の generate_signals と統合してシミュレーションを実行。
+### Fixed
+- （初回リリースのため履歴なし）
 
-- 共通・ユーティリティ
-  - DuckDB を前提とした SQL 実装と、トランザクションを用いた原子操作による冪等性確保。
-  - ロギングを各モジュールに導入し、警告やデバッグ情報を適切に出力。
-  - 外部依存を極力抑えた設計（標準ライブラリ + duckdb 想定）。
+### Known limitations / Notes
+- エグジット条件でトレーリングストップや時間決済（保有日数ベース）は未実装。positions テーブルに peak_price / entry_date 等の情報が必要（将来実装予定）。
+- generate_signals は AI スコアが未登録の場合、news コンポーネントを中立（0.5）で補完する設計。
+- .env パーサは多くの一般的なケースに対応するが、極めて複雑なシェル展開はサポートしない。
+- 一部処理は対象テーブル・カラムの存在を前提とする（schema/init の実装が必要）。
+- 外部依存（pandas 等）を敢えて使わず標準ライブラリ／DuckDB SQL ベースで実装しているため、大規模データでのパフォーマンスチューニングは今後の課題。
 
-Changed
-- 新規初版のため該当なし。
-
-Fixed
-- 新規初版のため該当なし。
-
-Removed
-- 新規初版のため該当なし。
-
-Security
-- 新規初版のため該当なし。
-
-Notes / Known limitations
-- positions テーブルに peak_price / entry_date 等が存在しないため、トレーリングストップや保持期間ベースの時間決済は未実装（コード中に明記）。
-- ai_scores が空の場合、ニューススコアは中立（0.5）に補完される。AI スコア周りの学習・更新フローは本実装外。
-- execution / monitoring の実装が未完のため、本番での発注・監視は別途実装が必要。
-- .env 読み込みはプロジェクトルート検出に依存する。パッケージ配布後は KABUSYS_DISABLE_AUTO_ENV_LOAD を使うか明示的に環境を設定することを推奨。
-- 一部の SQL は DuckDB 固有のウィンドウ関数や ROW_NUMBER を利用しているため、他RDBMS への移植時は見直しが必要。
-
-作者・貢献者
-- 本CHANGELOG は提供されたソースコードの内容から推測して作成されています（自動生成ではなく手作業の要約）。
+### Security
+- 環境変数の必須チェックで未設定時に明示的なエラーを発生させることで運用ミスを検出しやすくしています。
 
 ---
+
+今後のリリースでは下記のような拡張を予定しています（予定項目）
+- execution 層（kabu API）との統合実装（実際の発注・アカウント管理）
+- モデル学習／AI スコア生成パイプラインの統合
+- positions テーブルの拡張（entry_date / peak_price 等）と高度なエグジット戦略（トレーリング等）
+- 単体テスト・CI 設定およびドキュメント強化
+
+(注) 本 CHANGELOG は提供されたソースコードから機能を推測して作成しています。実際の意図や設計方針と差分がある場合があります。
