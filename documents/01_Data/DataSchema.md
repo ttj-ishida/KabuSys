@@ -61,9 +61,35 @@
 
 ------------------------------------------------------------------------
 
-# 4. カレンダーデータ
+# 4. 銘柄マスタ
+
+## stocks
+
+全上場銘柄のマスタ情報。J-Quants `/listed/info` から毎日 UPSERT する。
+セクター集中制限（PortfolioConstruction Section 8）で参照する。
+
+  column      type       description
+  ----------- ---------- -------------
+  code        string     銘柄コード（PRIMARY KEY）
+  name        string     銘柄名
+  market      string     市場区分（'Prime' / 'Standard' / 'Growth' / 'Other'）
+  sector      string     TSE 33業種名（J-Quants Sector33CodeName）
+  updated_at  timestamp  最終更新日時
+
+取得元: J-Quants `/listed/info`（MarketCode → market 文字列に変換）
+
+フィールドマッピング:
+  J-Quants "Code"             → code
+  J-Quants "CompanyName"      → name
+  J-Quants "MarketCode"       → market（"0111"→"Prime", "0121"→"Standard", "0131"→"Growth"）
+  J-Quants "Sector33CodeName" → sector
+
+------------------------------------------------------------------------
+
+# 4b. カレンダーデータ
 
 ## market_calendar
+
 
 JPXのカレンダー情報（祝日・半休・SQ等）。
 
@@ -313,15 +339,15 @@ Executionの処理フロー:
 
 # 15. データフロー
 
-    Market Data / News
-    ↓
-    prices_daily / news_articles
-    ↓
-    features / ai_scores
+    Market Data / News        J-Quants /listed/info
+    ↓                         ↓
+    prices_daily / news_articles    stocks（銘柄マスタ）
+    ↓                               ↓
+    features / ai_scores        ────┘（セクター参照）
     ↓
     signals
     ↓
-    portfolio_targets
+    portfolio_targets（ポートフォリオ構築モジュールが生成）
     ↓
     orders
     ↓

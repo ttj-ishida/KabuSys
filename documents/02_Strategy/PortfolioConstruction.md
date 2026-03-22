@@ -110,40 +110,58 @@ final_score =
 
 # 7. 資金配分方法
 
-## 7.1 等金額配分
+`run_backtest` および本番執行系では `allocation_method` パラメータで切り替える。
+
+## 7.1 リスクベースサイジング（推奨デフォルト）
+
+StrategyModel.md Section 6 に基づく方式。ボラティリティ正規化効果があり、
+高ボラ銘柄は少なく、低ボラ銘柄は多く購入する。
+
+```
+許容損失額 = 総資産 × risk_pct（デフォルト 0.005 = 0.5%）
+1株リスク  = エントリー価格 × stop_loss_pct（デフォルト 0.08 = 8%）
+購入株数   = floor(許容損失額 / 1株リスク)
+           ← ただし「総資産 × max_position_pct（10%）」の上限を超えない
+           ← 単元株（100株）単位に切り捨て
+```
+
+`run_backtest` のデフォルト: `allocation_method="risk_based"`
+
+## 7.2 等金額配分
 
 最もシンプルな方法。
 
-例
-
 ```
-資産 1000万円
-銘柄数 10
-
-→ 各銘柄 100万円
+weight_i = 1 / N
+alloc_i  = 総資産 × weight_i × max_utilization（0.70）
 ```
 
----
+例: 資産 1000万円、銘柄数 10 → 各銘柄 70万円
 
-## 7.2 スコア加重配分
+`allocation_method="equal"` で使用。
+
+## 7.3 スコア加重配分
 
 スコアに応じて資金配分。
 
-例
-
 ```
-weight_i = score_i / sum(score)
+weight_i = score_i / sum(scores)
+alloc_i  = 総資産 × weight_i × max_utilization（0.70）
 ```
 
----
+全銘柄のスコアが 0.0 の場合は等金額配分にフォールバック。
 
-## 7.3 ボラティリティ調整
+`allocation_method="score"` で使用。
 
-リスクを均等化する方法。
+## 7.4 共通制約（全方式）
 
-```
-weight_i = 1 / volatility_i
-```
+| パラメータ | 値 | 説明 |
+|------------|-----|------|
+| max_position_pct | 0.10 | 1銘柄への投資上限（総資産の10%） |
+| max_utilization | 0.70 | 全ポジション合計の投資上限（総資産の70%） |
+| lot_size | 100 | 単元株数（100株単位に切り捨て） |
+
+実装モジュール: `src/kabusys/portfolio/position_sizing.py`
 
 ---
 
@@ -151,29 +169,33 @@ weight_i = 1 / volatility_i
 
 セクター集中を防ぐ。
 
-制限例
-
 | 制限 | 値 |
 |----|----|
-同一セクター最大 | 30% |
-単一銘柄最大 | 10% |
+| 同一セクター最大 | 30% |
+| 単一銘柄最大 | 10% |
+
+セクターデータ: J-Quants `/listed/info` → `stocks` テーブル（DataSchema.md Section 4参照）。
+セクター不明銘柄は制限なし（"unknown" 扱い）。
+
+実装モジュール: `src/kabusys/portfolio/risk_adjustment.py`
 
 ---
 
 # 9. 市場レジーム制御
 
-市場レジームに応じてリスク量を調整する。
+市場レジームに応じてリスク量を調整する。`market_regime.regime_label` の値（小文字）を参照する。
 
-| Regime | 投資比率 |
-|------|--------|
-Bull | 100% |
-Neutral | 70% |
-Bear | 30% |
+| regime_label | 投下資金乗数 | 説明 |
+|-------------|------------|------|
+| "bull" | 1.0（100%） | 通常運用 |
+| "neutral" | 0.7（70%） | やや縮小 |
+| "bear" | 0.3（30%） | 大幅縮小 |
 
-Bearでは
+**Bear レジームでの BUY シグナル:**
+`generate_signals()` が Bear 相場では BUY シグナルを一切生成しない（StrategyModel.md Section 5.1）。
+乗数 0.3 は Bear とは別に "neutral" 等の中間局面向けの追加セーフガード。
 
-- 新規建制限
-- キャッシュ比率増加
+実装モジュール: `src/kabusys/portfolio/risk_adjustment.py`（`calc_regime_multiplier`）
 
 ---
 
@@ -258,18 +280,22 @@ adjusted_score =
 ポートフォリオ構築は以下のプロセスで行う。
 
 ```
-銘柄スコア生成
+generate_signals() → signals テーブル
       ↓
-ランキング
+select_candidates()        # 銘柄選定（上位 max_positions 銘柄）
       ↓
-銘柄選定
+apply_sector_cap()         # セクター集中チェック
       ↓
-資金配分
+calc_*_weights()           # 配分重み計算（allocation_method に応じて選択）
       ↓
-リスク制御
+calc_position_sizes()      # 株数決定（リスク制限・単元株丸め）
       ↓
-リバランス
+apply_regime_multiplier()  # レジーム乗数適用
+      ↓
+{code: shares} → 発注
 ```
+
+実装: `src/kabusys/portfolio/`（portfolio_builder.py / position_sizing.py / risk_adjustment.py）
 
 この仕組みにより、分散された安定的なポートフォリオを構築し、
 戦略のパフォーマンスを最大化する。
