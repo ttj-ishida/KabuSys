@@ -132,14 +132,16 @@ def _write_positions(
         cost_basis: code → 平均取得単価。
     """
     conn.execute("DELETE FROM positions WHERE date = ?", [trading_day])
-    for code, shares in positions.items():
-        if shares <= 0:
-            continue
-        avg_price = cost_basis.get(code, 0.0)
-        conn.execute(
+    rows = [
+        (trading_day, code, shares, cost_basis.get(code, 0.0))
+        for code, shares in positions.items()
+        if shares > 0
+    ]
+    if rows:
+        conn.executemany(
             "INSERT INTO positions (date, code, position_size, avg_price, market_value) "
             "VALUES (?, ?, ?, ?, NULL)",
-            [trading_day, code, shares, avg_price],
+            rows,
         )
 
 
@@ -171,7 +173,7 @@ def _read_day_signals(
 
 
 # ---------------------------------------------------------------------------
-# パブリック API（run_backtest は Task 5 で実装）
+# パブリック API
 # ---------------------------------------------------------------------------
 
 def run_backtest(
@@ -207,48 +209,49 @@ def run_backtest(
     simulator = PortfolioSimulator(initial_cash=initial_cash)
     signals_prev: list[dict] = []
 
-    trading_days = get_trading_days(bt_conn, start_date, end_date)
-    logger.info(
-        "run_backtest: 開始 start=%s end=%s 営業日数=%d 初期資金=%.0f",
-        start_date, end_date, len(trading_days), initial_cash,
-    )
+    try:
+        trading_days = get_trading_days(bt_conn, start_date, end_date)
+        logger.info(
+            "run_backtest: 開始 start=%s end=%s 営業日数=%d 初期資金=%.0f",
+            start_date, end_date, len(trading_days), initial_cash,
+        )
 
-    for trading_day in trading_days:
-        # Step 1: 前日シグナルを当日 open で約定
-        open_prices = _fetch_open_prices(bt_conn, trading_day)
-        simulator.execute_orders(signals_prev, open_prices, slippage_rate, commission_rate, trading_day)
+        for trading_day in trading_days:
+            # Step 1: 前日シグナルを当日 open で約定
+            open_prices = _fetch_open_prices(bt_conn, trading_day)
+            simulator.execute_orders(signals_prev, open_prices, slippage_rate, commission_rate, trading_day)
 
-        # Step 2: positions テーブルに書き戻し（generate_signals の SELL 判定に必要）
-        _write_positions(bt_conn, trading_day, simulator.positions, simulator.cost_basis)
+            # Step 2: positions テーブルに書き戻し（generate_signals の SELL 判定に必要）
+            _write_positions(bt_conn, trading_day, simulator.positions, simulator.cost_basis)
 
-        # Step 3: 終値で時価評価・スナップショット記録
-        close_prices = _fetch_close_prices(bt_conn, trading_day)
-        simulator.mark_to_market(trading_day, close_prices)
+            # Step 3: 終値で時価評価・スナップショット記録
+            close_prices = _fetch_close_prices(bt_conn, trading_day)
+            simulator.mark_to_market(trading_day, close_prices)
 
-        # Step 4: 翌日用シグナル生成（bt_conn の positions を読んで SELL 判定）
-        generate_signals(bt_conn, target_date=trading_day)
+            # Step 4: 翌日用シグナル生成（bt_conn の positions を読んで SELL 判定）
+            generate_signals(bt_conn, target_date=trading_day)
 
-        # Step 5: 翌日の発注リストを組み立て（ポジションサイジング）
-        buy_signals, sell_signals = _read_day_signals(bt_conn, trading_day)
-        num_buy = len(buy_signals)
-        if num_buy > 0 and simulator.cash > 0:
-            prior_pv = simulator.history[-1].portfolio_value if simulator.history else initial_cash
-            alloc = min(
-                prior_pv * max_position_pct,
-                simulator.cash / num_buy,
-            )
-        else:
-            alloc = 0.0
+            # Step 5: 翌日の発注リストを組み立て（ポジションサイジング）
+            buy_signals, sell_signals = _read_day_signals(bt_conn, trading_day)
+            num_buy = len(buy_signals)
+            if num_buy > 0 and simulator.cash > 0:
+                prior_pv = simulator.history[-1].portfolio_value if simulator.history else initial_cash
+                alloc = min(
+                    prior_pv * max_position_pct,
+                    simulator.cash / num_buy,
+                )
+            else:
+                alloc = 0.0
 
-        signals_prev = [
-            {"code": s["code"], "side": "buy", "alloc": alloc}
-            for s in buy_signals
-        ] + [
-            {"code": s["code"], "side": "sell"}
-            for s in sell_signals
-        ]
-
-    bt_conn.close()
+            signals_prev = [
+                {"code": s["code"], "side": "buy", "alloc": alloc}
+                for s in buy_signals
+            ] + [
+                {"code": s["code"], "side": "sell"}
+                for s in sell_signals
+            ]
+    finally:
+        bt_conn.close()
     metrics = calc_metrics(simulator.history, simulator.trades)
     logger.info(
         "run_backtest: 完了 CAGR=%.2f%% Sharpe=%.3f MaxDD=%.2f%% Trades=%d",
