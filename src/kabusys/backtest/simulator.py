@@ -34,7 +34,7 @@ class TradeRecord:
     shares: int
     price: float                  # 約定価格（スリッページ適用後）
     commission: float
-    realized_pnl: float | None    # SELL 時のみ（取得原価との差分 - 手数料）
+    realized_pnl: float | None    # SELL 時のみ。shares*(exit_price - avg_cost) - SELL手数料。BUY手数料は cash から別途控除済みのため含まない。
 
 
 class PortfolioSimulator:
