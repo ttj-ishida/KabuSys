@@ -181,5 +181,80 @@ def run_backtest(
     commission_rate: float = 0.00055,
     max_position_pct: float = 0.20,
 ) -> BacktestResult:
-    """バックテストを実行する（Task 5 で実装予定）。"""
-    raise NotImplementedError("run_backtest は Task 5 で実装")
+    """バックテストを実行し結果を返す。
+
+    本番 DB の conn からインメモリ DuckDB にデータをコピーし、
+    generate_signals() を使って日次シミュレーションを行う。
+
+    Args:
+        conn:             本番 DuckDB 接続（読み取り専用で使用）。
+        start_date:       バックテスト開始日（含む）。
+        end_date:         バックテスト終了日（含む）。
+        initial_cash:     初期資金（円）。
+        slippage_rate:    スリッページ率（デフォルト 0.1%）。
+        commission_rate:  手数料率（デフォルト 0.055%）。
+        max_position_pct: 1銘柄あたりの最大ポートフォリオ比率（デフォルト 20%）。
+
+    Returns:
+        BacktestResult（history, trades, metrics）。
+    """
+    from kabusys.data.calendar_management import get_trading_days
+    from kabusys.strategy.signal_generator import generate_signals
+
+    bt_conn = _build_backtest_conn(conn, start_date, end_date)
+    simulator = PortfolioSimulator(initial_cash=initial_cash)
+    signals_prev: list[dict] = []
+
+    trading_days = get_trading_days(bt_conn, start_date, end_date)
+    logger.info(
+        "run_backtest: 開始 start=%s end=%s 営業日数=%d 初期資金=%.0f",
+        start_date, end_date, len(trading_days), initial_cash,
+    )
+
+    for trading_day in trading_days:
+        # Step 1: 前日シグナルを当日 open で約定
+        open_prices = _fetch_open_prices(bt_conn, trading_day)
+        simulator.execute_orders(signals_prev, open_prices, slippage_rate, commission_rate)
+
+        # Step 2: positions テーブルに書き戻し（generate_signals の SELL 判定に必要）
+        _write_positions(bt_conn, trading_day, simulator.positions, simulator.cost_basis)
+
+        # Step 3: 終値で時価評価・スナップショット記録
+        close_prices = _fetch_close_prices(bt_conn, trading_day)
+        simulator.mark_to_market(trading_day, close_prices)
+
+        # Step 4: 翌日用シグナル生成（bt_conn の positions を読んで SELL 判定）
+        generate_signals(bt_conn, target_date=trading_day)
+
+        # Step 5: 翌日の発注リストを組み立て（ポジションサイジング）
+        buy_signals, sell_signals = _read_day_signals(bt_conn, trading_day)
+        num_buy = len(buy_signals)
+        if num_buy > 0 and simulator.cash > 0:
+            prior_pv = simulator.history[-1].portfolio_value if simulator.history else initial_cash
+            alloc = min(
+                prior_pv * max_position_pct,
+                simulator.cash / num_buy,
+            )
+        else:
+            alloc = 0.0
+
+        signals_prev = [
+            {"code": s["code"], "side": "buy", "alloc": alloc}
+            for s in buy_signals
+        ] + [
+            {"code": s["code"], "side": "sell"}
+            for s in sell_signals
+        ]
+
+    bt_conn.close()
+    metrics = calc_metrics(simulator.history, simulator.trades)
+    logger.info(
+        "run_backtest: 完了 CAGR=%.2f%% Sharpe=%.3f MaxDD=%.2f%% Trades=%d",
+        metrics.cagr * 100, metrics.sharpe_ratio,
+        metrics.max_drawdown * 100, metrics.total_trades,
+    )
+    return BacktestResult(
+        history=simulator.history,
+        trades=simulator.trades,
+        metrics=metrics,
+    )

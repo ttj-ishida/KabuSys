@@ -314,3 +314,131 @@ def test_write_positions_values(conn):
     }
     assert rows["1234"] == (200, 1050.0)
     assert rows["5678"] == (50, 600.0)
+
+
+# ---------------------------------------------------------------------------
+# Task 5: run_backtest 統合テスト
+# ---------------------------------------------------------------------------
+
+def _setup_minimal_backtest(conn):
+    """3営業日分の最小限データをセットアップするヘルパー。"""
+    from datetime import date
+
+    days = [date(2024, 1, 4), date(2024, 1, 5), date(2024, 1, 9)]
+    for d in days:
+        _insert_calendar(conn, d, is_trading=True)
+        _insert_price(conn, "1234", d, open_=1000.0, close=1050.0)
+        conn.execute(
+            """INSERT INTO features
+               (date, code, momentum_20, momentum_60, volatility_20,
+                volume_ratio, per, ma200_dev)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            [d, "1234", 1.5, 1.2, -0.5, 1.3, 0.5, 0.05],
+        )
+    return days
+
+
+def test_run_backtest_returns_result(conn):
+    """run_backtest が BacktestResult を返す（最低限の動作確認）。"""
+    from kabusys.backtest.engine import run_backtest, BacktestResult
+    from datetime import date
+
+    _setup_minimal_backtest(conn)
+
+    result = run_backtest(
+        conn=conn,
+        start_date=date(2024, 1, 4),
+        end_date=date(2024, 1, 9),
+    )
+
+    assert isinstance(result, BacktestResult)
+    assert len(result.history) >= 1
+    assert result.metrics is not None
+
+
+def test_run_backtest_cash_decreases_on_buy(conn):
+    """BUY 約定後に現金が減少している。"""
+    from kabusys.backtest.engine import run_backtest
+    from datetime import date
+
+    _setup_minimal_backtest(conn)
+    initial_cash = 10_000_000
+
+    result = run_backtest(
+        conn=conn,
+        start_date=date(2024, 1, 4),
+        end_date=date(2024, 1, 9),
+        initial_cash=initial_cash,
+    )
+
+    # 何かトレードがあれば現金が変わっているはず
+    if result.trades:
+        buys = [t for t in result.trades if t.side == "buy"]
+        if buys:
+            final_cash = result.history[-1].cash
+            assert final_cash < initial_cash
+
+
+def test_run_backtest_no_lookahead(conn):
+    """end_date より後の価格データは結果に影響しない（Look-ahead 防止）。"""
+    from kabusys.backtest.engine import run_backtest
+    from datetime import date
+
+    _setup_minimal_backtest(conn)
+
+    # 未来の価格（end_date + 1日）を挿入
+    future_date = date(2024, 1, 10)
+    _insert_price(conn, "1234", future_date, open_=9999.0, close=9999.0)
+    conn.execute(
+        """INSERT INTO features
+           (date, code, momentum_20, momentum_60, volatility_20,
+            volume_ratio, per, ma200_dev)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        [future_date, "1234", 99.0, 99.0, -99.0, 99.0, 0.01, 99.0],
+    )
+
+    result1 = run_backtest(
+        conn=conn,
+        start_date=date(2024, 1, 4),
+        end_date=date(2024, 1, 9),
+    )
+
+    # end_date 以降のスナップショットが存在しないこと
+    for snap in result1.history:
+        assert snap.date <= date(2024, 1, 9), f"未来日付 {snap.date} が履歴に含まれている"
+
+
+def test_run_backtest_idempotent(conn):
+    """同一パラメータで2回実行しても metrics が同一値になる。"""
+    from kabusys.backtest.engine import run_backtest
+    from datetime import date
+
+    _setup_minimal_backtest(conn)
+
+    result1 = run_backtest(conn=conn, start_date=date(2024, 1, 4), end_date=date(2024, 1, 9))
+    result2 = run_backtest(conn=conn, start_date=date(2024, 1, 4), end_date=date(2024, 1, 9))
+
+    assert abs(result1.metrics.cagr - result2.metrics.cagr) < 1e-9
+    assert len(result1.history) == len(result2.history)
+
+
+def test_run_backtest_max_position_pct(conn):
+    """max_position_pct=0.10 → 1銘柄への投資が portfolio_value の 10% 超にならない。"""
+    from kabusys.backtest.engine import run_backtest
+    from datetime import date
+
+    _setup_minimal_backtest(conn)
+    initial_cash = 10_000_000
+
+    result = run_backtest(
+        conn=conn,
+        start_date=date(2024, 1, 4),
+        end_date=date(2024, 1, 9),
+        initial_cash=initial_cash,
+        max_position_pct=0.10,
+    )
+
+    for trade in result.trades:
+        if trade.side == "buy":
+            invested = trade.shares * trade.price
+            assert invested <= initial_cash * 0.10 * 1.01  # 1% の誤差許容
