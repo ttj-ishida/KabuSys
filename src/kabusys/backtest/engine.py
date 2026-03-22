@@ -66,9 +66,10 @@ def _build_backtest_conn(
                 continue
             result = source_conn.execute(f"SELECT * FROM {table} LIMIT 0")
             cols = [desc[0] for desc in result.description]
+            col_list = ", ".join(cols)
             placeholders = ", ".join(["?" for _ in cols])
             bt_conn.executemany(
-                f"INSERT OR IGNORE INTO {table} VALUES ({placeholders})", rows
+                f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})", rows
             )
         except Exception as exc:
             logger.warning("_build_backtest_conn: %s のコピーをスキップ: %s", table, exc)
@@ -79,9 +80,10 @@ def _build_backtest_conn(
         if rows:
             result = source_conn.execute("SELECT * FROM market_calendar LIMIT 0")
             cols = [desc[0] for desc in result.description]
+            col_list = ", ".join(cols)
             placeholders = ", ".join(["?" for _ in cols])
             bt_conn.executemany(
-                f"INSERT OR IGNORE INTO market_calendar VALUES ({placeholders})", rows
+                f"INSERT INTO market_calendar ({col_list}) VALUES ({placeholders})", rows
             )
     except Exception as exc:
         logger.warning("_build_backtest_conn: market_calendar のコピーをスキップ: %s", exc)
@@ -214,7 +216,7 @@ def run_backtest(
     for trading_day in trading_days:
         # Step 1: 前日シグナルを当日 open で約定
         open_prices = _fetch_open_prices(bt_conn, trading_day)
-        simulator.execute_orders(signals_prev, open_prices, slippage_rate, commission_rate)
+        simulator.execute_orders(signals_prev, open_prices, slippage_rate, commission_rate, trading_day)
 
         # Step 2: positions テーブルに書き戻し（generate_signals の SELL 判定に必要）
         _write_positions(bt_conn, trading_day, simulator.positions, simulator.cost_basis)

@@ -56,6 +56,7 @@ class PortfolioSimulator:
         open_prices: dict[str, float],
         slippage_rate: float,
         commission_rate: float,
+        trading_day: date | None = None,
     ) -> None:
         """シグナルリストを当日 open 価格で約定処理する。
 
@@ -67,10 +68,11 @@ class PortfolioSimulator:
             open_prices:   code → 当日始値 の辞書。
             slippage_rate: スリッページ率。BUY は +、SELL は -。
             commission_rate: 手数料率（約定金額 × commission_rate）。
+            trading_day:   約定日（TradeRecord.date に使用）。None の場合は history[-1].date を使用。
         """
         # SELL を先に処理
         for sig in [s for s in signals if s["side"] == "sell"]:
-            self._execute_sell(sig["code"], open_prices, slippage_rate, commission_rate)
+            self._execute_sell(sig["code"], open_prices, slippage_rate, commission_rate, trading_day)
         # BUY を後に処理
         for sig in [s for s in signals if s["side"] == "buy"]:
             self._execute_buy(
@@ -79,6 +81,7 @@ class PortfolioSimulator:
                 open_prices,
                 slippage_rate,
                 commission_rate,
+                trading_day,
             )
 
     def _execute_buy(
@@ -88,6 +91,7 @@ class PortfolioSimulator:
         open_prices: dict[str, float],
         slippage_rate: float,
         commission_rate: float,
+        trading_day: date | None = None,
     ) -> None:
         open_price = open_prices.get(code)
         if open_price is None:
@@ -123,7 +127,9 @@ class PortfolioSimulator:
         self.cost_basis[code] = (existing_cost + cost) / new_total_shares
         self.positions[code] = new_total_shares
 
-        trade_date = self.history[-1].date if self.history else date.today()
+        trade_date = trading_day if trading_day is not None else (
+            self.history[-1].date if self.history else date(1970, 1, 1)
+        )
         self.trades.append(TradeRecord(
             date=trade_date,
             code=code,
@@ -140,6 +146,7 @@ class PortfolioSimulator:
         open_prices: dict[str, float],
         slippage_rate: float,
         commission_rate: float,
+        trading_day: date | None = None,
     ) -> None:
         shares = self.positions.get(code, 0)
         if shares <= 0:
@@ -163,7 +170,9 @@ class PortfolioSimulator:
         del self.positions[code]
         del self.cost_basis[code]
 
-        trade_date = self.history[-1].date if self.history else date.today()
+        trade_date = trading_day if trading_day is not None else (
+            self.history[-1].date if self.history else date(1970, 1, 1)
+        )
         self.trades.append(TradeRecord(
             date=trade_date,
             code=code,
