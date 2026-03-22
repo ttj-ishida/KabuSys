@@ -43,11 +43,11 @@ def main() -> None:
         start_date = date.fromisoformat(args.start)
         end_date = date.fromisoformat(args.end)
     except ValueError as exc:
-        print(f"ERROR: Invalid date format: {exc}", file=sys.stderr)
+        logger.error("Invalid date format: %s", exc)
         sys.exit(1)
 
     if start_date >= end_date:
-        print("ERROR: --start must be before --end", file=sys.stderr)
+        logger.error("--start must be before --end")
         sys.exit(1)
 
     from kabusys.data.schema import init_schema

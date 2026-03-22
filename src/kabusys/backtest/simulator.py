@@ -61,10 +61,11 @@ class PortfolioSimulator:
         """シグナルリストを当日 open 価格で約定処理する。
 
         SELL を先に処理してから BUY を処理する（資金確保のため）。
+        SELL は保有全量をクローズする（部分利確・部分損切り非対応）。
 
         Args:
             signals:       [{"code": str, "side": "buy"|"sell", "alloc": float}]
-                           sell の場合 alloc キーは不要。
+                           sell の場合 alloc キーは不要（保有全量をクローズ）。
             open_prices:   code → 当日始値 の辞書。
             slippage_rate: スリッページ率。BUY は +、SELL は -。
             commission_rate: 手数料率（約定金額 × commission_rate）。
