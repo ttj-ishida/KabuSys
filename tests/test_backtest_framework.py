@@ -228,3 +228,89 @@ def test_simulator_insufficient_cash_skips_buy():
         commission_rate=0.0,
     )
     assert len(sim.trades) == 0
+
+
+# ---------------------------------------------------------------------------
+# Task 4: engine.py ヘルパー
+# ---------------------------------------------------------------------------
+
+def _insert_price(conn, code: str, d, open_: float, close: float) -> None:
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [d, code, open_, close, open_, close, 1_000_000],
+    )
+
+
+def _insert_calendar(conn, d, is_trading: bool = True) -> None:
+    conn.execute(
+        "INSERT INTO market_calendar (date, is_trading_day) VALUES (?, ?)",
+        [d, is_trading],
+    )
+
+
+def test_build_backtest_conn_copies_prices(conn):
+    """_build_backtest_conn → prices_daily が bt_conn にコピーされる。"""
+    from kabusys.backtest.engine import _build_backtest_conn
+    from datetime import date
+
+    d = date(2024, 1, 5)
+    _insert_price(conn, "1234", d, open_=1000.0, close=1010.0)
+
+    bt_conn = _build_backtest_conn(conn, date(2024, 1, 5), date(2024, 1, 5))
+    row = bt_conn.execute(
+        "SELECT close FROM prices_daily WHERE code = ? AND date = ?", ["1234", d]
+    ).fetchone()
+    assert row is not None
+    assert abs(float(row[0]) - 1010.0) < 1e-6
+    bt_conn.close()
+
+
+def test_fetch_open_and_close_prices(conn):
+    """_fetch_open_prices / _fetch_close_prices → 始値・終値を辞書で返す。"""
+    from kabusys.backtest.engine import _fetch_open_prices, _fetch_close_prices
+    from datetime import date
+
+    d = date(2024, 1, 8)
+    _insert_price(conn, "1234", d, open_=980.0, close=1020.0)
+    _insert_price(conn, "5678", d, open_=500.0, close=510.0)
+
+    opens = _fetch_open_prices(conn, d)
+    closes = _fetch_close_prices(conn, d)
+
+    assert abs(opens["1234"] - 980.0) < 1e-6
+    assert abs(closes["1234"] - 1020.0) < 1e-6
+    assert abs(opens["5678"] - 500.0) < 1e-6
+
+
+def test_write_positions_idempotent(conn):
+    """_write_positions → 同日に2回呼んでも1行のみ残る。"""
+    from kabusys.backtest.engine import _write_positions
+    from datetime import date
+
+    d = date(2024, 1, 10)
+    _write_positions(conn, d, {"1234": 100}, {"1234": 950.0})
+    _write_positions(conn, d, {"1234": 100}, {"1234": 950.0})
+
+    count = conn.execute(
+        "SELECT COUNT(*) FROM positions WHERE date = ?", [d]
+    ).fetchone()[0]
+    assert count == 1
+
+
+def test_write_positions_values(conn):
+    """_write_positions → position_size と avg_price が正しく書き込まれる。"""
+    from kabusys.backtest.engine import _write_positions
+    from datetime import date
+
+    d = date(2024, 1, 11)
+    _write_positions(conn, d, {"1234": 200, "5678": 50}, {"1234": 1050.0, "5678": 600.0})
+
+    rows = {
+        row[0]: (row[1], float(row[2]))
+        for row in conn.execute(
+            "SELECT code, position_size, avg_price FROM positions WHERE date = ?", [d]
+        ).fetchall()
+    }
+    assert rows["1234"] == (200, 1050.0)
+    assert rows["5678"] == (50, 600.0)
