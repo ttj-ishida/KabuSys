@@ -491,7 +491,10 @@ def save_market_calendar(
     return len(rows)
 
 
-def fetch_listed_info(id_token: str | None = None) -> list[dict[str, Any]]:
+def fetch_listed_info(
+    id_token: str | None = None,
+    date_: date | None = None,
+) -> list[dict[str, Any]]:
     """全上場銘柄情報を GET /listed/info から取得する。
 
     J-Quants API フィールドと stocks テーブルのマッピング:
@@ -502,10 +505,18 @@ def fetch_listed_info(id_token: str | None = None) -> list[dict[str, Any]]:
 
     Args:
         id_token: 認証トークン。省略時はモジュールキャッシュを使用。
+        date_:    取得対象日（Look-ahead Bias 防止のため、取得日を明示することを推奨）。
+                  省略時は当日のデータを返す。
 
     Returns:
         [{"code": str, "name": str, "market": str, "sector": str}, ...]
         Code が欠損するレコードはスキップ。
+
+    Note:
+        Look-ahead Bias 防止: バックテストで使用する場合は、バックテスト開始日
+        以前に取得済みのデータを stocks テーブルに格納してから使用すること。
+        本関数はデータ取得・ETL パイプライン専用であり、バックテストの内部ループから
+        直接呼び出してはならない。
     """
     _MARKET_CODE_MAP: dict[str, str] = {
         "0111": "Prime",
@@ -513,7 +524,11 @@ def fetch_listed_info(id_token: str | None = None) -> list[dict[str, Any]]:
         "0131": "Growth",
     }
 
-    data = _request("/listed/info", id_token=id_token)
+    params: dict[str, str] = {}
+    if date_ is not None:
+        params["date"] = date_.strftime("%Y%m%d")
+
+    data = _request("/listed/info", params=params if params else None, id_token=id_token)
     records = data.get("info", [])
 
     result: list[dict[str, Any]] = []

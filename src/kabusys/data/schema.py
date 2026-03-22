@@ -149,6 +149,8 @@ CREATE TABLE IF NOT EXISTS stocks (
     name        VARCHAR,
     market      VARCHAR,
     sector      VARCHAR,
+    -- UPSERT 時は ON CONFLICT DO UPDATE SET ... updated_at = now() を明示すること。
+    -- DEFAULT now() は INSERT 時のみ設定される（UPSERT では自動更新されない）。
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (code)
 )

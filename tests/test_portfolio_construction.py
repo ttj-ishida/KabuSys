@@ -98,7 +98,7 @@ def test_fetch_listed_info_field_mapping():
     }
 
     with patch("kabusys.data.jquants_client._request", return_value=mock_response):
-        result = fetch_listed_info()
+        result = fetch_listed_info(date_=None)
 
     assert len(result) == 4
     # MarketCode → market 変換確認
@@ -126,7 +126,7 @@ def test_fetch_listed_info_missing_fields_skipped():
     }
 
     with patch("kabusys.data.jquants_client._request", return_value=mock_response):
-        result = fetch_listed_info()
+        result = fetch_listed_info(date_=None)
 
     assert len(result) == 1
     assert result[0]["code"] == "1234"
