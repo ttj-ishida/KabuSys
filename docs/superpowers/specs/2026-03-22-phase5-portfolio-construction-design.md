@@ -178,7 +178,8 @@ def apply_sector_cap(
 def calc_regime_multiplier(regime: str) -> float:
     """
     市場レジームに応じた投下資金乗数を返す。
-    Bull → 1.0 / Neutral → 0.7 / Bear → 0.3 / 未知 → 1.0（フォールバック）
+    market_regime.regime_label は小文字で格納される（regime_detector.py 実装準拠）。
+    "bull" → 1.0 / "neutral" → 0.7 / "bear" → 0.3 / その他（未知）→ 1.0（フォールバック）
 
     【重要】Bear レジームで BUY シグナルが生成されない理由:
     generate_signals() はレジームが Bear の場合、BUY シグナルを一切生成しない
@@ -388,10 +389,10 @@ except Exception as exc:
 **risk_adjustment:**
 - セクター 30% 超の銘柄が除外される
 - セクター不明銘柄は制限なく通過する
-- `calc_regime_multiplier`: Bull=1.0 / Neutral=0.7 / Bear=0.3 / 未知=1.0
+- `calc_regime_multiplier`: "bull"=1.0 / "neutral"=0.7 / "bear"=0.3 / 未知=1.0
 
 **統合:**
-- Neutral レジームで available_cash が 70% に抑制される
+- "neutral" レジームで available_cash が 70% に抑制される
 - 同一セクター集中時に上限が機能する
 - `allocation_method="equal"` で等金額配分になる
 - `allocation_method="score"` でスコア比例配分になる
