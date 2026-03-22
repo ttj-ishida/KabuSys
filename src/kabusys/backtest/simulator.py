@@ -1,34 +1,203 @@
+# src/kabusys/backtest/simulator.py
 """
-バックテストシミュレータモジュール（スタブ）。
+PortfolioSimulator — 擬似約定とポートフォリオ状態管理。
 
-Task 3 で本実装を行う。本ファイルは Task 2 の metrics.py が参照する
-データクラスのみを定義したスタブ。
+BacktestFramework.md Section 4.3 のスリッページ・手数料モデルに従う。
 """
 from __future__ import annotations
 
+import logging
+import math
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class DailySnapshot:
-    """1営業日分のポートフォリオ状態スナップショット。"""
+    """日次ポートフォリオのスナップショット。"""
 
     date: date
     cash: float
-    positions: dict  # code -> shares
-    portfolio_value: float
+    positions: dict[str, int]     # code → 株数
+    portfolio_value: float        # cash + 時価評価額
 
 
 @dataclass
 class TradeRecord:
-    """1件の約定記録。"""
+    """約定記録。"""
 
     date: date
     code: str
-    side: str          # "buy" or "sell"
+    side: str                     # "buy" | "sell"
     shares: int
-    price: float
+    price: float                  # 約定価格（スリッページ適用後）
     commission: float
-    realized_pnl: Optional[float] = None
+    realized_pnl: float | None    # SELL 時のみ（取得原価との差分 - 手数料）
+
+
+class PortfolioSimulator:
+    """ポートフォリオシミュレータ。
+
+    engine.py から呼び出される。DB 参照は持たない（純粋なメモリ内状態管理）。
+    """
+
+    def __init__(self, initial_cash: float) -> None:
+        self.cash: float = initial_cash
+        self.positions: dict[str, int] = {}          # code → 株数
+        self.cost_basis: dict[str, float] = {}       # code → 平均取得単価
+        self.history: list[DailySnapshot] = []
+        self.trades: list[TradeRecord] = []
+
+    def execute_orders(
+        self,
+        signals: list[dict],
+        open_prices: dict[str, float],
+        slippage_rate: float,
+        commission_rate: float,
+    ) -> None:
+        """シグナルリストを当日 open 価格で約定処理する。
+
+        SELL を先に処理してから BUY を処理する（資金確保のため）。
+
+        Args:
+            signals:       [{"code": str, "side": "buy"|"sell", "alloc": float}]
+                           sell の場合 alloc キーは不要。
+            open_prices:   code → 当日始値 の辞書。
+            slippage_rate: スリッページ率。BUY は +、SELL は -。
+            commission_rate: 手数料率（約定金額 × commission_rate）。
+        """
+        # SELL を先に処理
+        for sig in [s for s in signals if s["side"] == "sell"]:
+            self._execute_sell(sig["code"], open_prices, slippage_rate, commission_rate)
+        # BUY を後に処理
+        for sig in [s for s in signals if s["side"] == "buy"]:
+            self._execute_buy(
+                sig["code"],
+                sig.get("alloc", 0.0),
+                open_prices,
+                slippage_rate,
+                commission_rate,
+            )
+
+    def _execute_buy(
+        self,
+        code: str,
+        alloc: float,
+        open_prices: dict[str, float],
+        slippage_rate: float,
+        commission_rate: float,
+    ) -> None:
+        open_price = open_prices.get(code)
+        if open_price is None:
+            logger.warning("execute_orders: BUY %s の始値が取得できません。スキップ。", code)
+            return
+
+        entry_price = open_price * (1.0 + slippage_rate)
+        shares = math.floor(alloc / entry_price)
+        if shares <= 0:
+            logger.debug("execute_orders: BUY %s shares=0（資金不足）。スキップ。", code)
+            return
+
+        cost = shares * entry_price
+        commission = cost * commission_rate
+        total_cost = cost + commission
+
+        if total_cost > self.cash:
+            # 再計算: 手数料込みで収まる株数に調整
+            shares = math.floor(self.cash / (entry_price * (1.0 + commission_rate)))
+            if shares <= 0:
+                logger.debug("execute_orders: BUY %s 再計算後 shares=0。スキップ。", code)
+                return
+            cost = shares * entry_price
+            commission = cost * commission_rate
+            total_cost = cost + commission
+
+        self.cash -= total_cost
+
+        # 平均取得単価の更新
+        existing_shares = self.positions.get(code, 0)
+        existing_cost = self.cost_basis.get(code, 0.0) * existing_shares
+        new_total_shares = existing_shares + shares
+        self.cost_basis[code] = (existing_cost + cost) / new_total_shares
+        self.positions[code] = new_total_shares
+
+        trade_date = self.history[-1].date if self.history else date.today()
+        self.trades.append(TradeRecord(
+            date=trade_date,
+            code=code,
+            side="buy",
+            shares=shares,
+            price=entry_price,
+            commission=commission,
+            realized_pnl=None,
+        ))
+
+    def _execute_sell(
+        self,
+        code: str,
+        open_prices: dict[str, float],
+        slippage_rate: float,
+        commission_rate: float,
+    ) -> None:
+        shares = self.positions.get(code, 0)
+        if shares <= 0:
+            logger.debug("execute_orders: SELL %s 保有なし。スキップ。", code)
+            return
+
+        open_price = open_prices.get(code)
+        if open_price is None:
+            logger.warning("execute_orders: SELL %s の始値が取得できません。スキップ。", code)
+            return
+
+        exit_price = open_price * (1.0 - slippage_rate)
+        proceeds = shares * exit_price
+        commission = proceeds * commission_rate
+        net_proceeds = proceeds - commission
+
+        avg_cost = self.cost_basis.get(code, 0.0)
+        realized_pnl = shares * (exit_price - avg_cost) - commission
+
+        self.cash += net_proceeds
+        del self.positions[code]
+        del self.cost_basis[code]
+
+        trade_date = self.history[-1].date if self.history else date.today()
+        self.trades.append(TradeRecord(
+            date=trade_date,
+            code=code,
+            side="sell",
+            shares=shares,
+            price=exit_price,
+            commission=commission,
+            realized_pnl=realized_pnl,
+        ))
+
+    def mark_to_market(
+        self,
+        trading_day: date,
+        close_prices: dict[str, float],
+    ) -> None:
+        """終値でポートフォリオを時価評価し、DailySnapshot を記録する。
+
+        保有株に終値がない場合は 0 で評価し WARNING ログを出す。
+        """
+        stock_value = 0.0
+        for code, shares in self.positions.items():
+            price = close_prices.get(code)
+            if price is None:
+                logger.warning(
+                    "mark_to_market: %s の終値が取得できません。0 で評価します。date=%s",
+                    code, trading_day,
+                )
+                price = 0.0
+            stock_value += shares * price
+
+        portfolio_value = self.cash + stock_value
+        self.history.append(DailySnapshot(
+            date=trading_day,
+            cash=self.cash,
+            positions=dict(self.positions),
+            portfolio_value=portfolio_value,
+        ))

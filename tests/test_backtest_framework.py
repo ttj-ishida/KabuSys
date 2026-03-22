@@ -106,3 +106,125 @@ def test_metrics_no_trades():
     assert result.win_rate == 0.0
     assert result.payoff_ratio == 0.0
     assert result.total_trades == 0
+
+
+# ---------------------------------------------------------------------------
+# Task 3: simulator.py
+# ---------------------------------------------------------------------------
+
+def _make_simulator(initial_cash: float = 1_000_000):
+    from kabusys.backtest.simulator import PortfolioSimulator
+    return PortfolioSimulator(initial_cash=initial_cash)
+
+
+def test_simulator_buy_reduces_cash():
+    """BUY 約定 → 現金が (株数 × 約定価格 + 手数料) 分減る。"""
+    sim = _make_simulator(1_000_000)
+    signals = [{"code": "1234", "side": "buy", "alloc": 200_000}]
+    open_prices = {"1234": 1000.0}
+    slippage = 0.001
+    commission = 0.00055
+
+    sim.execute_orders(signals, open_prices, slippage, commission)
+
+    entry_price = 1000.0 * (1 + slippage)  # 1001.0
+    shares = int(200_000 // entry_price)     # 199
+    cost = shares * entry_price
+    comm = cost * commission
+    expected_cash = 1_000_000 - cost - comm
+    assert abs(sim.cash - expected_cash) < 0.01
+
+
+def test_simulator_buy_slippage():
+    """BUY 約定価格 = open * (1 + slippage_rate)。"""
+    sim = _make_simulator()
+    signals = [{"code": "1234", "side": "buy", "alloc": 500_000}]
+    open_prices = {"1234": 2000.0}
+    sim.execute_orders(signals, open_prices, slippage_rate=0.001, commission_rate=0.00055)
+
+    assert len(sim.trades) == 1
+    trade = sim.trades[0]
+    assert abs(trade.price - 2000.0 * 1.001) < 1e-6
+
+
+def test_simulator_sell_realized_pnl():
+    """SELL → realized_pnl = shares * (exit_price - cost_basis) - commission。"""
+    sim = _make_simulator()
+    # まず BUY して cost_basis を確立
+    sim.execute_orders(
+        [{"code": "1234", "side": "buy", "alloc": 300_000}],
+        {"1234": 1000.0},
+        slippage_rate=0.0,   # スリッページなしで計算を単純化
+        commission_rate=0.0,
+    )
+    buy_trade = sim.trades[0]
+    shares = buy_trade.shares
+
+    # SELL
+    sim.execute_orders(
+        [{"code": "1234", "side": "sell"}],
+        {"1234": 1200.0},
+        slippage_rate=0.0,
+        commission_rate=0.0,
+    )
+    sell_trade = sim.trades[1]
+    expected_pnl = shares * (1200.0 - 1000.0)
+    assert abs(sell_trade.realized_pnl - expected_pnl) < 0.01
+
+
+def test_simulator_sell_slippage():
+    """SELL 約定価格 = open * (1 - slippage_rate)。"""
+    sim = _make_simulator()
+    # 強制的に保有状態を作る
+    sim.positions["1234"] = 100
+    sim.cost_basis["1234"] = 900.0
+    sim.cash -= 90_000
+
+    sim.execute_orders(
+        [{"code": "1234", "side": "sell"}],
+        {"1234": 1000.0},
+        slippage_rate=0.001,
+        commission_rate=0.0,
+    )
+    assert abs(sim.trades[0].price - 999.0) < 1e-6
+
+
+def test_simulator_mark_to_market():
+    """mark_to_market → portfolio_value = cash + sum(shares * close)。"""
+    from kabusys.backtest.simulator import PortfolioSimulator
+    sim = PortfolioSimulator(initial_cash=500_000)
+    sim.positions = {"1234": 100, "5678": 200}
+    sim.cost_basis = {"1234": 900.0, "5678": 500.0}
+    sim.cash = 200_000
+
+    close_prices = {"1234": 1000.0, "5678": 600.0}
+    sim.mark_to_market(date(2024, 1, 5), close_prices)
+
+    expected_pv = 200_000 + 100 * 1000.0 + 200 * 600.0
+    assert len(sim.history) == 1
+    assert abs(sim.history[0].portfolio_value - expected_pv) < 0.01
+
+
+def test_simulator_no_price_skips_buy():
+    """open_prices に code が存在しない BUY シグナルはスキップ（ログのみ）。"""
+    sim = _make_simulator()
+    sim.execute_orders(
+        [{"code": "9999", "side": "buy", "alloc": 100_000}],
+        {},  # 価格なし
+        slippage_rate=0.001,
+        commission_rate=0.00055,
+    )
+    assert sim.cash == 1_000_000  # 変化なし
+    assert len(sim.trades) == 0
+
+
+def test_simulator_insufficient_cash_skips_buy():
+    """alloc > cash の場合、shares=0 になりスキップ。"""
+    sim = _make_simulator(initial_cash=100)  # 現金が極端に少ない
+    sim.execute_orders(
+        [{"code": "1234", "side": "buy", "alloc": 100_000}],
+        {"1234": 10_000.0},
+        slippage_rate=0.0,
+        commission_rate=0.0,
+    )
+    assert len(sim.trades) == 0
