@@ -333,8 +333,8 @@ def _fetch_regime(conn: duckdb.DuckDBPyConnection, trading_day: date) -> str:
         "SELECT regime_label FROM market_regime WHERE date = ?", [trading_day]
     ).fetchone()
     if row is None:
-        logger.warning("_fetch_regime: %s のレジームが取得できません。'Bull' でフォールバック。", trading_day)
-        return "Bull"
+        logger.warning("_fetch_regime: %s のレジームが取得できません。'bull' でフォールバック。", trading_day)
+        return "bull"
     return row[0]
 ```
 
