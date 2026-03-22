@@ -1,110 +1,82 @@
-# Changelog
+CHANGELOG
+=========
 
-すべての変更は [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) 準拠で記載しています。
+すべての注目すべき変更は本ファイルに記録します。
+フォーマットは "Keep a Changelog" に準拠し、セマンティック バージョニングを使用します。
 
-## [0.1.0] - 2026-03-22
+[Unreleased]
+------------
 
-初回リリース。日本株自動売買システムのコアライブラリを実装しました。主な機能、設計方針、既知の未実装点を以下にまとめます。
+（なし）
 
-### 追加
-- パッケージ初期化
-  - kabusys パッケージのバージョンを `0.1.0` に設定。
-  - 公開モジュール群を __all__ で定義（data, strategy, execution, monitoring）。
+[0.1.0] - 2026-03-22
+-------------------
 
+Added
+- 初回公開。日本株自動売買ライブラリ "KabuSys" の基本機能を提供するパッケージを追加。
+  - パッケージエントリポイント: kabusys.__version__ = "0.1.0"、主要サブモジュールを __all__ に公開。
 - 環境設定管理（kabusys.config）
-  - .env/.env.local ファイルおよび OS 環境変数から設定を読み込む自動ロード機能を実装。
-  - プロジェクトルート判定は `.git` または `pyproject.toml` を基準に行い、CWD に依存しない実装。
-  - .env パーサーは export 形式、シングル/ダブルクォート、エスケープ、インラインコメントに対応。
-  - 自動ロードは環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` で無効化可能。
-  - OS 環境変数を保護する機構（override/protected）。
-  - Settings クラスでアプリ設定をプロパティとして提供（必須変数は _require により検証）。
-    - J-Quants / kabuステーション / Slack / DB パス 等の設定を提供。
-    - KABUSYS_ENV の許容値検証（development, paper_trading, live）。
-    - LOG_LEVEL の検証（DEBUG, INFO, WARNING, ERROR, CRITICAL）。
-    - Path 型での DuckDB / SQLite パスの取り扱い。
+  - .env / .env.local をプロジェクトルート（.git または pyproject.toml 基準）から自動読み込み（OS 環境変数優先、.env.local は上書き）。
+  - KABUSYS_DISABLE_AUTO_ENV_LOAD 環境変数で自動読み込みを無効化可能。
+  - .env の行パーサーを実装（コメント、export プレフィックス、シングル/ダブルクォートとバックスラッシュエスケープ、インラインコメント処理に対応）。
+  - Settings クラスを提供し、J-Quants / kabuステーション / Slack / DB パス / 実行環境・ログレベルなどをプロパティ経由で取得。必須キー未設定時は ValueError を送出。
+  - KABUSYS_ENV の許容値検証（development / paper_trading / live）や LOG_LEVEL 検証を実装。
+- 戦略関連（kabusys.strategy）
+  - feature_engineering.build_features
+    - research 側で計算した生ファクターを読み込み、ユニバースフィルタ（最低株価・最低平均売買代金）適用、指定列の Z スコア正規化（±3 でクリップ）を行い、features テーブルに日付単位で冪等に書き込み。
+    - 価格は target_date 以前の最新価格を参照してルックアヘッドを防止。
+    - トランザクション＋バルク挿入で原子性を保証。ROLLBACK の失敗は警告。
+  - signal_generator.generate_signals
+    - features と ai_scores を統合して各銘柄のコンポーネントスコア（momentum / value / volatility / liquidity / news）を計算し、重み付き合算で final_score を算出。
+    - デフォルト重み・閾値を内蔵（例: momentum=0.40, threshold=0.60）。ユーザ指定 weights は検証・スケーリングされる（不正なキーや非数値は無視）。
+    - Bear レジーム判定（AI の regime_score の平均が負かどうか、サンプル閾値あり）で BUY を抑制。
+    - 保有ポジションに対するエグジット判定（ストップロス -8% とスコア低下）を実装し、signals テーブルへ日付単位で冪等に書き込み。
+    - SELL 優先ポリシー（SELL 対象は BUY から除外しランク再付与）。
+- リサーチ関連（kabusys.research）
+  - factor_research モジュール
+    - calc_momentum: mom_1m / mom_3m / mom_6m / ma200_dev を prices_daily から計算。データ不足時は None を許容。
+    - calc_volatility: 20日 ATR（true range の取り扱いに注意）、相対 ATR（atr_pct）、20日平均売買代金、出来高比率を計算。
+    - calc_value: raw_financials から target_date 以前の最新財務データを取得し PER / ROE を計算（EPS が 0 または欠損の場合は PER=None）。
+  - feature_exploration モジュール
+    - calc_forward_returns: 指定ホライズン（デフォルト [1,5,21]）の将来リターンを一括取得。引数検証（1〜252 営業日）あり。
+    - calc_ic: Spearman（ランク）相関による IC 計算。有効レコードが 3 件未満の場合は None を返す。
+    - factor_summary / rank: 基本統計量の計算、同順位は平均ランクで処理。標準ライブラリのみで実装（pandas 等に非依存）。
+  - research パッケージは主要関数を __all__ で公開。
+- バックテスト（kabusys.backtest）
+  - simulator.PortfolioSimulator
+    - メモリ内での約定処理、資金・保有・平均取得単価管理、約定記録（TradeRecord）を保持。
+    - execute_orders: 当日始値で擬似約定（SELL 先行、SELL は全量クローズ）。スリッページ・手数料モデルを適用し、手数料込みで株数再計算。
+    - mark_to_market: 終値で時価評価し DailySnapshot を記録。終値欠損時は 0 評価で警告。
+  - metrics.calc_metrics
+    - CAGR / Sharpe / Max Drawdown / Win Rate / Payoff Ratio / トレード数を計算するユーティリティを提供。
+  - engine.run_backtest
+    - 本番 DB からインメモリ DuckDB へデータをコピーしてバックテストを実行するフローを提供。
+    - signals の生成 → 約定 → positions の書き戻し → マーク・トゥ・マーケット → 翌日シグナル生成 のループを実装。
+    - _build_backtest_conn により必要テーブルを日付範囲でフィルタしてコピー（market_calendar は全件コピー）、コピー時の失敗は警告でスキップ。
+    - positions の書き戻し（冪等な DELETE + INSERT）や signals 読み取りヘルパーを提供。
+  - backtest パッケージは run_backtest / BacktestResult / DailySnapshot / TradeRecord / BacktestMetrics を公開。
+- パッケージ設計方針（ドキュメント記載の挙動を実装）
+  - ルックアヘッドバイアスを防ぐため target_date までのデータのみ参照する実装方針を徹底。
+  - 発注 API への直接依存を持たない（execution 層との分離）。
+  - DuckDB をデータバックエンドとして使用。トランザクションとバルク挿入により原子性を確保。
+  - ロギングを随所に追加し、警告や情報を適切に出力。
 
-- 戦略：特徴量エンジニアリング（kabusys.strategy.feature_engineering）
-  - research の生ファクターを取り込み、ユニバースフィルタ、Zスコア正規化、クリッピング、features テーブルへの日付単位 UPSERT を実装。
-  - ユニバースフィルタ条件：
-    - 最低株価: 300 円
-    - 20日平均売買代金: 5 億円
-  - 正規化対象カラムの指定、Zスコアを ±3 でクリップ。
-  - ファクター取得は research モジュール（calc_momentum, calc_volatility, calc_value）を使用。
-  - トランザクション / バルク挿入により日付単位の置換（冪等性）を確保。
+Changed
+- 該当なし（初回リリース）。
 
-- 戦略：シグナル生成（kabusys.strategy.signal_generator）
-  - features テーブルと ai_scores を統合して銘柄ごとの final_score を計算し、BUY / SELL シグナルを生成して signals テーブルへ書き込む。
-  - コンポーネントスコア:
-    - momentum, value, volatility, liquidity, news（AI スコア）
-  - 重み付けのデフォルト（StrategyModel.md に準拠）を実装し、ユーザ渡し weights を検証・正規化して合計を 1.0 にスケール。
-  - AI レジーム集計により Bear 相場を検知すると BUY を抑制（サンプル数閾値あり）。
-  - SELL（エグジット）条件:
-    - ストップロス: 終値 / avg_price - 1 < -8%（最優先）
-    - スコア低下: final_score が threshold 未満
-  - SELL 対象銘柄は BUY リストから除外（SELL 優先）。
-  - 日付単位の置換（トランザクション／バルク挿入）で冪等性を確保。
-  - 公開 API:
-    - generate_signals(conn, target_date, threshold=0.60, weights=None) -> 書き込みシグナル数を返す
+Fixed
+- .env ファイル読み込み時のエラーを警告に変換して処理継続（ファイル読み込み失敗で例外を投げず自動ロードをスキップ可能）。
+- DB 書き込み時のトランザクションエラー発生時に ROLLBACK を試行し、ROLLBACK 自身の失敗は警告ログを出すことで予期せぬ例外情報を補足。
 
-- research モジュール群（kabusys.research）
-  - ファクター計算群（kabusys.research.factor_research）:
-    - calc_momentum: 1M/3M/6M リターン、200日移動平均乖離率（データ不足時は None）
-    - calc_volatility: 20日 ATR（atr_pct）、avg_turnover、volume_ratio（部分窓でも算出）
-    - calc_value: raw_financials から最新財務を参照して PER/ROE を計算
-  - feature_exploration:
-    - calc_forward_returns: 任意ホライズン（デフォルト [1,5,21]）の将来リターンを一括取得（horizons の検証あり）
-    - calc_ic: ファクターと将来リターンのスピアマンランク相関（IC）を計算（有効レコード数閾値あり）
-    - factor_summary: 各ファクター列の count/mean/std/min/max/median を計算
-    - rank: 同順位は平均ランクで扱うランク関数（丸めにより ties 検出の安定化）
-  - zscore_normalize は kabusys.data.stats から利用（実装は data 側に依存）
+Deprecated
+- 該当なし。
 
-- バックテストフレームワーク（kabusys.backtest）
-  - simulator:
-    - PortfolioSimulator によりメモリ内でポートフォリオ状態・約定を管理。
-    - execute_orders: SELL を先に処理、BUY は alloc に基づき当日始値で約定（スリッページ/手数料を適用）。
-      - BUY は端数切り捨て（floor）で株数を計算、手数料込みで再計算して資金不足時はスキップ。
-      - SELL は保有全量をクローズ（部分利確/部分損切り未対応）。
-    - mark_to_market: 終値で評価し DailySnapshot を記録（終値欠損は 0 と評価して警告）。
-    - TradeRecord / DailySnapshot のデータクラスを定義。
-  - metrics:
-    - calc_metrics で BacktestMetrics を作成（CAGR, Sharpe, Max Drawdown, Win rate, Payoff ratio, total trades）。
-    - それぞれの内部計算関数を実装（年次化の扱い、0 回避などのガードあり）。
-  - engine:
-    - run_backtest(conn, start_date, end_date, initial_cash=10_000_000, slippage_rate=0.001, commission_rate=0.00055, max_position_pct=0.20)
-      - 本番 DuckDB からインメモリ DuckDB へ必要テーブル（日付範囲でフィルタ）をコピーしてバックテスト用接続を構築。
-      - 日次ループでの処理フローを実装：
-        1. 前日シグナルを当日始値で約定
-        2. positions テーブルにシミュレータ保有状態を書き戻し（generate_signals の SELL 判定に必要）
-        3. 終値で時価評価・スナップショット記録
-        4. generate_signals() で当日シグナル生成
-        5. ポジションサイジング（max_position_pct による制限）で翌日の発注リスト作成
-      - market_calendar は全件コピー（取引日計算に使用）
-      - 日付範囲でコピーされるテーブル: prices_daily, features, ai_scores, market_regime（start_date - 300日 から end_date）
-    - run_backtest は BacktestResult(history, trades, metrics) を返す。
+Removed
+- 該当なし。
 
-### 仕様上の注意 / 未実装（既知の制約）
-- シグナル生成側・戦略側は発注 API や実際の execution 層に依存しない設計だが、execution パッケージは空の初期化モジュールのみ存在（発注連携は別実装想定）。
-- エグジット条件について未実装の要素:
-  - トレーリングストップ（peak_price が positions に必要）
-  - 時間決済（保有 60 営業日超過）など
-- generate_signals の weights 引数は不正値を細かく無視する（未知キー/非数値/負値/NaN/Inf をスキップ）し、合計が 1.0 になるように正規化する点に注意。
-- feature_engineering は features テーブルへ書き込む際、avg_turnover をフィルタで利用するが features テーブル自体には avg_turnover を保存しない。
-- calc_forward_returns の horizons は 1〜252 の整数であることを要求。
-- バックテストのポジションサイズ計算・約定ロジックは簡易化（部分利確や複雑なオーダー管理は未対応）。
-- DuckDB を利用しており SQL 実装は特定の構文（ウィンドウ関数等）に依存する。
+Security
+- 該当なし。
 
-### ドキュメント / 設計参照
-- 各モジュール内に設計方針や処理フローのコメント（StrategyModel.md / BacktestFramework.md 等への言及）が含まれており、実装はそれら仕様に基づいています。
-
-### 破壊的変更
-- 初回リリースのため破壊的変更なし。
-
----
-
-今後の予定（例）
-- execution 層の実装（kabu API 連携）
-- ポジション管理の強化（部分利確、トレーリングストップ、ピーク価格管理）
-- モデル評価用の追加メトリクス・可視化ユーティリティ
-- unit tests / CI の整備
-
-（必要であれば上記変更内容をより細かく、各関数や仕様へのリンク付きで展開します。）
+Notes
+- 一部ユーティリティ（例: zscore_normalize）は kabusys.data.stats から呼び出されることを前提としている（本差分には実装の参照あり）。
+- 実稼働での使用時は必須環境変数（JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID 等）を .env に設定すること。Settings._require により未設定の場合は ValueError が発生する。
