@@ -226,3 +226,207 @@ def test_calc_score_weights_empty():
     from kabusys.portfolio.portfolio_builder import calc_score_weights
 
     assert calc_score_weights([]) == {}
+
+
+# ---------------------------------------------------------------------------
+# Task 3: position_sizing.py
+# ---------------------------------------------------------------------------
+
+
+def test_calc_position_sizes_risk_based_basic():
+    """risk_based: 0.5% リスク・8% 損切りで株数が計算される。
+
+    portfolio_value=10_000_000, price=1000
+    → raw = floor(10M*0.005 / (1000*0.08)) = floor(50000/80) = floor(625) = 625 株
+    → 100株単位切り捨て: (625 // 100) * 100 = 600 株
+    """
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    result = calc_position_sizes(
+        weights={},
+        candidates=[{"code": "1234", "score": 0.8, "signal_rank": 1}],
+        portfolio_value=10_000_000,
+        available_cash=10_000_000,
+        current_positions={},
+        open_prices={"1234": 1000.0},
+        allocation_method="risk_based",
+        risk_pct=0.005,
+        stop_loss_pct=0.08,
+        max_position_pct=0.10,
+        max_utilization=0.70,
+        lot_size=100,
+    )
+    assert "1234" in result
+    shares = result["1234"]
+    assert shares == 600
+
+
+def test_calc_position_sizes_max_position_pct_cap():
+    """max_position_pct=0.10 が守られる（1銘柄上限 = 総資産の10%）。
+
+    portfolio_value=1_000_000, price=1000 → 上限 = floor(1M * 0.10 / 1000) = 100 株
+    """
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    result = calc_position_sizes(
+        weights={},
+        candidates=[{"code": "1234", "score": 0.8, "signal_rank": 1}],
+        portfolio_value=1_000_000,
+        available_cash=1_000_000,
+        current_positions={},
+        open_prices={"1234": 1000.0},
+        allocation_method="risk_based",
+        risk_pct=0.005,
+        stop_loss_pct=0.08,
+        max_position_pct=0.10,
+        max_utilization=0.70,
+        lot_size=100,
+    )
+    assert result.get("1234", 0) <= 100
+
+
+def test_calc_position_sizes_lot_size_truncation():
+    """100株単位に切り捨てられる。"""
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    # 10M * 0.005 / (1100 * 0.08) = 568.18... → (568 // 100) * 100 = 500 株
+    result = calc_position_sizes(
+        weights={},
+        candidates=[{"code": "1234", "score": 0.8, "signal_rank": 1}],
+        portfolio_value=10_000_000,
+        available_cash=10_000_000,
+        current_positions={},
+        open_prices={"1234": 1100.0},
+        allocation_method="risk_based",
+        risk_pct=0.005,
+        stop_loss_pct=0.08,
+        max_position_pct=0.10,
+        max_utilization=0.70,
+        lot_size=100,
+    )
+    shares = result.get("1234", 0)
+    assert shares % 100 == 0
+
+
+def test_calc_position_sizes_max_utilization_aggregate_cap():
+    """available_cash を超える場合にスケールダウンされる。
+
+    3銘柄 × risk_based → 投資合計が available_cash 以内に収まる。
+    """
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    candidates = [
+        {"code": "A", "score": 0.9, "signal_rank": 1},
+        {"code": "B", "score": 0.8, "signal_rank": 2},
+        {"code": "C", "score": 0.7, "signal_rank": 3},
+    ]
+    open_prices = {"A": 500.0, "B": 500.0, "C": 500.0}
+    result = calc_position_sizes(
+        weights={},
+        candidates=candidates,
+        portfolio_value=1_000_000,
+        available_cash=1_000_000,
+        current_positions={},
+        open_prices=open_prices,
+        allocation_method="risk_based",
+        risk_pct=0.005,
+        stop_loss_pct=0.08,
+        max_position_pct=0.10,
+        max_utilization=0.70,
+        lot_size=100,
+    )
+    total_invested = sum(result.get(c["code"], 0) * open_prices[c["code"]] for c in candidates)
+    assert total_invested <= 1_000_000 * 1.001  # 0.1% の誤差許容
+
+
+def test_calc_position_sizes_equal_method():
+    """allocation_method="equal" → 等金額配分で株数を計算。"""
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    candidates = [
+        {"code": "A", "score": 0.9, "signal_rank": 1},
+        {"code": "B", "score": 0.5, "signal_rank": 2},
+    ]
+    weights = {"A": 0.5, "B": 0.5}
+
+    result = calc_position_sizes(
+        weights=weights,
+        candidates=candidates,
+        portfolio_value=10_000_000,
+        available_cash=10_000_000,
+        current_positions={},
+        open_prices={"A": 1000.0, "B": 1000.0},
+        allocation_method="equal",
+        max_position_pct=0.10,
+        max_utilization=0.70,
+        lot_size=100,
+    )
+    # alloc_A = 10M * 0.5 * 0.70 = 3_500_000 → floor(3500000 / 1000) = 3500 → 上限 1000 株
+    assert result.get("A", 0) == 1000
+    assert result.get("B", 0) == 1000
+
+
+def test_calc_position_sizes_score_method():
+    """allocation_method="score" → スコア比例配分。"""
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    candidates = [
+        {"code": "A", "score": 0.6, "signal_rank": 1},
+        {"code": "B", "score": 0.4, "signal_rank": 2},
+    ]
+    weights = {"A": 0.6, "B": 0.4}
+
+    result = calc_position_sizes(
+        weights=weights,
+        candidates=candidates,
+        portfolio_value=10_000_000,
+        available_cash=10_000_000,
+        current_positions={},
+        open_prices={"A": 1000.0, "B": 1000.0},
+        allocation_method="score",
+        max_position_pct=0.10,
+        max_utilization=0.70,
+        lot_size=100,
+    )
+    # A: 10M * 0.6 * 0.70 = 4_200_000 → floor(4200000/1000) = 4200 → 上限 1000
+    # B: 10M * 0.4 * 0.70 = 2_800_000 → floor(2800000/1000) = 2800 → 上限 1000
+    assert result.get("A", 0) == 1000
+    assert result.get("B", 0) == 1000
+
+
+def test_calc_position_sizes_no_price_skipped():
+    """open_prices に価格がない銘柄はスキップ（0株）。"""
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    result = calc_position_sizes(
+        weights={},
+        candidates=[{"code": "9999", "score": 0.9, "signal_rank": 1}],
+        portfolio_value=10_000_000,
+        available_cash=10_000_000,
+        current_positions={},
+        open_prices={},  # 価格なし
+        allocation_method="risk_based",
+    )
+    assert result.get("9999", 0) == 0
+
+
+def test_calc_position_sizes_existing_position_excluded():
+    """既存保有分は追加購入しない（追加分 = max(0, target - current)）。"""
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    # target=600, current=600 → 追加分=0
+    result = calc_position_sizes(
+        weights={},
+        candidates=[{"code": "1234", "score": 0.9, "signal_rank": 1}],
+        portfolio_value=10_000_000,
+        available_cash=10_000_000,
+        current_positions={"1234": 600},  # 既に 600 株保有
+        open_prices={"1234": 1000.0},
+        allocation_method="risk_based",
+        risk_pct=0.005,
+        stop_loss_pct=0.08,
+        max_position_pct=0.10,
+        max_utilization=0.70,
+        lot_size=100,
+    )
+    assert result.get("1234", 0) == 0
