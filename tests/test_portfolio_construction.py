@@ -430,3 +430,196 @@ def test_calc_position_sizes_existing_position_excluded():
         lot_size=100,
     )
     assert result.get("1234", 0) == 0
+
+
+# ---------------------------------------------------------------------------
+# Task 4: risk_adjustment.py
+# ---------------------------------------------------------------------------
+
+def test_apply_sector_cap_removes_overweight_sector():
+    """同一セクターが 30% 超なら新規候補を除外。
+
+    既存保有: 電気機器 A = 1000株 × 1000円 = 1,000,000円
+    portfolio_value = 3,000,000 → セクター比 = 33.3% > 30%
+    → 電気機器の新規候補 B を除外
+    """
+    from kabusys.portfolio.risk_adjustment import apply_sector_cap
+
+    candidates = [
+        {"code": "B", "score": 0.9, "signal_rank": 1},  # 電気機器
+        {"code": "C", "score": 0.8, "signal_rank": 2},  # 機械
+    ]
+    sector_map = {"A": "電気機器", "B": "電気機器", "C": "機械"}
+    current_positions = {"A": 1000}
+    open_prices = {"A": 1000.0, "B": 900.0, "C": 800.0}
+
+    result = apply_sector_cap(
+        candidates=candidates,
+        sector_map=sector_map,
+        portfolio_value=3_000_000,
+        current_positions=current_positions,
+        open_prices=open_prices,
+        max_sector_pct=0.30,
+    )
+
+    codes = {c["code"] for c in result}
+    assert "B" not in codes   # 除外
+    assert "C" in codes       # 通過
+
+
+def test_apply_sector_cap_allows_under_limit():
+    """セクター比が 30% 未満なら除外しない。"""
+    from kabusys.portfolio.risk_adjustment import apply_sector_cap
+
+    candidates = [
+        {"code": "B", "score": 0.9, "signal_rank": 1},
+    ]
+    sector_map = {"A": "電気機器", "B": "電気機器"}
+    current_positions = {"A": 100}
+    open_prices = {"A": 1000.0, "B": 900.0}
+
+    result = apply_sector_cap(
+        candidates=candidates,
+        sector_map=sector_map,
+        portfolio_value=5_000_000,  # A = 100_000 / 5M = 2% < 30%
+        current_positions=current_positions,
+        open_prices=open_prices,
+        max_sector_pct=0.30,
+    )
+
+    assert len(result) == 1
+    assert result[0]["code"] == "B"
+
+
+def test_apply_sector_cap_unknown_sector_passes():
+    """sector_map にないコード（セクター不明）は制限なく通過する。"""
+    from kabusys.portfolio.risk_adjustment import apply_sector_cap
+
+    candidates = [
+        {"code": "X", "score": 0.9, "signal_rank": 1},
+    ]
+    sector_map = {}  # X のセクターなし
+    result = apply_sector_cap(
+        candidates=candidates,
+        sector_map=sector_map,
+        portfolio_value=1_000_000,
+        current_positions={},
+        open_prices={"X": 1000.0},
+        max_sector_pct=0.30,
+    )
+    assert len(result) == 1
+    assert result[0]["code"] == "X"
+
+
+def test_apply_sector_cap_preserves_fields():
+    """apply_sector_cap は {code, score, signal_rank} 形式を保持して返す。"""
+    from kabusys.portfolio.risk_adjustment import apply_sector_cap
+
+    candidates = [
+        {"code": "A", "score": 0.9, "signal_rank": 1},
+        {"code": "B", "score": 0.7, "signal_rank": 2},
+    ]
+    sector_map = {"A": "電気機器", "B": "機械"}
+    result = apply_sector_cap(
+        candidates=candidates,
+        sector_map=sector_map,
+        portfolio_value=10_000_000,
+        current_positions={},
+        open_prices={"A": 1000.0, "B": 1000.0},
+        max_sector_pct=0.30,
+    )
+    assert len(result) == 2
+    assert result[0]["code"] == "A"
+    assert "score" in result[0]
+    assert "signal_rank" in result[0]
+
+
+def test_calc_regime_multiplier_values():
+    """calc_regime_multiplier: bull=1.0, neutral=0.7, bear=0.3, 未知=1.0。"""
+    from kabusys.portfolio.risk_adjustment import calc_regime_multiplier
+
+    assert calc_regime_multiplier("bull") == 1.0
+    assert calc_regime_multiplier("neutral") == 0.7
+    assert calc_regime_multiplier("bear") == 0.3
+    assert calc_regime_multiplier("unknown_regime") == 1.0
+
+
+def test_calc_regime_multiplier_case_sensitive():
+    """大文字の 'Bull' は未知とみなし 1.0 にフォールバック（DB は小文字で格納）。"""
+    from kabusys.portfolio.risk_adjustment import calc_regime_multiplier
+
+    assert calc_regime_multiplier("Bull") == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Task 4: 統合テスト（portfolio_builder + position_sizing + risk_adjustment）
+# ---------------------------------------------------------------------------
+
+def test_integration_neutral_regime_reduces_available_cash():
+    """`neutral` レジームで available_cash が 70% に抑制される。
+
+    portfolio_value=10M, multiplier=0.7 → available_cash=7M
+    risk_based: 10M * 0.005 / (1000 * 0.08) = 625 → 600 株 × 1000 = 600_000
+    total_cost=600_000 < available_cash=7_000_000 → スケールダウンなし → 600 株
+    """
+    from kabusys.portfolio.portfolio_builder import select_candidates
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+    from kabusys.portfolio.risk_adjustment import calc_regime_multiplier
+
+    portfolio_value = 10_000_000
+    multiplier = calc_regime_multiplier("neutral")
+    assert multiplier == 0.7
+    available_cash = portfolio_value * multiplier  # 7_000_000
+
+    candidates = select_candidates(
+        [{"code": "1234", "signal_rank": 1, "score": 0.9}]
+    )
+    result = calc_position_sizes(
+        weights={},
+        candidates=candidates,
+        portfolio_value=portfolio_value,
+        available_cash=available_cash,
+        current_positions={},
+        open_prices={"1234": 1000.0},
+        allocation_method="risk_based",
+    )
+    assert result.get("1234", 0) == 600
+
+
+def test_integration_sector_cap_then_size():
+    """セクター上限フィルタ後に position_sizing が動作する。"""
+    from kabusys.portfolio.portfolio_builder import select_candidates, calc_equal_weights
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+    from kabusys.portfolio.risk_adjustment import apply_sector_cap
+
+    signals = [
+        {"code": "A", "signal_rank": 1, "score": 0.9},  # 電気機器（除外される）
+        {"code": "B", "signal_rank": 2, "score": 0.7},  # 機械（通過）
+    ]
+    sector_map = {"existing_A": "電気機器", "A": "電気機器", "B": "機械"}
+    current_positions = {"existing_A": 1000}  # 電気機器に 1000 株保有
+    open_prices = {"existing_A": 1200.0, "A": 1000.0, "B": 900.0}
+    portfolio_value = 3_500_000  # existing_A = 1.2M / 3.5M = 34.3% > 30%
+
+    candidates = select_candidates(signals)
+    filtered = apply_sector_cap(
+        candidates, sector_map, portfolio_value, current_positions, open_prices
+    )
+
+    assert len(filtered) == 1
+    assert filtered[0]["code"] == "B"
+
+    weights = calc_equal_weights(filtered)
+    result = calc_position_sizes(
+        weights=weights,
+        candidates=filtered,
+        portfolio_value=portfolio_value,
+        available_cash=portfolio_value,
+        current_positions=current_positions,
+        open_prices=open_prices,
+        allocation_method="equal",
+        max_position_pct=0.10,
+        max_utilization=0.70,
+    )
+    assert result.get("A", 0) == 0   # セクター除外
+    assert result.get("B", 0) > 0    # 購入あり
