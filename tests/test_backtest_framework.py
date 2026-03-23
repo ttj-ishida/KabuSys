@@ -442,3 +442,134 @@ def test_run_backtest_max_position_pct(conn):
         if trade.side == "buy":
             invested = trade.shares * trade.price
             assert invested <= initial_cash * 0.10 * 1.01  # 1% の誤差許容
+
+
+# ---------------------------------------------------------------------------
+# Task 6: engine.py — Phase 5 helpers and run_backtest updates
+# ---------------------------------------------------------------------------
+
+def test_fetch_regime_returns_bull_on_no_data(conn):
+    """_fetch_regime: market_regime にデータなし → 'bull' を返す。"""
+    from kabusys.backtest.engine import _fetch_regime
+    from datetime import date
+
+    result = _fetch_regime(conn, date(2024, 1, 5))
+    assert result == "bull"
+
+
+def test_fetch_regime_returns_correct_label(conn):
+    """_fetch_regime: market_regime にデータあり → regime_label を返す。"""
+    from kabusys.backtest.engine import _fetch_regime
+    from datetime import date
+
+    d = date(2024, 1, 5)
+    conn.execute(
+        "INSERT INTO market_regime (date, regime_score, regime_label) VALUES (?, ?, ?)",
+        [d, -0.5, "bear"],
+    )
+    result = _fetch_regime(conn, d)
+    assert result == "bear"
+
+
+def test_fetch_sector_map_empty_table(conn):
+    """_fetch_sector_map: stocks テーブルが空なら {}。"""
+    from kabusys.backtest.engine import _fetch_sector_map
+
+    result = _fetch_sector_map(conn)
+    assert result == {}
+
+
+def test_fetch_sector_map_returns_data(conn):
+    """_fetch_sector_map: stocks テーブルからセクターマップを返す。"""
+    from kabusys.backtest.engine import _fetch_sector_map
+
+    conn.execute(
+        "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
+        ["1234", "テスト", "Prime", "電気機器"],
+    )
+    conn.execute(
+        "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
+        ["5678", "サンプル", "Standard", "機械"],
+    )
+    result = _fetch_sector_map(conn)
+    assert result == {"1234": "電気機器", "5678": "機械"}
+
+
+def test_build_backtest_conn_copies_stocks(conn):
+    """_build_backtest_conn → stocks テーブルが bt_conn にコピーされる。"""
+    from kabusys.backtest.engine import _build_backtest_conn
+    from datetime import date
+
+    conn.execute(
+        "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
+        ["1234", "テスト", "Prime", "電気機器"],
+    )
+    bt_conn = _build_backtest_conn(conn, date(2024, 1, 5), date(2024, 1, 5))
+    row = bt_conn.execute("SELECT sector FROM stocks WHERE code = '1234'").fetchone()
+    assert row is not None
+    assert row[0] == "電気機器"
+    bt_conn.close()
+
+
+def test_read_day_signals_includes_score(conn):
+    """_read_day_signals → buy_signals に score フィールドが含まれる。"""
+    from kabusys.backtest.engine import _read_day_signals
+    from datetime import date
+
+    d = date(2024, 1, 5)
+    conn.execute(
+        "INSERT INTO signals (date, code, side, score, signal_rank) VALUES (?, ?, ?, ?, ?)",
+        [d, "1234", "buy", 0.85, 1],
+    )
+    buy_signals, sell_signals = _read_day_signals(conn, d)
+    assert len(buy_signals) == 1
+    assert "score" in buy_signals[0]
+    assert abs(buy_signals[0]["score"] - 0.85) < 1e-9
+
+
+def test_run_backtest_new_params_accepted(conn):
+    """run_backtest が新パラメータ（allocation_method, max_positions 等）を受け付ける。"""
+    from kabusys.backtest.engine import run_backtest, BacktestResult
+    from datetime import date
+
+    _setup_minimal_backtest(conn)
+
+    result = run_backtest(
+        conn=conn,
+        start_date=date(2024, 1, 4),
+        end_date=date(2024, 1, 9),
+        allocation_method="equal",
+        max_positions=5,
+        max_utilization=0.70,
+    )
+
+    assert isinstance(result, BacktestResult)
+
+
+def test_run_backtest_risk_based_method(conn):
+    """run_backtest の allocation_method="risk_based" が動作する。"""
+    from kabusys.backtest.engine import run_backtest, BacktestResult
+    from datetime import date
+
+    _setup_minimal_backtest(conn)
+
+    result = run_backtest(
+        conn=conn,
+        start_date=date(2024, 1, 4),
+        end_date=date(2024, 1, 9),
+        allocation_method="risk_based",
+        risk_pct=0.005,
+        stop_loss_pct=0.08,
+    )
+
+    assert isinstance(result, BacktestResult)
+
+
+def test_run_backtest_default_max_position_pct_is_010(conn):
+    """run_backtest のデフォルト max_position_pct は 0.10（Phase 5 設計書準拠）。"""
+    import inspect
+    from kabusys.backtest.engine import run_backtest
+
+    sig = inspect.signature(run_backtest)
+    default = sig.parameters["max_position_pct"].default
+    assert default == 0.10, f"max_position_pct のデフォルトが {default}（0.10 であること）"

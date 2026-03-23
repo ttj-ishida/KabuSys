@@ -34,8 +34,8 @@ def main() -> None:
     parser.add_argument("--cash", type=float, default=10_000_000, help="Initial cash (JPY) [default: 10000000]")
     parser.add_argument("--slippage", type=float, default=0.001, help="Slippage rate [default: 0.001]")
     parser.add_argument("--commission", type=float, default=0.00055, help="Commission rate [default: 0.00055]")
-    parser.add_argument("--max-position-pct", type=float, default=0.20,
-                        help="Max position size as %% of portfolio per security [default: 0.20]")
+    parser.add_argument("--max-position-pct", type=float, default=0.10,
+                        help="Max position size as %% of portfolio per security [default: 0.10]")
     parser.add_argument("--db", required=True, help="DuckDB file path")
     args = parser.parse_args()
 
