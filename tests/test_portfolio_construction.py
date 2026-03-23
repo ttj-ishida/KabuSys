@@ -130,3 +130,99 @@ def test_fetch_listed_info_missing_fields_skipped():
 
     assert len(result) == 1
     assert result[0]["code"] == "1234"
+
+
+# ---------------------------------------------------------------------------
+# Task 2: portfolio_builder.py
+# ---------------------------------------------------------------------------
+
+
+def test_select_candidates_top_n():
+    """select_candidates → スコア降順で上位 max_positions 件を返す。"""
+    from kabusys.portfolio.portfolio_builder import select_candidates
+
+    signals = [
+        {"code": "A", "signal_rank": 3, "score": 0.5},
+        {"code": "B", "signal_rank": 1, "score": 0.9},
+        {"code": "C", "signal_rank": 2, "score": 0.7},
+        {"code": "D", "signal_rank": 4, "score": 0.3},
+    ]
+    result = select_candidates(signals, max_positions=2)
+    assert len(result) == 2
+    assert result[0]["code"] == "B"
+    assert result[1]["code"] == "C"
+
+
+def test_select_candidates_fewer_than_max():
+    """候補数 ≤ max_positions なら全件返す。"""
+    from kabusys.portfolio.portfolio_builder import select_candidates
+
+    signals = [
+        {"code": "A", "signal_rank": 1, "score": 0.8},
+        {"code": "B", "signal_rank": 2, "score": 0.6},
+    ]
+    result = select_candidates(signals, max_positions=10)
+    assert len(result) == 2
+
+
+def test_select_candidates_empty():
+    """空リスト → 空リスト。"""
+    from kabusys.portfolio.portfolio_builder import select_candidates
+
+    assert select_candidates([], max_positions=10) == []
+
+
+def test_calc_equal_weights_sums_to_one():
+    """calc_equal_weights → 重みの合計が 1.0。"""
+    from kabusys.portfolio.portfolio_builder import calc_equal_weights
+
+    candidates = [
+        {"code": "A", "score": 0.9, "signal_rank": 1},
+        {"code": "B", "score": 0.7, "signal_rank": 2},
+        {"code": "C", "score": 0.5, "signal_rank": 3},
+    ]
+    weights = calc_equal_weights(candidates)
+    assert set(weights.keys()) == {"A", "B", "C"}
+    assert abs(sum(weights.values()) - 1.0) < 1e-9
+    # 等分
+    assert abs(weights["A"] - 1 / 3) < 1e-9
+
+
+def test_calc_equal_weights_empty():
+    """candidates が空なら {}。"""
+    from kabusys.portfolio.portfolio_builder import calc_equal_weights
+
+    assert calc_equal_weights([]) == {}
+
+
+def test_calc_score_weights_proportional():
+    """calc_score_weights → score に比例した重み。"""
+    from kabusys.portfolio.portfolio_builder import calc_score_weights
+
+    candidates = [
+        {"code": "A", "score": 0.6, "signal_rank": 1},
+        {"code": "B", "score": 0.4, "signal_rank": 2},
+    ]
+    weights = calc_score_weights(candidates)
+    assert abs(weights["A"] - 0.6) < 1e-9
+    assert abs(weights["B"] - 0.4) < 1e-9
+
+
+def test_calc_score_weights_fallback_on_all_zero():
+    """全スコアが 0.0 のとき等金額配分にフォールバックする。"""
+    from kabusys.portfolio.portfolio_builder import calc_score_weights
+
+    candidates = [
+        {"code": "A", "score": 0.0, "signal_rank": 1},
+        {"code": "B", "score": 0.0, "signal_rank": 2},
+    ]
+    weights = calc_score_weights(candidates)
+    assert abs(weights["A"] - 0.5) < 1e-9
+    assert abs(weights["B"] - 0.5) < 1e-9
+
+
+def test_calc_score_weights_empty():
+    """candidates が空なら {}。"""
+    from kabusys.portfolio.portfolio_builder import calc_score_weights
+
+    assert calc_score_weights([]) == {}
