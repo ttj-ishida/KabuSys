@@ -40,7 +40,9 @@ def calc_position_sizes(
         stop_loss_pct:     損切り率（risk_based 時）
         max_position_pct:  1銘柄上限（総資産比）
         max_utilization:   投下資金上限（総資産比）
-        lot_size:          単元株数
+        lot_size:          単元株数（現状は全銘柄共通で 100 を想定）
+                           TODO: 将来的には stocks マスタに lot_size を持たせ、
+                                 銘柄別 lot_map: dict[str, int] を受け取る設計に拡張する
         cost_buffer:       手数料・スリッページ見積り係数。aggregate cap 判定の際に
                            price に (1 + cost_buffer) を掛けて保守的に見積もる。
                            slippage_rate + commission_rate 程度を推奨。
@@ -129,8 +131,9 @@ def calc_position_sizes(
 
             # 残余キャッシュで fractional 残差が大きい順に lot_size 単位を追加配分
             # raw_shares と _max_per_stock の上限を超えないよう安全弁を設ける
+            # 二次キーに code を使い、同一 frac のときも順序を安定させる（再現性確保）
             remaining_cash = available_cash - committed_cost
-            remainders.sort(reverse=True)
+            remainders.sort(key=lambda x: (-x[0], x[1]))
             for _, code in remainders:
                 price = open_prices.get(code, 0)
                 if price <= 0:

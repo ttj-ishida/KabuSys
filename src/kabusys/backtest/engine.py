@@ -201,7 +201,8 @@ def _fetch_regime(conn: duckdb.DuckDBPyConnection, trading_day: date) -> str:
         "SELECT regime_label FROM market_regime WHERE date = ?", [trading_day]
     ).fetchone()
     if row is None:
-        logger.warning(
+        # バックテスト序盤などでレジームデータが未整備の場合は通常の運用。INFO に留める。
+        logger.info(
             "_fetch_regime: %s のレジームが取得できません。'bull' でフォールバック。", trading_day
         )
         return "bull"
@@ -262,13 +263,25 @@ def run_backtest(
         raise ValueError(
             f"allocation_method は {_VALID_ALLOCATION_METHODS} のいずれかを指定してください: {allocation_method!r}"
         )
+    if stop_loss_pct <= 0:
+        raise ValueError(f"stop_loss_pct は正の値を指定してください: {stop_loss_pct}")
+    if not (0 < max_position_pct <= 1):
+        raise ValueError(f"max_position_pct は (0, 1] の範囲で指定してください: {max_position_pct}")
+    if not (0 <= max_utilization <= 1):
+        raise ValueError(f"max_utilization は [0, 1] の範囲で指定してください: {max_utilization}")
+    if max_positions < 1:
+        raise ValueError(f"max_positions は 1 以上を指定してください: {max_positions}")
+    if slippage_rate < 0 or commission_rate < 0:
+        raise ValueError(f"slippage_rate / commission_rate は 0 以上を指定してください")
 
     from kabusys.data.calendar_management import get_trading_days
     from kabusys.strategy.signal_generator import generate_signals
 
     bt_conn = _build_backtest_conn(conn, start_date, end_date)
     simulator = PortfolioSimulator(initial_cash=initial_cash)
-    signals_prev: list[dict] = []
+    # バックテストループ内でメモリ上に持ち回る翌日用発注リスト
+    # （本番 live trading とは異なり、バックテストは単一関数呼び出し内で完結するためDB永続化不要）
+    next_day_orders: list[dict] = []
 
     try:
         trading_days = get_trading_days(bt_conn, start_date, end_date)
@@ -281,9 +294,9 @@ def run_backtest(
         sector_map = _fetch_sector_map(bt_conn)
 
         for trading_day in trading_days:
-            # Step 1: 前日シグナルを当日 open で約定
+            # Step 1: 前日生成の発注リストを当日 open で約定
             open_prices = _fetch_open_prices(bt_conn, trading_day)
-            simulator.execute_orders(signals_prev, open_prices, slippage_rate, commission_rate, trading_day)
+            simulator.execute_orders(next_day_orders, open_prices, slippage_rate, commission_rate, trading_day)
 
             # Step 2: positions テーブルに書き戻し（generate_signals の SELL 判定に必要）
             _write_positions(bt_conn, trading_day, simulator.positions, simulator.cost_basis)
@@ -333,7 +346,8 @@ def run_backtest(
                 cost_buffer=slippage_rate + commission_rate,
             )
 
-            signals_prev = [
+            # 翌日の約定に使う発注リストをメモリ上で更新（次ループの Step 1 で消費）
+            next_day_orders = [
                 {"code": code, "side": "buy", "shares": shares}
                 for code, shares in sized.items()
                 if shares > 0

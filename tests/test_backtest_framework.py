@@ -689,6 +689,40 @@ def test_run_backtest_available_cash_capped_by_max_utilization(conn):
     assert len(buy_trades) == 0, "max_utilization=0.0 では BUY 約定が発生してはならない"
 
 
+def test_run_backtest_invalid_stop_loss_pct_raises(conn):
+    """stop_loss_pct=0 は除算ゼロになるため ValueError を発生させる。"""
+    from kabusys.backtest.engine import run_backtest
+    from datetime import date
+    import pytest
+
+    _setup_minimal_backtest(conn)
+
+    with pytest.raises(ValueError, match="stop_loss_pct"):
+        run_backtest(
+            conn=conn,
+            start_date=date(2024, 1, 4),
+            end_date=date(2024, 1, 9),
+            stop_loss_pct=0.0,
+        )
+
+
+def test_run_backtest_invalid_max_utilization_raises(conn):
+    """max_utilization が範囲外なら ValueError を発生させる。"""
+    from kabusys.backtest.engine import run_backtest
+    from datetime import date
+    import pytest
+
+    _setup_minimal_backtest(conn)
+
+    with pytest.raises(ValueError, match="max_utilization"):
+        run_backtest(
+            conn=conn,
+            start_date=date(2024, 1, 4),
+            end_date=date(2024, 1, 9),
+            max_utilization=1.5,
+        )
+
+
 def test_run_backtest_cli_params(conn):
     """run_backtest が CLI から渡される新パラメータを正しく受け付ける。"""
     from kabusys.backtest.engine import run_backtest, BacktestResult
