@@ -56,6 +56,7 @@ class PortfolioSimulator:
         slippage_rate: float,
         commission_rate: float,
         trading_day: date | None = None,
+        lot_size: int = 1,
     ) -> None:
         """シグナルリストを当日 open 価格で約定処理する。
 
@@ -69,6 +70,8 @@ class PortfolioSimulator:
             slippage_rate: スリッページ率。BUY は +、SELL は -。
             commission_rate: 手数料率（約定金額 × commission_rate）。
             trading_day:   約定日（TradeRecord.date に使用）。None の場合は history[-1].date を使用。
+            lot_size:      部分約定時の単元株数。デフォルト 1（後方互換）。
+                           日本株では通常 100 を渡す。
         """
         # SELL を先に処理
         for sig in [s for s in signals if s["side"] == "sell"]:
@@ -82,6 +85,7 @@ class PortfolioSimulator:
                 slippage_rate,
                 commission_rate,
                 trading_day,
+                lot_size=lot_size,
             )
 
     def _execute_buy(
@@ -92,6 +96,7 @@ class PortfolioSimulator:
         slippage_rate: float,
         commission_rate: float,
         trading_day: date | None = None,
+        lot_size: int = 1,
     ) -> None:
         if shares <= 0:
             logger.debug("execute_orders: BUY %s shares=%d。スキップ。", code, shares)
@@ -108,8 +113,9 @@ class PortfolioSimulator:
         total_cost = cost + commission
 
         if total_cost > self.cash:
-            # 部分約定: 保有現金で約定可能な最大株数を再計算
+            # 部分約定: 保有現金で約定可能な最大株数を単元丸めで再計算
             max_affordable = int(self.cash / (entry_price * (1.0 + commission_rate)))
+            max_affordable = (max_affordable // lot_size) * lot_size
             if max_affordable <= 0:
                 logger.debug(
                     "execute_orders: BUY %s 現金不足（必要: %.0f, 保有: %.0f）。スキップ。",

@@ -689,6 +689,85 @@ def test_run_backtest_available_cash_capped_by_max_utilization(conn):
     assert len(buy_trades) == 0, "max_utilization=0.0 では BUY 約定が発生してはならない"
 
 
+def test_execute_buy_partial_fill_lot_size_rounded(conn):
+    """_execute_buy: 部分約定は lot_size=100 で単元丸めされる。
+
+    cash=150_000, entry_price≈1001, lot_size=100
+    → max_affordable_raw = floor(150_000 / 1001) = 149
+    → lot 丸め: (149 // 100) * 100 = 100 株で約定
+    """
+    from kabusys.backtest.simulator import PortfolioSimulator
+    from datetime import date
+
+    sim = PortfolioSimulator(initial_cash=150_000.0)
+    sim._execute_buy(
+        code="1234",
+        shares=200,
+        open_prices={"1234": 1000.0},
+        slippage_rate=0.001,
+        commission_rate=0.00055,
+        trading_day=date(2024, 1, 5),
+        lot_size=100,
+    )
+
+    assert "1234" in sim.positions
+    assert sim.positions["1234"] % 100 == 0, "部分約定でも単元株単位になること"
+    assert sim.cash >= 0
+
+
+def test_execute_buy_partial_fill_lot_size_default_no_rounding():
+    """lot_size=1（デフォルト）では単元丸めせずに部分約定する（後方互換）。"""
+    from kabusys.backtest.simulator import PortfolioSimulator
+    from datetime import date
+
+    sim = PortfolioSimulator(initial_cash=95_000.0)
+    sim._execute_buy(
+        code="1234",
+        shares=100,
+        open_prices={"1234": 1000.0},
+        slippage_rate=0.001,
+        commission_rate=0.00055,
+        trading_day=date(2024, 1, 5),
+        lot_size=1,  # デフォルト: 単元丸めなし
+    )
+
+    assert "1234" in sim.positions
+    assert sim.positions["1234"] < 100
+
+
+def test_select_candidates_tiebreak_by_signal_rank():
+    """同一スコアの銘柄は signal_rank 昇順でタイブレークされる。"""
+    from kabusys.portfolio.portfolio_builder import select_candidates
+
+    signals = [
+        {"code": "A", "signal_rank": 3, "score": 0.5},
+        {"code": "B", "signal_rank": 1, "score": 0.5},  # 同スコア・より低い rank
+        {"code": "C", "signal_rank": 2, "score": 0.5},
+    ]
+    result = select_candidates(signals, max_positions=2)
+    codes = [c["code"] for c in result]
+    assert codes[0] == "B", "signal_rank が最小（優先度が高い）の B が先頭"
+    assert codes[1] == "C"
+
+
+def test_run_backtest_invalid_risk_pct_raises(conn):
+    """risk_pct が範囲外なら ValueError を発生させる（risk_based 時のみ）。"""
+    from kabusys.backtest.engine import run_backtest
+    from datetime import date
+    import pytest
+
+    _setup_minimal_backtest(conn)
+
+    with pytest.raises(ValueError, match="risk_pct"):
+        run_backtest(
+            conn=conn,
+            start_date=date(2024, 1, 4),
+            end_date=date(2024, 1, 9),
+            allocation_method="risk_based",
+            risk_pct=0.0,
+        )
+
+
 def test_run_backtest_invalid_stop_loss_pct_raises(conn):
     """stop_loss_pct=0 は除算ゼロになるため ValueError を発生させる。"""
     from kabusys.backtest.engine import run_backtest

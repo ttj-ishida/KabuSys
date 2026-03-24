@@ -273,6 +273,8 @@ def run_backtest(
         raise ValueError(f"max_positions は 1 以上を指定してください: {max_positions}")
     if slippage_rate < 0 or commission_rate < 0:
         raise ValueError(f"slippage_rate / commission_rate は 0 以上を指定してください")
+    if allocation_method == "risk_based" and not (0 < risk_pct < 1):
+        raise ValueError(f"risk_pct は (0, 1) の範囲で指定してください: {risk_pct}")
 
     from kabusys.data.calendar_management import get_trading_days
     from kabusys.strategy.signal_generator import generate_signals
@@ -296,7 +298,7 @@ def run_backtest(
         for trading_day in trading_days:
             # Step 1: 前日生成の発注リストを当日 open で約定
             open_prices = _fetch_open_prices(bt_conn, trading_day)
-            simulator.execute_orders(next_day_orders, open_prices, slippage_rate, commission_rate, trading_day)
+            simulator.execute_orders(next_day_orders, open_prices, slippage_rate, commission_rate, trading_day, lot_size=100)
 
             # Step 2: positions テーブルに書き戻し（generate_signals の SELL 判定に必要）
             _write_positions(bt_conn, trading_day, simulator.positions, simulator.cost_basis)
@@ -317,12 +319,15 @@ def run_backtest(
             # max_utilization を全配分方式に一貫適用（risk_based 含む）
             available_cash = min(simulator.cash * multiplier, current_pv * max_utilization)
 
-            candidates = select_candidates(buy_signals, max_positions)
+            # セクター制限を全候補に先行適用し、除外後に上位 max_positions を選ぶ
+            # （従来の select → filter では除外後の補充がなかった）
             sell_codes = {s["code"] for s in sell_signals}
-            candidates = apply_sector_cap(
-                candidates, sector_map, current_pv, simulator.positions, open_prices,
+            all_sorted = select_candidates(buy_signals, max_positions=len(buy_signals))
+            filtered = apply_sector_cap(
+                all_sorted, sector_map, current_pv, simulator.positions, close_prices,
                 sell_codes=sell_codes,
             )
+            candidates = filtered[:max_positions]
 
             if allocation_method == "equal":
                 weights = calc_equal_weights(candidates)
