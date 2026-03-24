@@ -209,11 +209,15 @@ def _fetch_regime(conn: duckdb.DuckDBPyConnection, trading_day: date) -> str:
 
 
 def _fetch_sector_map(conn: duckdb.DuckDBPyConnection) -> dict[str, str]:
-    """stocks テーブルから {code: sector} を返す。テーブルが空なら {}。"""
+    """stocks テーブルから {code: sector} を返す。テーブルが空なら {}。
+
+    空文字・空白のみのセクターは NULL 扱いとし、マップから除外する
+    （apply_sector_cap 側で "unknown" にフォールバックされる）。
+    """
     rows = conn.execute(
-        "SELECT code, sector FROM stocks WHERE sector IS NOT NULL"
+        "SELECT code, NULLIF(TRIM(sector), '') AS sector FROM stocks WHERE NULLIF(TRIM(sector), '') IS NOT NULL"
     ).fetchall()
-    return {code: sector for code, sector in rows}
+    return {code: sector for code, sector in rows if sector}
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +257,12 @@ def run_backtest(
     Returns:
         BacktestResult（history, trades, metrics）。
     """
+    _VALID_ALLOCATION_METHODS = {"equal", "score", "risk_based"}
+    if allocation_method not in _VALID_ALLOCATION_METHODS:
+        raise ValueError(
+            f"allocation_method は {_VALID_ALLOCATION_METHODS} のいずれかを指定してください: {allocation_method!r}"
+        )
+
     from kabusys.data.calendar_management import get_trading_days
     from kabusys.strategy.signal_generator import generate_signals
 
@@ -289,12 +299,15 @@ def run_backtest(
             buy_signals, sell_signals = _read_day_signals(bt_conn, trading_day)
             regime = _fetch_regime(bt_conn, trading_day)
             multiplier = calc_regime_multiplier(regime)
-            prior_pv = simulator.history[-1].portfolio_value if simulator.history else initial_cash
+            # 当日 mark_to_market 後の最新ポートフォリオ価値（翌日用発注サイジングに使用）
+            current_pv = simulator.history[-1].portfolio_value if simulator.history else initial_cash
             available_cash = simulator.cash * multiplier
 
             candidates = select_candidates(buy_signals, max_positions)
+            sell_codes = {s["code"] for s in sell_signals}
             candidates = apply_sector_cap(
-                candidates, sector_map, prior_pv, simulator.positions, open_prices
+                candidates, sector_map, current_pv, simulator.positions, open_prices,
+                sell_codes=sell_codes,
             )
 
             if allocation_method == "equal":
@@ -307,7 +320,7 @@ def run_backtest(
             sized = calc_position_sizes(
                 weights=weights,
                 candidates=candidates,
-                portfolio_value=prior_pv,
+                portfolio_value=current_pv,
                 available_cash=available_cash,
                 current_positions=simulator.positions,
                 open_prices=open_prices,

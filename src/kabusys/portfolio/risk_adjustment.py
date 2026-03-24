@@ -17,6 +17,7 @@ def apply_sector_cap(
     current_positions: dict[str, int],
     open_prices: dict[str, float],
     max_sector_pct: float = 0.30,
+    sell_codes: set[str] | None = None,
 ) -> list[dict]:
     """同一セクターの既存保有比率が max_sector_pct を超える場合、そのセクターの新規候補を除外する。
 
@@ -27,6 +28,7 @@ def apply_sector_cap(
         current_positions: 既存保有 {code: shares}
         open_prices:       {code: price}
         max_sector_pct:    1セクターの最大保有比率
+        sell_codes:        当日売却予定のコード集合。エクスポージャー計算から除外する。
 
     Returns:
         セクター上限チェック後の candidates（同じ {code, score, signal_rank} 形式）。
@@ -35,9 +37,13 @@ def apply_sector_cap(
     if not candidates or portfolio_value <= 0:
         return candidates
 
-    # 既存保有のセクター別時価を計算
+    excluded = sell_codes or set()
+
+    # 既存保有のセクター別時価を計算（当日売却予定銘柄を除外）
     sector_exposure: dict[str, float] = {}
     for code, shares in current_positions.items():
+        if code in excluded:
+            continue
         sector = sector_map.get(code, "unknown")
         if sector == "unknown":
             continue

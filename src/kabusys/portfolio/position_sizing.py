@@ -104,12 +104,35 @@ def calc_position_sizes(
         if total_cost > available_cash and total_cost > 0:
             scale = available_cash / total_cost
             scaled: dict[str, int] = {}
+            committed_cost = 0.0
+            # (fractional_remainder, code) — 残差が大きい順に追加配分するための記録
+            remainders: list[tuple[float, str]] = []
+
             for code, shares in raw_shares.items():
                 price = open_prices.get(code, 0)
-                new_shares = math.floor(shares * scale)
-                new_shares = (new_shares // lot_size) * lot_size
+                if price <= 0:
+                    continue
+                scaled_f = shares * scale
+                new_shares = (math.floor(scaled_f) // lot_size) * lot_size
                 if new_shares > 0:
                     scaled[code] = new_shares
+                    committed_cost += new_shares * price
+                # fractional_remainder = lot_size 単位での端数部分
+                frac = (scaled_f / lot_size) - math.floor(scaled_f / lot_size)
+                remainders.append((frac, code))
+
+            # 残余キャッシュで fractional 残差が大きい順に lot_size 単位を追加配分
+            remaining_cash = available_cash - committed_cost
+            remainders.sort(reverse=True)
+            for _, code in remainders:
+                price = open_prices.get(code, 0)
+                if price <= 0:
+                    continue
+                lot_cost = lot_size * price
+                if remaining_cash >= lot_cost:
+                    scaled[code] = scaled.get(code, 0) + lot_size
+                    remaining_cash -= lot_cost
+
             return scaled
 
     return raw_shares

@@ -573,3 +573,95 @@ def test_run_backtest_default_max_position_pct_is_010(conn):
     sig = inspect.signature(run_backtest)
     default = sig.parameters["max_position_pct"].default
     assert default == 0.10, f"max_position_pct のデフォルトが {default}（0.10 であること）"
+
+
+# ---------------------------------------------------------------------------
+# レビュー対応: 追加テスト
+# ---------------------------------------------------------------------------
+
+def test_fetch_sector_map_excludes_empty_string_sector(conn):
+    """_fetch_sector_map: 空文字セクターは除外される（'unknown' フォールバックに委ねる）。"""
+    from kabusys.backtest.engine import _fetch_sector_map
+
+    conn.execute(
+        "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
+        ["1111", "正常", "Prime", "電気機器"],
+    )
+    conn.execute(
+        "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
+        ["2222", "空文字セクター", "Prime", ""],
+    )
+    conn.execute(
+        "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
+        ["3333", "スペースのみ", "Prime", "   "],
+    )
+
+    result = _fetch_sector_map(conn)
+
+    assert "1111" in result
+    assert result["1111"] == "電気機器"
+    assert "2222" not in result, "空文字セクターはマップに含まれてはならない"
+    assert "3333" not in result, "スペースのみのセクターはマップに含まれてはならない"
+
+
+def test_execute_buy_partial_fill_when_insufficient_cash():
+    """_execute_buy: 現金不足でも max_affordable_shares で部分約定する。
+
+    cash=95_000, entry_price=1000*(1+0.001)=1001, commission_rate=0.00055
+    total_cost(100株) = 100*1001*(1+0.00055) = 101_155.5 > 95_000
+    → max_affordable = floor(95_000 / (1001 * 1.00055)) = floor(94.86) = 94 株
+    → 94 株で約定
+    """
+    from kabusys.backtest.simulator import PortfolioSimulator
+    from datetime import date
+
+    sim = PortfolioSimulator(initial_cash=95_000.0)
+    sim._execute_buy(
+        code="1234",
+        shares=100,
+        open_prices={"1234": 1000.0},
+        slippage_rate=0.001,
+        commission_rate=0.00055,
+        trading_day=date(2024, 1, 5),
+    )
+
+    assert "1234" in sim.positions, "部分約定で保有が発生するはず"
+    assert sim.positions["1234"] > 0
+    assert sim.positions["1234"] < 100, "100株未満の部分約定"
+    assert sim.cash >= 0, "現金がマイナスになってはならない"
+
+
+def test_execute_buy_full_skip_when_price_too_high():
+    """_execute_buy: 1株も買えない場合は約定しない。"""
+    from kabusys.backtest.simulator import PortfolioSimulator
+    from datetime import date
+
+    sim = PortfolioSimulator(initial_cash=500.0)  # 1株1000円を買えない
+    sim._execute_buy(
+        code="1234",
+        shares=100,
+        open_prices={"1234": 1000.0},
+        slippage_rate=0.001,
+        commission_rate=0.00055,
+        trading_day=date(2024, 1, 5),
+    )
+
+    assert "1234" not in sim.positions
+    assert sim.cash == 500.0
+
+
+def test_run_backtest_invalid_allocation_method_raises(conn):
+    """run_backtest に不正な allocation_method を渡すと ValueError が発生する。"""
+    from kabusys.backtest.engine import run_backtest
+    from datetime import date
+    import pytest
+
+    _setup_minimal_backtest(conn)
+
+    with pytest.raises(ValueError, match="allocation_method"):
+        run_backtest(
+            conn=conn,
+            start_date=date(2024, 1, 4),
+            end_date=date(2024, 1, 9),
+            allocation_method="invalid_method",
+        )

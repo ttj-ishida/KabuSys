@@ -108,9 +108,22 @@ class PortfolioSimulator:
         total_cost = cost + commission
 
         if total_cost > self.cash:
-            logger.debug("execute_orders: BUY %s 現金不足（必要: %.0f, 保有: %.0f）。スキップ。",
-                         code, total_cost, self.cash)
-            return
+            # 部分約定: 保有現金で約定可能な最大株数を再計算
+            max_affordable = int(self.cash / (entry_price * (1.0 + commission_rate)))
+            if max_affordable <= 0:
+                logger.debug(
+                    "execute_orders: BUY %s 現金不足（必要: %.0f, 保有: %.0f）。スキップ。",
+                    code, total_cost, self.cash,
+                )
+                return
+            logger.debug(
+                "execute_orders: BUY %s 部分約定 %d→%d 株（現金: %.0f, 必要: %.0f）",
+                code, shares, max_affordable, self.cash, total_cost,
+            )
+            shares = max_affordable
+            cost = shares * entry_price
+            commission = cost * commission_rate
+            total_cost = cost + commission
 
         self.cash -= total_cost
 

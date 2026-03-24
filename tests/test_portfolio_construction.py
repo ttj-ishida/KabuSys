@@ -623,3 +623,118 @@ def test_integration_sector_cap_then_size():
     )
     assert result.get("A", 0) == 0   # セクター除外
     assert result.get("B", 0) > 0    # 購入あり
+
+
+# ---------------------------------------------------------------------------
+# レビュー対応: 追加テスト
+# ---------------------------------------------------------------------------
+
+def test_apply_sector_cap_sell_codes_excluded_from_exposure():
+    """sell_codes に含まれる銘柄はセクターエクスポージャーから除外される。
+
+    既存保有: 電気機器 A = 1000株 × 1000円 = 1,000,000円  (33.3% > 30%)
+    sell_codes に A が含まれる → エクスポージャー = 0 → ブロックされない
+    → 電気機器の新規候補 B が通過する
+    """
+    from kabusys.portfolio.risk_adjustment import apply_sector_cap
+
+    candidates = [{"code": "B", "score": 0.9, "signal_rank": 1}]
+    sector_map = {"A": "電気機器", "B": "電気機器"}
+    current_positions = {"A": 1000}
+    open_prices = {"A": 1000.0, "B": 900.0}
+
+    result = apply_sector_cap(
+        candidates=candidates,
+        sector_map=sector_map,
+        portfolio_value=3_000_000,
+        current_positions=current_positions,
+        open_prices=open_prices,
+        max_sector_pct=0.30,
+        sell_codes={"A"},
+    )
+
+    assert len(result) == 1
+    assert result[0]["code"] == "B"
+
+
+def test_apply_sector_cap_without_sell_codes_blocks_sector():
+    """sell_codes なしの場合は従来通りセクター上限で除外される（後退防止）。"""
+    from kabusys.portfolio.risk_adjustment import apply_sector_cap
+
+    candidates = [{"code": "B", "score": 0.9, "signal_rank": 1}]
+    sector_map = {"A": "電気機器", "B": "電気機器"}
+    current_positions = {"A": 1000}
+    open_prices = {"A": 1000.0, "B": 900.0}
+
+    result = apply_sector_cap(
+        candidates=candidates,
+        sector_map=sector_map,
+        portfolio_value=3_000_000,
+        current_positions=current_positions,
+        open_prices=open_prices,
+        max_sector_pct=0.30,
+    )
+
+    assert len(result) == 0
+
+
+def test_calc_position_sizes_scale_down_greedy_no_zeroing():
+    """スケールダウン後、残差貪欲配分により全銘柄ゼロ化が防止される。
+
+    2銘柄 × raw=100株 × 1000円 = 200_000円, available_cash=130_000円
+    scale=0.65 → floor(100*0.65)=65 → (65//100)*100=0 → 両方ゼロになる恐れ
+    貪欲配分により少なくとも 100 株が割り当てられること。
+    """
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    candidates = [
+        {"code": "A", "score": 0.9, "signal_rank": 1},
+        {"code": "B", "score": 0.8, "signal_rank": 2},
+    ]
+    result = calc_position_sizes(
+        weights={"A": 0.5, "B": 0.5},
+        candidates=candidates,
+        portfolio_value=1_000_000,
+        available_cash=130_000,
+        current_positions={},
+        open_prices={"A": 1000.0, "B": 1000.0},
+        allocation_method="equal",
+        max_position_pct=0.10,
+        max_utilization=0.20,
+        lot_size=100,
+    )
+
+    total_shares = sum(result.values())
+    assert total_shares > 0, "スケールダウン後に全銘柄ゼロになってはならない"
+    total_cost = sum(result.get(c["code"], 0) * 1000.0 for c in candidates)
+    assert total_cost <= 130_000 * 1.001
+
+
+def test_calc_position_sizes_scale_down_stays_within_budget():
+    """スケールダウン後の投資合計が available_cash を超えない（貪欲配分含む）。"""
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    candidates = [
+        {"code": "A", "score": 0.6, "signal_rank": 1},
+        {"code": "B", "score": 0.4, "signal_rank": 2},
+        {"code": "C", "score": 0.3, "signal_rank": 3},
+    ]
+    available_cash = 250_000.0
+    open_prices = {"A": 1000.0, "B": 800.0, "C": 600.0}
+
+    result = calc_position_sizes(
+        weights={},
+        candidates=candidates,
+        portfolio_value=5_000_000,
+        available_cash=available_cash,
+        current_positions={},
+        open_prices=open_prices,
+        allocation_method="risk_based",
+        risk_pct=0.005,
+        stop_loss_pct=0.08,
+        max_position_pct=0.10,
+        lot_size=100,
+    )
+
+    total_cost = sum(result.get(c["code"], 0) * open_prices[c["code"]] for c in candidates)
+    assert total_cost <= available_cash * 1.001
