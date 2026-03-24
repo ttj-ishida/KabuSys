@@ -24,6 +24,7 @@ def calc_position_sizes(
     max_position_pct: float = 0.10,
     max_utilization: float = 0.70,
     lot_size: int = 100,
+    cost_buffer: float = 0.0,
 ) -> dict[str, int]:
     """allocation_method に応じて各銘柄の発注株数を計算する。
 
@@ -40,6 +41,9 @@ def calc_position_sizes(
         max_position_pct:  1銘柄上限（総資産比）
         max_utilization:   投下資金上限（総資産比）
         lot_size:          単元株数
+        cost_buffer:       手数料・スリッページ見積り係数。aggregate cap 判定の際に
+                           price に (1 + cost_buffer) を掛けて保守的に見積もる。
+                           slippage_rate + commission_rate 程度を推奨。
 
     Returns:
         {code: shares_to_buy}（shares > 0 の銘柄のみ）
@@ -95,9 +99,11 @@ def calc_position_sizes(
                 raw_shares[code] = add_shares
 
     # aggregate cap: 全銘柄の投資合計が available_cash を超える場合にスケールダウン
+    # cost_buffer を加味して約定コスト（スリッページ・手数料）を保守的に見積もる
+    price_factor = 1.0 + cost_buffer
     if raw_shares:
         total_cost = sum(
-            raw_shares[code] * open_prices[code]
+            raw_shares[code] * open_prices[code] * price_factor
             for code in raw_shares
             if code in open_prices
         )
@@ -116,21 +122,24 @@ def calc_position_sizes(
                 new_shares = (math.floor(scaled_f) // lot_size) * lot_size
                 if new_shares > 0:
                     scaled[code] = new_shares
-                    committed_cost += new_shares * price
+                    committed_cost += new_shares * price * price_factor
                 # fractional_remainder = lot_size 単位での端数部分
                 frac = (scaled_f / lot_size) - math.floor(scaled_f / lot_size)
                 remainders.append((frac, code))
 
             # 残余キャッシュで fractional 残差が大きい順に lot_size 単位を追加配分
+            # raw_shares と _max_per_stock の上限を超えないよう安全弁を設ける
             remaining_cash = available_cash - committed_cost
             remainders.sort(reverse=True)
             for _, code in remainders:
                 price = open_prices.get(code, 0)
                 if price <= 0:
                     continue
-                lot_cost = lot_size * price
-                if remaining_cash >= lot_cost:
-                    scaled[code] = scaled.get(code, 0) + lot_size
+                lot_cost = lot_size * price * price_factor
+                candidate_new = scaled.get(code, 0) + lot_size
+                max_allowed = min(raw_shares.get(code, 0), _max_per_stock(price))
+                if remaining_cash >= lot_cost and candidate_new <= max_allowed:
+                    scaled[code] = candidate_new
                     remaining_cash -= lot_cost
 
             return scaled

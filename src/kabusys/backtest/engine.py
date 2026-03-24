@@ -301,7 +301,8 @@ def run_backtest(
             multiplier = calc_regime_multiplier(regime)
             # 当日 mark_to_market 後の最新ポートフォリオ価値（翌日用発注サイジングに使用）
             current_pv = simulator.history[-1].portfolio_value if simulator.history else initial_cash
-            available_cash = simulator.cash * multiplier
+            # max_utilization を全配分方式に一貫適用（risk_based 含む）
+            available_cash = min(simulator.cash * multiplier, current_pv * max_utilization)
 
             candidates = select_candidates(buy_signals, max_positions)
             sell_codes = {s["code"] for s in sell_signals}
@@ -329,6 +330,7 @@ def run_backtest(
                 stop_loss_pct=stop_loss_pct,
                 max_position_pct=max_position_pct,
                 max_utilization=max_utilization,
+                cost_buffer=slippage_rate + commission_rate,
             )
 
             signals_prev = [

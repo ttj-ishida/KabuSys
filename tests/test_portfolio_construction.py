@@ -738,3 +738,62 @@ def test_calc_position_sizes_scale_down_stays_within_budget():
 
     total_cost = sum(result.get(c["code"], 0) * open_prices[c["code"]] for c in candidates)
     assert total_cost <= available_cash * 1.001
+
+
+def test_calc_position_sizes_cost_buffer_reduces_total():
+    """cost_buffer を指定すると aggregate cap 判定が保守的になる。
+
+    cost_buffer=0.1 は 10% のマージンを見込んで total_cost を計算するため、
+    スケールダウン後の株式実取得コスト（cost_buffer なし）が available_cash 以内に収まる。
+    """
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    candidates = [
+        {"code": "A", "score": 0.9, "signal_rank": 1},
+        {"code": "B", "score": 0.8, "signal_rank": 2},
+    ]
+    open_prices = {"A": 1000.0, "B": 1000.0}
+    available_cash = 200_000.0
+
+    result_with_buffer = calc_position_sizes(
+        weights={},
+        candidates=candidates,
+        portfolio_value=5_000_000,
+        available_cash=available_cash,
+        current_positions={},
+        open_prices=open_prices,
+        allocation_method="risk_based",
+        risk_pct=0.005,
+        stop_loss_pct=0.08,
+        lot_size=100,
+        cost_buffer=0.1,
+    )
+
+    # cost_buffer あり: 実取得コスト（buffer なし）は available_cash 以内
+    raw_cost = sum(result_with_buffer.get(c["code"], 0) * open_prices[c["code"]] for c in candidates)
+    assert raw_cost <= available_cash
+
+
+def test_calc_position_sizes_greedy_does_not_exceed_raw_shares():
+    """貪欲配分が raw_shares を超えないこと（安全弁の確認）。"""
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    candidates = [{"code": "A", "score": 0.9, "signal_rank": 1}]
+    open_prices = {"A": 1000.0}
+    # raw_shares = 200株 (risk_based で計算される量), available_cash は潤沢
+    result = calc_position_sizes(
+        weights={},
+        candidates=candidates,
+        portfolio_value=10_000_000,
+        available_cash=500_000,  # 十分ある
+        current_positions={},
+        open_prices=open_prices,
+        allocation_method="risk_based",
+        risk_pct=0.005,
+        stop_loss_pct=0.08,
+        max_position_pct=0.10,
+        lot_size=100,
+    )
+
+    # 結果は raw_shares（≒600株）以内であること
+    assert result.get("A", 0) <= 600

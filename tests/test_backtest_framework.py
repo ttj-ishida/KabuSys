@@ -665,3 +665,46 @@ def test_run_backtest_invalid_allocation_method_raises(conn):
             end_date=date(2024, 1, 9),
             allocation_method="invalid_method",
         )
+
+
+def test_run_backtest_available_cash_capped_by_max_utilization(conn):
+    """available_cash = min(cash*multiplier, pv*max_utilization) が適用される。
+
+    max_utilization=0.0 なら available_cash=0 → 発注株数がゼロになる。
+    """
+    from kabusys.backtest.engine import run_backtest
+    from datetime import date
+
+    _setup_minimal_backtest(conn)
+
+    result = run_backtest(
+        conn=conn,
+        start_date=date(2024, 1, 4),
+        end_date=date(2024, 1, 9),
+        initial_cash=10_000_000,
+        max_utilization=0.0,  # 全ポジション禁止
+    )
+
+    buy_trades = [t for t in result.trades if t.side == "buy"]
+    assert len(buy_trades) == 0, "max_utilization=0.0 では BUY 約定が発生してはならない"
+
+
+def test_run_backtest_cli_params(conn):
+    """run_backtest が CLI から渡される新パラメータを正しく受け付ける。"""
+    from kabusys.backtest.engine import run_backtest, BacktestResult
+    from datetime import date
+
+    _setup_minimal_backtest(conn)
+
+    result = run_backtest(
+        conn=conn,
+        start_date=date(2024, 1, 4),
+        end_date=date(2024, 1, 9),
+        allocation_method="equal",
+        max_utilization=0.50,
+        max_positions=5,
+        risk_pct=0.01,
+        stop_loss_pct=0.10,
+    )
+
+    assert isinstance(result, BacktestResult)
