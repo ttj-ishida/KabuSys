@@ -238,6 +238,7 @@ def run_backtest(
     allocation_method: str = "risk_based",
     risk_pct: float = 0.005,
     stop_loss_pct: float = 0.08,
+    lot_size: int = 100,
 ) -> BacktestResult:
     """バックテストを実行し結果を返す。
 
@@ -254,6 +255,7 @@ def run_backtest(
         allocation_method: 資金配分方式: "equal" | "score" | "risk_based"（デフォルト）。
         risk_pct:          1トレード許容リスク率（risk_based 時、デフォルト 0.5%）。
         stop_loss_pct:     損切り率（株数計算用、risk_based 時、デフォルト 8%）。
+        lot_size:          単元株数（デフォルト 100）。日本株の標準単元。
 
     Returns:
         BacktestResult（history, trades, metrics）。
@@ -275,6 +277,8 @@ def run_backtest(
         raise ValueError(f"slippage_rate / commission_rate は 0 以上を指定してください")
     if allocation_method == "risk_based" and not (0 < risk_pct < 1):
         raise ValueError(f"risk_pct は (0, 1) の範囲で指定してください: {risk_pct}")
+    if lot_size < 1:
+        raise ValueError(f"lot_size は 1 以上を指定してください: {lot_size}")
 
     from kabusys.data.calendar_management import get_trading_days
     from kabusys.strategy.signal_generator import generate_signals
@@ -298,7 +302,7 @@ def run_backtest(
         for trading_day in trading_days:
             # Step 1: 前日生成の発注リストを当日 open で約定
             open_prices = _fetch_open_prices(bt_conn, trading_day)
-            simulator.execute_orders(next_day_orders, open_prices, slippage_rate, commission_rate, trading_day, lot_size=100)
+            simulator.execute_orders(next_day_orders, open_prices, slippage_rate, commission_rate, trading_day, lot_size=lot_size)
 
             # Step 2: positions テーブルに書き戻し（generate_signals の SELL 判定に必要）
             _write_positions(bt_conn, trading_day, simulator.positions, simulator.cost_basis)
@@ -349,13 +353,15 @@ def run_backtest(
                 max_position_pct=max_position_pct,
                 max_utilization=max_utilization,
                 cost_buffer=slippage_rate + commission_rate,
+                lot_size=lot_size,
             )
 
             # 翌日の約定に使う発注リストをメモリ上で更新（次ループの Step 1 で消費）
+            # BUY と SELL が同一銘柄になる場合は BUY を除外（SELL を優先）
             next_day_orders = [
                 {"code": code, "side": "buy", "shares": shares}
                 for code, shares in sized.items()
-                if shares > 0
+                if shares > 0 and code not in sell_codes
             ] + [{"code": s["code"], "side": "sell"} for s in sell_signals]
     finally:
         bt_conn.close()

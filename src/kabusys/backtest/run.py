@@ -47,6 +47,8 @@ def main() -> None:
                         help="Risk per trade as fraction of portfolio (risk_based only) [default: 0.005]")
     parser.add_argument("--stop-loss-pct", type=float, default=0.08,
                         help="Stop-loss rate for position sizing (risk_based only) [default: 0.08]")
+    parser.add_argument("--lot-size", type=int, default=100,
+                        help="Lot size (shares per lot) for Japanese stocks [default: 100]")
     parser.add_argument("--db", required=True, help="DuckDB file path")
     args = parser.parse_args()
 
@@ -79,6 +81,7 @@ def main() -> None:
             max_positions=args.max_positions,
             risk_pct=args.risk_pct,
             stop_loss_pct=args.stop_loss_pct,
+            lot_size=args.lot_size,
         )
     finally:
         conn.close()

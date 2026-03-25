@@ -458,7 +458,7 @@ def test_apply_sector_cap_removes_overweight_sector():
         sector_map=sector_map,
         portfolio_value=3_000_000,
         current_positions=current_positions,
-        open_prices=open_prices,
+        price_map=open_prices,
         max_sector_pct=0.30,
     )
 
@@ -483,7 +483,7 @@ def test_apply_sector_cap_allows_under_limit():
         sector_map=sector_map,
         portfolio_value=5_000_000,  # A = 100_000 / 5M = 2% < 30%
         current_positions=current_positions,
-        open_prices=open_prices,
+        price_map=open_prices,
         max_sector_pct=0.30,
     )
 
@@ -504,7 +504,7 @@ def test_apply_sector_cap_unknown_sector_passes():
         sector_map=sector_map,
         portfolio_value=1_000_000,
         current_positions={},
-        open_prices={"X": 1000.0},
+        price_map={"X": 1000.0},
         max_sector_pct=0.30,
     )
     assert len(result) == 1
@@ -525,7 +525,7 @@ def test_apply_sector_cap_preserves_fields():
         sector_map=sector_map,
         portfolio_value=10_000_000,
         current_positions={},
-        open_prices={"A": 1000.0, "B": 1000.0},
+        price_map={"A": 1000.0, "B": 1000.0},
         max_sector_pct=0.30,
     )
     assert len(result) == 2
@@ -648,7 +648,7 @@ def test_apply_sector_cap_sell_codes_excluded_from_exposure():
         sector_map=sector_map,
         portfolio_value=3_000_000,
         current_positions=current_positions,
-        open_prices=open_prices,
+        price_map=open_prices,
         max_sector_pct=0.30,
         sell_codes={"A"},
     )
@@ -671,7 +671,7 @@ def test_apply_sector_cap_without_sell_codes_blocks_sector():
         sector_map=sector_map,
         portfolio_value=3_000_000,
         current_positions=current_positions,
-        open_prices=open_prices,
+        price_map=open_prices,
         max_sector_pct=0.30,
     )
 

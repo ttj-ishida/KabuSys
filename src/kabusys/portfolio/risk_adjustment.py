@@ -15,7 +15,7 @@ def apply_sector_cap(
     sector_map: dict[str, str],
     portfolio_value: float,
     current_positions: dict[str, int],
-    open_prices: dict[str, float],
+    price_map: dict[str, float],
     max_sector_pct: float = 0.30,
     sell_codes: set[str] | None = None,
 ) -> list[dict]:
@@ -26,7 +26,7 @@ def apply_sector_cap(
         sector_map:        {code: sector}。コードが存在しないものは "unknown" 扱い。
         portfolio_value:   総資産（円）
         current_positions: 既存保有 {code: shares}
-        open_prices:       {code: price}
+        price_map:         {code: price}。open・close どちらの価格マップも受け取れる。
         max_sector_pct:    1セクターの最大保有比率
         sell_codes:        当日売却予定のコード集合。エクスポージャー計算から除外する。
 
@@ -47,7 +47,7 @@ def apply_sector_cap(
         sector = sector_map.get(code, "unknown")
         if sector == "unknown":
             continue
-        price = open_prices.get(code, 0.0)
+        price = price_map.get(code, 0.0)
         sector_exposure[sector] = sector_exposure.get(sector, 0.0) + shares * price
 
     # 超過セクターの集合を作成
