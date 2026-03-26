@@ -340,13 +340,16 @@ def run_backtest(
             else:
                 weights = {}  # risk_based は weights 不使用
 
+            # サイジングは当日終値ベース（当日クローズ時点の最新価格で翌日発注量を見積もる）。
+            # 実際の約定は翌日始値で行われるが、当日終値がより新鮮な近似値。
+            # apply_sector_cap も close_prices を使っており、価格基準を統一している。
             sized = calc_position_sizes(
                 weights=weights,
                 candidates=candidates,
                 portfolio_value=current_pv,
                 available_cash=available_cash,
                 current_positions=simulator.positions,
-                open_prices=open_prices,
+                open_prices=close_prices,
                 allocation_method=allocation_method,
                 risk_pct=risk_pct,
                 stop_loss_pct=stop_loss_pct,

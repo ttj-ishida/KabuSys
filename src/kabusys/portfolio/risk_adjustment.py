@@ -48,6 +48,8 @@ def apply_sector_cap(
         if sector == "unknown":
             continue
         price = price_map.get(code, 0.0)
+        # TODO: price が欠損（0.0）の場合、エクスポージャーが過少見積りされブロックが外れる。
+        #       将来的には前日終値や取得原価などのフォールバック価格を使う拡張を検討。
         sector_exposure[sector] = sector_exposure.get(sector, 0.0) + shares * price
 
     # 超過セクターの集合を作成
