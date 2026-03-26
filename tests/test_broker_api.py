@@ -56,11 +56,19 @@ def test_order_status_fields():
 
 
 def test_position_fields():
+    """Position の qty と avg_price が正しく設定されること。"""
     pos = Position(code="1234", qty=100, avg_price=1500.0)
     assert pos.qty == 100
     assert pos.avg_price == 1500.0
 
 
 def test_wallet_info_fields():
+    """WalletInfo の available_cash が正しく設定されること。"""
     wallet = WalletInfo(available_cash=5_000_000.0)
     assert wallet.available_cash == 5_000_000.0
+
+
+def test_order_response_fields():
+    """OrderResponse の order_id が設定されること。"""
+    resp = OrderResponse(order_id="ORD12345")
+    assert resp.order_id == "ORD12345"
