@@ -114,11 +114,11 @@ class BrokerAPIProtocol(Protocol):
 
 def create_broker_api(mock: bool = False, **kwargs) -> BrokerAPIProtocol:
     """環境に応じたクライアントを返す。
-    mock=True → MockBrokerClient
-    mock=False → KabuStationClient(**kwargs)
+    mock=True  → MockBrokerClient(**kwargs)  # fill_mode, available_cash 等を渡せる
+    mock=False → KabuStationClient(**kwargs)  # api_password, base_url 等を渡せる
     """
     if mock:
         from kabusys.execution.mock_client import MockBrokerClient
-        return MockBrokerClient()
+        return MockBrokerClient(**kwargs)
     from kabusys.execution.kabu_client import KabuStationClient
     return KabuStationClient(**kwargs)
