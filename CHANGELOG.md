@@ -1,101 +1,91 @@
-CHANGELOG
-=========
+# CHANGELOG
 
-すべての重要な変更点をこのファイルに記録します。  
-フォーマットは "Keep a Changelog" の慣例に準拠します。
+すべての変更は「Keep a Changelog」準拠で記載しています。主にコードベースから推測して作成した初期リリース向けの変更履歴です。
 
-[0.1.0] - 2026-03-26
--------------------
+全般的な方針：
+- ルックアヘッドバイアス回避のため、datetime.today() / date.today() を直接参照しない実装方針を採用しています（分析 / AI / ETL すべてのモジュールで一貫）。
+- DuckDB を主要な分析データベースとして使用。外部 API（J-Quants, OpenAI）との連携は明示的に注入可能・フェイルセーフ化しています。
+- OpenAI 呼び出しはテスト差し替えが容易なように内部関数を設け、レスポンスの堅牢なバリデーションとリトライ戦略を備えています。
 
-初回リリース。日本株自動売買フレームワーク "KabuSys" の基礎機能群を実装しました。
-主な追加点／仕様は以下の通りです。
+## [Unreleased]
+- （なし）
 
-### Added
-- パッケージ骨格
-  - パッケージ名: kabusys、バージョン: 0.1.0。
-  - __all__ に data, strategy, execution, monitoring を公開（execution パッケージは定義済み、実装は順次拡張予定）。
+## [0.1.0] - 2026-03-26
+Added
+- パッケージ初期リリース。
+  - バージョン: 0.1.0
+  - パッケージ説明: KabuSys - 日本株自動売買システム
 
-- 設定・環境変数管理 (kabusys.config)
-  - プロジェクトルート自動検出：.git または pyproject.toml を基準に探索。
-  - .env / .env.local 自動読み込み（OS 環境変数を保護する protected ロジックを採用）。
-  - export KEY=val 形式やクォート・エスケープ、インラインコメントなどに対応した .env パーサを実装。
-  - KABUSYS_DISABLE_AUTO_ENV_LOAD で自動ロードを無効化可能。
-  - 必須変数未設定時に ValueError を投げる _require ヘルパー。
-  - 設定クラス Settings を提供（J-Quants / kabu API / Slack / DB パス / env/log_level 等のプロパティを含む）。
-  - KABUSYS_ENV と LOG_LEVEL の入力検証（許容値セットに基づく検証と例外）。
+- 設定・環境管理（kabusys.config）
+  - .env ファイルおよび環境変数の自動読み込み実装（プロジェクトルート検出：.git / pyproject.toml を起点）。
+  - .env パーサ実装（export 形式・シングル/ダブルクォート・エスケープ・インラインコメント処理対応）。
+  - 自動ロードの無効化フラグ（KABUSYS_DISABLE_AUTO_ENV_LOAD）。
+  - 環境変数の必須チェック関数 _require と Settings クラスを提供。J-Quants / kabuAPI / Slack / DB パス等のプロパティを公開。
+  - KABUSYS_ENV / LOG_LEVEL の許容値チェックと便利なブールプロパティ（is_live / is_paper / is_dev）。
 
-- ポートフォリオ構築 (kabusys.portfolio)
-  - 銘柄選定と重み計算（pure function）
-    - select_candidates: スコア降順 + signal_rank によるタイブレークで候補抽出。
-    - calc_equal_weights: 等金額配分（1/N）。
-    - calc_score_weights: スコア比率による配分。全銘柄スコアが 0 の場合は等分配にフォールバック（WARNING ログ）。
-  - リスク制御（pure function）
-    - apply_sector_cap: セクター集中制限。既存保有時価を用いてセクター比率が閾値を超える場合に同セクターの新規候補を除外（"unknown" セクターは除外対象外）。
-    - calc_regime_multiplier: 市場レジームに応じた投下資金乗数（bull/neutral/bear に対応、未知レジームは 1.0）。
-  - ポジションサイズ計算（pure function）
-    - calc_position_sizes: allocation_method に応じた発注株数計算（"risk_based", "equal", "score" をサポート）。
-    - 単元（lot_size）丸め、1銘柄上限（max_position_pct）、投下資金の aggregate cap、cost_buffer を用いた保守的コスト見積り、スケーリングと端数配分ロジックを実装。
-    - 価格欠損時のスキップやログ出力。
+- データ関連（kabusys.data）
+  - カレンダー管理（calendar_management）
+    - market_calendar を利用した営業日判定（is_trading_day, is_sq_day）。
+    - 翌営業日・前営業日の探索（next_trading_day / prev_trading_day）、期間内営業日リスト取得（get_trading_days）。
+    - JPX カレンダーを J-Quants から差分取得して保存する夜間バッチ（calendar_update_job）。バックフィルや健全性チェックを搭載。
+    - DB が未取得の場合の曜日ベースフォールバック（週末は非営業日扱い）。
+  - ETL パイプライン（pipeline, etl）
+    - ETL 結果格納用データクラス ETLResult の定義（品質チェック結果・エラー集約・辞書化ユーティリティ）。
+    - 差分更新・最終取得日管理・バックフィルロジック・品質チェック統合のための下地実装。
+    - ETLResult をエクスポートする薄いインターフェース（etl.py）。
+  - jquants_client との統合ポイント（fetch/save を呼ぶ想定の実装場所を確保）。
 
-- 戦略（strategy）
-  - 特徴量エンジニアリング (kabusys.strategy.feature_engineering)
-    - research モジュールの生ファクターを取得し、ユニバースフィルタ（最低株価・最低売買代金）適用、Z スコア正規化、±3 でクリップ、features テーブルへ日付単位の置換（冪等）で保存。
-    - DuckDB を使ったデータ取得・トランザクション処理。
-  - シグナル生成 (kabusys.strategy.signal_generator)
-    - features と ai_scores を統合して各コンポーネントスコア（momentum/value/volatility/liquidity/news）を計算。
-    - コンポーネント欠損は中立値（0.5）で補完し不当に降格されないよう設計。
-    - final_score に基づく BUY シグナル生成（閾値デフォルト 0.60）。
-    - AI ベースのレジーム集計により Bear レジーム時は BUY を抑制。
-    - 保有銘柄に対するエグジット判定（ストップロス、スコア低下）を実装し SELL シグナルを生成。
-    - signals テーブルへの日付単位置換（冪等）を実装。
-    - weights 入力の検査・補完・正規化ロジックを実装（不正値はログでスキップ）。
+- AI / NLP（kabusys.ai）
+  - ニュース NLP（news_nlp）
+    - OpenAI（gpt-4o-mini）を用いたニュースごとのセンチメントスコアリング。
+    - タイムウィンドウ計算（前日15:00 JST ～ 当日08:30 JST に対応する UTC 範囲）。
+    - 銘柄ごとに最新記事を集約し、1銘柄1スコアで評価。入力サイズ対策（最大記事数・文字数トリム）。
+    - バッチ処理（最大20銘柄/リクエスト）・JSON mode レスポンス検証・結果のクリップ ±1.0。
+    - レート制限・ネットワーク断・5xx に対する指数バックオフリトライ、APIエラー時は安全にスキップ。
+    - DuckDB への冪等的な書き込み（該当 date/code の DELETE → INSERT）を実装。部分失敗時に既存データを保護する設計。
+    - テスト容易性のため _call_openai_api の差し替えを想定。
 
-- リサーチ機能（kabusys.research）
-  - ファクター計算 (kabusys.research.factor_research)
-    - calc_momentum: 1M/3M/6M リターン、MA200 乖離を計算（データ不足時は None）。
-    - calc_volatility: ATR20、相対 ATR（atr_pct）、20日平均売買代金、出来高比率を計算（部分窓対応）。
-    - calc_value: raw_financials と当日価格を組み合わせて PER/ROE を算出（EPS が 0/欠損時は None）。
-  - 探索・評価ユーティリティ (kabusys.research.feature_exploration)
-    - calc_forward_returns: 複数ホライズンの将来リターンを一括取得（SQL で高速取得）。
-    - calc_ic: ランク相関（Spearman ρ）計算。サンプル数が不足する場合は None。
-    - factor_summary: 基本統計量（count/mean/std/min/max/median）。
-    - rank: 同順位は平均ランクとする安定なランク関数。
-  - zscore_normalize を re-export（kabusys.data.stats 依存）。
+  - 市場レジーム判定（regime_detector）
+    - ETF 1321（日経225連動型）の 200 日移動平均乖離（重み70%）とマクロニュース LLM センチメント（重み30%）を合成して日次レジーム（bull/neutral/bear）を判定。
+    - MA 計算は target_date 未満のデータのみを使用し、データ不足時は中立（ma_ratio=1.0）で続行。
+    - マクロキーワードで raw_news をフィルタしてタイトルを抽出し LLM 評価（最大20件）。
+    - OpenAI API 呼び出しに対する堅牢なリトライと、失敗時は macro_sentiment=0.0 でフェイルセーフ。
+    - 結果を market_regime テーブルへ冪等書き込み（BEGIN/DELETE/INSERT/COMMIT）。
 
-- バックテスト (kabusys.backtest)
-  - メトリクス計算 (kabusys.backtest.metrics)
-    - CAGR、Sharpe、最大ドローダウン、勝率、ペイオフ比、総トレード数を計算するユーティリティを実装。
-  - ポートフォリオシミュレータ (kabusys.backtest.simulator)
-    - メモリ内でのポートフォリオ状態管理、SELL を先に処理してから BUY を処理する実行順、スリッページ（BUY:+、SELL:-）・手数料率を取り入れた約定処理、TradeRecord/DailySnapshot のデータ構造を提供。
-    - SELL は全量クローズ（現状、部分利確やトレーリングは非対応）。
+- リサーチ / ファクター（kabusys.research）
+  - ファクター計算（factor_research）
+    - モメンタム（1M/3M/6M リターン、ma200 乖離）、ボラティリティ（20日 ATR）、流動性（20日平均売買代金・出来高比）、バリュー（PER, ROE）を計算する関数を提供（calc_momentum, calc_volatility, calc_value）。
+    - DuckDB 上で SQL ウィンドウ関数を活用した効率的な実装。データ不足時に None を返す扱い。
+  - 特徴量探索（feature_exploration）
+    - 将来リターン計算（calc_forward_returns、任意ホライズン対応、引数検証）。
+    - IC（Information Coefficient）計算（calc_ic：ランク相関 Spearman ρ）。
+    - ランク変換ユーティリティ（rank：同順位は平均ランク）。
+    - ファクター統計サマリー（factor_summary：count/mean/std/min/max/median）。
 
-### Changed
-- （初回リリースのため該当なし）
+Changed
+- 初期設計での堅牢性強化（各所共通）
+  - DuckDB の executemany に対する互換性問題に配慮（空リストバインド回避）。
+  - OpenAI の JSON mode でも余計な前後テキストが混在するケースを想定して JSON 抽出ロジックを追加。
+  - API エラー分類（429/ネットワーク断/タイムアウト/5xx をリトライ、その他は安全にスキップ）を明確化。
+  - レスポンスパース失敗・不正な値はログ出力のうえフェイルセーフ（例外を投げず既定値にフォールバック）とするポリシーに統一。
 
-### Fixed
-- （初回リリースのため該当なし）
+Fixed
+- 仕様上の落とし穴に対する対応
+  - .env パーサでのクォート内エスケープ処理やインラインコメント解釈の不整合を解消。
+  - market_calendar が未取得または部分的にしか登録されていない場合でも next/prev/get_trading_days が一貫した結果を返すよう修正（DB 値優先・未登録は曜日フォールバック）。
+  - AI モジュールでの部分的な API 失敗が他銘柄の結果を消してしまうことを防ぐため、DB 書き込み時にスコープを限定（対象コードのみ削除して再挿入）。
 
-### Notes / Limitations / TODO
-- position_sizing:
-  - lot_size は現時点で全銘柄共通での扱い。将来的に銘柄別 lot_map に拡張予定（TODO）。
-  - price が欠損（0.0）の場合にエクスポージャーが過少評価されてブロックが外れる可能性がある旨を注記（将来的に前日終値や取得原価をフォールバックする検討）。
-- signal_generator:
-  - トレーリングストップや保有日数に基づく決済は未実装（positions テーブルに peak_price / entry_date が必要）。
-  - Bear レジーム判定は ai_scores の regime_score サンプル数依存（閾値未満では Bear とみなさない）。
-- feature_engineering / research:
-  - 処理は DuckDB 上で完結し、ルックアヘッドバイアスを避ける設計。ただし入力テーブル（prices_daily / raw_financials / ai_scores / features / signals 等）の整合性が前提。
-- execution / monitoring:
-  - execution パッケージは初期骨格のみ。実際の発注連携やモニタリング周りは今後実装予定。
-- API の互換性:
-  - すべての公開関数はドキュメント文字列で引数・戻り値の挙動を明記。将来的な変更はBREAKING CHANGE セクションで明示予定。
+Security
+- 環境変数の上書き制御を実装（.env ロード時、既存 OS 環境変数は保護。override フラグと protected set を利用）。
+- 必須トークン（OpenAI, J-Quants refresh token, Slack token など）は明示的にチェックして未設定時に早期にエラーを返す。
 
-Acknowledgements
-- 本リリースは設計ドキュメント（PortfolioConstruction.md, StrategyModel.md, BacktestFramework.md 等）に基づき実装されています。
+Notes / Known limitations
+- 外部依存：
+  - J-Quants クライアント（jquants_client）および実際の API キーは別途用意する必要があります。
+  - OpenAI API（gpt-4o-mini）呼び出しは実環境の API キーが必要。テスト時はモック可能。
+- 一部ファイルは設計ドキュメントに基づいた実装のため、環境依存の挙動（DB スキーマ、外部 API のレスポンス形式）に依存します。
+- calendar_update_job / ETL 周りは実行に際して J-Quants からのデータ取得ロジック（fetch/save）の実装が前提です。
 
-今後の予定
-- execution 層の実装（kabu ステーション等の実取引 API と連携）
-- モニタリング・アラート機能の追加（Slack 通知等）
-- 銘柄ごとの lot_size マスタ導入、フォールバック価格ロジック、追加のエグジット戦略（トレーリング等）
+--- 
 
---------------------------------
-（注）この CHANGELOG はコードベースからの推測に基づいて作成しています。実際の変更履歴・コミットログと異なる場合があります。
+この CHANGELOG はコード内の docstring、関数名、設計方針コメントから推測して作成しています。追加のリリース履歴や過去の変更を反映する場合は、該当コミットやリリースノートの情報を提供してください。
