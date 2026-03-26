@@ -1,105 +1,94 @@
 # Changelog
 
-すべての重要な変更はこのファイルに記録します。  
-フォーマットは「Keep a Changelog」に準拠します。  
-
-なお、この CHANGELOG はコードベースから推測して自動生成しています（実装内容・ドキュメント文字列に基づく要約）。APIや挙動の正確な仕様はソースコードを参照してください。
+すべての変更は [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) の形式に従います。  
+このリポジトリの現在のパッケージバージョン: 0.1.0
 
 ## [Unreleased]
+- （現在の差分はありません）
 
-（今後の変更・修正をここに記載）
-
----
-
-## [0.1.0] - 2026-03-26
-
-初回公開リリース。日本株自動売買システム「KabuSys」のコア機能群を実装・公開。
+## [0.1.0] - 初回リリース
+リリース日: 未設定
 
 ### Added
-- パッケージ初期化
-  - kabusys のパッケージメタデータとして __version__ = "0.1.0" を定義。
-  - 公開モジュール一覧として __all__ に data, strategy, execution, monitoring を設定。
+- パッケージ基盤
+  - kabusys パッケージの初期公開（__version__ = 0.1.0）。
+  - kabase のサブパッケージをエクスポート: data, strategy, execution, monitoring, portfolio, research, backtest 等の主要モジュール群を公開。
 
-- 環境変数・設定管理（kabusys.config）
-  - .env/.env.local の自動読み込み機能を実装（プロジェクトルート判定は .git または pyproject.toml による）。
-  - KABUSYS_DISABLE_AUTO_ENV_LOAD により自動ロードを無効化可能。
-  - .env パーサを実装（export プレフィックス対応、クォート文字列のエスケープ処理、インラインコメント処理など）。
-  - 環境変数の保護（既存 OS 環境変数を protected として扱う上書き制御）。
-  - Settings クラスを実装し、J-Quants / kabu ステーション / Slack / DB パス / システム設定等の取得 API を提供。
-  - 必須変数未設定時は ValueError を送出する _require 関数を提供。
-  - KABUSYS_ENV（development/paper_trading/live）と LOG_LEVEL のバリデーションを実装。
+- 設定・環境変数管理 (kabusys.config)
+  - .env / .env.local の自動読み込み（プロジェクトルートを .git または pyproject.toml から特定）。
+  - .env パーサ実装（コメント、export プレフィックス、シングル/ダブルクォート、バックスラッシュエスケープ対応）。
+  - 読み込み優先順位: OS 環境変数 > .env.local > .env。
+  - 自動ロード無効化フラグ: KABUSYS_DISABLE_AUTO_ENV_LOAD=1。
+  - Settings クラス実装（プロパティ経由で各種必須/任意設定を取得）。
+    - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID を必須として取得する _require() 実装。
+    - KABU_API_BASE_URL のデフォルト値、DUCKDB_PATH / SQLITE_PATH の既定パス、環境 (development/paper_trading/live) と LOG_LEVEL の検証ロジック。
+    - is_live / is_paper / is_dev ヘルパー。
 
-- ポートフォリオ構築ロジック（kabusys.portfolio）
-  - portfolio_builder:
-    - select_candidates: スコア降順、同点は signal_rank でタイブレークして上位 N を選定。
-    - calc_equal_weights: 等金額配分を計算。
-    - calc_score_weights: スコア加重配分を計算（全スコアが 0 の場合は等分配へフォールバックし WARNING を出力）。
-  - risk_adjustment:
-    - apply_sector_cap: セクター別集中リスク制限。既存保有のセクターエクスポージャーを計算し閾値超過セクターの新規候補を除外（"unknown" セクターは除外対象外）。
-    - calc_regime_multiplier: 市場レジーム（bull/neutral/bear）に応じた投下資金乗数を返却（未知レジームは 1.0 にフォールバック）。
-  - position_sizing:
-    - calc_position_sizes: allocation_method（risk_based / equal / score）に応じた株数計算、単元株（lot_size）丸め、1銘柄上限・aggregate cap、cost_buffer を用いた保守的見積り、スケールダウン時の残差処理（fractional の優先配分）を実装。
+- ポートフォリオ構築 (kabusys.portfolio)
+  - 候補選定・重み付け (portfolio_builder)
+    - select_candidates: スコア降順で上位 N を選択（同点は signal_rank によるタイブレーク）。
+    - calc_equal_weights: 等金額配分。
+    - calc_score_weights: スコア加重配分（全スコアが 0 の場合は等金額にフォールバック、警告出力）。
+  - リスク調整 (risk_adjustment)
+    - apply_sector_cap: 既存保有のセクターエクスポージャーを計算し、指定比率を超えるセクターの新規候補を除外（"unknown" セクターは除外対象外）。
+    - calc_regime_multiplier: 市場レジーム（bull/neutral/bear）に応じた投下資金乗数を提供（未知のレジームは警告の上 1.0 にフォールバック）。
+  - 位置サイズ決定 (position_sizing)
+    - calc_position_sizes: allocation_method による発注株数計算を実装（"risk_based" / "equal" / "score" に対応）。
+    - リスクベースでは risk_pct, stop_loss_pct 等を用いて目標株数を算出。
+    - 単元（lot_size）で丸め、per-stock 上限（max_position_pct）と aggregate 上限（available_cash）を考慮したスケーリング。
+    - cost_buffer を使った保守的コスト見積り、端数処理のための再配分ロジックを実装。
 
-- 特徴量エンジニアリング（kabusys.strategy.feature_engineering）
-  - build_features: research モジュールの生ファクター（momentum/volatility/value）を統合してユニバースフィルタ（最低株価・流動性）適用、Zスコア正規化、±3 クリップ、features テーブルへの日付単位の置換（冪等）を実装。
-  - 正規化対象カラムやフィルタ閾値（_MIN_PRICE=300 円, _MIN_TURNOVER=5e8）を定義。
+- 戦略（feature engineering / signal generation） (kabusys.strategy)
+  - feature_engineering.build_features:
+    - research モジュールからの生ファクターを統合し、ユニバースフィルタ（最低株価・平均売買代金）、Z スコア正規化（±3 クリップ）を行い、features テーブルへ日付単位で冪等的に書き込む。
+    - DuckDB 接続を受け取り prices_daily / raw_financials を参照する実装。
+  - signal_generator.generate_signals:
+    - features と ai_scores を統合してコンポーネントスコア（momentum/value/volatility/liquidity/news）を計算、重み付き合算して final_score を算出。
+    - デフォルト重みと閾値（default threshold=0.60）を実装。ユーザー指定 weights は検証・正規化される。
+    - Bear レジーム検知時は BUY シグナルを抑制（ai_scores の regime_score を集計して判定）。
+    - SELL シグナル生成ロジック（ストップロス / final_score の閾値未満）を実装。保有位置の価格欠損時には判定をスキップし警告を出力。
+    - signals テーブルへの日付単位の置換（トランザクションで原子性確保）。
+    - BUY と SELL の優先ルール（SELL 優先で BUY から除外）とランク再付与。
 
-- シグナル生成（kabusys.strategy.signal_generator）
-  - generate_signals: features と ai_scores を統合して最終スコア（final_score）を算出し、BUY/SELL シグナルを生成して signals テーブルへ日付単位で置換（冪等）。
-  - ファクター重みのマージ／正規化、無効なユーザー重みの無視と警告出力。
-  - コンポーネントスコア計算（momentum/value/volatility/liquidity/news）と sigmoid / 平均での合成。
-  - Bear レジーム判定（ai_scores の regime_score の平均が負かつサンプル数閾値を満たす場合）による BUY 抑制。
-  - SELL 判定ロジック（ストップロス: -8%／スコア低下）を実装。features に存在しない保有銘柄は score=0 と見なして SELL 判定。
-  - 未実装のエグジット条件（トレーリングストップ、時間決済）は注記あり。
-
-- リサーチ機能（kabusys.research）
+- リサーチ（kabusys.research）
   - factor_research:
-    - calc_momentum / calc_volatility / calc_value を実装し、prices_daily / raw_financials から各種ファクター（mom_1m/3m/6m, ma200_dev, atr_20, atr_pct, avg_turnover, volume_ratio, per, roe）を算出。
-    - データ不足時の None ハンドリング。
+    - calc_momentum / calc_volatility / calc_value を実装（各ファクターの定義は StrategyModel.md に準拠）。
+    - DuckDB を用いて prices_daily / raw_financials から必要指標を算出（MA200, ATR20, avg_turnover, per, roe 等）。
   - feature_exploration:
-    - calc_forward_returns: 将来リターン（指定ホライズン）を一括取得するクエリを実装。
-    - calc_ic: スピアマンランク相関（IC）を実装。サンプル不足時は None を返す。
-    - rank: 同順位は平均ランクとするランク化実装（丸めで ties 対応）。
-    - factor_summary: 基本統計量（count/mean/std/min/max/median）を計算。
-  - 研究ユーティリティ zscore_normalize をデータモジュールからエクスポート（kabusys.data.stats を経由）。
+    - calc_forward_returns: 将来リターン（複数ホライズン）を一括クエリで計算。
+    - calc_ic: スピアマンのランク相関（Information Coefficient）を計算。
+    - factor_summary: 各ファクターの基本統計量（count/mean/std/min/max/median）。
+    - rank: 同順位は平均ランクで扱うランク付けユーティリティ。
+  - zscore_normalize は data.stats から提供されるユーティリティとして利用。
 
-- バックテストフレームワーク（kabusys.backtest）
-  - simulator:
-    - PortfolioSimulator クラスを実装（メモリ内状態管理）。DailySnapshot / TradeRecord のデータクラスを定義。
-    - execute_orders: SELL を先行処理してから BUY を処理するワークフロー、スリッページ・手数料率を適用した約定処理、SELL は保有全量クローズ（部分利確未対応）などを実装。
-  - metrics:
-    - calc_metrics と内部計算（CAGR, Sharpe, Max Drawdown, Win Rate, Payoff Ratio, total_trades）を実装。
-
-- パッケージのエクスポート整備
-  - kabusys.portfolio/__init__.py, kabusys.strategy/__init__.py, kabusys.research/__init__.py により主要 API を公開。
+- バックテスト（kabusys.backtest）
+  - metrics.calc_metrics: DailySnapshot / TradeRecord から評価指標（CAGR, Sharpe, Max Drawdown, Win Rate, Payoff Ratio, Total Trades）を計算する機能。
+  - simulator.PortfolioSimulator:
+    - メモリ内のポートフォリオ状態管理、BUY/SELL の擬似約定処理を実装。SELL を先に処理し、その後 BUY（資金確保目的）。
+    - スリッページ（buy:+、sell:-）と手数料率を考慮した約定価格・手数料の計算、TradeRecord の記録機能。
+    - DailySnapshot / TradeRecord のデータクラスを定義。
 
 ### Changed
-- 初期リリースにつき「変更点」は該当なし。
+- （初回リリースのため過去変更はなし）
 
 ### Fixed
-- 初期リリースにつき「修正点」は該当なし。
+- （初回リリースのため過去修正はなし）
 
-### Known limitations / Notes (ドキュメントに明記)
-- .env の自動読み込みはプロジェクトルートが特定できない場合はスキップされる（配布環境での挙動を考慮）。
-- risk_adjustment.apply_sector_cap:
-  - "unknown" セクターのコードにはセクター上限が適用されない設計（明示的に除外）。
-  - price_map に価格が欠損（0.0）だとエクスポージャーが過少見積りされる可能性があり、将来的にフォールバック価格の導入を検討。
-- strategy.signal_generator:
-  - トレーリングストップや時間決済などの一部エグジット条件は未実装（positions テーブルに peak_price / entry_date が必要）。
-  - AI ニューススコアが未登録の場合は中立値 0.5 で補完する設計。
-- position_sizing:
-  - lot_size は全銘柄共通の単位（現在は共通の lot_size 引数で対応）。将来的に銘柄別 lot_map の導入を想定する TODO コメントあり。
-- バックテストの約定ロジック:
-  - SELL は現状「全量クローズ」のみ。部分約定や分割売買は未対応。
-- 一部関数は debug/info/warning のログ出力を行うが、詳細なログポリシーは運用で調整が必要。
+### Deprecated
+- （該当なし）
+
+### Removed
+- （該当なし）
 
 ### Security
-- 初版リリースにおける既知のセキュリティ問題はなし。設定情報（トークン等）は Settings 経由で環境変数から取得するため、運用時は .env の取り扱いに注意すること。
+- （該当なし）
 
 ---
 
-今後のリリースでは以下を想定:
-- トレーリングストップや時間決済などの追加エグジットロジック実装
-- 銘柄別 lot_size / 手数料モデルの柔軟化
-- .env 取り扱い・パスワード管理（OS シークレットストア等）拡張
-- execution 層・monitoring 層の具体的な API 実装（現状はパッケージ構成のみ）
+注意・既知の制限・TODO
+- 一部機能は意図的に未実装／将来の拡張予定としてコメントあり（例：position_sizing の銘柄別 lot_size 拡張、signal_generator のトレーリングストップや時間決済条件）。
+- apply_sector_cap は price_map に欠損（0.0）があるとエクスポージャーが過少見積りされる可能性がある旨をコメントで明記。将来的に前日終値等のフォールバック実装を検討。
+- generate_signals の Bear 判定は ai_scores のサンプル数不足時は Bear とみなさない（誤判定防止）。
+- DuckDB と特定テーブル（prices_daily, raw_financials, features, ai_scores, positions, signals 等）を前提とした設計。実行には該当スキーマとデータが必要。
+
+この CHANGELOG はコードベースの現状から推測して作成しています。実際のリリース日や追加のリリースノートはプロジェクトのリリースワークフローに従って補完してください。
