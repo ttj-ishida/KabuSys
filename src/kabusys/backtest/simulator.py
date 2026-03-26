@@ -102,6 +102,13 @@ class PortfolioSimulator:
             logger.debug("execute_orders: BUY %s shares=%d。スキップ。", code, shares)
             return
 
+        if lot_size > 1 and shares % lot_size != 0:
+            logger.warning(
+                "execute_orders: BUY %s shares=%d は単元株数 %d の倍数ではありません。"
+                "呼び出し側の丸め漏れの可能性があります。",
+                code, shares, lot_size,
+            )
+
         open_price = open_prices.get(code)
         if open_price is None:
             logger.warning("execute_orders: BUY %s の始値が取得できません。スキップ。", code)

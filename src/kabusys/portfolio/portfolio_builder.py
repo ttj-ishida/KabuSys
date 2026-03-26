@@ -28,8 +28,7 @@ def select_candidates(
     # score 降順、同点時は signal_rank 昇順（小さい方が優先）でタイブレーク
     sorted_signals = sorted(
         buy_signals,
-        key=lambda s: (s.get("score", 0.0), -s.get("signal_rank", 0)),
-        reverse=True,
+        key=lambda s: (-s.get("score", 0.0), s.get("signal_rank", 0)),
     )
     return sorted_signals[:max_positions]
 

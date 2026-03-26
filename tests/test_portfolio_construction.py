@@ -678,6 +678,55 @@ def test_apply_sector_cap_without_sell_codes_blocks_sector():
     assert len(result) == 0
 
 
+def test_apply_sector_cap_exactly_at_limit_blocks():
+    """セクター比がちょうど max_sector_pct のとき除外される（>=）。
+
+    既存保有: 電気機器 A = 300株 × 1000円 = 300_000円 / 1_000_000円 = 30.0% = max_sector_pct
+    >= 判定により除外される。
+    """
+    from kabusys.portfolio.risk_adjustment import apply_sector_cap
+
+    candidates = [{"code": "B", "score": 0.9, "signal_rank": 1}]
+    sector_map = {"A": "電気機器", "B": "電気機器"}
+    current_positions = {"A": 300}
+
+    result = apply_sector_cap(
+        candidates=candidates,
+        sector_map=sector_map,
+        portfolio_value=1_000_000,
+        current_positions=current_positions,
+        price_map={"A": 1000.0, "B": 900.0},
+        max_sector_pct=0.30,
+    )
+
+    assert len(result) == 0, "ちょうど上限のとき除外されること（>=）"
+
+
+def test_apply_sector_cap_just_below_limit_passes():
+    """セクター比が max_sector_pct をわずかに下回るとき通過する。
+
+    既存保有: 電気機器 A = 299株 × 1000円 = 299_000円 / 1_000_000円 = 29.9% < 30.0%
+    通過すること。
+    """
+    from kabusys.portfolio.risk_adjustment import apply_sector_cap
+
+    candidates = [{"code": "B", "score": 0.9, "signal_rank": 1}]
+    sector_map = {"A": "電気機器", "B": "電気機器"}
+    current_positions = {"A": 299}
+
+    result = apply_sector_cap(
+        candidates=candidates,
+        sector_map=sector_map,
+        portfolio_value=1_000_000,
+        current_positions=current_positions,
+        price_map={"A": 1000.0, "B": 900.0},
+        max_sector_pct=0.30,
+    )
+
+    assert len(result) == 1
+    assert result[0]["code"] == "B"
+
+
 def test_calc_position_sizes_scale_down_greedy_no_zeroing():
     """スケールダウン後、残差貪欲配分により全銘柄ゼロ化が防止される。
 

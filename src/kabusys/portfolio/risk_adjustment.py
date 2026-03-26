@@ -53,7 +53,7 @@ def apply_sector_cap(
     # 超過セクターの集合を作成
     blocked_sectors: set[str] = set()
     for sector, exposure in sector_exposure.items():
-        if exposure / portfolio_value > max_sector_pct:
+        if exposure / portfolio_value >= max_sector_pct:
             blocked_sectors.add(sector)
             logger.debug(
                 "apply_sector_cap: セクター '%s' が上限超過 (%.1f%% > %.1f%%)",

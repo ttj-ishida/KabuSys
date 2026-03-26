@@ -90,6 +90,10 @@ def calc_position_sizes(
             if w <= 0.0:
                 continue
 
+            # per-position 上限: portfolio_value * weight * max_utilization
+            # aggregate 上限: available_cash（engine 側で min(cash*multiplier, pv*max_utilization) として渡される）
+            # weights が 1 に正規化されているため sum(alloc) = pv * max_utilization = available_cash（現金十分時）。
+            # レジーム乗数で cash が削られた場合のみ、後段の aggregate cap でスケールダウンされる。
             alloc = portfolio_value * w * max_utilization
             base_shares = math.floor(alloc / price)
             target_shares = min(base_shares, _max_per_stock(price))

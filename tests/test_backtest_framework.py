@@ -750,6 +750,46 @@ def test_select_candidates_tiebreak_by_signal_rank():
     assert codes[1] == "C"
 
 
+def test_execute_buy_non_lot_multiple_warns(caplog):
+    """_execute_buy: shares が lot_size の倍数でない場合に WARNING ログを出す。"""
+    import logging
+    from kabusys.backtest.simulator import PortfolioSimulator
+    from datetime import date
+
+    sim = PortfolioSimulator(initial_cash=1_000_000.0)
+    with caplog.at_level(logging.WARNING, logger="kabusys.backtest.simulator"):
+        sim._execute_buy(
+            code="1234",
+            shares=150,  # lot_size=100 の倍数でない
+            open_prices={"1234": 1000.0},
+            slippage_rate=0.001,
+            commission_rate=0.00055,
+            trading_day=date(2024, 1, 5),
+            lot_size=100,
+        )
+    assert any("単元株数" in r.message for r in caplog.records), "WARNING ログが出ること"
+
+
+def test_execute_buy_lot_multiple_no_warn(caplog):
+    """_execute_buy: shares が lot_size の倍数のとき WARNING ログは出ない。"""
+    import logging
+    from kabusys.backtest.simulator import PortfolioSimulator
+    from datetime import date
+
+    sim = PortfolioSimulator(initial_cash=1_000_000.0)
+    with caplog.at_level(logging.WARNING, logger="kabusys.backtest.simulator"):
+        sim._execute_buy(
+            code="1234",
+            shares=200,  # 100 の倍数
+            open_prices={"1234": 1000.0},
+            slippage_rate=0.001,
+            commission_rate=0.00055,
+            trading_day=date(2024, 1, 5),
+            lot_size=100,
+        )
+    assert not any("単元株数" in r.message for r in caplog.records), "WARNING ログが出ないこと"
+
+
 def test_run_backtest_invalid_risk_pct_raises(conn):
     """risk_pct が範囲外なら ValueError を発生させる（risk_based 時のみ）。"""
     from kabusys.backtest.engine import run_backtest
