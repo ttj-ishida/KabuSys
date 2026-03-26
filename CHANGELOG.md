@@ -1,96 +1,99 @@
-# Changelog
+CHANGELOG
+=========
 
-すべての変更は [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) の方針に従って記載しています。  
-バージョン番号はパッケージの __version__（src/kabusys/__init__.py）に合わせています。
+すべての利害関係者向けの変更履歴を Keep a Changelog の形式に準拠して日本語で記載します。
 
-## [Unreleased]
-（現時点で未リリースの変更はありません）
+注: 本リリースはパッケージ内部実装から推測して作成した初版のリリースノートです（ソースコード中の __version__ = "0.1.0" に基づく）。
 
-## [0.1.0] - 2026-03-26
-初回リリース。日本株向け自動売買フレームワークのコア機能を提供します。以下のモジュールと主な機能を実装しています。
+[0.1.0] - 2026-03-26
+--------------------
 
-### 追加（Added）
-- 基本パッケージ構成
-  - パッケージエントリポイントを追加（kabusys.__version__ = 0.1.0）。
-  - サブパッケージを公開: data, strategy, execution, monitoring（__all__ 定義）。
+Added（追加）
+- パッケージ基盤
+  - kabusys パッケージ初期実装を追加。パッケージメタ情報（src/kabusys/__init__.py）でバージョンを "0.1.0" に設定し、主要サブパッケージを __all__ で公開（data, strategy, execution, monitoring）。
 
-- 環境設定（src/kabusys/config.py）
-  - .env / .env.local の自動読み込み機能（プロジェクトルート検出: .git または pyproject.toml を基準）。
-  - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動読み込み無効化オプション。
-  - .env パーサーの実装（export プレフィックス対応、シングル/ダブルクォート内のエスケープ処理、インラインコメント処理）。
-  - OS 環境変数を保護する protected keys の概念（.env.local による上書きと排他制御）。
-  - Settings クラスを提供し、主要設定をプロパティ経由で取得:
-    - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, KABU_API_BASE_URL
-    - SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
-    - DUCKDB_PATH, SQLITE_PATH
-    - KABUSYS_ENV（development / paper_trading / live 検証）および LOG_LEVEL（DEBUG/INFO/... の検証）
-    - is_live / is_paper / is_dev 補助プロパティ
-  - 必須キー未設定時は ValueError を投げる _require 実装。
+- 環境設定
+  - 環境変数 / .env 管理モジュールを追加（src/kabusys/config.py）。
+    - プロジェクトルート検出ロジックを実装（.git または pyproject.toml を起点に探索）。
+    - .env / .env.local の自動読み込みを実装（読み込み順: OS 環境 > .env.local > .env）。自動ロードを無効化するための環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD をサポート。
+    - .env パーサを実装（export プレフィックス対応、シングル/ダブルクォート、バックスラッシュによるエスケープ、コメント処理の扱いなど）。
+    - protected パラメータで OS 環境変数を上書きから保護する仕組みを用意。
+    - Settings クラスを追加し、主要設定をプロパティとして取得可能に（J-Quants / kabuステーション / Slack / DB パス / 環境モード・ログレベル検証など）。
+    - 設定値検証: KABUSYS_ENV（development / paper_trading / live のみ許容）、LOG_LEVEL（DEBUG/INFO/WARNING/ERROR/CRITICAL のみ許容）。未設定の必須項目は ValueError を発生させる _require を提供。
 
-- ポートフォリオ構築（src/kabusys/portfolio/*）
-  - portfolio_builder:
-    - select_candidates: BUY シグナルをスコア降順、同点は signal_rank 昇順で選出。
-    - calc_equal_weights: 等金額配分の重み計算。
-    - calc_score_weights: スコアを正規化した重み（全スコアが 0 の場合は等配分にフォールバックして WARNING）。
-  - risk_adjustment:
-    - apply_sector_cap: セクターごとの既存エクスポージャーを計算し、最大セクター比率超過時に当該セクターの新規候補を除外（"unknown" セクターは除外対象外）。
-    - calc_regime_multiplier: 市場レジーム ("bull"/"neutral"/"bear") に応じた投下資金乗数（デフォルト 1.0/0.7/0.3、未知レジームは警告の上 1.0 にフォールバック）。
-  - position_sizing:
-    - calc_position_sizes: allocation_method に応じた株数算出（"risk_based"/"equal"/"score"）。
-    - リスクベース算出、単元（lot_size）丸め、per-position／aggregate の上限、cost_buffer を加味した保守的見積り、投資合計が available_cash を超える場合のスケールダウンと残差を考慮した再配分アルゴリズムを実装。
-    - 価格欠損や lot_size 非対応のケースに対するログ出力。
+- ポートフォリオ構築（portfolio）
+  - 銘柄選定・重み計算モジュール（portfolio_builder）を追加。
+    - select_candidates: score 降順、同点は signal_rank 昇順で上位 N を返す。
+    - calc_equal_weights / calc_score_weights: 等金額配分とスコア加重配分を実装。全スコアが 0 の場合は等分配にフォールバック（warning を出力）。
+  - リスク調整モジュール（risk_adjustment）を追加。
+    - apply_sector_cap: セクター毎の既存エクスポージャーを計算し max_sector_pct を超えるセクターの新規候補を除外（"unknown" セクターは制限対象外）。
+    - calc_regime_multiplier: market レジームに対する投下資金乗数（bull=1.0, neutral=0.7, bear=0.3）。未知レジームはログを出して 1.0 にフォールバック。
+  - ポジションサイジング（position_sizing）を追加。
+    - allocation_method (= "risk_based" / "equal" / "score") に基づく株数算出。
+    - risk_based: 許容リスク率と stop_loss_pct からベース株数を計算。
+    - equal/score: 重みと max_utilization を用いた配分、per-position 上限（max_position_pct）を適用。
+    - lot_size 単位で丸め（将来の銘柄別 lot_map 拡張を想定）。
+    - aggregate cap：総投下金額が available_cash を超えた場合のスケーリング実装。cost_buffer（スリッページ・手数料見積り）を考慮した保守的な見積り、端数再配分アルゴリズムを実装。
 
-- 戦略（src/kabusys/strategy/*）
-  - feature_engineering:
-    - calc_momentum / calc_volatility / calc_value（research モジュールを利用）からの生ファクターを統合。
-    - ユニバースフィルタ（最低株価・最低平均売買代金）適用。
-    - 指定カラムを Z スコア正規化（kabusys.data.stats.zscore_normalize を使用）し ±3 でクリップ。
-    - DuckDB を使った features テーブルへの日付単位の冪等 UPSERT（BEGIN/COMMIT/ROLLBACK 管理）。
-  - signal_generator:
-    - features と ai_scores を統合してコンポーネントスコア（momentum/value/volatility/liquidity/news）を算出。
-    - sigmoid による正規化、欠損コンポーネントは中立 0.5 で補完。
-    - final_score に対する閾値（デフォルト 0.60）で BUY シグナルを生成。Bear レジーム時は BUY を抑制。
-    - 保有ポジションに対するエグジット（stop-loss / score_drop）を判断して SELL シグナルを生成。
-    - weights の入力検証・デフォルトフォールバック・合計正規化を実装。
-    - signals テーブルへの日付単位の置換（冪等）を実装。
-    - 各種ログ（WARN/INFO/DEBUG）出力を充実させて不整合時の追跡を容易に。
+- 戦略（strategy）
+  - 特徴量エンジニアリング（feature_engineering）を追加。
+    - research モジュールの生ファクターを取得し、ユニバースフィルタ（最低株価300円、20日平均売買代金 5 億円）を適用。
+    - 指定カラムを Z スコア正規化し ±3 でクリップ。DuckDB に対して日付単位での置換（DELETE + INSERT）をトランザクションで実行し冪等性を確保。
+  - シグナル生成（signal_generator）を追加。
+    - features と ai_scores を統合して各種コンポーネントスコア（momentum/value/volatility/liquidity/news）を計算。
+    - sigmoid による 0..1 変換、欠損コンポーネントは中立 0.5 で補完。
+    - 最終スコア final_score を計算し閾値超過で BUY を生成。Bear レジーム（AI の regime_score 平均が負かつサンプル数閾値以上）では BUY を抑制。
+    - SELL（エグジット）判定を実装（stop_loss: -8% 以内、final_score の閾値割れ）。features に存在しない保有銘柄は score=0 と見なして SELL の対象とする（警告ログ）。
+    - signals テーブルへの日付単位置換をトランザクションで実装（冪等）。
 
-- 研究用モジュール（src/kabusys/research/*）
-  - factor_research:
-    - calc_momentum: 1M/3M/6M リターン、MA200 乖離を DuckDB ウィンドウ関数で計算。
-    - calc_volatility: 20日 ATR（true range の NULL 管理を含む）、相対 ATR（atr_pct）、20日平均売買代金、出来高比率を計算。
-    - calc_value: raw_financials から直近の財務データを取得して PER / ROE を算出（EPS=0 は None）。
-    - SQL ベースで過去データスキャンの範囲バッファを考慮した実装。
-  - feature_exploration:
-    - calc_forward_returns: 指定ホライズン（デフォルト [1,5,21]）の将来終値リターンを一括 SQL で取得。
-    - calc_ic: Spearman のランク相関（Information Coefficient）を実装（データ不足時は None）。
-    - factor_summary: 基本統計量（count/mean/std/min/max/median）を算出。
-    - rank: 同順位は平均ランクで扱うランク関数（round による同値判定で数値丸め誤差を吸収）。
+- リサーチ（research）
+  - factor_research を追加（momentum / volatility / value のファクター計算）。
+    - calc_momentum: 1m/3m/6m リターン、200 日 MA 乖離率（データ不足時は None）。
+    - calc_volatility: 20 日 ATR、相対 ATR（atr_pct）、20 日平均売買代金、出来高比率。
+    - calc_value: raw_financials からの最新財務データ結合（PER/ROE）。
+  - 特徴量評価ユーティリティ（feature_exploration）を追加。
+    - calc_forward_returns: 任意ホライズン（デフォルト [1,5,21]）の将来リターンを一括取得。
+    - calc_ic: Spearman（ランク相関）による IC 計算（同順位は平均ランク処理、サンプル不足時は None）。
+    - factor_summary / rank: 基本統計量とランク変換ユーティリティを実装。
+  - すべて DuckDB と標準ライブラリのみで完結する設計（pandas 非依存）。
 
-- バックテスト（src/kabusys/backtest/*）
-  - simulator:
+- バックテスト（backtest）
+  - ポートフォリオシミュレータ（simulator）を追加。
     - DailySnapshot / TradeRecord の dataclass 定義。
-    - PortfolioSimulator: 簡易約定ロジック（SELL 先行、BUY 後処理）、スリッページ・手数料反映、履歴・約定記録の保持。部分約定／単元制御用の lot_size パラメータあり。
-  - metrics:
-    - 各種バックテスト指標を計算する calc_metrics 実装（CAGR, Sharpe, Max Drawdown, Win Rate, Payoff Ratio, total_trades）。
-    - 内部での各指標の詳細実装（年次化や営業日換算、例外時の 0 フォールバックなど）。
+    - execute_orders: SELL を先に処理して全量クローズ、BUY を後処理。スリッページ（BUY +、SELL −）・手数料モデルを反映。lot_size を考慮した約定動作。
+    - TradeRecord に realized_pnl を保持（SELL 時）。
+  - メトリクス計算（metrics）を追加。
+    - CAGR, Sharpe Ratio（無リスク金利=0 を仮定）, Max Drawdown, Win Rate, Payoff Ratio, total_trades を計算する API を提供。
 
-### 変更（Changed）
-- 初回リリースのため特になし（このバージョンで新規実装多数）。
+Changed（変更）
+- なし（初回リリースのため過去変更履歴無し）。
 
-### 修正（Fixed）
-- 初回リリースのため特になし（実装時点での既知の挙動はログや docstring に注記）。
+Fixed（修正）
+- なし（初回リリースのため過去修正無し）。
 
-### 注意点 / 実装上の制約（Notes）
-- DuckDB を前提とした SQL 実装のため、prices_daily / raw_financials / features / ai_scores / positions / signals 等のスキーマ・存在が前提となります。詳細は各モジュールの docstring を参照してください。
-- execution パッケージはパッケージツリーにプレースホルダが存在しますが、外部発注 API 統合や実口座接続の実装は本バージョンでは含まれていません（発注層は将来の実装を想定）。
-- 一部のロジックは簡易化されており（例: SELL は現状「全量クローズ」のみ）、将来的に部分利確・トレーリングストップ等の拡張が想定されています（docstring に TODO 記載）。
-- env ファイルパーサの挙動は実用レベルに配慮していますが、極端に複雑なシェル展開や変数展開はサポートしていません。
-- calc_regime_multiplier の multiplier は保護的な値に設定されていますが、Bear レジーム時の BUY シグナル抑制は signal_generator 側のロジックが一次的に担います。
+Deprecated（非推奨）
+- なし。
 
-### ドキュメント（Documentation）
-- 各モジュールに詳細な docstring を付与しました（動作想定、参照テーブル、アルゴリズムの根拠、TODO・将来拡張点など）。
+Removed（削除）
+- なし。
 
----
+Security（セキュリティ）
+- .env ファイル読み込みに失敗した場合は warnings.warn を出して処理を継続（致命的失敗を避ける設計）。ただし、必須環境変数が未設定の場合は Settings._require が ValueError を投げるため、実行時に適切な環境変数管理が必要。
 
-開発・利用にあたって不明点や追加してほしい機能があればお知らせください。必要であればリリースノートの英語版やセクション分けをさらに詳細化して提供します。
+Notes / Limitations（備考 / 既知の制約）
+- apply_sector_cap は price_map に欠損（0.0）があるとセクターエクスポージャーを過少見積もる可能性がある旨の TODO を注釈として残している（将来的に前日終値や取得原価でのフォールバックを想定）。
+- position_sizing の lot_size は現状グローバル固定（将来的に銘柄別 lot_map に拡張予定）。
+- signal_generator のトレーリングストップや時間決済（60 営業日超過）は未実装（positions テーブルの追加入力が必要）。
+- feature_engineering と generate_signals は target_date 時点のデータのみを使用することでルックアヘッドバイアスを回避する設計だが、上流データ（prices_daily / raw_financials / ai_scores 等）が正しく整備されていることが前提。
+- Backtest: SELL は現状「全量クローズ」方式で、部分利確/部分損切りには対応していない。
+
+ログ / 例外ハンドリング
+- 多くの箇所で logging モジュールを利用して情報・警告・デバッグを出力。DB トランザクションでは例外発生時に ROLLBACK を試み、失敗した場合は warning を出力してから例外を再送出する設計。
+
+今後の検討事項（ソース内の TODO）
+- position_sizing: 銘柄別 lot_size (lot_map) のサポート
+- risk_adjustment: price 欠損時のフォールバック価格採用
+- signal_generator: トレーリングストップ、時間決済の実装
+- simulator: 部分利確/部分損切りや部分約定の挙動拡張
+
+ライセンス・導入方法などはリポジトリの README / pyproject.toml を参照してください。
