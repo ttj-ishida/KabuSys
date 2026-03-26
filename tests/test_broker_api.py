@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 from kabusys.execution.broker_api import (
+    BrokerAPIError,
+    BrokerAPIProtocol,
+    OrderRejectedError,
     OrderRequest,
     OrderResponse,
     OrderStatus,
     Position,
+    RateLimitError,
     WalletInfo,
+    create_broker_api,
 )
 
 
@@ -72,3 +77,39 @@ def test_order_response_fields():
     """OrderResponse の order_id が設定されること。"""
     resp = OrderResponse(order_id="ORD12345")
     assert resp.order_id == "ORD12345"
+
+
+# ---------------------------------------------------------------------------
+# 例外クラス
+# ---------------------------------------------------------------------------
+
+def test_broker_api_error_is_exception():
+    err = BrokerAPIError("test error")
+    assert isinstance(err, Exception)
+    assert str(err) == "test error"
+
+
+def test_broker_api_error_with_status_code():
+    err = BrokerAPIError("rate limit", status_code=429)
+    assert err.status_code == 429
+
+
+def test_order_rejected_error_is_broker_api_error():
+    err = OrderRejectedError("rejected")
+    assert isinstance(err, BrokerAPIError)
+
+
+def test_rate_limit_error_is_broker_api_error():
+    err = RateLimitError("too many requests", status_code=429)
+    assert isinstance(err, BrokerAPIError)
+    assert err.status_code == 429
+
+
+# ---------------------------------------------------------------------------
+# ファクトリ
+# ---------------------------------------------------------------------------
+
+def test_create_broker_api_mock_returns_mock_client():
+    from kabusys.execution.mock_client import MockBrokerClient
+    api = create_broker_api(mock=True)
+    assert isinstance(api, MockBrokerClient)

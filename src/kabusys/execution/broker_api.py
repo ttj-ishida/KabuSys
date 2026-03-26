@@ -6,6 +6,7 @@ signal_queue.size → OrderRequest.qty のマッピングは呼び出し元（Ex
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 
 # ---------------------------------------------------------------------------
@@ -49,3 +50,75 @@ class Position:
 @dataclass
 class WalletInfo:
     available_cash: float   # 現物取引余力（円）
+
+
+# ---------------------------------------------------------------------------
+# 例外クラス
+# ---------------------------------------------------------------------------
+
+class BrokerAPIError(Exception):
+    """API 呼び出し失敗の基底例外。"""
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class OrderRejectedError(BrokerAPIError):
+    """発注が証券会社に拒否された（余力不足・規制等）。"""
+
+
+class RateLimitError(BrokerAPIError):
+    """API レート制限（429）に達した。"""
+
+
+# ---------------------------------------------------------------------------
+# Protocol インターフェース
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class BrokerAPIProtocol(Protocol):
+    """kabu station API クライアントの共通インターフェース。
+
+    get_token は内部実装（KabuStationClient では _get_token として隠蔽）。
+    呼び出し元はトークン管理を意識しない設計。
+    """
+
+    def send_order(self, order: OrderRequest) -> OrderResponse:
+        """発注する。証券会社に拒否された場合は OrderRejectedError を raise。"""
+        ...
+
+    def cancel_order(self, order_id: str) -> None:
+        """注文をキャンセルする。
+        - 対象注文が存在しない → BrokerAPIError
+        - 既に filled の注文 → BrokerAPIError（キャンセル不可）
+        """
+        ...
+
+    def get_order_status(self, order_id: str) -> OrderStatus | None:
+        """注文状態を照会する。対象注文が存在しない場合は None。"""
+        ...
+
+    def get_positions(self) -> list[Position]:
+        """現在の保有ポジション一覧を返す。"""
+        ...
+
+    def get_available_cash(self) -> float:
+        """現物取引余力（円）を返す。"""
+        ...
+
+
+# ---------------------------------------------------------------------------
+# ファクトリ関数
+# ---------------------------------------------------------------------------
+
+def create_broker_api(mock: bool = False, **kwargs) -> BrokerAPIProtocol:
+    """環境に応じたクライアントを返す。
+    mock=True → MockBrokerClient
+    mock=False → KabuStationClient(**kwargs)
+    """
+    if mock:
+        from kabusys.execution.mock_client import MockBrokerClient
+        return MockBrokerClient()
+    from kabusys.execution.kabu_client import KabuStationClient
+    return KabuStationClient(**kwargs)
