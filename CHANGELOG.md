@@ -1,99 +1,96 @@
-CHANGELOG
-=========
+# Changelog
 
-すべての変更は Keep a Changelog の形式に準拠して記載しています。
+すべての重要な変更をここに記録します。本チェンジログは「Keep a Changelog」仕様に準拠します。
 
-Unreleased
-----------
+なお、本ファイルはソースコード内容から機能追加・設計上の振る舞い・既知の制約を推測して作成しています。
 
-（なし）
+## [Unreleased]
 
-[0.1.0] - 2026-03-26
---------------------
+## [0.1.0] - 2026-03-26
+初回リリース。日本株自動売買フレームワークの核となるモジュール群を提供します。
 
-Added
-- パッケージ初期リリースを追加。
-  - パッケージバージョン: 0.1.0
+### Added
+- パッケージの基本情報
+  - kabusys パッケージの初期バージョンを導入（__version__ = "0.1.0"）。
+  - パッケージ公開 API：data, strategy, execution, monitoring を __all__ に定義。
 
-- 基本パッケージ構成
-  - モジュール公開: kabusys.data, kabusys.strategy, kabusys.execution, kabusys.monitoring を __all__ に定義。
+- 環境設定（kabusys.config）
+  - .env / .env.local からの自動読み込み機能を実装（プロジェクトルートは .git または pyproject.toml を基準に探索）。
+  - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動読み込み無効化をサポート（テスト用途）。
+  - .env パーサ実装（コメント、export プレフィックス、シングル/ダブルクォート、エスケープ対応を含む）。
+  - protected 機能により OS 環境変数を .env で上書きしない仕組みを提供。
+  - Settings クラスを実装し、主要設定値をプロパティ経由で取得：
+    - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, KABU_API_BASE_URL
+    - SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
+    - DUCKDB_PATH, SQLITE_PATH
+    - KABUSYS_ENV（development/paper_trading/live 検証）
+    - LOG_LEVEL（DEBUG/INFO/... 検証）
+    - is_live / is_paper / is_dev ヘルパー
 
-- 設定・環境変数管理（kabusys.config）
-  - .env ファイルまたは環境変数から設定を自動読み込み（プロジェクトルートは .git または pyproject.toml を基準に探索）。
-  - 自動ロードを無効化するフラグ: KABUSYS_DISABLE_AUTO_ENV_LOAD をサポート。
-  - .env のパース機能を実装:
-    - コメント行、export KEY=val 形式、シングル／ダブルクォート、バックスラッシュエスケープ、行内コメントの取り扱いに対応。
-  - .env.local を .env の上から上書き（既存の OS 環境変数は保護）。
-  - Settings クラスを提供し、必須設定値をプロパティ経由で取得:
-    - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID は必須（未設定時は ValueError）。
-    - KABU_API_BASE_URL、DUCKDB_PATH、SQLITE_PATH はデフォルト値あり。
-    - KABUSYS_ENV（development / paper_trading / live）と LOG_LEVEL の検証を実装。
-    - is_live / is_paper / is_dev のユーティリティプロパティを提供。
+- ポートフォリオ構築（kabusys.portfolio）
+  - 銘柄選定と配分：
+    - select_candidates: スコア降順で上位 N 銘柄を選択（score / signal_rank によるタイブレーク）。
+    - calc_equal_weights: 等金額配分（1/N）。
+    - calc_score_weights: スコア加重配分（総スコアが 0 の場合は等金額にフォールバック）。
+  - リスク調整：
+    - apply_sector_cap: セクター別の既存エクスポージャーを計算し、セクター集中が最大比率（既定 30%）を超える場合に新規候補を除外。unknown セクターは上限適用外。
+    - calc_regime_multiplier: 市場レジーム（bull/neutral/bear）に応じた投下資金乗数を提供（デフォルト: bull=1.0, neutral=0.7, bear=0.3）。未知レジームは 1.0 にフォールバック（警告ログ）。
+  - ポジションサイズ決定：
+    - calc_position_sizes: allocation_method（risk_based / equal / score）に応じて発注株数を計算。lot_size、max_position_pct、max_utilization、cost_buffer を考慮した aggregate cap 処理を実装。スケールダウン時の再配分で端数処理（lot 単位）と残差配分ロジックを持つ。
+    - risk_based 方式では risk_pct と stop_loss_pct を用いた株数算出を実装。
 
-- ニュースNLP（kabusys.ai.news_nlp）
-  - raw_news / news_symbols を用いた銘柄別ニュース集約と OpenAI によるセンチメントスコア付与機能を実装（score_news）。
-  - タイムウィンドウ: JST 基準 前日15:00 ～ 当日08:30（内部は UTC naive で計算）。calc_news_window を提供。
-  - 1銘柄あたりの記事数・文字数のトリム制限（_MAX_ARTICLES_PER_STOCK, _MAX_CHARS_PER_STOCK）。
-  - バッチ送信（1 API コールあたり最大 20 銘柄）とレスポンスのバリデーション（JSON mode を期待、results 配列の検証）。
-  - API エラー（429 / ネットワーク断 / タイムアウト / 5xx）に対するエクスポネンシャルバックオフ・リトライ実装。
-  - レスポンスのパース失敗や不正データはスキップして処理継続（フェイルセーフ）。
-  - 取得スコアは ±1.0 にクリップ。書き込みは冪等（DELETE → INSERT）で部分失敗時に他コードの既存データを保護。
-  - テスト用の差し替えポイント: _call_openai_api をモック可能。
+- 戦略（kabusys.strategy）
+  - 特徴量エンジニアリング（feature_engineering.build_features）
+    - research の生ファクター（calc_momentum / calc_volatility / calc_value）を統合し、ユニバースフィルタ（最低株価 300 円、20日平均売買代金 5 億円）を適用。
+    - Z スコア正規化（指定カラム）、±3 クリップ、features テーブルへの日付単位 UPSERT（トランザクションで原子性保証）。
+    - DuckDB を使用した SQL ベースの価格取得とバルク挿入。
+  - シグナル生成（signal_generator.generate_signals）
+    - features と ai_scores を統合して momentum/value/volatility/liquidity/news のコンポーネントスコアを計算。
+    - final_score を重み付け合成（デフォルト重みを実装）し、閾値（デフォルト 0.60）で BUY シグナルを生成。
+    - Bear レジーム検知時は BUY シグナルを抑制（ai_scores の regime_score 平均が負かつサンプル数閾値以上）。
+    - エグジット判定（STOP-LOSS およびスコア低下）を実装し SELL シグナルを生成。
+    - signals テーブルへの日付単位の置換（トランザクションで原子性保証）。
+    - 衝突回避や不正な weight 入力の検証ロジックを搭載（不正値はスキップ、合計が 1.0 に正規化）。
 
-- 市場レジーム判定（kabusys.ai.regime_detector）
-  - ETF 1321（日経225連動）の 200 日移動平均乖離（重み 70%）と、マクロニュースの LLM センチメント（重み 30%）を合成して日次レジーム判定（score_regime）。
-  - マクロ記事抽出はキーワード列（日本語・米国系）に基づき raw_news から取得。
-  - OpenAI モデル gpt-4o-mini を使用し、JSON 形式で macro_sentiment を取得。API失敗時は macro_sentiment = 0.0 として継続。
-  - レジームスコア合成 → ラベル化（bull / neutral / bear）。
-  - DB への書き込みは冪等（BEGIN / DELETE / INSERT / COMMIT）で実施。
-  - テスト用モックポイント: _call_openai_api。
+- リサーチ（kabusys.research）
+  - factor_research: calc_momentum, calc_volatility, calc_value を実装（prices_daily / raw_financials を参照）。各関数は欠損時の None 処理やウィンドウカウント条件を考慮。
+  - feature_exploration: 将来リターン計算（calc_forward_returns）、IC 計算（calc_ic）、ランク付けユーティリティ（rank）、統計サマリー（factor_summary）を実装。外部依存を持たず標準ライブラリ中心で実装。
 
-- データ基盤ユーティリティ（kabusys.data）
-  - マーケットカレンダー管理（calendar_management）:
-    - is_trading_day, is_sq_day, next_trading_day, prev_trading_day, get_trading_days を提供。
-    - market_calendar が未取得の場合は土日ベースのフォールバックを使用。
-    - calendar_update_job: J-Quants API から差分取得して market_calendar を冪等に更新。バックフィル（直近 _BACKFILL_DAYS）と健全性チェック（未来日付の上限）を実装。
-  - ETL パイプライン（pipeline）:
-    - ETLResult データクラスを導入し、ETL の取得/保存件数、品質問題リスト、エラー概要を集約。to_dict() で辞書化可能。
-    - テーブル最大日付取得・存在チェック等のユーティリティ関数を提供。
-  - ETL 公開インターフェース（etl）:
-    - pipeline.ETLResult を再エクスポート。
+- バックテスト（kabusys.backtest）
+  - metrics.calc_metrics と内部メトリクス実装（CAGR, Sharpe, Max Drawdown, Win Rate, Payoff Ratio, total_trades）。
+  - simulator.PortfolioSimulator: 擬似約定処理とポートフォリオ状態管理を実装。DailySnapshot / TradeRecord のデータモデルを定義。
+    - execute_orders: SELL を先行処理、BUY を後処理するポリシー。スリッページ・手数料モデルのパラメータ化（slippage_rate, commission_rate）。SELL は全量クローズの想定。
 
-- リサーチ機能（kabusys.research）
-  - ファクター計算（factor_research）:
-    - calc_momentum: mom_1m / mom_3m / mom_6m / ma200_dev を prices_daily から計算（データ不足時は None）。
-    - calc_volatility: 20日 ATR、ATR 比率、20日平均売買代金、出来高比率を計算（データ不足時は None）。
-    - calc_value: raw_financials と prices_daily を組み合わせて PER, ROE を算出（EPS が 0 または欠損の場合は None）。
-    - 全関数は DuckDB 接続を受け取り、外部 API 呼び出しは行わない設計。
-  - 特徴量探索（feature_exploration）:
-    - calc_forward_returns: 指定ホライズン（デフォルト [1,5,21]）の将来リターンを計算（horizons の検証あり）。
-    - calc_ic: factor と forward returns を code で突合し、Spearman（ランク）相関（IC）を計算。十分なサンプルがない場合は None を返す。
-    - rank: 同順位は平均ランクに変換（浮動誤差対策に round を使用）。
-    - factor_summary: 基本統計量（count, mean, std, min, max, median）を計算。
-  - research パッケージの __all__ で主要関数を公開。
+- ロギング・エラーハンドリング
+  - 各モジュールで適切に logger を使用し、重要なフォールバックや警告（例: .env 読み込み失敗、価格欠損、weights の不正値、DB トランザクションの ROLLBACK 失敗）を出力。
 
-Changed
+### Changed
 - （初回リリースのため該当なし）
 
-Fixed
+### Fixed
 - （初回リリースのため該当なし）
 
-Notes / 設計上の重要点
-- ルックアヘッドバイアス対策:
-  - 各種処理（news, regime, research 等）は内部で datetime.today()/date.today() を使わず、呼び出し側から target_date を受け取る設計。
-  - DB クエリは target_date 未満／以前の条件を厳格に指定して将来データの参照を防止。
-- フェイルセーフ方針:
-  - 外部 API（OpenAI, J-Quants）呼び出し失敗時は基本的に処理を中断せず、該当部分は既定値（例: 0.0）またはスキップして継続する。
-- テストしやすさ:
-  - OpenAI 呼び出し箇所は内部関数でラップしており、unittest.mock.patch による差し替えが可能。
-- 依存・運用:
-  - データ処理は DuckDB を前提に実装。
-  - OpenAI は gpt-4o-mini を利用する想定（JSON Mode を期待）。
+### Notes / Known limitations
+- signal_generator:
+  - Bear レジームの扱いは保守的で、ai_scores が未登録またはサンプル不足の場合は Bear と見做さない。
+  - SELL の判定条件のうち「トレーリングストップ」「時間決済（60 営業日超）」は未実装（positions テーブルに peak_price / entry_date が必要）。
+- portfolio.risk_adjustment.apply_sector_cap:
+  - price_map に price が欠損（0.0）だとエクスポージャーが過少評価され、ブロックが外れる可能性がある（将来的にフォールバック価格の検討を注記）。
+- position_sizing:
+  - 単元株数 lot_size は現状グローバル共通（将来的に銘柄別対応を想定）。
+  - cost_buffer を用いた保守的見積りは導入済みだが、手数料・スリッページの実運用調整は要検証。
+- feature_engineering:
+  - 正規化対象のカラムや閾値（例: _MIN_PRICE, _MIN_TURNOVER, _ZSCORE_CLIP）は現状固定値。運用での調整が想定される。
+- 環境変数パーサ:
+  - 一部の .env 書式（複雑な改行含む値など）や特殊ケースは未試験。読み込み失敗時は warnings.warn で通知。
 
-Security
-- API キー等の必須値は Settings 経由で管理し、.env / 環境変数で注入する設計。必須未設定時は ValueError を投げることで誤動作を防止。
+### Security
+- 現時点で特筆すべきセキュリティ修正はなし。ただし環境変数に機密情報を格納する設計のため、運用時の権限管理・シークレット管理は適切に行ってください。
 
-今後の予定（例）
-- ai_scores の保存におけるメタデータ拡充（スコア由来の詳細など）
-- pipeline における品質チェック結果の自動アクション（アラート／再実行）
-- strategy / execution / monitoring の具体実装（現状はパッケージ公開名のみ）
+## 破壊的変更 (Breaking Changes)
+- 本初版のため、過去互換性に関する破壊的変更は無し。
+
+---
+
+参照:
+- 各モジュールの実装には PortfolioConstruction.md, StrategyModel.md, BacktestFramework.md などの設計ドキュメントに基づく旨のコメントが含まれています。運用・拡張の際はそれら設計資料を参照してください。
