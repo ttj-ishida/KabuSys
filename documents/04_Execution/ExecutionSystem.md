@@ -70,3 +70,71 @@ Strategy層が生成したシグナルは、実行層（Execution）へ渡る直
 2. **安全隔離**: これらを一旦すべて「状態不明 (Unknown)」として隔離する。
 3. **リコンシリエーション (突合)**: kabuステーション「注文照会API」および「残高照会API」を叩き、実際の保有口座ポジション・注文状況と、ローカルDBの差分を突合する。
 4. **同期と再開**: 正しい状態にアップデート（例: `Filled` または `Rejected`）した後、未処理のキューの消化を再開する。
+
+---
+
+## 5. Broker API クライアント実装方針 (Issue #28)
+
+kabuステーション REST API へのアクセスは `src/kabusys/execution/` 配下に分離し、
+`Protocol` ベースのインターフェースにより実装とモックを差し替え可能にする。
+
+### ファイル構成
+
+```
+src/kabusys/execution/
+├── broker_api.py    ← BrokerAPIProtocol（Protocol）+ データモデル + ファクトリ関数
+├── kabu_client.py   ← KabuStationClient（実API実装）
+└── mock_client.py   ← MockBrokerClient（テスト・開発用）
+```
+
+### Protocol インターフェース（`BrokerAPIProtocol`）
+
+```python
+class BrokerAPIProtocol(Protocol):
+    def get_token(self, api_password: str) -> str: ...
+    def send_order(self, order: OrderRequest) -> OrderResponse: ...
+    def cancel_order(self, order_id: str) -> None: ...
+    def get_order_status(self, order_id: str) -> OrderStatus | None: ...
+    def get_positions(self) -> list[Position]: ...
+    def get_available_cash(self) -> float: ...
+```
+
+Order State Machine（Section 2）のステータスと `OrderStatus.status` の対応:
+
+| State Machine | `OrderStatus.status` |
+|--------------|----------------------|
+| OrderCreated / OrderSent / OrderAccepted | `"open"` |
+| PartialFill | `"partial"` |
+| Filled / Closed | `"filled"` |
+| Cancelled | `"cancelled"` |
+| Rejected | `"rejected"` |
+
+### 使用 REST エンドポイント
+
+| メソッド | パス | 用途 |
+|---------|------|------|
+| POST | `/token` | APIトークン取得（早朝失効時に自動再取得） |
+| POST | `/sendorder` | 現物株発注 |
+| PUT | `/cancelorder` | 注文キャンセル |
+| GET | `/orders` | 注文照会（Reconciliation でも使用） |
+| GET | `/positions` | 残高照会（Reconciliation でも使用） |
+| GET | `/wallet/cash` | 現物取引余力（第1関門チェック） |
+
+**Base URL**: `http://localhost:18080/kabusapi`（本番）/ `http://localhost:18081/kabusapi`（検証）
+
+### 差し替え方法
+
+```python
+# 開発・テスト時
+api = create_broker_api(mock=True)
+
+# 本番時
+api = create_broker_api(mock=False, api_password="...", base_url="http://localhost:18080/kabusapi")
+```
+
+### 注意事項
+
+- kabuステーション® アプリが PC 上で起動している前提（localhost 接続）
+- 発注系 API はレート制限 5 req/sec（Section 3 第2関門で制御）
+- WebSocket（市場データ PUSH）は Execution Engine（Issue #30）で別途扱う
+- 詳細仕様: `docs/superpowers/specs/2026-03-26-broker-api-design.md`
