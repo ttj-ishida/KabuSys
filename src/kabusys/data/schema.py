@@ -141,6 +141,21 @@ CREATE TABLE IF NOT EXISTS news_symbols (
 )
 """
 
+# ---- Master Data Layer -----------------------------------------------------
+
+_STOCKS = """
+CREATE TABLE IF NOT EXISTS stocks (
+    code        VARCHAR     NOT NULL,
+    name        VARCHAR,
+    market      VARCHAR,
+    sector      VARCHAR,
+    -- UPSERT 時は ON CONFLICT DO UPDATE SET ... updated_at = now() を明示すること。
+    -- DEFAULT now() は INSERT 時のみ設定される（UPSERT では自動更新されない）。
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (code)
+)
+"""
+
 # ---- Feature Layer ---------------------------------------------------------
 
 _FEATURES = """
@@ -307,6 +322,8 @@ _ALL_DDL: list[str] = [
     _FUNDAMENTALS,
     _NEWS_ARTICLES,
     _NEWS_SYMBOLS,
+    # Master
+    _STOCKS,
     # Feature
     _FEATURES,
     _AI_SCORES,

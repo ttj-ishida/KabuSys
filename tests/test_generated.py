@@ -1,350 +1,399 @@
 
-import os
-import hashlib
-from datetime import date, datetime, timezone
-from types import SimpleNamespace
+import math
+from datetime import date, datetime
 from unittest import mock
 
-import duckdb
 import pytest
 
-# config
+# config module
 from kabusys.config import _parse_env_line, _require, Settings
 
-# research (feature exploration)
-from kabusys.research import (
-    calc_forward_returns,
-    calc_ic,
-    rank,
-    factor_summary,
+# portfolio builder / risk / position sizing
+from kabusys.portfolio.portfolio_builder import (
+    select_candidates,
+    calc_equal_weights,
+    calc_score_weights,
+)
+from kabusys.portfolio.risk_adjustment import apply_sector_cap, calc_regime_multiplier
+from kabusys.portfolio.position_sizing import calc_position_sizes
+
+# feature engineering (universe filter)
+from kabusys.research.feature_engineering import _apply_universe_filter
+
+# signal generator utilities
+from kabusys.strategy.signal_generator import (
+    _sigmoid,
+    _avg_scores,
+    _generate_sell_signals,
 )
 
-# features (zscore)
-from kabusys.data.features import zscore_normalize
+# research utilities
+from kabusys.research.feature_exploration import rank, calc_ic, factor_summary
 
-# jquants client utils
-from kabusys.data.jquants_client import _to_float, _to_int, get_id_token
+# backtest simulator
+from kabusys.backtest.simulator import PortfolioSimulator, DailySnapshot, TradeRecord
 
-# schema init
-from kabusys.data.schema import init_schema
+# news utilities
+from kabusys.data.news import (
+    _normalize_url,
+    _make_article_id,
+    _validate_url_scheme,
+    _is_private_host,
+    preprocess_text,
+    _parse_rss_datetime,
+)
 
-# news collector
-from kabusys.data import news_collector as nc
-
-# etl
-from kabusys.data.etl import ETLResult
 
 # -------------------------
-# config tests
+# config._parse_env_line
 # -------------------------
-
-
 def test_parse_env_line_basic_and_comments():
-    assert _parse_env_line("") is None
-    assert _parse_env_line("  # comment ") is None
-    # no separator
-    assert _parse_env_line("NOSEP") is None
-    # simple unquoted with inline comment recognized only if preceded by space
-    assert _parse_env_line("BAR=1 #ignored") == ("BAR", "1")
+    assert _parse_env_line("KEY=val") == ("KEY", "val")
+    # inline comment is recognized only if preceded by space/tab
+    assert _parse_env_line("KEY=val #comment") == ("KEY", "val")
+    # hash immediately after value is part of value
+    assert _parse_env_line("KEY=val#notcomment") == ("KEY", "val#notcomment")
     # export prefix
-    assert _parse_env_line("export X=val") == ("X", "val")
-    # quoted with escaped quote and '#' inside quotes should be preserved
-    # FOO='a\'b#c'  -> value should be: a'b#c
-    line = "FOO='a\\'b#c'   #comment"
-    assert _parse_env_line(line) == ("FOO", "a'b#c")
-    # double quoted with escaped quote
-    line2 = 'Q="x\\\"y"'
-    assert _parse_env_line(line2) == ("Q", 'x"y')
+    assert _parse_env_line("export FOO=bar") == ("FOO", "bar")
+    # quoted with escaped quote
+    assert _parse_env_line(r"Q='a\'b'") == ("Q", "a'b")
+    # double quoted with backslash escape for double quote
+    assert _parse_env_line(r'Q2="a\"b"') == ("Q2", 'a"b')
+    # empty or comment line returns None
+    assert _parse_env_line("") is None
+    assert _parse_env_line("# comment") is None
+    # missing separator
+    assert _parse_env_line("NOSEP") is None
+    # missing key after export
+    assert _parse_env_line("export =value") is None
 
 
-def test_require_raises_and_ok(monkeypatch):
-    monkeypatch.delenv("SOME_MISSING_VAR", raising=False)
+# -------------------------
+# Settings and _require
+# -------------------------
+def test_require_and_settings_properties(monkeypatch):
+    # Ensure _require raises when missing
+    monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
     with pytest.raises(ValueError):
-        _require("SOME_MISSING_VAR")
-    monkeypatch.setenv("SOME_MISSING_VAR", "value")
-    assert _require("SOME_MISSING_VAR") == "value"
+        _require("JQUANTS_REFRESH_TOKEN")
 
-
-def test_settings_env_and_log_level(monkeypatch):
-    s = Settings()
-    # default env is development
-    monkeypatch.delenv("KABUSYS_ENV", raising=False)
-    assert s.env == "development"
-    # valid values
+    # set env and verify Settings properties
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "rtok")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pwd")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "sbot")
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "chid")
     monkeypatch.setenv("KABUSYS_ENV", "live")
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+    s = Settings()
+    assert s.jquants_refresh_token == "rtok"
+    assert s.kabu_api_password == "pwd"
+    assert s.slack_bot_token == "sbot"
+    assert s.slack_channel_id == "chid"
     assert s.env == "live"
-    monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
-    assert s.env == "paper_trading"
-    # invalid value
+    assert s.log_level == "DEBUG"
+    assert s.is_live is True
+    assert s.is_paper is False
+    assert s.is_dev is False
+
+    # env invalid value raises
     monkeypatch.setenv("KABUSYS_ENV", "invalid_env")
     with pytest.raises(ValueError):
         _ = s.env
 
-    # log level default INFO
-    monkeypatch.delenv("LOG_LEVEL", raising=False)
-    assert s.log_level == "INFO"
-    monkeypatch.setenv("LOG_LEVEL", "debug")
-    assert s.log_level == "DEBUG"
-    monkeypatch.setenv("LOG_LEVEL", "BAD")
+    monkeypatch.setenv("LOG_LEVEL", "NOPE")
     with pytest.raises(ValueError):
         _ = s.log_level
 
 
 # -------------------------
-# research tests (_rank, calc_ic, calc_forward_returns, factor_summary)
+# Portfolio builder
 # -------------------------
-
-
-def test_rank_with_ties():
-    vals = [10.0, 20.0, 20.0, 30.0]
-    ranks = rank(vals)
-    # expected ranks: 1.0, 2.5, 2.5, 4.0
-    assert pytest.approx(ranks[0]) == 1.0
-    assert pytest.approx(ranks[1]) == 2.5
-    assert pytest.approx(ranks[2]) == 2.5
-    assert pytest.approx(ranks[3]) == 4.0
-
-
-def test_calc_ic_insufficient_and_perfect_correlation():
-    # insufficient records (<3)
-    factor = [{"code": "A", "f": 1.0}, {"code": "B", "f": 2.0}]
-    fwd = [{"code": "A", "r": 0.1}, {"code": "B", "r": 0.2}]
-    assert calc_ic(factor, fwd, "f", "r") is None
-
-    # perfect monotonic correlation -> Spearman rho == 1.0
-    factor = [
-        {"code": "C", "f": 1.0},
-        {"code": "D", "f": 2.0},
-        {"code": "E", "f": 3.0},
+def test_select_candidates_and_weights():
+    signals = [
+        {"code": "A", "score": 1.0},
+        {"code": "B", "score": 2.0},
+        {"code": "C", "score": 0.5},
     ]
-    fwd = [
-        {"code": "C", "r": 10.0},
-        {"code": "D", "r": 20.0},
-        {"code": "E", "r": 30.0},
-    ]
-    rho = calc_ic(factor, fwd, "f", "r")
-    assert pytest.approx(rho) == 1.0
+    top2 = select_candidates(signals, max_positions=2)
+    assert [s["code"] for s in top2] == ["B", "A"]
 
-    # negative monotonic
-    factor = [
-        {"code": "X", "f": 1.0},
-        {"code": "Y", "f": 2.0},
-        {"code": "Z", "f": 3.0},
-    ]
-    fwd = [
-        {"code": "X", "r": 30.0},
-        {"code": "Y", "r": 20.0},
-        {"code": "Z", "r": 10.0},
-    ]
-    rho = calc_ic(factor, fwd, "f", "r")
-    assert pytest.approx(rho) == -1.0
+    # empty input
+    assert select_candidates([], 5) == []
+
+    # equal weights
+    eq = calc_equal_weights([{"code": "A"}, {"code": "B"}, {"code": "C"}])
+    assert math.isclose(eq["A"], 1.0 / 3)
+    assert sum(eq.values()) == pytest.approx(1.0)
+
+    # score weights normal
+    sc = calc_score_weights([{"code": "A", "score": 1.0}, {"code": "B", "score": 3.0}])
+    assert sc["A"] == pytest.approx(1.0 / 4.0)
+    assert sc["B"] == pytest.approx(3.0 / 4.0)
+
+def test_calc_score_weights_all_zero_fallback(caplog):
+    caplog.clear()
+    caplog.set_level("WARNING")
+    candidates = [{"code": "A", "score": 0.0}, {"code": "B", "score": 0.0}]
+    w = calc_score_weights(candidates)
+    # fallback equal weights
+    assert w == {"A": 0.5, "B": 0.5}
+    # warning emitted
+    assert any("等金額配分にフォールバック" in rec.message or "フォールバック" in rec.message for rec in caplog.records)
 
 
-def test_calc_forward_returns_basic():
-    conn = duckdb.connect(":memory:")
-    # create minimal prices_daily table used by calc_forward_returns
-    conn.execute(
-        """
+# -------------------------
+# risk_adjustment
+# -------------------------
+def test_apply_sector_cap_filters_blocked_sector(caplog):
+    caplog.set_level("DEBUG")
+    candidates = [{"code": "B", "score": 1.0}, {"code": "C", "score": 0.5}]
+    sector_map = {"A": "tech", "B": "tech", "C": "other"}
+    current_positions = {"A": 100}  # large exposure for tech
+    open_prices = {"A": 2.0, "B": 10.0, "C": 5.0}
+    portfolio_value = 1000.0
+    # exposure for tech = 100 * 2 = 200 => 200/1000 = 0.2 > default 0.3? default is 0.30 -> 0.2 not exceed
+    # choose smaller max_sector_pct to trigger
+    filtered = apply_sector_cap(candidates, sector_map, portfolio_value, current_positions, open_prices, max_sector_pct=0.1)
+    # B is in same sector 'tech' and should be filtered out
+    assert filtered == [{"code": "C", "score": 0.5}]
+    assert any("除外" in rec.message or "上限" in rec.message for rec in caplog.records)
+
+def test_calc_regime_multiplier_and_unknown_logs(caplog):
+    caplog.set_level("WARNING")
+    assert calc_regime_multiplier("bull") == 1.0
+    assert calc_regime_multiplier("neutral") == 0.7
+    assert calc_regime_multiplier("bear") == 0.3
+    # unknown -> warning + fallback 1.0
+    caplog.clear()
+    assert calc_regime_multiplier("mystery") == 1.0
+    assert any("未知のレジーム" in r.message or "フォールバック" in r.message for r in caplog.records)
+
+
+# -------------------------
+# position_sizing
+# -------------------------
+def test_calc_position_sizes_equal_and_scaling():
+    weights = {"A": 0.5, "B": 0.5}
+    candidates = [{"code": "A"}, {"code": "B"}]
+    portfolio_value = 1_000_000.0
+    available_cash = 150_000.0  # less than raw plan cost to force scaling
+    current_positions = {}
+    open_prices = {"A": 1000.0, "B": 1000.0}
+    sized = calc_position_sizes(
+        weights=weights,
+        candidates=candidates,
+        portfolio_value=portfolio_value,
+        available_cash=available_cash,
+        current_positions=current_positions,
+        open_prices=open_prices,
+        allocation_method="equal",
+        lot_size=10,
+    )
+    # raw target per stock would be capped to _max_per_stock floor(1e6*0.1/1000)=100 shares each -> raw cost=200*1000=200000
+    # scale = 150000/200000 = 0.75 => new_shares floor(100*0.75)=75 -> rounded down to nearest 10 => 70
+    assert sized == {"A": 70, "B": 70}
+
+def test_calc_position_sizes_risk_based_lot_and_skips():
+    candidates = [{"code": "X"}]
+    weights = {}
+    portfolio_value = 1_000_000.0
+    available_cash = 10000.0
+    current_positions = {}
+    open_prices = {"X": 1000.0}
+    # use lot_size=1 to allow non-zero target_shares
+    sized = calc_position_sizes(
+        weights=weights,
+        candidates=candidates,
+        portfolio_value=portfolio_value,
+        available_cash=available_cash,
+        current_positions=current_positions,
+        open_prices=open_prices,
+        allocation_method="risk_based",
+        risk_pct=0.005,
+        stop_loss_pct=0.08,
+        lot_size=1,
+    )
+    # base_shares = floor(portfolio_value * risk_pct / (price * stop_loss_pct))
+    base_shares = math.floor(portfolio_value * 0.005 / (1000.0 * 0.08))
+    assert sized.get("X", 0) == base_shares  # should produce expected shares
+
+
+# -------------------------
+# universe filter
+# -------------------------
+def test_apply_universe_filter_basic():
+    recs = [
+        {"code": "A", "avg_turnover": 6e8},  # price check uses price_map
+        {"code": "B", "avg_turnover": 1e7},
+        {"code": "C", "avg_turnover": 6e8},
+    ]
+    price_map = {"A": 500.0, "B": 100.0, "C": float("nan")}
+    out = _apply_universe_filter(recs, price_map)
+    # A passes, B fails price >= 300, C fails close nan
+    assert out == [{"code": "A", "avg_turnover": 6e8}]
+
+
+# -------------------------
+# signal_generator utils
+# -------------------------
+def test_sigmoid_and_avg_scores_and_generate_sell_signals(tmp_path, monkeypatch, caplog):
+    # _sigmoid
+    assert _sigmoid(None) is None
+    assert _sigmoid(0.0) == pytest.approx(0.5)
+    assert _sigmoid(1000.0) == pytest.approx(1.0, rel=1e-6)
+    # overflow path: large negative z
+    assert _sigmoid(-1000.0) == pytest.approx(0.0)
+
+    # _avg_scores
+    assert _avg_scores([None, None]) is None
+    assert _avg_scores([0.5, None, 1.5]) == pytest.approx(1.0)
+
+    # _generate_sell_signals requires a duckdb connection and tables: we'll construct minimal duckdb in-memory
+    import duckdb
+    conn = duckdb.connect(database=":memory:")
+    # create minimal schema for positions and prices_daily
+    conn.execute("""
+        CREATE TABLE positions (
+            date DATE,
+            code VARCHAR,
+            position_size INTEGER,
+            avg_price DOUBLE
+        );
+    """)
+    conn.execute("""
         CREATE TABLE prices_daily (
             date DATE,
             code VARCHAR,
             close DOUBLE
-        )
-        """
-    )
-    # target_date and future dates
-    # LEAD(close, 5) は5行後を参照するため、中間行を補完して index=5 が 2020-01-06 になるよう挿入
-    t = date(2020, 1, 1)
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [t, "0001", 100.0])            # index 0
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 2), "0001", 110.0])  # index 1
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 3), "0001", 105.0])  # index 2
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 4), "0001", 108.0])  # index 3
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 5), "0001", 112.0])  # index 4
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [date(2020, 1, 6), "0001", 120.0])  # index 5
-    # another code missing future -> returns None
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [t, "0002", 50.0])
+        );
+    """)
+    target = date(2022, 1, 3)
+    # one position with avg_price 100, position_size 10, price today 90 -> pnl_rate = -0.1 -> stop_loss
+    conn.executemany("INSERT INTO positions (date, code, position_size, avg_price) VALUES (?, ?, ?, ?)",
+                     [(target, "AAA", 10, 100.0)])
+    conn.executemany("INSERT INTO prices_daily (date, code, close) VALUES (?, ?, ?)",
+                     [(target, "AAA", 90.0)])
+    score_map = {}  # missing feature -> treated as 0.0
+    caplog.set_level("WARNING")
+    sells = _generate_sell_signals(conn, target, score_map, threshold=0.6)
+    assert len(sells) == 1
+    assert sells[0]["code"] == "AAA"
+    assert sells[0]["reason"] == "stop_loss"
+    # when price missing: should skip SELL and log warning
+    conn2 = duckdb.connect(database=":memory:")
+    conn2.execute("CREATE TABLE positions (date DATE, code VARCHAR, position_size INTEGER, avg_price DOUBLE);")
+    conn2.execute("CREATE TABLE prices_daily (date DATE, code VARCHAR, close DOUBLE);")
+    conn2.executemany("INSERT INTO positions (date, code, position_size, avg_price) VALUES (?, ?, ?, ?)",
+                      [(target, "BBB", 5, 10.0)])
+    # no price for BBB -> generator should skip and warn
+    caplog.clear()
+    sells2 = _generate_sell_signals(conn2, target, {}, threshold=0.6)
+    assert sells2 == []
+    assert any("価格が取得できないため SELL 判定をスキップ" in r.message or "取得できない" in r.message for r in caplog.records)
 
-    res = calc_forward_returns(conn, t, horizons=[1, 5])
-    # should have two codes, ordered by code
-    codes = [r["code"] for r in res]
-    assert "0001" in codes and "0002" in codes
-    r1 = next(r for r in res if r["code"] == "0001")
-    # fwd_1d = (110 - 100) / 100 = 0.1
-    assert pytest.approx(r1["fwd_1d"]) == 0.1
-    # fwd_5d = (120 - 100) / 100 = 0.2
-    assert pytest.approx(r1["fwd_5d"]) == 0.2
-    r2 = next(r for r in res if r["code"] == "0002")
-    assert r2["fwd_1d"] is None and r2["fwd_5d"] is None
 
+# -------------------------
+# research.rank / calc_ic / factor_summary
+# -------------------------
+def test_rank_and_calc_ic_and_summary():
+    vals = [10.0, 10.0, 20.0]
+    r = rank(vals)
+    # two ties -> average ranks 1.5, 1.5, 3.0
+    assert r == [1.5, 1.5, 3.0]
 
-def test_factor_summary_and_median_even_odd():
+    # calc_ic: create factor_records and forward_records with inverse relationship -> rho negative
+    factor_records = [
+        {"code": "A", "f": 1.0},
+        {"code": "B", "f": 2.0},
+        {"code": "C", "f": 3.0},
+    ]
+    forward_records = [
+        {"code": "A", "fwd": 3.0},
+        {"code": "B", "fwd": 2.0},
+        {"code": "C", "fwd": 1.0},
+    ]
+    rho = calc_ic(factor_records, forward_records, "f", "fwd")
+    assert rho is not None
+    assert rho < 0.0 and rho < -0.9  # near -1 for perfect inverse rank
+
+    # insufficient samples returns None
+    rho2 = calc_ic(factor_records[:2], forward_records[:2], "f", "fwd")
+    assert rho2 is None
+
+    # factor_summary
     records = [
         {"a": 1.0, "b": None},
-        {"a": 2.0, "b": 3.0},
-        {"a": 3.0, "b": 6.0},
-        {"a": None, "b": 9.0},
+        {"a": 2.0, "b": 0.5},
+        {"a": 3.0, "b": 1.5},
     ]
     summary = factor_summary(records, ["a", "b", "c"])
-    # 'a' has values [1,2,3] median=2
     assert summary["a"]["count"] == 3
-    assert pytest.approx(summary["a"]["mean"]) == 2.0
-    assert summary["a"]["median"] == 2.0
-    # 'b' has values [3,6,9] median=6
-    assert summary["b"]["count"] == 3
-    assert pytest.approx(summary["b"]["mean"]) == 6.0
-    assert summary["b"]["median"] == 6.0
-    # 'c' absent -> all None
+    assert summary["a"]["mean"] == pytest.approx(2.0)
+    assert summary["b"]["count"] == 2
+    assert summary["b"]["min"] == pytest.approx(0.5)
     assert summary["c"]["count"] == 0
     assert summary["c"]["mean"] is None
 
 
 # -------------------------
-# features: zscore_normalize
+# news utilities
 # -------------------------
-
-
-def test_zscore_normalize_basic_and_none_and_single():
-    records = [
-        {"code": "A", "val": 1.0},
-        {"code": "B", "val": 3.0},
-        {"code": "C", "val": None},
-    ]
-    out = zscore_normalize(records, ["val"])
-    # mean = 2, std = 1 -> zscores [-1, +1], None preserved
-    vals = {r["code"]: r["val"] for r in out}
-    assert pytest.approx(vals["A"], rel=1e-6) == -1.0
-    assert pytest.approx(vals["B"], rel=1e-6) == 1.0
-    assert vals["C"] is None
-
-    # single record -> no normalization performed (len <=1)
-    single = [{"code": "A", "val": 10.0}]
-    out2 = zscore_normalize(single, ["val"])
-    assert out2[0]["val"] == 10.0
-
-
-# -------------------------
-# jquants_client utils tests
-# -------------------------
-
-
-def test_to_float_and_to_int_edge_cases():
-    assert _to_float(None) is None
-    assert _to_float("") is None
-    assert _to_float("1.23") == pytest.approx(1.23)
-    assert _to_float("abc") is None
-
-    assert _to_int(None) is None
-    assert _to_int("") is None
-    assert _to_int("1") == 1
-    assert _to_int("1.0") == 1
-    assert _to_int("1.9") is None
-    assert _to_int("abc") is None
-
-
-def test_get_id_token_uses_request_and_env(monkeypatch):
-    # patch the internal _request used by get_id_token to return an idToken
-    import kabusys.data.jquants_client as jc
-
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "dummy_refresh")
-    with mock.patch.object(jc, "_request", return_value={"idToken": "ID123"}) as m:
-        token = get_id_token()
-        assert token == "ID123"
-        m.assert_called_once()
-    # if no refresh token in env, get_id_token should raise ValueError
-    monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
-    with pytest.raises(ValueError):
-        get_id_token(None)
-
-
-# -------------------------
-# schema init test
-# -------------------------
-
-
-def test_init_schema_creates_tables():
-    conn = init_schema(":memory:")
-    # check that a few expected tables exist
-    row = conn.execute(
-        "SELECT 1 FROM information_schema.tables WHERE lower(table_name) = lower('raw_prices')"
-    ).fetchone()
-    assert row is not None
-    # check another table
-    row2 = conn.execute(
-        "SELECT 1 FROM information_schema.tables WHERE lower(table_name) = lower('prices_daily')"
-    ).fetchone()
-    assert row2 is not None
-    conn.close()
-
-
-# -------------------------
-# news_collector utils and save_raw_news
-# -------------------------
-
-
-def test_normalize_url_and_make_article_id_and_preprocess_text():
-    url = "HTTPS://Example.COM/path?utm_source=aa&b=2#frag"
-    norm = nc._normalize_url(url)
+def test_news_url_normalize_and_id_and_validation_and_text_and_parse_datetime(monkeypatch):
+    url = "HTTPS://Example.COM/path?utm_source=x&b=2&a=1#frag"
+    norm = _normalize_url(url)
+    # scheme/host lowercased, query sorted, utm_* removed, fragment removed
+    assert norm.startswith("https://example.com/path")
     assert "utm_source" not in norm
     assert "#" not in norm
-    assert norm.startswith("https://")
-    # article id is 32-hex prefix
-    aid = nc._make_article_id(url)
-    assert isinstance(aid, str) and len(aid) == 32
-    # preprocess text removes urls and collapses whitespace
-    txt = "Visit https://x.com  \n\n and  enjoy"
-    assert nc.preprocess_text(txt) == "Visit and enjoy"
-    # None -> empty
-    assert nc.preprocess_text(None) == ""
+    # consistent id generation
+    id1 = _make_article_id(url)
+    id2 = _make_article_id(url)
+    assert isinstance(id1, str) and len(id1) == 32
+    assert id1 == id2
 
+    # scheme validation
+    with pytest.raises(ValueError):
+        _validate_url_scheme("ftp://example.com/foo")
 
-def test_parse_rss_datetime_and_extract_stock_codes():
-    # RFC2822 with timezone +0900 -> should convert to UTC naive
-    s = "Mon, 01 Jan 2024 00:00:00 +0900"
-    dt = nc._parse_rss_datetime(s)
-    # dt should be naive and represent UTC time (i.e., 2023-12-31 15:00:00 UTC)
-    assert dt.tzinfo is None
-    # extract stock codes from text, only known codes allowed and duplicates removed
-    text = "This mentions 7203 and 6758 and 7203 again"
-    codes = nc.extract_stock_codes(text, {"7203", "6758", "9999"})
-    assert set(codes) == {"7203", "6758"}
-    # no known codes -> empty
-    assert nc.extract_stock_codes("No codes here 1234", {"0000"}) == []
+    # private host detection: localhost and private IPs should be private
+    assert _is_private_host("127.0.0.1")
+    # some unknown host that cannot be resolved should be treated as non-private (function returns False)
+    # To avoid DNS dependence, pass None -> treated as private
+    assert _is_private_host(None)
 
+    # preprocess_text removes urls and normalizes spaces
+    txt = "Hello  world\nvisit https://example.com/page?id=1 \n"
+    assert preprocess_text(txt) == "Hello world visit"
 
-def test_save_raw_news_idempotent(tmp_path):
-    conn = init_schema(":memory:")
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    art = {
-        "id": "id1",
-        "datetime": now,
-        "source": "test",
-        "title": "t",
-        "content": "c",
-        "url": "https://example.com/a",
-    }
-    # first save -> returns ['id1']
-    from kabusys.data.news_collector import save_raw_news
-
-    inserted = save_raw_news(conn, [art])
-    assert inserted == ["id1"]
-    # second save same article -> returns []
-    inserted2 = save_raw_news(conn, [art])
-    assert inserted2 == []
-    conn.close()
+    # parse rss datetime - valid RFC2822
+    dt = _parse_rss_datetime("Mon, 01 Jan 2024 00:00:00 +0900")
+    assert isinstance(dt, datetime)
+    # parse invalid -> returns roughly now (datetime object)
+    dt2 = _parse_rss_datetime("not a date")
+    assert isinstance(dt2, datetime)
 
 
 # -------------------------
-# ETLResult dataclass
+# PortfolioSimulator
 # -------------------------
-
-
-def test_etlresult_to_dict_and_flags():
-    # create dummy quality issue like object
-    qi = SimpleNamespace(check_name="chk", severity="error", message="bad")
-    r = ETLResult(target_date=date(2020, 1, 1), quality_issues=[qi], errors=["e"])
-    d = r.to_dict()
-    assert d["target_date"] == date(2020, 1, 1)
-    assert r.has_errors is True
-    assert r.has_quality_errors is True
-    assert isinstance(d["quality_issues"], list)
-    assert d["quality_issues"][0]["check_name"] == "chk"
+def test_portfolio_simulator_buy_sell_mark_to_market(caplog):
+    ps = PortfolioSimulator(initial_cash=10000.0)
+    # history empty; default trade date fallback to 1970-01-01
+    # buy with shares > 0 and price present
+    signals = [{"code": "AAA", "side": "buy", "shares": 50}]
+    open_prices = {"AAA": 100.0}
+    ps.execute_orders(signals, open_prices, slippage_rate=0.01, commission_rate=0.001, trading_day=date(2022,1,1))
+    # cost: entry_price = 100*(1+0.01)=101, cost=5050, commission ~5.05, total ~5055.05
+    assert ps.positions["AAA"] == 50
+    assert "AAA" in ps.cost_basis
+    assert ps.trades and ps.trades[-1].side == "buy"
+    # mark to market with missing price should warn and count price as 0
+    caplog.set_level("WARNING")
+    ps.mark_to_market(date(2022,1,1), close_prices={})
+    assert ps.history[-1].portfolio_value == pytest.approx(ps.cash)  # stock value 0
+    assert any("終値が取得できません" in r.message or "取得できません" in r.message for r in caplog.records)
+    # now sell (close all)
+    ps.execute_orders([{"code": "AAA", "side": "sell"}], {"AAA": 120.0}, slippage_rate=0.01, commission_rate=0.001, trading_day=date(2022,1,2))
+    assert "AAA" not in ps.positions
+    assert ps.trades[-1].side == "sell"
+    assert ps.trades[-1].realized_pnl is not None

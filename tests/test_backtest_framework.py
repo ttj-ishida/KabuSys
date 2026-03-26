@@ -120,7 +120,7 @@ def _make_simulator(initial_cash: float = 1_000_000):
 def test_simulator_buy_reduces_cash():
     """BUY 約定 → 現金が (株数 × 約定価格 + 手数料) 分減る。"""
     sim = _make_simulator(1_000_000)
-    signals = [{"code": "1234", "side": "buy", "alloc": 200_000}]
+    signals = [{"code": "1234", "side": "buy", "shares": 100}]
     open_prices = {"1234": 1000.0}
     slippage = 0.001
     commission = 0.00055
@@ -128,7 +128,7 @@ def test_simulator_buy_reduces_cash():
     sim.execute_orders(signals, open_prices, slippage, commission)
 
     entry_price = 1000.0 * (1 + slippage)  # 1001.0
-    shares = int(200_000 // entry_price)     # 199
+    shares = 100
     cost = shares * entry_price
     comm = cost * commission
     expected_cash = 1_000_000 - cost - comm
@@ -138,7 +138,7 @@ def test_simulator_buy_reduces_cash():
 def test_simulator_buy_slippage():
     """BUY 約定価格 = open * (1 + slippage_rate)。"""
     sim = _make_simulator()
-    signals = [{"code": "1234", "side": "buy", "alloc": 500_000}]
+    signals = [{"code": "1234", "side": "buy", "shares": 100}]
     open_prices = {"1234": 2000.0}
     sim.execute_orders(signals, open_prices, slippage_rate=0.001, commission_rate=0.00055)
 
@@ -152,9 +152,9 @@ def test_simulator_sell_realized_pnl():
     sim = _make_simulator()
     # まず BUY して cost_basis を確立
     sim.execute_orders(
-        [{"code": "1234", "side": "buy", "alloc": 300_000}],
+        [{"code": "1234", "side": "buy", "shares": 300}],
         {"1234": 1000.0},
-        slippage_rate=0.0,   # スリッページなしで計算を単純化
+        slippage_rate=0.0,
         commission_rate=0.0,
     )
     buy_trade = sim.trades[0]
@@ -209,7 +209,7 @@ def test_simulator_no_price_skips_buy():
     """open_prices に code が存在しない BUY シグナルはスキップ（ログのみ）。"""
     sim = _make_simulator()
     sim.execute_orders(
-        [{"code": "9999", "side": "buy", "alloc": 100_000}],
+        [{"code": "9999", "side": "buy", "shares": 100}],
         {},  # 価格なし
         slippage_rate=0.001,
         commission_rate=0.00055,
@@ -219,15 +219,15 @@ def test_simulator_no_price_skips_buy():
 
 
 def test_simulator_insufficient_cash_skips_buy():
-    """alloc > cash の場合、shares=0 になりスキップ。"""
+    """shares > 0 でも現金不足なら全体をスキップ。"""
     sim = _make_simulator(initial_cash=100)  # 現金が極端に少ない
     sim.execute_orders(
-        [{"code": "1234", "side": "buy", "alloc": 100_000}],
-        {"1234": 10_000.0},
+        [{"code": "1234", "side": "buy", "shares": 100}],
+        {"1234": 10_000.0},  # 100株 × 10000円 = 1,000,000 円必要
         slippage_rate=0.0,
         commission_rate=0.0,
     )
-    assert len(sim.trades) == 0
+    assert len(sim.trades) == 0  # 現金不足でスキップ
 
 
 # ---------------------------------------------------------------------------
@@ -442,3 +442,422 @@ def test_run_backtest_max_position_pct(conn):
         if trade.side == "buy":
             invested = trade.shares * trade.price
             assert invested <= initial_cash * 0.10 * 1.01  # 1% の誤差許容
+
+
+# ---------------------------------------------------------------------------
+# Task 6: engine.py — Phase 5 helpers and run_backtest updates
+# ---------------------------------------------------------------------------
+
+def test_fetch_regime_returns_bull_on_no_data(conn):
+    """_fetch_regime: market_regime にデータなし → 'bull' を返す。"""
+    from kabusys.backtest.engine import _fetch_regime
+    from datetime import date
+
+    result = _fetch_regime(conn, date(2024, 1, 5))
+    assert result == "bull"
+
+
+def test_fetch_regime_returns_correct_label(conn):
+    """_fetch_regime: market_regime にデータあり → regime_label を返す。"""
+    from kabusys.backtest.engine import _fetch_regime
+    from datetime import date
+
+    d = date(2024, 1, 5)
+    conn.execute(
+        "INSERT INTO market_regime (date, regime_score, regime_label) VALUES (?, ?, ?)",
+        [d, -0.5, "bear"],
+    )
+    result = _fetch_regime(conn, d)
+    assert result == "bear"
+
+
+def test_fetch_sector_map_empty_table(conn):
+    """_fetch_sector_map: stocks テーブルが空なら {}。"""
+    from kabusys.backtest.engine import _fetch_sector_map
+
+    result = _fetch_sector_map(conn)
+    assert result == {}
+
+
+def test_fetch_sector_map_returns_data(conn):
+    """_fetch_sector_map: stocks テーブルからセクターマップを返す。"""
+    from kabusys.backtest.engine import _fetch_sector_map
+
+    conn.execute(
+        "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
+        ["1234", "テスト", "Prime", "電気機器"],
+    )
+    conn.execute(
+        "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
+        ["5678", "サンプル", "Standard", "機械"],
+    )
+    result = _fetch_sector_map(conn)
+    assert result == {"1234": "電気機器", "5678": "機械"}
+
+
+def test_build_backtest_conn_copies_stocks(conn):
+    """_build_backtest_conn → stocks テーブルが bt_conn にコピーされる。"""
+    from kabusys.backtest.engine import _build_backtest_conn
+    from datetime import date
+
+    conn.execute(
+        "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
+        ["1234", "テスト", "Prime", "電気機器"],
+    )
+    bt_conn = _build_backtest_conn(conn, date(2024, 1, 5), date(2024, 1, 5))
+    row = bt_conn.execute("SELECT sector FROM stocks WHERE code = '1234'").fetchone()
+    assert row is not None
+    assert row[0] == "電気機器"
+    bt_conn.close()
+
+
+def test_read_day_signals_includes_score(conn):
+    """_read_day_signals → buy_signals に score フィールドが含まれる。"""
+    from kabusys.backtest.engine import _read_day_signals
+    from datetime import date
+
+    d = date(2024, 1, 5)
+    conn.execute(
+        "INSERT INTO signals (date, code, side, score, signal_rank) VALUES (?, ?, ?, ?, ?)",
+        [d, "1234", "buy", 0.85, 1],
+    )
+    buy_signals, sell_signals = _read_day_signals(conn, d)
+    assert len(buy_signals) == 1
+    assert "score" in buy_signals[0]
+    assert abs(buy_signals[0]["score"] - 0.85) < 1e-9
+
+
+def test_run_backtest_new_params_accepted(conn):
+    """run_backtest が新パラメータ（allocation_method, max_positions 等）を受け付ける。"""
+    from kabusys.backtest.engine import run_backtest, BacktestResult
+    from datetime import date
+
+    _setup_minimal_backtest(conn)
+
+    result = run_backtest(
+        conn=conn,
+        start_date=date(2024, 1, 4),
+        end_date=date(2024, 1, 9),
+        allocation_method="equal",
+        max_positions=5,
+        max_utilization=0.70,
+    )
+
+    assert isinstance(result, BacktestResult)
+
+
+def test_run_backtest_risk_based_method(conn):
+    """run_backtest の allocation_method="risk_based" が動作する。"""
+    from kabusys.backtest.engine import run_backtest, BacktestResult
+    from datetime import date
+
+    _setup_minimal_backtest(conn)
+
+    result = run_backtest(
+        conn=conn,
+        start_date=date(2024, 1, 4),
+        end_date=date(2024, 1, 9),
+        allocation_method="risk_based",
+        risk_pct=0.005,
+        stop_loss_pct=0.08,
+    )
+
+    assert isinstance(result, BacktestResult)
+
+
+def test_run_backtest_default_max_position_pct_is_010(conn):
+    """run_backtest のデフォルト max_position_pct は 0.10（Phase 5 設計書準拠）。"""
+    import inspect
+    from kabusys.backtest.engine import run_backtest
+
+    sig = inspect.signature(run_backtest)
+    default = sig.parameters["max_position_pct"].default
+    assert default == 0.10, f"max_position_pct のデフォルトが {default}（0.10 であること）"
+
+
+# ---------------------------------------------------------------------------
+# レビュー対応: 追加テスト
+# ---------------------------------------------------------------------------
+
+def test_fetch_sector_map_excludes_empty_string_sector(conn):
+    """_fetch_sector_map: 空文字セクターは除外される（'unknown' フォールバックに委ねる）。"""
+    from kabusys.backtest.engine import _fetch_sector_map
+
+    conn.execute(
+        "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
+        ["1111", "正常", "Prime", "電気機器"],
+    )
+    conn.execute(
+        "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
+        ["2222", "空文字セクター", "Prime", ""],
+    )
+    conn.execute(
+        "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
+        ["3333", "スペースのみ", "Prime", "   "],
+    )
+
+    result = _fetch_sector_map(conn)
+
+    assert "1111" in result
+    assert result["1111"] == "電気機器"
+    assert "2222" not in result, "空文字セクターはマップに含まれてはならない"
+    assert "3333" not in result, "スペースのみのセクターはマップに含まれてはならない"
+
+
+def test_execute_buy_partial_fill_when_insufficient_cash():
+    """_execute_buy: 現金不足でも max_affordable_shares で部分約定する。
+
+    cash=95_000, entry_price=1000*(1+0.001)=1001, commission_rate=0.00055
+    total_cost(100株) = 100*1001*(1+0.00055) = 101_155.5 > 95_000
+    → max_affordable = floor(95_000 / (1001 * 1.00055)) = floor(94.86) = 94 株
+    → 94 株で約定
+    """
+    from kabusys.backtest.simulator import PortfolioSimulator
+    from datetime import date
+
+    sim = PortfolioSimulator(initial_cash=95_000.0)
+    sim._execute_buy(
+        code="1234",
+        shares=100,
+        open_prices={"1234": 1000.0},
+        slippage_rate=0.001,
+        commission_rate=0.00055,
+        trading_day=date(2024, 1, 5),
+    )
+
+    assert "1234" in sim.positions, "部分約定で保有が発生するはず"
+    assert sim.positions["1234"] > 0
+    assert sim.positions["1234"] < 100, "100株未満の部分約定"
+    assert sim.cash >= 0, "現金がマイナスになってはならない"
+
+
+def test_execute_buy_full_skip_when_price_too_high():
+    """_execute_buy: 1株も買えない場合は約定しない。"""
+    from kabusys.backtest.simulator import PortfolioSimulator
+    from datetime import date
+
+    sim = PortfolioSimulator(initial_cash=500.0)  # 1株1000円を買えない
+    sim._execute_buy(
+        code="1234",
+        shares=100,
+        open_prices={"1234": 1000.0},
+        slippage_rate=0.001,
+        commission_rate=0.00055,
+        trading_day=date(2024, 1, 5),
+    )
+
+    assert "1234" not in sim.positions
+    assert sim.cash == 500.0
+
+
+def test_run_backtest_invalid_allocation_method_raises(conn):
+    """run_backtest に不正な allocation_method を渡すと ValueError が発生する。"""
+    from kabusys.backtest.engine import run_backtest
+    from datetime import date
+    import pytest
+
+    _setup_minimal_backtest(conn)
+
+    with pytest.raises(ValueError, match="allocation_method"):
+        run_backtest(
+            conn=conn,
+            start_date=date(2024, 1, 4),
+            end_date=date(2024, 1, 9),
+            allocation_method="invalid_method",
+        )
+
+
+def test_run_backtest_available_cash_capped_by_max_utilization(conn):
+    """available_cash = min(cash*multiplier, pv*max_utilization) が適用される。
+
+    max_utilization=0.0 なら available_cash=0 → 発注株数がゼロになる。
+    """
+    from kabusys.backtest.engine import run_backtest
+    from datetime import date
+
+    _setup_minimal_backtest(conn)
+
+    result = run_backtest(
+        conn=conn,
+        start_date=date(2024, 1, 4),
+        end_date=date(2024, 1, 9),
+        initial_cash=10_000_000,
+        max_utilization=0.0,  # 全ポジション禁止
+    )
+
+    buy_trades = [t for t in result.trades if t.side == "buy"]
+    assert len(buy_trades) == 0, "max_utilization=0.0 では BUY 約定が発生してはならない"
+
+
+def test_execute_buy_partial_fill_lot_size_rounded(conn):
+    """_execute_buy: 部分約定は lot_size=100 で単元丸めされる。
+
+    cash=150_000, entry_price≈1001, lot_size=100
+    → max_affordable_raw = floor(150_000 / 1001) = 149
+    → lot 丸め: (149 // 100) * 100 = 100 株で約定
+    """
+    from kabusys.backtest.simulator import PortfolioSimulator
+    from datetime import date
+
+    sim = PortfolioSimulator(initial_cash=150_000.0)
+    sim._execute_buy(
+        code="1234",
+        shares=200,
+        open_prices={"1234": 1000.0},
+        slippage_rate=0.001,
+        commission_rate=0.00055,
+        trading_day=date(2024, 1, 5),
+        lot_size=100,
+    )
+
+    assert "1234" in sim.positions
+    assert sim.positions["1234"] % 100 == 0, "部分約定でも単元株単位になること"
+    assert sim.cash >= 0
+
+
+def test_execute_buy_partial_fill_lot_size_default_no_rounding():
+    """lot_size=1（デフォルト）では単元丸めせずに部分約定する（後方互換）。"""
+    from kabusys.backtest.simulator import PortfolioSimulator
+    from datetime import date
+
+    sim = PortfolioSimulator(initial_cash=95_000.0)
+    sim._execute_buy(
+        code="1234",
+        shares=100,
+        open_prices={"1234": 1000.0},
+        slippage_rate=0.001,
+        commission_rate=0.00055,
+        trading_day=date(2024, 1, 5),
+        lot_size=1,  # デフォルト: 単元丸めなし
+    )
+
+    assert "1234" in sim.positions
+    assert sim.positions["1234"] < 100
+
+
+def test_select_candidates_tiebreak_by_signal_rank():
+    """同一スコアの銘柄は signal_rank 昇順でタイブレークされる。"""
+    from kabusys.portfolio.portfolio_builder import select_candidates
+
+    signals = [
+        {"code": "A", "signal_rank": 3, "score": 0.5},
+        {"code": "B", "signal_rank": 1, "score": 0.5},  # 同スコア・より低い rank
+        {"code": "C", "signal_rank": 2, "score": 0.5},
+    ]
+    result = select_candidates(signals, max_positions=2)
+    codes = [c["code"] for c in result]
+    assert codes[0] == "B", "signal_rank が最小（優先度が高い）の B が先頭"
+    assert codes[1] == "C"
+
+
+def test_execute_buy_non_lot_multiple_warns(caplog):
+    """_execute_buy: shares が lot_size の倍数でない場合に WARNING ログを出す。"""
+    import logging
+    from kabusys.backtest.simulator import PortfolioSimulator
+    from datetime import date
+
+    sim = PortfolioSimulator(initial_cash=1_000_000.0)
+    with caplog.at_level(logging.WARNING, logger="kabusys.backtest.simulator"):
+        sim._execute_buy(
+            code="1234",
+            shares=150,  # lot_size=100 の倍数でない
+            open_prices={"1234": 1000.0},
+            slippage_rate=0.001,
+            commission_rate=0.00055,
+            trading_day=date(2024, 1, 5),
+            lot_size=100,
+        )
+    assert any("単元株数" in r.message for r in caplog.records), "WARNING ログが出ること"
+
+
+def test_execute_buy_lot_multiple_no_warn(caplog):
+    """_execute_buy: shares が lot_size の倍数のとき WARNING ログは出ない。"""
+    import logging
+    from kabusys.backtest.simulator import PortfolioSimulator
+    from datetime import date
+
+    sim = PortfolioSimulator(initial_cash=1_000_000.0)
+    with caplog.at_level(logging.WARNING, logger="kabusys.backtest.simulator"):
+        sim._execute_buy(
+            code="1234",
+            shares=200,  # 100 の倍数
+            open_prices={"1234": 1000.0},
+            slippage_rate=0.001,
+            commission_rate=0.00055,
+            trading_day=date(2024, 1, 5),
+            lot_size=100,
+        )
+    assert not any("単元株数" in r.message for r in caplog.records), "WARNING ログが出ないこと"
+
+
+def test_run_backtest_invalid_risk_pct_raises(conn):
+    """risk_pct が範囲外なら ValueError を発生させる（risk_based 時のみ）。"""
+    from kabusys.backtest.engine import run_backtest
+    from datetime import date
+    import pytest
+
+    _setup_minimal_backtest(conn)
+
+    with pytest.raises(ValueError, match="risk_pct"):
+        run_backtest(
+            conn=conn,
+            start_date=date(2024, 1, 4),
+            end_date=date(2024, 1, 9),
+            allocation_method="risk_based",
+            risk_pct=0.0,
+        )
+
+
+def test_run_backtest_invalid_stop_loss_pct_raises(conn):
+    """stop_loss_pct=0 は除算ゼロになるため ValueError を発生させる。"""
+    from kabusys.backtest.engine import run_backtest
+    from datetime import date
+    import pytest
+
+    _setup_minimal_backtest(conn)
+
+    with pytest.raises(ValueError, match="stop_loss_pct"):
+        run_backtest(
+            conn=conn,
+            start_date=date(2024, 1, 4),
+            end_date=date(2024, 1, 9),
+            stop_loss_pct=0.0,
+        )
+
+
+def test_run_backtest_invalid_max_utilization_raises(conn):
+    """max_utilization が範囲外なら ValueError を発生させる。"""
+    from kabusys.backtest.engine import run_backtest
+    from datetime import date
+    import pytest
+
+    _setup_minimal_backtest(conn)
+
+    with pytest.raises(ValueError, match="max_utilization"):
+        run_backtest(
+            conn=conn,
+            start_date=date(2024, 1, 4),
+            end_date=date(2024, 1, 9),
+            max_utilization=1.5,
+        )
+
+
+def test_run_backtest_cli_params(conn):
+    """run_backtest が CLI から渡される新パラメータを正しく受け付ける。"""
+    from kabusys.backtest.engine import run_backtest, BacktestResult
+    from datetime import date
+
+    _setup_minimal_backtest(conn)
+
+    result = run_backtest(
+        conn=conn,
+        start_date=date(2024, 1, 4),
+        end_date=date(2024, 1, 9),
+        allocation_method="equal",
+        max_utilization=0.50,
+        max_positions=5,
+        risk_pct=0.01,
+        stop_loss_pct=0.10,
+    )
+
+    assert isinstance(result, BacktestResult)

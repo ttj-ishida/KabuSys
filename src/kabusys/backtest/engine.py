@@ -14,6 +14,14 @@ import duckdb
 
 from kabusys.backtest.metrics import BacktestMetrics, calc_metrics
 from kabusys.backtest.simulator import DailySnapshot, PortfolioSimulator, TradeRecord
+from kabusys.portfolio import (
+    apply_sector_cap,
+    calc_equal_weights,
+    calc_position_sizes,
+    calc_regime_multiplier,
+    calc_score_weights,
+    select_candidates,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +96,20 @@ def _build_backtest_conn(
     except Exception as exc:
         logger.warning("_build_backtest_conn: market_calendar のコピーをスキップ: %s", exc)
 
+    # stocks は全件コピー（銘柄のセクターは日付フィルタなし）
+    # TIMESTAMPTZ 型の updated_at 列は pytz 依存のため除外し、明示列のみコピーする
+    try:
+        rows = source_conn.execute(
+            "SELECT code, name, market, sector FROM stocks"
+        ).fetchall()
+        if rows:
+            bt_conn.executemany(
+                "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
+                rows,
+            )
+    except Exception as exc:
+        logger.warning("_build_backtest_conn: stocks のコピーをスキップ: %s", exc)
+
     return bt_conn
 
 
@@ -151,15 +173,13 @@ def _read_day_signals(
 ) -> tuple[list[dict], list[dict]]:
     """指定日の signals テーブルから BUY / SELL シグナルを読み取る。
 
-    generate_signals() の呼び出し後に使用する。
-
     Returns:
         (buy_signals, sell_signals)
-        buy_signals:  [{"code": str, "signal_rank": int}, ...]
+        buy_signals:  [{"code": str, "signal_rank": int, "score": float}, ...]
         sell_signals: [{"code": str}, ...]
     """
     buy_rows = conn.execute(
-        "SELECT code, signal_rank FROM signals "
+        "SELECT code, signal_rank, score FROM signals "
         "WHERE date = ? AND side = 'buy' ORDER BY signal_rank",
         [trading_day],
     ).fetchall()
@@ -167,9 +187,38 @@ def _read_day_signals(
         "SELECT code FROM signals WHERE date = ? AND side = 'sell'",
         [trading_day],
     ).fetchall()
-    buy_signals = [{"code": row[0], "signal_rank": row[1]} for row in buy_rows]
+    buy_signals = [{"code": row[0], "signal_rank": row[1], "score": row[2] or 0.0} for row in buy_rows]
     sell_signals = [{"code": row[0]} for row in sell_rows]
     return buy_signals, sell_signals
+
+
+def _fetch_regime(conn: duckdb.DuckDBPyConnection, trading_day: date) -> str:
+    """market_regime テーブルから当日レジームを返す。データなしなら 'bull' でフォールバック。
+
+    schema.py の market_regime テーブルのレジーム列名は `regime_label`。
+    """
+    row = conn.execute(
+        "SELECT regime_label FROM market_regime WHERE date = ?", [trading_day]
+    ).fetchone()
+    if row is None:
+        # バックテスト序盤などでレジームデータが未整備の場合は通常の運用。INFO に留める。
+        logger.info(
+            "_fetch_regime: %s のレジームが取得できません。'bull' でフォールバック。", trading_day
+        )
+        return "bull"
+    return row[0]
+
+
+def _fetch_sector_map(conn: duckdb.DuckDBPyConnection) -> dict[str, str]:
+    """stocks テーブルから {code: sector} を返す。テーブルが空なら {}。
+
+    空文字・空白のみのセクターは NULL 扱いとし、マップから除外する
+    （apply_sector_cap 側で "unknown" にフォールバックされる）。
+    """
+    rows = conn.execute(
+        "SELECT code, NULLIF(TRIM(sector), '') AS sector FROM stocks WHERE NULLIF(TRIM(sector), '') IS NOT NULL"
+    ).fetchall()
+    return {code: sector for code, sector in rows if sector}
 
 
 # ---------------------------------------------------------------------------
@@ -183,43 +232,77 @@ def run_backtest(
     initial_cash: float = 10_000_000,
     slippage_rate: float = 0.001,
     commission_rate: float = 0.00055,
-    max_position_pct: float = 0.20,
+    max_position_pct: float = 0.10,
+    max_utilization: float = 0.70,
+    max_positions: int = 10,
+    allocation_method: str = "risk_based",
+    risk_pct: float = 0.005,
+    stop_loss_pct: float = 0.08,
+    lot_size: int = 100,
 ) -> BacktestResult:
     """バックテストを実行し結果を返す。
 
-    本番 DB の conn からインメモリ DuckDB にデータをコピーし、
-    generate_signals() を使って日次シミュレーションを行う。
-
     Args:
-        conn:             本番 DuckDB 接続（読み取り専用で使用）。
-        start_date:       バックテスト開始日（含む）。
-        end_date:         バックテスト終了日（含む）。
-        initial_cash:     初期資金（円）。
-        slippage_rate:    スリッページ率（デフォルト 0.1%）。
-        commission_rate:  手数料率（デフォルト 0.055%）。
-        max_position_pct: 1銘柄あたりの最大ポートフォリオ比率（デフォルト 20%）。
+        conn:              本番 DuckDB 接続（読み取り専用で使用）。
+        start_date:        バックテスト開始日（含む）。
+        end_date:          バックテスト終了日（含む）。
+        initial_cash:      初期資金（円）。
+        slippage_rate:     スリッページ率（デフォルト 0.1%）。
+        commission_rate:   手数料率（デフォルト 0.055%）。
+        max_position_pct:  1銘柄あたりの最大ポートフォリオ比率（デフォルト 10%）。
+        max_utilization:   全ポジション投下上限（デフォルト 70%）。
+        max_positions:     最大保有銘柄数（デフォルト 10）。
+        allocation_method: 資金配分方式: "equal" | "score" | "risk_based"（デフォルト）。
+        risk_pct:          1トレード許容リスク率（risk_based 時、デフォルト 0.5%）。
+        stop_loss_pct:     損切り率（株数計算用、risk_based 時、デフォルト 8%）。
+        lot_size:          単元株数（デフォルト 100）。日本株の標準単元。
 
     Returns:
         BacktestResult（history, trades, metrics）。
     """
+    _VALID_ALLOCATION_METHODS = {"equal", "score", "risk_based"}
+    if allocation_method not in _VALID_ALLOCATION_METHODS:
+        raise ValueError(
+            f"allocation_method は {_VALID_ALLOCATION_METHODS} のいずれかを指定してください: {allocation_method!r}"
+        )
+    if stop_loss_pct <= 0:
+        raise ValueError(f"stop_loss_pct は正の値を指定してください: {stop_loss_pct}")
+    if not (0 < max_position_pct <= 1):
+        raise ValueError(f"max_position_pct は (0, 1] の範囲で指定してください: {max_position_pct}")
+    if not (0 <= max_utilization <= 1):
+        raise ValueError(f"max_utilization は [0, 1] の範囲で指定してください: {max_utilization}")
+    if max_positions < 1:
+        raise ValueError(f"max_positions は 1 以上を指定してください: {max_positions}")
+    if slippage_rate < 0 or commission_rate < 0:
+        raise ValueError(f"slippage_rate / commission_rate は 0 以上を指定してください")
+    if allocation_method == "risk_based" and not (0 < risk_pct < 1):
+        raise ValueError(f"risk_pct は (0, 1) の範囲で指定してください: {risk_pct}")
+    if lot_size < 1:
+        raise ValueError(f"lot_size は 1 以上を指定してください: {lot_size}")
+
     from kabusys.data.calendar_management import get_trading_days
     from kabusys.strategy.signal_generator import generate_signals
 
     bt_conn = _build_backtest_conn(conn, start_date, end_date)
     simulator = PortfolioSimulator(initial_cash=initial_cash)
-    signals_prev: list[dict] = []
+    # バックテストループ内でメモリ上に持ち回る翌日用発注リスト
+    # （本番 live trading とは異なり、バックテストは単一関数呼び出し内で完結するためDB永続化不要）
+    next_day_orders: list[dict] = []
 
     try:
         trading_days = get_trading_days(bt_conn, start_date, end_date)
         logger.info(
-            "run_backtest: 開始 start=%s end=%s 営業日数=%d 初期資金=%.0f",
-            start_date, end_date, len(trading_days), initial_cash,
+            "run_backtest: 開始 start=%s end=%s 営業日数=%d 初期資金=%.0f allocation=%s",
+            start_date, end_date, len(trading_days), initial_cash, allocation_method,
         )
 
+        # sector_map はバックテスト開始前に一度だけ取得（銘柄のセクターは日次変化しない）
+        sector_map = _fetch_sector_map(bt_conn)
+
         for trading_day in trading_days:
-            # Step 1: 前日シグナルを当日 open で約定
+            # Step 1: 前日生成の発注リストを当日 open で約定
             open_prices = _fetch_open_prices(bt_conn, trading_day)
-            simulator.execute_orders(signals_prev, open_prices, slippage_rate, commission_rate, trading_day)
+            simulator.execute_orders(next_day_orders, open_prices, slippage_rate, commission_rate, trading_day, lot_size=lot_size)
 
             # Step 2: positions テーブルに書き戻し（generate_signals の SELL 判定に必要）
             _write_positions(bt_conn, trading_day, simulator.positions, simulator.cost_basis)
@@ -231,25 +314,58 @@ def run_backtest(
             # Step 4: 翌日用シグナル生成（bt_conn の positions を読んで SELL 判定）
             generate_signals(bt_conn, target_date=trading_day)
 
-            # Step 5: 翌日の発注リストを組み立て（ポジションサイジング）
+            # Step 5: ポートフォリオ構築（Phase 5 モジュール使用）
             buy_signals, sell_signals = _read_day_signals(bt_conn, trading_day)
-            num_buy = len(buy_signals)
-            if num_buy > 0 and simulator.cash > 0:
-                prior_pv = simulator.history[-1].portfolio_value if simulator.history else initial_cash
-                alloc = min(
-                    prior_pv * max_position_pct,
-                    simulator.cash / num_buy,
-                )
-            else:
-                alloc = 0.0
+            regime = _fetch_regime(bt_conn, trading_day)
+            multiplier = calc_regime_multiplier(regime)
+            # 当日 mark_to_market 後の最新ポートフォリオ価値（翌日用発注サイジングに使用）
+            current_pv = simulator.history[-1].portfolio_value if simulator.history else initial_cash
+            # max_utilization を全配分方式に一貫適用（risk_based 含む）
+            available_cash = min(simulator.cash * multiplier, current_pv * max_utilization)
 
-            signals_prev = [
-                {"code": s["code"], "side": "buy", "alloc": alloc}
-                for s in buy_signals
-            ] + [
-                {"code": s["code"], "side": "sell"}
-                for s in sell_signals
-            ]
+            # セクター制限を全候補に先行適用し、除外後に上位 max_positions を選ぶ
+            # （従来の select → filter では除外後の補充がなかった）
+            sell_codes = {s["code"] for s in sell_signals}
+            all_sorted = select_candidates(buy_signals, max_positions=len(buy_signals))
+            filtered = apply_sector_cap(
+                all_sorted, sector_map, current_pv, simulator.positions, close_prices,
+                sell_codes=sell_codes,
+            )
+            candidates = filtered[:max_positions]
+
+            if allocation_method == "equal":
+                weights = calc_equal_weights(candidates)
+            elif allocation_method == "score":
+                weights = calc_score_weights(candidates)
+            else:
+                weights = {}  # risk_based は weights 不使用
+
+            # サイジングは当日終値ベース（当日クローズ時点の最新価格で翌日発注量を見積もる）。
+            # 実際の約定は翌日始値で行われるが、当日終値がより新鮮な近似値。
+            # apply_sector_cap も close_prices を使っており、価格基準を統一している。
+            sized = calc_position_sizes(
+                weights=weights,
+                candidates=candidates,
+                portfolio_value=current_pv,
+                available_cash=available_cash,
+                current_positions=simulator.positions,
+                open_prices=close_prices,
+                allocation_method=allocation_method,
+                risk_pct=risk_pct,
+                stop_loss_pct=stop_loss_pct,
+                max_position_pct=max_position_pct,
+                max_utilization=max_utilization,
+                cost_buffer=slippage_rate + commission_rate,
+                lot_size=lot_size,
+            )
+
+            # 翌日の約定に使う発注リストをメモリ上で更新（次ループの Step 1 で消費）
+            # BUY と SELL が同一銘柄になる場合は BUY を除外（SELL を優先）
+            next_day_orders = [
+                {"code": code, "side": "buy", "shares": shares}
+                for code, shares in sized.items()
+                if shares > 0 and code not in sell_codes
+            ] + [{"code": s["code"], "side": "sell"} for s in sell_signals]
     finally:
         bt_conn.close()
     metrics = calc_metrics(simulator.history, simulator.trades)

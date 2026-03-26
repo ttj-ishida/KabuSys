@@ -34,8 +34,21 @@ def main() -> None:
     parser.add_argument("--cash", type=float, default=10_000_000, help="Initial cash (JPY) [default: 10000000]")
     parser.add_argument("--slippage", type=float, default=0.001, help="Slippage rate [default: 0.001]")
     parser.add_argument("--commission", type=float, default=0.00055, help="Commission rate [default: 0.00055]")
-    parser.add_argument("--max-position-pct", type=float, default=0.20,
-                        help="Max position size as %% of portfolio per security [default: 0.20]")
+    parser.add_argument("--max-position-pct", type=float, default=0.10,
+                        help="Max position size as %% of portfolio per security [default: 0.10]")
+    parser.add_argument("--allocation-method", default="risk_based",
+                        choices=["equal", "score", "risk_based"],
+                        help="Capital allocation method [default: risk_based]")
+    parser.add_argument("--max-utilization", type=float, default=0.70,
+                        help="Max fraction of portfolio to deploy [default: 0.70]")
+    parser.add_argument("--max-positions", type=int, default=10,
+                        help="Max number of concurrent positions [default: 10]")
+    parser.add_argument("--risk-pct", type=float, default=0.005,
+                        help="Risk per trade as fraction of portfolio (risk_based only) [default: 0.005]")
+    parser.add_argument("--stop-loss-pct", type=float, default=0.08,
+                        help="Stop-loss rate for position sizing (risk_based only) [default: 0.08]")
+    parser.add_argument("--lot-size", type=int, default=100,
+                        help="Lot size (shares per lot) for Japanese stocks [default: 100]")
     parser.add_argument("--db", required=True, help="DuckDB file path")
     args = parser.parse_args()
 
@@ -63,6 +76,12 @@ def main() -> None:
             slippage_rate=args.slippage,
             commission_rate=args.commission,
             max_position_pct=args.max_position_pct,
+            allocation_method=args.allocation_method,
+            max_utilization=args.max_utilization,
+            max_positions=args.max_positions,
+            risk_pct=args.risk_pct,
+            stop_loss_pct=args.stop_loss_pct,
+            lot_size=args.lot_size,
         )
     finally:
         conn.close()
