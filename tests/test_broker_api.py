@@ -113,3 +113,100 @@ def test_create_broker_api_mock_returns_mock_client():
     from kabusys.execution.mock_client import MockBrokerClient
     api = create_broker_api(mock=True)
     assert isinstance(api, MockBrokerClient)
+
+
+from kabusys.execution.mock_client import MockBrokerClient
+
+
+# ---------------------------------------------------------------------------
+# MockBrokerClient — ハッピーパス（instant fill）
+# ---------------------------------------------------------------------------
+
+def test_mock_send_order_instant_fill():
+    """instant モードでの発注：即約定し positions と cash が更新される。"""
+    client = MockBrokerClient(fill_mode="instant", available_cash=1_000_000.0)
+    req = OrderRequest(code="1234", qty=100, price=500.0, order_type="limit")
+
+    resp = client.send_order(req)
+
+    assert resp.order_id.startswith("MOCK")
+    # 約定済み状態
+    status = client.get_order_status(resp.order_id)
+    assert status is not None
+    assert status.status == "filled"
+    assert status.filled_qty == 100
+    assert status.code == "1234"
+    assert status.side == "buy"
+    # ポジション更新
+    positions = client.get_positions()
+    assert len(positions) == 1
+    assert positions[0].code == "1234"
+    assert positions[0].qty == 100
+    assert positions[0].avg_price == 500.0
+    # 現金減少
+    cash = client.get_available_cash()
+    assert cash == 1_000_000.0 - 100 * 500.0
+
+
+def test_mock_send_order_market_order_instant_fill():
+    """成行注文（price=0.0）は price=0.0 で約定記録される。"""
+    client = MockBrokerClient(fill_mode="instant", available_cash=1_000_000.0)
+    req = OrderRequest(code="5678", qty=50)  # market order
+
+    resp = client.send_order(req)
+    status = client.get_order_status(resp.order_id)
+
+    assert status.status == "filled"
+    assert status.price == 0.0  # 成行は価格 0.0 で記録
+
+
+def test_mock_cancel_order_open():
+    """open 状態の注文はキャンセルできる。"""
+    client = MockBrokerClient(fill_mode="partial")
+    req = OrderRequest(code="1234", qty=100, price=500.0, order_type="limit")
+    resp = client.send_order(req)
+
+    client.cancel_order(resp.order_id)
+
+    status = client.get_order_status(resp.order_id)
+    assert status.status == "cancelled"
+
+
+def test_mock_get_order_status_not_found():
+    """存在しない order_id は None を返す。"""
+    client = MockBrokerClient()
+    assert client.get_order_status("NONEXISTENT") is None
+
+
+def test_mock_get_positions_initial():
+    """initial_positions が反映される。"""
+    initial = [Position(code="1234", qty=200, avg_price=600.0)]
+    client = MockBrokerClient(initial_positions=initial)
+    positions = client.get_positions()
+    assert len(positions) == 1
+    assert positions[0].code == "1234"
+    assert positions[0].qty == 200
+
+
+def test_mock_get_available_cash_decreases_after_buy():
+    """buy 後に利用可能現金が減少する。"""
+    client = MockBrokerClient(fill_mode="instant", available_cash=500_000.0)
+    req = OrderRequest(code="3333", qty=10, price=1000.0, order_type="limit")
+    client.send_order(req)
+    assert client.get_available_cash() == 490_000.0
+
+
+def test_mock_sell_order_increases_cash():
+    """sell 後に利用可能現金が増加し、ポジションが減少する。"""
+    initial = [Position(code="1234", qty=100, avg_price=500.0)]
+    client = MockBrokerClient(
+        fill_mode="instant",
+        available_cash=0.0,
+        initial_positions=initial,
+    )
+    req = OrderRequest(code="1234", side="sell", qty=50, price=600.0, order_type="limit")
+    client.send_order(req)
+
+    assert client.get_available_cash() == 50 * 600.0
+    positions = client.get_positions()
+    assert positions[0].qty == 50
