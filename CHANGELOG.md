@@ -1,123 +1,97 @@
 # Changelog
 
 すべての重要な変更はこのファイルに記録します。  
-フォーマットは「Keep a Changelog」に準拠し、セマンティックバージョニングを使用します。
+フォーマットは「Keep a Changelog」に準拠します。
 
-現在のバージョン: 0.1.0 - 初回リリース
-
-<!--
-  参考: Keep a Changelog のセクション
-  - Added: 新機能
-  - Changed: 既存機能の変更
-  - Deprecated: 非推奨
-  - Removed: 削除
-  - Fixed: バグ修正
-  - Security: セキュリティ修正
--->
+なお、本CHANGELOGはコードベースから推測した変更点／機能説明をもとに作成しています。
 
 ## [Unreleased]
 
-今後のリリース向けの保留中の変更はここに記載します。
+### Added
+- なし（次回リリースに向けた未反映の変更はありません）
 
 ---
 
 ## [0.1.0] - 2026-03-27
 
-初回公開リリース。日本株自動売買システムのコアライブラリを提供します。主な内容は以下のとおりです。
+初回公開リリース。以下の主要機能とモジュールを実装しました。
 
 ### Added
-- パッケージ基礎
-  - パッケージ名: kabusys、バージョン 0.1.0 を設定（src/kabusys/__init__.py）。
-  - モジュール群: data, research, ai, execution, strategy, monitoring を公開。
+- パッケージ基盤
+  - kabusys パッケージ初期バージョン（__version__ = "0.1.0"）。
+  - パッケージ公開APIとして data, strategy, execution, monitoring を __all__ に定義。
 
-- 環境設定管理
-  - .env ファイルと OS 環境変数を統合して読み込む自動ローダーを実装（src/kabusys/config.py）。
-    - プロジェクトルート検出は __file__ を基点に .git または pyproject.toml を探索し、CWD 非依存で動作。
-    - 読み込み順序は OS 環境 > .env.local > .env。KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で自動ロード無効化可能。
-    - .env パーサは export 構文、シングル/ダブルクォート、バックスラッシュエスケープ、インラインコメントの取り扱いに対応。
-    - _load_env_file は既存 OS 環境変数の保護機能（protected）を持ち、override フラグで上書き制御。
-  - Settings クラスを提供し、J-Quants / kabuステーション / Slack / DB パス / 実行環境等の設定をプロパティ経由で取得（必須値未設定時は明確な例外を送出）。
-  - 環境値検証（KABUSYS_ENV の有効値制限、LOG_LEVEL のバリデーション）を実装。
+- 設定管理（kabusys.config）
+  - .env / .env.local ファイルと OS 環境変数を組み合わせた自動設定読み込みを実装。
+    - プロジェクトルートは __file__ を起点に .git または pyproject.toml を探索して特定。
+    - KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で自動ロードを無効化可能。
+  - .env パーサは以下に対応：
+    - export KEY=val 形式
+    - シングル/ダブルクォートとバックスラッシュエスケープ
+    - インラインコメントの取り扱い（クォート有無に応じた解析）
+  - Settings クラスを提供し、アプリ設定をプロパティ経由で取得可能：
+    - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, KABU_API_BASE_URL
+    - SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
+    - DUCKDB_PATH（既定: data/kabusys.duckdb）, SQLITE_PATH（既定: data/monitoring.db）
+    - KABUSYS_ENV（development / paper_trading / live の検証）と LOG_LEVEL の検証
+    - is_live / is_paper / is_dev の便利プロパティ
 
-- AI（自然言語処理）モジュール
-  - ニュースセンチメント分析 (score_news)
-    - raw_news + news_symbols を銘柄ごとに集約し、OpenAI（gpt-4o-mini）へバッチ送信して銘柄別スコアを ai_scores テーブルへ保存（src/kabusys/ai/news_nlp.py）。
-    - 設計上の特徴:
-      - JST 時刻ウィンドウ（前日15:00〜当日08:30）を UTC に変換して厳格に処理（calc_news_window）。
-      - 1チャンク最大 20 銘柄、1銘柄あたり最大記事数・最大文字数でトリム。
-      - 429・ネットワーク断・タイムアウト・5xx を対象に指数バックオフでリトライ。その他エラーはスキップして継続（フェイルセーフ）。
-      - JSON Mode のレスポンスを堅牢にパースし、余分な前後テキストから最外側の {} を抽出する復元処理を実装。
-      - スコアは ±1.0 にクリップ。部分失敗に備え、ai_scores は該当コードのみ DELETE → INSERT の置換を行う（冪等性確保）。
-      - テスト容易性のため OpenAI 呼び出し関数を patch で差し替え可能（_call_openai_api）。
-  - 市場レジーム判定 (score_regime)
-    - ETF 1321 の 200 日 MA 乖離（重み70%）とマクロニュース LLM センチメント（重み30%）を合成して日次レジーム（bull / neutral / bear）を決定し market_regime テーブルへ保存（src/kabusys/ai/regime_detector.py）。
-    - 設計上の特徴:
-      - prices_daily の date < target_date の排他条件など、ルックアヘッドバイアス防止の取り扱いを徹底。
-      - API 失敗時は macro_sentiment=0.0 として継続するフェイルセーフ。
-      - OpenAI 呼び出しは独立実装でモジュール結合を避ける。最大リトライ・エクスポネンシャルバックオフを実装。
+- AI（kabusys.ai）
+  - ニュースセンチメントスコアリング（kabusys.ai.news_nlp）
+    - raw_news / news_symbols を読み、銘柄ごとにニュースを集約。
+    - OpenAI（gpt-4o-mini）へバッチ送信し、{"results": [{"code": "...", "score": ...}, ...]} 形式でスコアを取得。
+    - バッチサイズ、記事数・文字数上限、JSONレスポンスの堅牢なバリデーションを実装。
+    - 429 / ネットワーク断 / タイムアウト / 5xx に対する指数バックオフリトライ。
+    - スコアは ±1.0 にクリップ。取得したスコアを ai_scores テーブルへ冪等的に書き込み（DELETE → INSERT）。
+    - 時間ウィンドウ計算（JST基準） calc_news_window を提供（テスト容易性のため datetime.today/date.today を直接参照しない設計）。
+    - テスト用に _call_openai_api を差し替え可能。
+  - 市場レジーム判定（kabusys.ai.regime_detector）
+    - ETF 1321（日経225連動型）の 200 日移動平均乖離（重み 70%）とマクロニュースの LLM センチメント（重み 30%）を合成し、日次で市場レジーム（bull/neutral/bear）を判定。
+    - prices_daily と raw_news を参照し、market_regime テーブルへ冪等書き込み（BEGIN / DELETE / INSERT / COMMIT）。
+    - OpenAI 呼び出しは専用実装で、API キー注入可能（api_key 引数 or OPENAI_API_KEY 環境変数）。
+    - APIエラー時は macro_sentiment=0.0 のフェイルセーフで継続、リトライとログ出力を実装。
 
-- リサーチ（ファクター計算・特徴量探索）
-  - ファクター計算モジュール（src/kabusys/research/factor_research.py）
-    - Momentum: mom_1m / mom_3m / mom_6m と ma200_dev（200日MA乖離）を計算。
-    - Volatility & Liquidity: 20日 ATR、相対ATR、20日平均売買代金、出来高比率を計算。
-    - Value: PER（EPSが0/欠損なら None）、ROE を raw_financials と prices_daily から計算。
-    - DuckDB SQL を主体に実装し、結果を (date, code) キーの dict リストで返す。
-  - 特徴量探索モジュール（src/kabusys/research/feature_exploration.py）
-    - forward returns（将来リターン）の計算（horizons デフォルト [1,5,21]）。
-    - IC（Spearman の ρ）計算（rank による tie の平均化を考慮）。
-    - factor_summary: count/mean/std/min/max/median を算出。
-    - rank ユーティリティ（同順位は平均ランク）および zscore_normalize の再エクスポートを提供。
+- データプラットフォーム（kabusys.data）
+  - カレンダー管理（kabusys.data.calendar_management）
+    - market_calendar テーブルを利用した営業日判定ロジックを提供：
+      - is_trading_day, next_trading_day, prev_trading_day, get_trading_days, is_sq_day
+    - DB 登録が無い日については曜日ベース（土日非営業日）でフォールバック。
+    - calendar_update_job により J-Quants API からの差分取得・バックフィル・保存処理を実装。
+    - 最大探索日数・バックフィル日数・健全性チェックなど安全対策を導入。
+  - ETL パイプライン（kabusys.data.pipeline / etl）
+    - ETLResult データクラス（target_date, fetched/saved counts, quality_issues, errors 等）を実装して公開（kabusys.data.etl で再エクスポート）。
+    - 差分取得、idempotent な保存（jquants_client の save_* を想定）および品質チェック設計方針を反映。
+    - DB 最大日付取得等のユーティリティを実装。
+    - backfill を考慮した範囲計算と市場カレンダー連携。
 
-- データプラットフォーム（DuckDB ベース）
-  - マーケットカレンダー管理（src/kabusys/data/calendar_management.py）
-    - is_trading_day / next_trading_day / prev_trading_day / get_trading_days / is_sq_day を提供。
-    - market_calendar が未取得の場合は曜日ベース（土日非営業日）のフォールバック。
-    - calendar_update_job: J-Quants API から差分取得して market_calendar を冪等更新。バックフィル・健全性チェックを実装。
-  - ETL パイプライン基盤（src/kabusys/data/pipeline.py）
-    - ETLResult データクラスを導入（取得件数、保存件数、品質問題、エラー集計など）。
-    - 差分取得、バックフィル（日数制御）、品質チェックのポイントを設計に明示。
-    - _get_max_date 等の DB ヘルパー実装。
-  - ETL ユーティリティの公開インターフェースを提供（src/kabusys/data/etl.py）。
-
-- 外部 API クライアント設計
-  - jquants_client への参照を使った差分取得・保存処理を想定（実装ファイルは data パッケージ内で利用）。
-  - OpenAI クライアント呼び出しは OpenAI SDK を利用（api_key を引数注入可能、テスト時は patch で差し替え可能）。
-
-- 汎用設計方針・品質
-  - ルックアヘッドバイアス防止: 主要なスコアリング処理で datetime.today()/date.today() を直接参照しない実装方針を徹底。
-  - DB 書き込みは冪等性を重視（DELETE → INSERT、ON CONFLICT 等を想定）。トランザクション（BEGIN/COMMIT/ROLLBACK）で障害時に整合性を保護。
-  - API 呼び出しの堅牢化（リトライ・バックオフ・エラーハンドリング）やレスポンス検証を多数実装。
-  - 外部依存を抑え、標準ライブラリ + duckdb + OpenAI SDK を中心に設計（pandas 等に依存しない実装）。
+- リサーチ（kabusys.research）
+  - Factor 計算（kabusys.research.factor_research）
+    - モメンタム（1M/3M/6M リターン、ma200 乖離）、ボラティリティ（20 日 ATR）、流動性（平均売買代金、出来高比率）、バリュー（PER, ROE）等を DuckDB 上の SQL で計算する関数を提供：
+      - calc_momentum, calc_volatility, calc_value
+    - データ不足時には None を返す等の堅牢性を確保。
+  - 特徴量探索（kabusys.research.feature_exploration）
+    - 将来リターン算出（calc_forward_returns）、IC（calc_ic）、ランク化ユーティリティ（rank）、および統計サマリー（factor_summary）を実装。
+    - 外部ライブラリへ依存せず標準ライブラリのみで実装。
+    - calc_forward_returns は horizons パラメータの妥当性検査、まとめて1クエリで取得する最適化を実装。
+    - calc_ic はスピアマン（ランク相関）を実装し、データ不足時は None を返す。
 
 ### Changed
-- 初回リリースのため該当なし。
+- 初回リリースのため該当なし（初実装群）。
 
 ### Fixed
 - 初回リリースのため該当なし。
 
-### Deprecated
-- 初回リリースのため該当なし。
-
-### Removed
-- 初回リリースのため該当なし。
-
 ### Security
-- OPENAI_API_KEY 等の機密情報は明示的に引数または環境変数で取得。自動ロード時も OS 環境変数は保護され、.env の上書きは制御可能（protected set）。
+- OpenAI を利用する機能は api_key を引数で注入可能にし、環境変数 OPENAI_API_KEY も利用できるように設計。
+- 必須の機密情報（Slack / API トークン等）は Settings 経由で明示的に要求する実装。
+
+### Notes / Design decisions
+- ルックアヘッドバイアス防止のため、いずれの処理も内部で datetime.today()/date.today() を直接参照しない設計（target_date を明示的に渡す）。
+- DuckDB の executemany に空リストを渡せない制約を考慮し、空チェックを行ってから実行する実装。
+- DB 書き込みは可能な限り冪等化（DELETE → INSERT や ON CONFLICT 相当の保存）を行う。
+- OpenAI 呼出しに対してはリトライ／バックオフ戦略を実装し、API障害時はフェイルセーフ（スコアを 0 またはスキップ）で処理継続。
+- テスト容易性のため、内部の OpenAI 呼び出し関数（_call_openai_api）をモック差し替え可能にしている。
 
 ---
 
-開発者向けメモ（実装上の注意）
-- テスト時は KABUSYS_DISABLE_AUTO_ENV_LOAD を設定して .env 自動ロードを無効化できます。
-- OpenAI 呼び出し部分はモックしやすいよう関数単位で分離しています（unittest.mock.patch を利用）。
-- DuckDB の executemany で空リストを渡せない制約に配慮した実装箇所があります（部分置換ロジック）。
-- 将来の拡張点として、kabu ステーションとの連携・発注ロジックや、監視/モニタリング用テーブルの実装が想定されています。
-
----
-
-（補足）今後のリリースでは以下が想定されます（未実装機能・改善候補）
-- 発注実行モジュール（kabu API 経由）の実装とテスト
-- 監視・アラート（Slack 連携）ロジックの強化
-- ETL の並列化・パフォーマンス改善、品質チェックルールの拡充
-- ai モジュールの追加評価指標やプロンプト改善
-
-以上。
+作成にあたってコードベースから機能・設計方針を推測してまとめています。リリースノートや変更履歴の追加・修正が必要であれば、目的に合わせて日付・詳細・セクションを更新します。
