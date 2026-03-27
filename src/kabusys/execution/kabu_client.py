@@ -22,6 +22,17 @@ from kabusys.execution.broker_api import (
 
 logger = logging.getLogger(__name__)
 
+# kabu station 注文状態コード → 内部ステータス文字列
+_KABU_STATUS_MAP: dict[int, str] = {
+    1: "open",       # 待機
+    2: "open",       # 処理中
+    3: "open",       # 受付済
+    4: "partial",    # 一部約定
+    5: "filled",     # 全部約定
+    6: "cancelled",  # 取消済
+    7: "rejected",   # 失効
+}
+
 
 class KabuStationClient:
     """kabu station REST API クライアント。
@@ -171,17 +182,8 @@ class KabuStationClient:
 
     def _parse_order_status(self, data: dict) -> OrderStatus:
         """kabu station の注文データを OrderStatus に変換する。"""
-        _STATUS_MAP = {
-            1: "open",      # 待機
-            2: "open",      # 処理中
-            3: "open",      # 受付済
-            4: "partial",   # 一部約定
-            5: "filled",    # 全部約定
-            6: "cancelled", # 取消済
-            7: "rejected",  # 失効
-        }
         raw_status = data.get("State", 0)
-        status_str = _STATUS_MAP.get(raw_status, "open")
+        status_str = _KABU_STATUS_MAP.get(raw_status, "open")
 
         filled_details = [d for d in data.get("Details", []) if d.get("Type") == 3]
         filled_qty = sum(int(d.get("Qty", 0)) for d in filled_details)
