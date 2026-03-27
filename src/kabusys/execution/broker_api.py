@@ -91,7 +91,7 @@ class BrokerAPIProtocol(Protocol):
     def cancel_order(self, order_id: str) -> None:
         """注文をキャンセルする。
         - 対象注文が存在しない → BrokerAPIError
-        - 既に filled の注文 → BrokerAPIError（キャンセル不可）
+        - 既に filled / cancelled / rejected の注文 → BrokerAPIError（キャンセル不可）
         """
         ...
 
