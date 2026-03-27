@@ -93,8 +93,8 @@ class MockBrokerClient:
         if order_id not in self._orders:
             raise BrokerAPIError(f"注文が見つかりません: {order_id}")
         status = self._orders[order_id]
-        if status.status == "filled":
-            raise BrokerAPIError(f"約定済み注文はキャンセルできません: {order_id}")
+        if status.status in ("filled", "cancelled", "rejected"):
+            raise BrokerAPIError(f"キャンセルできない状態の注文です (status={status.status}): {order_id}")
         self._orders[order_id] = OrderStatus(
             order_id=order_id,
             code=status.code,

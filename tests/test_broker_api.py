@@ -1,6 +1,8 @@
 """BrokerAPI クライアント層のテスト。MockBrokerClient を使い kabu station 不要で実行可能。"""
 from __future__ import annotations
 
+import pytest
+
 from kabusys.execution.broker_api import (
     BrokerAPIError,
     BrokerAPIProtocol,
@@ -258,7 +260,6 @@ def test_mock_fill_mode_reject():
     client = MockBrokerClient(fill_mode="reject")
     req = OrderRequest(code="1234", qty=100)
 
-    import pytest
     with pytest.raises(OrderRejectedError):
         client.send_order(req)
 
@@ -267,7 +268,6 @@ def test_mock_cancel_unknown_order_raises():
     """存在しない order_id のキャンセルは BrokerAPIError を raise する。"""
     client = MockBrokerClient()
 
-    import pytest
     with pytest.raises(BrokerAPIError):
         client.cancel_order("UNKNOWN9999")
 
@@ -278,7 +278,6 @@ def test_mock_cancel_filled_order_raises():
     req = OrderRequest(code="1234", qty=100, price=500.0, order_type="limit")
     resp = client.send_order(req)
 
-    import pytest
     with pytest.raises(BrokerAPIError):
         client.cancel_order(resp.order_id)
 
@@ -321,3 +320,30 @@ def test_mock_sell_without_position_does_not_credit_cash():
     req = OrderRequest(code="9999", side="sell", qty=10, price=1000.0, order_type="limit")
     client.send_order(req)
     assert client.get_available_cash() == 500_000.0  # unchanged
+
+
+def test_mock_cancel_already_cancelled_order_raises():
+    """cancelled 状態の注文を再キャンセルしようとすると BrokerAPIError を raise する。"""
+    client = MockBrokerClient(fill_mode="partial")
+    req = OrderRequest(code="1234", qty=100, price=500.0, order_type="limit")
+    resp = client.send_order(req)
+    client.cancel_order(resp.order_id)
+    with pytest.raises(BrokerAPIError):
+        client.cancel_order(resp.order_id)
+
+
+def test_mock_fill_order_unknown_raises():
+    """存在しない order_id に fill_order() を呼ぶと BrokerAPIError を raise する。"""
+    client = MockBrokerClient()
+    with pytest.raises(BrokerAPIError):
+        client.fill_order("UNKNOWN9999")
+
+
+def test_mock_fill_order_cancelled_raises():
+    """cancelled 状態の注文に fill_order() を呼ぶと BrokerAPIError を raise する。"""
+    client = MockBrokerClient(fill_mode="partial")
+    req = OrderRequest(code="1234", qty=100, price=500.0, order_type="limit")
+    resp = client.send_order(req)
+    client.cancel_order(resp.order_id)
+    with pytest.raises(BrokerAPIError):
+        client.fill_order(resp.order_id)
