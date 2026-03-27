@@ -87,7 +87,7 @@ class MockBrokerClient:
                     self._positions[code] = Position(
                         code=code, qty=new_qty, avg_price=pos.avg_price
                     )
-            self._cash += qty * price
+                self._cash += qty * price
 
     def cancel_order(self, order_id: str) -> None:
         if order_id not in self._orders:

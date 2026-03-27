@@ -13,6 +13,7 @@ from kabusys.execution.broker_api import (
     WalletInfo,
     create_broker_api,
 )
+from kabusys.execution.mock_client import MockBrokerClient
 
 
 def test_order_request_defaults():
@@ -113,9 +114,6 @@ def test_create_broker_api_mock_returns_mock_client():
     from kabusys.execution.mock_client import MockBrokerClient
     api = create_broker_api(mock=True)
     assert isinstance(api, MockBrokerClient)
-
-
-from kabusys.execution.mock_client import MockBrokerClient
 
 
 # ---------------------------------------------------------------------------
