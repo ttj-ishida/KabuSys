@@ -59,6 +59,13 @@ class KabuStationClient:
         self._token: str | None = None
         self._client = httpx.Client(timeout=timeout)
 
+    def _json(self, resp: httpx.Response) -> object:
+        """レスポンスを JSON としてパースする。パース失敗は BrokerAPIError に変換する。"""
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise BrokerAPIError(f"レスポンスの JSON パース失敗: {exc}") from exc
+
     def _get_token(self) -> str:
         """API トークンを取得する（遅延初期化・早朝失効時に自動再取得）。"""
         try:
@@ -74,7 +81,7 @@ class KabuStationClient:
             raise BrokerAPIError(
                 f"トークン取得失敗: {resp.status_code}", status_code=resp.status_code
             )
-        self._token = resp.json()["Token"]
+        self._token = self._json(resp)["Token"]
         return self._token
 
     def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
@@ -109,6 +116,8 @@ class KabuStationClient:
             except httpx.RequestError as exc:
                 raise BrokerAPIError(f"ネットワークエラー（リトライ）: {exc}") from exc
 
+        if resp.status_code == 401:
+            raise BrokerAPIError("認証エラー: トークン再取得後も 401", status_code=401)
         if resp.status_code == 429:
             raise RateLimitError("API レート制限超過", status_code=429)
         if resp.status_code >= 500:
@@ -147,7 +156,7 @@ class KabuStationClient:
                 status_code=resp.status_code,
             )
 
-        data = resp.json()
+        data = self._json(resp)
         if data.get("Result") != 0:
             raise OrderRejectedError(f"発注拒否: {data}")
 
@@ -175,7 +184,7 @@ class KabuStationClient:
                 f"注文照会失敗: {resp.status_code}", status_code=resp.status_code
             )
 
-        orders = resp.json()
+        orders = self._json(resp)
         if not orders:
             return None
 
@@ -217,7 +226,7 @@ class KabuStationClient:
                 f"残高照会失敗: {resp.status_code}", status_code=resp.status_code
             )
         positions = []
-        for p in resp.json() or []:
+        for p in self._json(resp) or []:
             positions.append(
                 Position(
                     code=str(p.get("Symbol", "")),
@@ -234,7 +243,7 @@ class KabuStationClient:
             raise BrokerAPIError(
                 f"余力照会失敗: {resp.status_code}", status_code=resp.status_code
             )
-        return float(resp.json().get("StockAccountWallet", 0.0))
+        return float(self._json(resp).get("StockAccountWallet", 0.0))
 
     def close(self) -> None:
         """HTTP クライアントを閉じる。"""
