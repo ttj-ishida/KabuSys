@@ -47,10 +47,13 @@ class KabuStationClient:
     def __init__(
         self,
         api_password: str,
+        trade_password: str | None = None,
         base_url: str = "http://localhost:18080/kabusapi",
         timeout: float = 10.0,
     ) -> None:
         self._api_password = api_password
+        # trade_password 省略時は api_password と同一とみなす（単一パスワード設定の場合）
+        self._trade_password = trade_password if trade_password is not None else api_password
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._token: str | None = None
@@ -121,7 +124,7 @@ class KabuStationClient:
         front_order_type = 10 if order.order_type == "market" else 20
 
         payload = {
-            "Password": self._api_password,
+            "Password": self._trade_password,
             "Symbol": order.code,
             "Exchange": order.exchange,
             "SecurityType": 1,
@@ -131,14 +134,16 @@ class KabuStationClient:
             "AccountType": order.account_type,
             "Qty": order.qty,
             "FrontOrderType": front_order_type,
-            "Price": order.price,
+            # 成行の場合は Price=0 を強制（呼び出し元が price を誤指定してもサーバー拒否を防ぐ）
+            "Price": 0 if order.order_type == "market" else order.price,
         }
 
         resp = self._request("post", "/sendorder", json=payload)
 
         if resp.status_code != 200:
+            logger.debug("発注拒否レスポンス詳細: %s", resp.text)
             raise OrderRejectedError(
-                f"発注拒否: {resp.status_code} {resp.text}",
+                f"発注拒否: {resp.status_code}",
                 status_code=resp.status_code,
             )
 
@@ -152,7 +157,7 @@ class KabuStationClient:
         """注文をキャンセルする。"""
         payload = {
             "OrderId": order_id,
-            "Password": self._api_password,
+            "Password": self._trade_password,
         }
         resp = self._request("put", "/cancelorder", json=payload)
         if resp.status_code != 200:
@@ -162,9 +167,9 @@ class KabuStationClient:
 
     def get_order_status(self, order_id: str) -> OrderStatus | None:
         """注文状態を照会する。"""
-        resp = self._request("get", f"/orders?id={order_id}")
-        if resp.status_code == 404:
-            return None
+        # クエリパラメータなしで全件取得後に ID フィルタ。
+        # kabu station は id クエリを持たない／無視するケースがあるため。
+        resp = self._request("get", "/orders")
         if resp.status_code != 200:
             raise BrokerAPIError(
                 f"注文照会失敗: {resp.status_code}", status_code=resp.status_code
@@ -174,7 +179,6 @@ class KabuStationClient:
         if not orders:
             return None
 
-        # kabu station は list を返す。order_id で絞り込み
         for o in orders:
             if str(o.get("ID")) == str(order_id):
                 return self._parse_order_status(o)
