@@ -113,9 +113,20 @@ def test_rate_limit_error_is_broker_api_error():
 # ---------------------------------------------------------------------------
 
 def test_create_broker_api_mock_returns_mock_client():
-    from kabusys.execution.mock_client import MockBrokerClient
     api = create_broker_api(mock=True)
     assert isinstance(api, MockBrokerClient)
+
+
+def test_create_broker_api_mock_forwards_kwargs():
+    """create_broker_api(mock=True, ...) が kwargs を MockBrokerClient に転送すること。"""
+    api = create_broker_api(mock=True, available_cash=500_000.0)
+    assert api.get_available_cash() == 500_000.0
+
+
+def test_mock_broker_client_conforms_to_protocol():
+    """MockBrokerClient が BrokerAPIProtocol を満たすこと（構造的部分型）。"""
+    client = MockBrokerClient()
+    assert isinstance(client, BrokerAPIProtocol)
 
 
 # ---------------------------------------------------------------------------
