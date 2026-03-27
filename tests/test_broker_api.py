@@ -208,3 +208,116 @@ def test_mock_sell_order_increases_cash():
     assert client.get_available_cash() == 50 * 600.0
     positions = client.get_positions()
     assert positions[0].qty == 50
+
+
+# ---------------------------------------------------------------------------
+# MockBrokerClient — 部分約定
+# ---------------------------------------------------------------------------
+
+def test_mock_fill_mode_partial():
+    """partial モードでは発注数量の50%のみ約定し status=partial になる。"""
+    client = MockBrokerClient(fill_mode="partial", available_cash=1_000_000.0)
+    req = OrderRequest(code="1234", qty=100, price=500.0, order_type="limit")
+
+    resp = client.send_order(req)
+    status = client.get_order_status(resp.order_id)
+
+    assert status.status == "partial"
+    assert status.filled_qty == 50
+    assert status.qty == 100
+    # 部分約定分だけポジション・現金更新
+    positions = client.get_positions()
+    assert positions[0].qty == 50
+    assert client.get_available_cash() == 1_000_000.0 - 50 * 500.0
+
+
+def test_mock_fill_order_manual():
+    """fill_order() で partial 注文を全量約定させられる。"""
+    client = MockBrokerClient(fill_mode="partial", available_cash=1_000_000.0)
+    req = OrderRequest(code="1234", qty=100, price=500.0, order_type="limit")
+    resp = client.send_order(req)
+
+    client.fill_order(resp.order_id)
+
+    status = client.get_order_status(resp.order_id)
+    assert status.status == "filled"
+    assert status.filled_qty == 100
+    # 残り50株分もポジション更新
+    positions = client.get_positions()
+    assert positions[0].qty == 100
+    # 残り50株分の現金も減少
+    assert client.get_available_cash() == 1_000_000.0 - 100 * 500.0
+
+
+# ---------------------------------------------------------------------------
+# MockBrokerClient — 異常系
+# ---------------------------------------------------------------------------
+
+def test_mock_fill_mode_reject():
+    """reject モードでは OrderRejectedError が raise される。"""
+    client = MockBrokerClient(fill_mode="reject")
+    req = OrderRequest(code="1234", qty=100)
+
+    import pytest
+    with pytest.raises(OrderRejectedError):
+        client.send_order(req)
+
+
+def test_mock_cancel_unknown_order_raises():
+    """存在しない order_id のキャンセルは BrokerAPIError を raise する。"""
+    client = MockBrokerClient()
+
+    import pytest
+    with pytest.raises(BrokerAPIError):
+        client.cancel_order("UNKNOWN9999")
+
+
+def test_mock_cancel_filled_order_raises():
+    """約定済み注文のキャンセルは BrokerAPIError を raise する。"""
+    client = MockBrokerClient(fill_mode="instant", available_cash=1_000_000.0)
+    req = OrderRequest(code="1234", qty=100, price=500.0, order_type="limit")
+    resp = client.send_order(req)
+
+    import pytest
+    with pytest.raises(BrokerAPIError):
+        client.cancel_order(resp.order_id)
+
+
+def test_mock_cancel_partial_order():
+    """partial 状態の注文はキャンセルできる。"""
+    client = MockBrokerClient(fill_mode="partial")
+    req = OrderRequest(code="1234", qty=100, price=500.0, order_type="limit")
+    resp = client.send_order(req)
+
+    client.cancel_order(resp.order_id)
+
+    status = client.get_order_status(resp.order_id)
+    assert status.status == "cancelled"
+
+
+# ---------------------------------------------------------------------------
+# テスト補助メソッド
+# ---------------------------------------------------------------------------
+
+def test_mock_get_order_history():
+    """get_order_history() は送信された全注文の履歴を返す。"""
+    client = MockBrokerClient(fill_mode="instant", available_cash=5_000_000.0)
+    req1 = OrderRequest(code="1111", qty=100, price=500.0, order_type="limit")
+    req2 = OrderRequest(code="2222", qty=200, price=300.0, order_type="limit")
+
+    resp1 = client.send_order(req1)
+    resp2 = client.send_order(req2)
+
+    history = client.get_order_history()
+    assert len(history) == 2
+    order_ids = {s.order_id for s in history}
+    assert resp1.order_id in order_ids
+    assert resp2.order_id in order_ids
+
+
+def test_mock_sell_without_position_does_not_credit_cash():
+    """ポジションのない銘柄の売注文は現金残高を変化させない。"""
+    client = MockBrokerClient(fill_mode="instant", available_cash=500_000.0)
+    req = OrderRequest(code="9999", side="sell", qty=10, price=1000.0, order_type="limit")
+    client.send_order(req)
+    assert client.get_available_cash() == 500_000.0  # unchanged

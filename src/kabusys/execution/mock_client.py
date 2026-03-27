@@ -113,3 +113,30 @@ class MockBrokerClient:
 
     def get_available_cash(self) -> float:
         return self._cash
+
+    def fill_order(self, order_id: str) -> None:
+        """fill_mode="partial" 時に手動で全量約定させる。タイミング依存テストに使用。
+        status を "filled" に更新し、残量（qty - filled_qty）分の _positions と _cash も追加更新する。
+        """
+        if order_id not in self._orders:
+            raise BrokerAPIError(f"注文が見つかりません: {order_id}")
+        status = self._orders[order_id]
+        if status.status in ("filled", "cancelled", "rejected"):
+            raise BrokerAPIError(f"fill_order: 状態 '{status.status}' の注文は変更できません")
+        remaining = status.qty - status.filled_qty
+        if remaining > 0:
+            price = status.price if status.price is not None else 0.0
+            self._apply_fill(status.code, status.side, remaining, price)
+        self._orders[order_id] = OrderStatus(
+            order_id=order_id,
+            code=status.code,
+            side=status.side,
+            qty=status.qty,
+            filled_qty=status.qty,
+            status="filled",
+            price=status.price,
+        )
+
+    def get_order_history(self) -> list[OrderStatus]:
+        """送信された全注文の履歴を返す（アサーション用）。"""
+        return list(self._orders.values())
