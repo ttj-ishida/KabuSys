@@ -47,10 +47,15 @@ class KabuStationClient:
 
     def _get_token(self) -> str:
         """API トークンを取得する（遅延初期化・早朝失効時に自動再取得）。"""
-        resp = self._client.post(
-            f"{self._base_url}/token",
-            json={"APIPassword": self._api_password},
-        )
+        try:
+            resp = self._client.post(
+                f"{self._base_url}/token",
+                json={"APIPassword": self._api_password},
+            )
+        except httpx.TimeoutException as exc:
+            raise BrokerAPIError(f"トークン取得タイムアウト: {exc}") from exc
+        except httpx.RequestError as exc:
+            raise BrokerAPIError(f"トークン取得ネットワークエラー: {exc}") from exc
         if resp.status_code != 200:
             raise BrokerAPIError(
                 f"トークン取得失敗: {resp.status_code}", status_code=resp.status_code
@@ -64,21 +69,31 @@ class KabuStationClient:
             self._get_token()
 
         headers = {"X-API-KEY": self._token}
-        resp = getattr(self._client, method)(
-            f"{self._base_url}{path}",
-            headers=headers,
-            **kwargs,
-        )
-
-        if resp.status_code == 401:
-            logger.info("401 Unauthorized — トークン再取得してリトライ")
-            self._get_token()
-            headers = {"X-API-KEY": self._token}
+        try:
             resp = getattr(self._client, method)(
                 f"{self._base_url}{path}",
                 headers=headers,
                 **kwargs,
             )
+        except httpx.TimeoutException as exc:
+            raise BrokerAPIError(f"タイムアウト: {exc}") from exc
+        except httpx.RequestError as exc:
+            raise BrokerAPIError(f"ネットワークエラー: {exc}") from exc
+
+        if resp.status_code == 401:
+            logger.info("401 Unauthorized — トークン再取得してリトライ")
+            self._get_token()
+            headers = {"X-API-KEY": self._token}
+            try:
+                resp = getattr(self._client, method)(
+                    f"{self._base_url}{path}",
+                    headers=headers,
+                    **kwargs,
+                )
+            except httpx.TimeoutException as exc:
+                raise BrokerAPIError(f"タイムアウト（リトライ）: {exc}") from exc
+            except httpx.RequestError as exc:
+                raise BrokerAPIError(f"ネットワークエラー（リトライ）: {exc}") from exc
 
         if resp.status_code == 429:
             raise RateLimitError("API レート制限超過", status_code=429)
@@ -168,12 +183,14 @@ class KabuStationClient:
         raw_status = data.get("State", 0)
         status_str = _STATUS_MAP.get(raw_status, "open")
 
-        details = data.get("Details", [{}])
-        filled_qty = sum(int(d.get("Qty", 0)) for d in details if d.get("Type") == 3)
+        filled_details = [d for d in data.get("Details", []) if d.get("Type") == 3]
+        filled_qty = sum(int(d.get("Qty", 0)) for d in filled_details)
         avg_price: float | None = None
         if filled_qty > 0:
-            prices = [float(d.get("Price", 0)) for d in details if d.get("Type") == 3]
-            avg_price = sum(prices) / len(prices) if prices else None
+            weighted = sum(
+                float(d.get("Price", 0)) * int(d.get("Qty", 0)) for d in filled_details
+            )
+            avg_price = weighted / filled_qty
 
         side_map = {"1": "sell", "2": "buy"}
         return OrderStatus(
