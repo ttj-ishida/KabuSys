@@ -1,76 +1,112 @@
-# Keep a Changelog — 変更履歴
+# Changelog
 
-この CHANGELOG は Keep a Changelog の形式に準拠しています。  
-初期リリース v0.1.0（初回公開）について、コードベースから推測できる主要な追加・実装内容と設計方針を日本語でまとめます。
+すべての変更は Keep a Changelog の形式に従います。  
+このプロジェクトはセマンティックバージョニングを採用しています。
+
+※ 本ドキュメントはコードベースから推測して作成した初期リリース向けの変更履歴です。
 
 ## [Unreleased]
 
 ## [0.1.0] - 2026-03-27
-初回リリース。日本株自動売買システム「KabuSys」のコア機能を実装しました。主な追加点および実装方針は以下の通りです。
+最初の公開リリース。
 
 ### Added
-- パッケージのエントリポイント
-  - src/kabusys/__init__.py による基本エクスポート（data, strategy, execution, monitoring）。
-  - パッケージバージョン __version__ = "0.1.0" を定義。
+- パッケージの基本構成を追加
+  - パッケージ名: kabusys
+  - バージョン: 0.1.0
+  - __all__ エクスポート: data, strategy, execution, monitoring
 
-- 設定・環境変数管理（kabusys.config）
-  - .env ファイルおよび環境変数から設定を自動読み込み（プロジェクトルート検出：.git または pyproject.toml を基準）。
-  - .env/.env.local の優先順位処理と既存 OS 環境変数の保護（protected set）。
-  - .env の堅牢なパーサー実装：コメント、export プレフィックス、クォート内のエスケープ、インラインコメント等に対応。
-  - 自動ロードを無効化するための環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD をサポート。
-  - Settings クラスを提供し、J-Quants / kabuステーション / Slack / DB パス / システム設定（env, log_level, is_live 等）のプロパティを公開。未設定値は明示的にエラーを出す設計（_require を使用）。
+- 環境設定管理 (`kabusys.config`)
+  - .env ファイルおよび環境変数の自動読み込み機能を実装
+    - 自動読み込みの優先順位: OS 環境変数 > .env.local > .env
+    - プロジェクトルート検出: .git または pyproject.toml を基準に探索
+    - KABUSYS_DISABLE_AUTO_ENV_LOAD=1 により自動ロードを無効化可能
+  - .env 行のパース機能を強化（export プレフィックス対応、シングル/ダブルクォートとバックスラッシュエスケープ、インラインコメント処理）
+  - .env ファイル読み込み時の保護キー（既存 OS 環境変数の保護）対応と override オプション
+  - 必須環境変数未設定時にわかりやすいエラーメッセージを出す _require 関数
+  - Settings クラスで主要設定をプロパティとして提供
+    - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID は必須
+    - KABU_API_BASE_URL, DUCKDB_PATH（デフォルト data/kabusys.duckdb）, SQLITE_PATH（デフォルト data/monitoring.db）などのデフォルト値
+    - KABUSYS_ENV に対する検証（development / paper_trading / live）
+    - LOG_LEVEL に対する検証（DEBUG/INFO/WARNING/ERROR/CRITICAL）
+    - is_live / is_paper / is_dev ヘルパー
 
-- AI モジュール（kabusys.ai）
-  - ニュース NLP（kabusys.ai.news_nlp）
-    - raw_news と news_symbols を元に、銘柄ごとのニュースを集約して OpenAI（gpt-4o-mini）でセンチメントを評価する機能を実装。
-    - バッチ処理（最大20銘柄／リクエスト）、1銘柄当たりの記事数と文字数の上限（トリム）、JSON mode を使った厳密な応答期待。
-    - 429 / ネットワーク断 / タイムアウト / 5xx に対する指数バックオフとリトライロジックを実装。
-    - レスポンスのバリデーション（JSON パース回復ロジック、results 配列検査、コード照合、スコア数値検証、±1.0 クリップ）。
-    - DuckDB への冪等書き込み（DELETE→INSERT）と部分失敗時の既存データ保護。
-    - テスト容易性のため OpenAI 呼び出しは _call_openai_api を経由し patch 可能に設計。
-  - 市場レジーム判定（kabusys.ai.regime_detector）
-    - ETF 1321（日経225連動）200日移動平均乖離（重み 70%）とマクロニュースの LLM センチメント（重み 30%）を合成して日次で市場レジーム（bull/neutral/bear）を判定。
-    - prices_daily と raw_news を参照し、ma200_ratio 計算、マクロキーワードで記事抽出、OpenAI 評価、スコア合成、market_regime テーブルへの冪等書き込みを実装。
-    - API エラー時は macro_sentiment を 0.0 にフォールバック（フェイルセーフ）。
-    - OpenAI 呼び出しのリトライと 5xx 判定での再試行を実装。テスト用に呼び出しを置換可能。
-    - ルックアヘッドバイアス対策として datetime.today()/date.today() を参照しない、DB クエリは target_date 未満の排他条件を使用。
+- AI モジュール (`kabusys.ai`)
+  - ニュース NLP スコアリング (`kabusys.ai.news_nlp`)
+    - score_news(conn, target_date, api_key=None)
+      - 前日15:00 JST〜当日08:30 JST のニュースを対象とするタイムウィンドウ計算（calc_news_window）
+      - raw_news / news_symbols から銘柄ごとに記事を集約（1銘柄あたり最大記事数・文字数でトリム）
+      - OpenAI（gpt-4o-mini）へバッチ送信（1回最大20銘柄）
+      - レート制限・ネットワーク断・タイムアウト・5xx を対象に指数バックオフでリトライ
+      - JSON モードレスポンスのバリデーション（results 配列、code/score 検証）、スコアは ±1.0 にクリップ
+      - 成功した銘柄のみ ai_scores テーブルへ冪等的に書き換え（DELETE → INSERT）
+    - 内部: _fetch_articles, _score_chunk, _validate_and_extract, _call_openai_api 等
+    - テスト容易性: OpenAI 呼び出しは個別関数に切り出し、ユニットテストで差し替え可能
+  - 市場レジーム判定 (`kabusys.ai.regime_detector`)
+    - score_regime(conn, target_date, api_key=None)
+      - ETF 1321 の 200 日移動平均乖離（重み 70%）とマクロニュースの LLM センチメント（重み 30%）を合成して市場レジーム（bull/neutral/bear）を判定
+      - ma200_ratio 計算（_calc_ma200_ratio: ルックアヘッド防止のため target_date 未満のデータのみ使用）
+      - マクロキーワードで raw_news タイトルを抽出（最大 20 件）
+      - OpenAI（gpt-4o-mini）でマクロセンチメント評価（JSON パース・リトライ・フォールバック）
+      - 合成スコアの閾値判定（BULL_THRESHOLD / BEAR_THRESHOLD）と market_regime テーブルへの冪等書き込み（BEGIN/DELETE/INSERT/COMMIT）
+    - マクロキーワードのセット、モデル名、リトライ回数、重み付け等の定数を定義
 
-- Data モジュール（kabusys.data）
-  - マーケットカレンダー管理（calendar_management）
-    - market_calendar に基づく営業日の判定ロジック（is_trading_day, next_trading_day, prev_trading_day, get_trading_days, is_sq_day）。
-    - DB 登録値優先、未登録日は曜日ベースでフォールバック。最大探索日数で無限ループを回避。
-    - 夜間バッチ job（calendar_update_job）で J-Quants から差分取得して保存、バックフィルと健全性チェックの実装。
-  - ETL パイプライン（pipeline, etl）
-    - ETLResult データクラスを公開（etl モジュールで再エクスポート）。
-    - 差分更新・保存（idempotent save）、品質チェックフレームワーク統合（quality モジュール参照）の骨組み。
-    - 最終取得日の検出、バックフィル日数、J-Quants API 呼び出しと保存処理のエラーハンドリング／ログ出力。
-    - DuckDB の存在チェックや MAX 日付取得ユーティリティを提供。
+- データモジュール (`kabusys.data`)
+  - カレンダー管理 (`kabusys.data.calendar_management`)
+    - JPX カレンダーの夜間バッチ更新ジョブ (calendar_update_job)
+      - J-Quants クライアント経由でカレンダーを差分取得 → market_calendar テーブルへ冪等保存
+      - バックフィル、先読み、健全性チェック（将来日付の異常検出）を実装
+    - 営業日判定および探索ユーティリティ
+      - is_trading_day, is_sq_day, next_trading_day, prev_trading_day, get_trading_days
+      - market_calendar のデータが不十分な場合は曜日ベースのフォールバック（週末を非営業日扱い）
+      - 最大探索範囲で無限ループ回避
+  - ETL パイプライン (`kabusys.data.pipeline`)
+    - ETLResult データクラス（ETL 実行結果、品質問題・エラー管理、シリアライズ to_dict）
+    - 差分更新・バックフィル・品質チェック方針を反映したユーティリティ
+    - 内部ユーティリティ: テーブル存在確認、最大日付取得、トレーディングデイ調整など
+  - etl.py で ETLResult を再エクスポート
 
-- Research モジュール（kabusys.research）
-  - ファクター計算（factor_research）
-    - Momentum（1M/3M/6M リターン、200日 MA 乖離）、Volatility（20日 ATR、相対 ATR、出来高指標）、Value（PER、ROE）などの計算関数を実装。
-    - DuckDB SQL を駆使して各ファクターを高速に算出。データ不足時の None ハンドリング。
-  - 特徴量探索（feature_exploration）
-    - 将来リターン計算（calc_forward_returns）：複数ホライズンの一括取得、入力検証。
-    - IC（calc_ic）：Spearman ランク相関（ランクは同順位平均）を実装。レコード不足や分散ゼロを考慮。
-    - 統計サマリー（factor_summary）：count/mean/std/min/max/median を標準ライブラリのみで算出。
-    - ユーティリティとして zscore_normalize（data.stats から再エクスポート）や rank 関数を提供。
+- リサーチモジュール (`kabusys.research`)
+  - factor_research
+    - calc_momentum(conn, target_date)
+      - 1M/3M/6M リターン、200 日 MA 乖離（ma200_dev）を計算
+      - データ不足時は None を返す挙動
+    - calc_volatility(conn, target_date)
+      - 20 日 ATR、相対 ATR（atr_pct）、20日平均売買代金、出来高比率を計算
+      - true_range の NULL 伝播を制御して正確に ATR を計算
+    - calc_value(conn, target_date)
+      - raw_financials から最新財務データを取得して PER / ROE を計算（EPS が 0 または NULL の場合は None）
+  - feature_exploration
+    - calc_forward_returns(conn, target_date, horizons=None)
+      - 指定ホライズン先の将来リターン計算（デフォルト [1,5,21]）
+      - horizons のバリデーション（1〜252 の整数）
+    - calc_ic(factor_records, forward_records, factor_col, return_col)
+      - スピアマンランク相関（IC）を計算。有効レコード < 3 の場合は None を返す
+    - rank(values)
+      - 同順位は平均ランクを割当てるランク化ユーティリティ（丸めて ties 検出）
+    - factor_summary(records, columns)
+      - 各カラムの count/mean/std/min/max/median を計算
 
-### Changed / Design decisions（実装時に明示された方針）
-- すべてのモジュールでルックアヘッドバイアスを避ける設計（datetime.today()/date.today() を直接参照しない）。
-- OpenAI 呼び出しは JSON Mode を利用し厳密な JSON 応答を期待。API 失敗時は例外を投げずにフェイルセーフでスコア 0.0 またはスキップして ETL の継続を優先。
-- DuckDB とのやり取りは冪等性を重視（DELETE→INSERT、ON CONFLICT 相当の扱い）、executemany の空リスト扱い（DuckDB 0.10 の制約）に注意した保護実装あり。
-- テスト容易性のため、API 呼び出し部（_call_openai_api 等）は patch / mock しやすいように分離。
-- ロギングを適切に追加し、失敗時は警告・例外ログを残して上位に伝播またはフェイルセーフ化。
+### Changed
+- 初回リリースのため該当なし
 
 ### Fixed
-- （初版のため既知のバグ修正履歴は未該当。実装内にログ出力・例外処理で不整合検出時の回復措置あり。）
+- 初回リリースのため該当なし
 
 ### Security
-- 環境変数保護のため OS 環境変数を protected set として上書き回避する仕組みを導入。
-- OpenAI キーは引数で注入可能（テスト時のキー露出軽減）かつ環境変数から取得。未設定時は ValueError を送出して明示的に扱う。
+- OpenAI API キーや各種トークンは環境変数経由で管理することを想定
+  - OpenAI 呼び出しを伴う関数（score_news, score_regime）は api_key 引数で注入可能（テスト／運用分離を容易にする）
+- .env 読み込みで既存 OS 環境変数はデフォルトで保護される（上書き防止）
+
+### Notes / Implementation details
+- DuckDB を主要なローカル分析 DB として利用（duckdb パッケージに依存）
+- OpenAI の Chat Completions API を gpt-4o-mini モデルで使用（response_format={"type": "json_object"} を想定）
+- LLM 連携処理は堅牢性を重視
+  - 429・ネットワーク断・タイムアウト・5xx は指数バックオフでリトライ
+  - パース失敗・致命的 API エラー時は例外を投げずフォールバック（0.0 やスキップ）する設計が多い
+- ルックアヘッドバイアス対策として、日付参照は date.today()/datetime.today() を直接利用しない実装方針を採用（関数引数として target_date を受ける）
+- DuckDB の executemany に関する互換性考慮（空リスト渡し回避）など、実行環境依存の注意点に対応
 
 ---
 
-注記:
-- この CHANGELOG はリポジトリ内のソースコードから実装内容と設計方針を推測して作成したもので、実際の変更履歴（コミット単位や作業履歴）をそのまま反映するものではありません。実際のリリースノート作成時はコミットログや PR を参照して補完してください。
+過去のリリースについてはここに追記していきます。今後のリリースでは機能追加、インターフェース変更、バグ修正等をカテゴリに分けて記載します。
