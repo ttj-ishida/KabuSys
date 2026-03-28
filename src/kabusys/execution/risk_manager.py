@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from kabusys.execution.broker_api import BrokerAPIProtocol
+from kabusys.execution.order_record import OrderState
 from kabusys.execution.order_repository import OrderRepository
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,6 @@ class RiskManager:
 
         # 2. 重複チェック（active 注文が存在するか）
         existing = self._repo.get_by_signal(signal_id)
-        from kabusys.execution.order_record import OrderState
         _TERMINAL = {OrderState.Closed, OrderState.Cancelled, OrderState.Rejected}
         active = [r for r in existing if r.state not in _TERMINAL]
         if active:
@@ -110,8 +110,9 @@ class RiskManager:
                 )
 
         # 3b. 全体上限
-        # utilization の分母はセッション開始時の資産評価額（initial_portfolio_value）を優先使用。
-        # 未設定（0.0）の場合はライブ計算した total_assets にフォールバック。
+        # NOTE: 分母はセッション開始時固定値を優先する。
+        # live total_assets を分母にすると含み益が増えた場合に上限が緩むため、
+        # 保守的な設計として initial_portfolio_value を基準にする。
         utilization_base = (
             self._config.initial_portfolio_value
             if self._config.initial_portfolio_value > 0
