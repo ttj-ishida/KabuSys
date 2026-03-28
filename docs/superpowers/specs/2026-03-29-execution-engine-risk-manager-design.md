@@ -142,7 +142,14 @@ def check_metrics(self, current_portfolio_value: float) -> RiskResult:
 - ドローダウン = `(initial_portfolio_value - current_portfolio_value) / initial_portfolio_value`
 - `> max_drawdown` (デフォルト 15%) でキルスイッチ発動フラグを返す
 
-`current_portfolio_value` の計算は呼び出し元（ExecutionEngine）が `broker.get_available_cash() + sum(position.market_value)` で算出して渡す。
+`current_portfolio_value` の計算は呼び出し元（ExecutionEngine）が以下で算出して渡す：
+```python
+positions = broker.get_positions()
+market_value = sum(p.qty * p.current_price for p in positions if p.current_price is not None)
+current_portfolio_value = broker.get_available_cash() + market_value
+```
+
+`Position.current_price` は下記 Section 10 で追加するフィールド。
 
 > **Gate 3 の呼び出しタイミング**: シグナル送信ループ内ではなく、WebSocket push 受信後（約定が確定した後）にのみ呼ぶ。発注直後はまだ約定していないため意味がない。
 
@@ -253,8 +260,12 @@ def kill_switch(self) -> None:
 ```
 
 1. `_stop_event.set()` — 全ループ停止
-2. `repo.list_active()` — 未約定注文を全件取得
-3. `broker.cancel_order(broker_order_id)` — 全件キャンセル（`broker_order_id` が None のものはスキップ）
+2. `repo.list_active()` — active 注文を全件取得
+3. 各注文に対して `order_manager.cancel_order(client_order_id)` を呼ぶ
+   - `OrderManager.cancel_order()` は broker API 呼び出し + SQLite の状態を `Cancelled` に遷移する一気通貫処理
+   - `InvalidStateTransitionError`（Filled 等の terminal 状態）と `RuntimeError` は無視してスキップ
+
+> **注**: `broker.cancel_order(broker_order_id)` を直接呼ばないこと。SQLite の状態が更新されないため、再起動後も active 注文として残り二重発注や重複チェック誤検知の原因となる。
 
 ---
 
@@ -335,6 +346,26 @@ def stream_push(
 | ExecutionEngine シグナル処理 | test_execution_engine | DuckDB インメモリ + MockBrokerClient + インメモリ SQLite |
 | WebSocket push 処理 | test_execution_engine | `_push_queue` に直接投入して `sync_order()` 呼び出しを確認 |
 | kill_switch | test_execution_engine | 全 active 注文が cancel されることを確認 |
+
+---
+
+## 10. broker_api.py への追加
+
+既存の `Position` dataclass に `current_price` フィールドを追加：
+
+```python
+@dataclass
+class Position:
+    code: str
+    qty: int
+    avg_price: float
+    current_price: float | None = None  # 現在値（時価評価額計算用）
+```
+
+- `kabu_client.py`: kabu API レスポンスの `CurrentPrice`（または `CurrentPriceTime` 付きフィールド）を `current_price` にマップする
+- `mock_client.py`: `MockBrokerClient.get_positions()` で `current_price` を返すよう更新する
+
+> `avg_price` は取得単価（コスト基準）であり、現在の市場価値ではない。ドローダウン計算に `avg_price` を使うと含み損が反映されないため、必ず `current_price` を使うこと。
 
 ---
 
