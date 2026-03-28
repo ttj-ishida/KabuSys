@@ -170,6 +170,54 @@ class ExecutionEngine:
             except (InvalidStateTransitionError, RuntimeError) as exc:
                 logger.debug("cancel_order スキップ: %s - %s", order.client_order_id, exc)
 
+    def _websocket_worker(self) -> None:
+        """WebSocket スレッド: kabu push を受信して _push_queue に投入する。"""
+        def _on_message(payload: dict) -> None:
+            self._push_queue.put(payload)
+
+        # KabuStationClient のみ stream_push を持つ
+        if not hasattr(self._broker, "stream_push"):
+            logger.warning("broker が stream_push() を持たないため WebSocket スレッドをスキップします")
+            return
+
+        self._broker.stream_push(on_message=_on_message, stop_event=self._stop_event)
+
+    def run_session(self) -> None:
+        """セッション全体を実行する（本番用エントリポイント）。
+
+        8:50 でシグナル処理 → 9:10 で発注締切 → 15:30 でセッション終了。
+        テスト環境では _process_signals() と _drain_push_queue() を直接呼ぶこと。
+        """
+        import time as _time
+        from datetime import datetime
+
+        logger.info("ExecutionEngine: セッション開始 target_date=%s", self._config.target_date)
+
+        # WebSocket スレッド起動
+        ws_thread = threading.Thread(target=self._websocket_worker, daemon=True, name="ws-push")
+        ws_thread.start()
+
+        def _now_time() -> time:
+            return datetime.now().time().replace(microsecond=0)
+
+        # signal_send_start まで待機
+        while _now_time() < self._config.signal_send_start and not self._stop_event.is_set():
+            self._stop_event.wait(timeout=5.0)
+
+        # シグナル処理ループ（8:50 ～ 9:10）
+        if not self._stop_event.is_set():
+            self._process_signals()
+
+        # push drain ループ（9:10 ～ 15:30）
+        while _now_time() < self._config.market_close and not self._stop_event.is_set():
+            self._drain_push_queue()
+            self._stop_event.wait(timeout=1.0)
+
+        # セッション終了
+        self._stop_event.set()
+        ws_thread.join(timeout=5.0)
+        logger.info("ExecutionEngine: セッション終了")
+
     def _read_signals(self) -> list[dict]:
         """DuckDB から今日のシグナルを portfolio_targets と JOIN して返す。"""
         rows = self._duckdb_conn.execute(
