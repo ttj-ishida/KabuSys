@@ -520,3 +520,47 @@ def test_create_order_db_unique_violation_raises_duplicate_error(repo):
     # 2件目: アプリ層チェックより先に DB 制約で弾かれても DuplicateOrderError になる
     with pytest.raises(DuplicateOrderError):
         m.create_order("sig-unique-test", request)
+
+
+def test_sync_order_partial_progress_updates_filled_qty(repo):
+    """sync_order: partial→partial 進行で filled_qty / avg_fill_price が更新される"""
+    from kabusys.execution.broker_api import OrderStatus
+
+    # OrderPartialFill 状態のレコードを直接 DB に保存（filled_qty=50）
+    r = _make_record(
+        signal_id="sig-partial-progress",
+        state=OrderState.PartialFill,
+        broker_order_id="broker-partial-001",
+        filled_qty=50,
+        avg_fill_price=1500.0,
+    )
+    repo.save(r)
+
+    class StubBrokerPartialProgress:
+        """同一 partial 状態のまま filled_qty が 50→80 に進行した応答を返す。"""
+        def get_order_status(self, order_id):
+            return OrderStatus(
+                order_id=order_id,
+                code="1234",
+                side="buy",
+                qty=100,
+                filled_qty=80,
+                status="partial",
+                price=1510.0,
+            )
+        def send_order(self, order): pass
+        def cancel_order(self, order_id): pass
+        def get_positions(self): return []
+        def get_available_cash(self): return 1_000_000.0
+
+    m = OrderManager(broker=StubBrokerPartialProgress(), repo=repo)
+    result = m.sync_order(r.client_order_id)
+
+    assert result.state == OrderState.PartialFill   # 状態は変わらない
+    assert result.filled_qty == 80                  # 数量は更新される
+    assert result.avg_fill_price == 1510.0          # 価格も更新される
+
+    # DB からも確認
+    persisted = repo.get(r.client_order_id)
+    assert persisted.filled_qty == 80
+    assert persisted.avg_fill_price == 1510.0

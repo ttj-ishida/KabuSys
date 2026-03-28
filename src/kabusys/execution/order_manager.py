@@ -73,11 +73,13 @@ class OrderManager:
         try:
             self._repo.save(record)
         except sqlite3.IntegrityError as exc:
-            # 部分ユニークインデックス違反: 並列実行でアプリ層チェックを抜けた場合に備える。
-            # sqlite3.IntegrityError をそのまま上位に漏らさず DuplicateOrderError に正規化する。
-            raise DuplicateOrderError(
-                f"signal_id={signal_id} の active 注文が既に存在します（DB 制約）"
-            ) from exc
+            # signal_id の部分ユニークインデックス違反のみ DuplicateOrderError に変換する。
+            # CHECK 制約違反（qty/price/side 不正など）は原因を隠蔽せず再スローする。
+            if "UNIQUE constraint failed" in str(exc) and "orders.signal_id" in str(exc):
+                raise DuplicateOrderError(
+                    f"signal_id={signal_id} の active 注文が既に存在します（DB 制約）"
+                ) from exc
+            raise
         return record
 
     def send_order(self, client_order_id: str) -> OrderRecord:
@@ -118,6 +120,7 @@ class OrderManager:
             # Step 3a: broker_order_id を先にコミット（state は Sent のまま）。
             # ここでクラッシュしても broker_order_id が DB に残り、sync_order で照合可能。
             record.broker_order_id = response.order_id
+            record.updated_at = datetime.now(timezone.utc)
             self._repo.update(record)
 
             # Step 3b: OrderAccepted に遷移してコミット
@@ -149,7 +152,22 @@ class OrderManager:
             return record
 
         new_state = _STATUS_TO_STATE.get(status.status)
-        if new_state is None or new_state == record.state:
+        if new_state is None:
+            return record
+
+        if new_state == record.state:
+            # 同一状態でも部分約定の進行（partial→partial）で filled_qty/avg_fill_price が
+            # 変化している場合は更新する。transition_to は使わず直接フィールドを更新する。
+            updated = False
+            if status.filled_qty is not None and status.filled_qty != record.filled_qty:
+                record.filled_qty = status.filled_qty
+                updated = True
+            if status.price is not None and status.price != record.avg_fill_price:
+                record.avg_fill_price = status.price
+                updated = True
+            if updated:
+                record.updated_at = datetime.now(timezone.utc)
+                self._repo.update(record)
             return record
 
         try:
