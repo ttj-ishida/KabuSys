@@ -491,6 +491,67 @@ def save_market_calendar(
     return len(rows)
 
 
+def fetch_listed_info(
+    id_token: str | None = None,
+    date_: date | None = None,
+) -> list[dict[str, Any]]:
+    """全上場銘柄情報を GET /listed/info から取得する。
+
+    J-Quants API フィールドと stocks テーブルのマッピング:
+        "Code"             → code
+        "CompanyName"      → name
+        "MarketCode"       → market（"0111"→"Prime", "0121"→"Standard", "0131"→"Growth", その他→"Other"）
+        "Sector33CodeName" → sector
+
+    Args:
+        id_token: 認証トークン。省略時はモジュールキャッシュを使用。
+        date_:    取得対象日（Look-ahead Bias 防止のため、取得日を明示することを推奨）。
+                  省略時は当日のデータを返す。
+
+    Returns:
+        [{"code": str, "name": str, "market": str, "sector": str}, ...]
+        Code が欠損するレコードはスキップ。
+
+    Note:
+        Look-ahead Bias 防止: バックテストで使用する場合は、バックテスト開始日
+        以前に取得済みのデータを stocks テーブルに格納してから使用すること。
+        本関数はデータ取得・ETL パイプライン専用であり、バックテストの内部ループから
+        直接呼び出してはならない。
+    """
+    _MARKET_CODE_MAP: dict[str, str] = {
+        "0111": "Prime",
+        "0121": "Standard",
+        "0131": "Growth",
+    }
+
+    params: dict[str, str] = {}
+    if date_ is not None:
+        params["date"] = date_.strftime("%Y%m%d")
+
+    data = _request("/listed/info", params=params if params else None, id_token=id_token)
+    records = data.get("info", [])
+
+    result: list[dict[str, Any]] = []
+    skipped = 0
+    for r in records:
+        code = str(r.get("Code") or "").strip()
+        if not code:
+            skipped += 1
+            continue
+        market_code = str(r.get("MarketCode") or "")
+        result.append({
+            "code": code,
+            "name": str(r.get("CompanyName") or ""),
+            "market": _MARKET_CODE_MAP.get(market_code, "Other"),
+            "sector": str(r.get("Sector33CodeName") or ""),
+        })
+
+    if skipped:
+        logger.warning("fetch_listed_info: %d 件を Code 欠損によりスキップ", skipped)
+    logger.info("fetch_listed_info: %d 件取得", len(result))
+    return result
+
+
 # ---------------------------------------------------------------------------
 # ユーティリティ
 # ---------------------------------------------------------------------------

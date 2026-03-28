@@ -136,8 +136,23 @@ CREATE TABLE IF NOT EXISTS news_symbols (
     code        VARCHAR     NOT NULL,
     PRIMARY KEY (news_id, code),
     -- Note: ON DELETE CASCADE は DuckDB 1.5.0 非サポートのため省略。
-    --       news_articles 削除時はアプリ側で先に news_symbols を削除すること。
-    FOREIGN KEY (news_id) REFERENCES news_articles(id)
+    --       raw_news 削除時はアプリ側で先に news_symbols を削除すること。
+    FOREIGN KEY (news_id) REFERENCES raw_news(id)
+)
+"""
+
+# ---- Master Data Layer -----------------------------------------------------
+
+_STOCKS = """
+CREATE TABLE IF NOT EXISTS stocks (
+    code        VARCHAR     NOT NULL,
+    name        VARCHAR,
+    market      VARCHAR,
+    sector      VARCHAR,
+    -- UPSERT 時は ON CONFLICT DO UPDATE SET ... updated_at = now() を明示すること。
+    -- DEFAULT now() は INSERT 時のみ設定される（UPSERT では自動更新されない）。
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (code)
 )
 """
 
@@ -169,6 +184,17 @@ CREATE TABLE IF NOT EXISTS ai_scores (
     ai_score            DOUBLE,
     created_at          TIMESTAMP   NOT NULL DEFAULT current_timestamp,
     PRIMARY KEY (date, code)
+)
+"""
+
+_MARKET_REGIME = """
+CREATE TABLE IF NOT EXISTS market_regime (
+    date             DATE      NOT NULL PRIMARY KEY,
+    regime_score     DOUBLE    NOT NULL,
+    regime_label     VARCHAR   NOT NULL,
+    ma200_ratio      DOUBLE,
+    macro_sentiment  DOUBLE,
+    created_at       TIMESTAMP NOT NULL DEFAULT current_timestamp
 )
 """
 
@@ -277,6 +303,7 @@ _INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_orders_signal_id ON orders(signal_id)",
     "CREATE INDEX IF NOT EXISTS idx_trades_order_id ON trades(order_id)",
     "CREATE INDEX IF NOT EXISTS idx_news_symbols_code ON news_symbols(code)",
+    "CREATE INDEX IF NOT EXISTS idx_raw_news_datetime ON raw_news(datetime)",
 ]
 
 # ---------------------------------------------------------------------------
@@ -295,9 +322,12 @@ _ALL_DDL: list[str] = [
     _FUNDAMENTALS,
     _NEWS_ARTICLES,
     _NEWS_SYMBOLS,
+    # Master
+    _STOCKS,
     # Feature
     _FEATURES,
     _AI_SCORES,
+    _MARKET_REGIME,
     # Execution
     _SIGNALS,
     _SIGNAL_QUEUE,
