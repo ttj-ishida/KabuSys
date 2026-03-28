@@ -1,0 +1,288 @@
+# Execution Engine + Risk Manager 設計仕様
+
+- Issue: #30 Execution Engine メインループ、#31 リスク管理3段階ガード
+- 日付: 2026-03-29
+- フェーズ: Phase 6
+
+---
+
+## 1. 目的
+
+`signal_generator.py` が夜間バッチで生成した `signals` テーブルを、翌営業日の寄付き前後に発注に変換する Execution Engine と、発注前後に3段階のリスク検査を行う Risk Manager を実装する。
+
+既存の `OrderManager` / `OrderRepository` / `KabuStationClient` を活用し、**クラッシュ安全性・二重発注防止・暴走防止**を担保する。
+
+---
+
+## 2. モジュール構成
+
+```
+src/kabusys/execution/
+├── broker_api.py        ✅ 既存（BrokerAPIProtocol, データモデル）
+├── kabu_client.py       ✅ 既存（REST） ← WebSocket 受信メソッド追加
+├── mock_client.py       ✅ 既存
+├── order_record.py      ✅ 既存
+├── order_repository.py  ✅ 既存
+├── order_manager.py     ✅ 既存
+├── risk_manager.py      🆕 #31 — 3段階リスクガード
+└── execution_engine.py  🆕 #30 — メインループ + WebSocket スレッド管理
+```
+
+### 責務分担
+
+| クラス | 責務 |
+|-------|------|
+| `RiskManager` | 発注前後の3段階リスク検査のみ。Gate 1/3 はステートレス、Gate 2 はサーキットブレーカー状態を保持 |
+| `ExecutionEngine` | オーケストレーション。「いつ・何を・どの順で呼ぶか」を管理。DB・API は注入されたオブジェクトに委譲 |
+
+---
+
+## 3. signal_id 採番ルール
+
+```python
+signal_id = f"{date.isoformat()}_{code}_{side}"
+# 例: "2026-03-29_1234_buy"
+```
+
+`OrderManager.create_order()` の `DuplicateOrderError` による冪等性をそのまま活用し、再起動時の二重発注を防ぐ。
+
+---
+
+## 4. RiskManager 設計（#31）
+
+### 4.1 設定データクラス
+
+```python
+@dataclass
+class RiskConfig:
+    max_position_pct: float = 0.10        # 1銘柄最大投資比率
+    max_utilization: float = 0.70         # 全ポジション投下上限
+    rate_limit_per_sec: int = 5           # API レート制限（毎秒5回）
+    circuit_breaker_errors: int = 10      # 連続エラー上限
+    circuit_breaker_window_sec: int = 60  # エラーカウントウィンドウ（秒）
+    max_drawdown: float = 0.15            # キルスイッチ発動ドローダウン閾値
+    initial_portfolio_value: float = 0.0  # セッション開始時の資産評価額
+
+
+@dataclass
+class RiskResult:
+    passed: bool
+    reason: str = ""  # 不合格理由（ログ・Monitoring 用）
+```
+
+### 4.2 Gate 1: シグナルレベル（発注前）
+
+```python
+def check_signal(
+    self,
+    signal_id: str,
+    code: str,
+    order_value: float,  # 発注金額 = 株価 × 発注株数
+) -> RiskResult:
+```
+
+検査内容：
+1. **余力チェック**: `broker.get_available_cash() >= order_value`
+2. **重複チェック**: `repo.get_by_signal(signal_id)` に active 注文が存在しないか
+3. **ポジション上限**: `broker.get_positions()` で同銘柄の評価額 + order_value が総資産の `max_position_pct` 以内か、かつ全ポジションが `max_utilization` 以内か
+
+### 4.3 Gate 2: エグゼキューションレベル（API 送信前）
+
+```python
+def check_execution(self) -> RiskResult:
+```
+
+検査内容：
+1. **レート制限**: トークンバケツ方式（`rate_limit_per_sec` 回/秒）。制限超過時は `passed=False`（呼び出し元がスリープして再試行）
+2. **サーキットブレーカー**: 直近 `circuit_breaker_window_sec` 秒以内に `circuit_breaker_errors` 回連続エラーで `OPEN` 状態へ遷移し発注停止
+
+**サーキットブレーカー状態遷移：**
+```
+CLOSED（正常）
+  → [N連続エラー] → OPEN（発注停止）
+  → [window秒経過] → HALF_OPEN（1件試行許可）
+  → [成功] → CLOSED
+  → [失敗] → OPEN
+```
+
+補助メソッド：
+- `record_api_error()` — エラー記録（send_order 失敗時に呼ぶ）
+- `record_api_success()` — 成功記録（HALF_OPEN → CLOSED 遷移用）
+
+### 4.4 Gate 3: メトリクスレベル（発注後監視）
+
+```python
+def check_metrics(self, current_portfolio_value: float) -> RiskResult:
+```
+
+検査内容：
+- ドローダウン = `(initial_portfolio_value - current_portfolio_value) / initial_portfolio_value`
+- `> max_drawdown` (デフォルト 15%) でキルスイッチ発動フラグを返す
+
+`current_portfolio_value` の計算は呼び出し元（ExecutionEngine）が `broker.get_available_cash() + sum(position.market_value)` で算出して渡す。
+
+---
+
+## 5. ExecutionEngine 設計（#30）
+
+### 5.1 設定データクラス
+
+```python
+@dataclass
+class EngineConfig:
+    target_date: date
+    signal_send_start: time = time(8, 50)  # 発注開始時刻
+    signal_send_end: time = time(9, 10)    # 発注締切時刻
+    market_close: time = time(15, 30)      # セッション終了時刻
+```
+
+### 5.2 コンストラクタ
+
+```python
+class ExecutionEngine:
+    def __init__(
+        self,
+        broker: BrokerAPIProtocol,
+        repo: OrderRepository,
+        risk_manager: RiskManager,
+        duckdb_conn: duckdb.DuckDBPyConnection,
+        config: EngineConfig,
+    ) -> None:
+```
+
+すべての依存を外部注入。`ExecutionEngine` 自身は DB / API に直接触れない。
+
+### 5.3 メインループ
+
+```python
+def run_session(self) -> None:
+```
+
+実行フロー：
+```
+1. WebSocket スレッド起動（kabu push 受信）
+2. config.signal_send_start まで待機
+3. シグナル処理ループ（signal_send_start ～ signal_send_end）:
+   a. DuckDB から today の signals を全件取得
+   b. for each signal:
+        [Gate 1] risk_manager.check_signal()    → NG: skip & log
+        [Gate 2] risk_manager.check_execution() → NG: 待機して再試行 or halt
+        OrderManager.create_order()
+        OrderManager.send_order()
+        [Gate 3] risk_manager.check_metrics()   → NG: kill_switch() 発動
+4. signal_send_end ～ market_close: 待機（WebSocket スレッドが約定を処理）
+5. market_close: WebSocket スレッド停止、セッション終了
+```
+
+### 5.4 WebSocket スレッド
+
+```python
+def _websocket_worker(self) -> None:
+```
+
+- kabu station WebSocket: `ws://localhost:18080/kabusapi/websocket`
+- `_stop_event`（`threading.Event`）が set されるまでループ
+- 受信した push payload を `_push_queue`（`queue.Queue`）に投入
+- メインループが `_push_queue` を drain して `OrderManager.sync_order()` を呼ぶ
+
+**スレッド間通信：**
+```
+WebSocket thread ──[queue.Queue]──→ Main thread
+                                     ↓
+                                sync_order()     → SQLite UPDATE
+                                check_metrics()  → ドローダウン監視
+```
+
+`kabu_client.py` に `stream_push(on_message: Callable, stop_event: threading.Event)` メソッドを追加してWebSocket受信を抽象化する。
+
+### 5.5 kill_switch()
+
+```python
+def kill_switch(self) -> None:
+```
+
+1. `_stop_event.set()` — 全ループ停止
+2. `repo.list_active()` — 未約定注文を全件取得
+3. `broker.cancel_order(broker_order_id)` — 全件キャンセル（broker_order_id が None のものはスキップ）
+
+---
+
+## 6. データフロー
+
+```
+【夜間バッチ済み】
+DuckDB: signals(date, code, side, score, signal_rank)
+SQLite: orders（OrderManager 管理）
+
+【8:50 セッション開始】
+ExecutionEngine.run_session()
+  │
+  ├─ DuckDB: SELECT * FROM signals WHERE date=?
+  │         → Signal リスト
+  │
+  ├─ [Gate 1] RiskManager.check_signal(signal_id, code, order_value)
+  │         → broker.get_available_cash()    REST
+  │         → broker.get_positions()         REST
+  │         → repo.get_by_signal(signal_id)  SQLite
+  │
+  ├─ [Gate 2] RiskManager.check_execution()
+  │         → トークンバケツ / サーキットブレーカー（メモリ）
+  │
+  ├─ OrderManager.create_order()  → SQLite INSERT
+  ├─ OrderManager.send_order()    → REST POST → SQLite UPDATE
+  │
+  └─ [Gate 3] RiskManager.check_metrics(portfolio_value)
+            → broker.get_available_cash() + get_positions() で評価額計算
+
+【約定 Push 受信（WebSocket スレッド）】
+kabu WebSocket push
+  → _push_queue.put(payload)
+  → Main: OrderManager.sync_order()    → SQLite UPDATE
+  → Main: RiskManager.check_metrics()  → ドローダウン継続監視
+```
+
+---
+
+## 7. kabu_client.py への追加
+
+既存の `KabuStationClient` に以下を追加：
+
+```python
+def stream_push(
+    self,
+    on_message: Callable[[dict], None],
+    stop_event: threading.Event,
+) -> None:
+    """WebSocket で kabu station の push 通知を受信するブロッキングメソッド。
+    stop_event が set されるまでループする。
+    スレッド内で呼び出すことを想定。
+    """
+```
+
+使用ライブラリ: `websocket-client`（既存依存に追加）
+
+---
+
+## 8. テスト方針（#34 も同ファイルで対応）
+
+テストファイル: `tests/test_execution_engine.py`
+
+| テスト対象 | 手法 |
+|-----------|------|
+| Gate 1: 余力不足 | `MockBrokerClient` で `get_available_cash()=0` を返す |
+| Gate 1: 重複チェック | インメモリ SQLite に active 注文を事前挿入 |
+| Gate 1: ポジション上限 | `get_positions()` で上限超えポジションを返す |
+| Gate 2: レート制限 | 短時間に `check_execution()` を N+1 回呼んで拒否を確認 |
+| Gate 2: サーキットブレーカー | `record_api_error()` を N 回呼んで OPEN → HALF_OPEN 遷移を確認 |
+| Gate 3: キルスイッチ | ドローダウン超過値を渡して `passed=False` を確認 |
+| ExecutionEngine シグナル処理 | DuckDB インメモリ + MockBrokerClient でフル E2E |
+| WebSocket push 処理 | `_push_queue` に直接投入して `sync_order()` 呼び出しを確認 |
+| kill_switch | 全 active 注文が cancel されることを確認 |
+
+---
+
+## 9. 既存コードとの整合
+
+- `BrokerAPIProtocol` の `get_available_cash() -> float` と `get_positions() -> list[Position]` は既存インターフェース（`broker_api.py`）に既定義
+- `MockBrokerClient` は `fill_mode` パラメータ対応済み — テストでそのまま使用可能
+- `OrderManager.create_order()` の `DuplicateOrderError` が信号の冪等性を保証 — 追加ロジック不要
