@@ -1,7 +1,7 @@
 # Order State Machine 設計仕様
 
 - Issue: #29
-- 版数: v1.0
+- 版数: v1.1
 - 作成日: 2026-03-28
 
 ---
@@ -13,6 +13,15 @@
 - UUID による冪等キー（`client_order_id`）で二重発注を防止する
 - SQLite に状態を永続化し、クラッシュ復旧時に `OrderSent` 状態の注文を検出できるようにする
 - Reconciliation（Issue #32）と Execution Engine（Issue #30）が依存する基盤レイヤーを提供する
+
+### DB 役割分担
+
+| DB | テーブル | 用途 |
+|----|---------|------|
+| SQLite（`data/kabusys.sqlite`） | `orders` | **状態管理**：リアルタイムの現在状態管理・低レイテンシな読み書き |
+| DuckDB（`audit.py`）            | `order_requests` / `executions` | **監査ログ**：追記専用・変更不可の証跡記録 |
+
+SQLite の `orders` が「現在どの状態か」を保持し、DuckDB の `order_requests` が「何が起きたか」の証跡を保持する。両者は並行して更新される（DuckDB 更新は Execution Engine の責務：Issue #30）。
 
 ---
 
@@ -28,6 +37,7 @@
 - リコンシリエーションの実装（`list_uncertain()` のインターフェースのみ提供し、実装は Issue #32）
 - Execution Engine のメインループ（Issue #30）
 - リスク管理3段階ガード（Issue #31）
+- `signal_queue.status` の更新（Issue #30 の責務：Execution Engine が注文完了後に DuckDB の `signal_queue` を更新する）
 
 ---
 
@@ -67,7 +77,7 @@ order_manager.py
 ```python
 class OrderState(str, enum.Enum):
     OrderCreated  = "created"   # 内部キューに登録済み、まだ送信前
-    OrderSent     = "sent"      # broker API に送信済み、応答待ち
+    OrderSent     = "sent"      # broker API に送信済み、応答待ち（クラッシュ時に不明状態になりうる）
     OrderAccepted = "accepted"  # 証券会社受付済み、市場待機中
     PartialFill   = "partial"   # 一部約定済み
     Filled        = "filled"    # 全量約定済み
@@ -113,6 +123,7 @@ class OrderRecord:
         状態遷移を検証して self.state を更新する。
         不正な遷移は InvalidStateTransitionError を raise する。
         kwargs には broker_order_id / filled_qty / avg_fill_price / error_message を渡せる。
+        updated_at は呼び出し時点の UTC に自動更新される。
         """
 ```
 
@@ -161,7 +172,9 @@ class OrderRepository:
     def __init__(self, conn: sqlite3.Connection) -> None: ...
 
     def save(self, record: OrderRecord) -> None
-    # INSERT OR REPLACE（冪等：存在すれば全フィールド上書き）
+    # INSERT のみ（重複 client_order_id は sqlite3.IntegrityError）
+    # 使用場面: OrderCreated レコードの初回挿入のみ
+    # 状態変更後の永続化は必ず update() を使用すること
 
     def update(self, record: OrderRecord) -> None
     # UPDATE（存在しない場合は RuntimeError）
@@ -174,7 +187,7 @@ class OrderRepository:
     # state が Closed / Cancelled / Rejected 以外を返す
 
     def list_uncertain(self) -> list[OrderRecord]
-    # state == OrderSent のみ返す（Reconciliation 用）
+    # state == OrderSent のみ返す（Reconciliation 用・Issue #32 の入口）
 ```
 
 ---
@@ -208,9 +221,16 @@ def create_order(
 
 def send_order(self, client_order_id: str) -> OrderRecord:
     """
-    OrderCreated → OrderSent に遷移して broker API に送信する。
-    broker_order_id を受領したら OrderAccepted に遷移して DB を更新する。
-    broker API が OrderRejectedError を raise した場合は Rejected に遷移する。
+    以下の順序で処理する（クラッシュ安全性のため OrderSent の永続化を broker 呼び出しの前に行う）:
+
+    1. OrderCreated → OrderSent に遷移して SQLite に保存（commit）
+    2. broker API の send_order を呼び出す
+    3. 成功: broker_order_id を受領 → OrderSent → OrderAccepted に遷移して SQLite を更新
+    4. 失敗（OrderRejectedError）: OrderSent → Rejected に遷移して SQLite を更新
+
+    kabu station は同期的に OrderId を返すため、正常時は常に OrderAccepted まで遷移する。
+    ステップ1 と broker 呼び出しの間でクラッシュした場合、OrderSent レコードが残る。
+    Reconciliation（Issue #32）が list_uncertain() でこのレコードを検出して状態を回復する。
     """
 
 def sync_order(self, client_order_id: str) -> OrderRecord:
@@ -218,12 +238,16 @@ def sync_order(self, client_order_id: str) -> OrderRecord:
     broker API の get_order_status を呼び、最新状態に同期する。
     broker が None を返した場合は状態を変更しない。
     OrderSent のまま不明な注文の Reconciliation 時にも使用する（Issue #32 の入口）。
+
+    OrderSent に対して broker が "open" を返した場合は OrderAccepted に遷移する。
     """
 
 def cancel_order(self, client_order_id: str) -> OrderRecord:
     """
-    broker API の cancel_order を呼び、Cancelled に遷移する。
-    既に Closed / Filled / Cancelled / Rejected の注文は BrokerAPIError を re-raise する。
+    DB の現在状態を確認し、終端状態（Closed / Filled / Cancelled / Rejected）の場合は
+    broker API を呼ばずに InvalidStateTransitionError を raise する。
+    それ以外の場合は broker API の cancel_order を呼び、Cancelled に遷移する。
+    broker API が失敗した場合は BrokerAPIError を re-raise する。
     """
 ```
 
@@ -255,20 +279,27 @@ class InvalidStateTransitionError(Exception):
 ### Group 2 — OrderRepository（インメモリ SQLite）
 
 - `save` → `get` の往復でフィールドが一致する
+- `save` を同一 `client_order_id` で2回呼ぶと `IntegrityError`
 - `list_active` は Closed / Cancelled / Rejected を除外する
 - `list_uncertain` は OrderSent のみ返す
-- 同一 `client_order_id` の `save` は上書きになる
 - `update` で存在しない ID は RuntimeError
 
 ### Group 3 — OrderManager（MockBrokerClient + インメモリ SQLite）
 
-- `create_order` → `send_order` の正常フロー（Accepted に遷移）
+**通常フロー**:
+- `create_order` → `send_order` の正常フロー（OrderAccepted に遷移）
 - 同一 `signal_id` で `create_order` を2回呼ぶと `DuplicateOrderError`
 - `send_order` で broker が `OrderRejectedError` → Rejected に遷移
+
+**クラッシュ復旧シナリオ**:
+- `send_order` ステップ1（OrderSent 永続化）完了後、broker 呼び出し前に「クラッシュ」を模擬（broker は呼ばれなかったとする）→ `list_uncertain()` がそのレコードを返すこと
+- `sync_order` を OrderSent のレコードに呼び出し、broker が `"open"` を返したら OrderAccepted に遷移すること
+
+**sync / cancel**:
 - `sync_order`: broker が `"filled"` を返したら Filled に遷移
 - `sync_order`: broker が `None` を返したら状態変化なし
 - `cancel_order`: OrderAccepted → Cancelled
-- `cancel_order`: Filled の注文は `BrokerAPIError` を re-raise
+- `cancel_order`: Filled の注文は `InvalidStateTransitionError`（broker を呼ばない）
 
 インメモリ SQLite は `sqlite3.connect(":memory:")` で各テスト独立に生成する。
 
@@ -289,6 +320,6 @@ from kabusys.execution.order_manager import OrderManager, DuplicateOrderError, I
 | Issue | 内容 | 本 Issue との関係 |
 |-------|------|-----------------|
 | #28 | kabuステーション API クライアント | `BrokerAPIProtocol` を消費する（依存先）|
-| #30 | Execution Engine メインループ | `OrderManager` を呼ぶ（依存元）|
+| #30 | Execution Engine メインループ | `OrderManager` を呼ぶ（依存元）・`signal_queue.status` 更新を担当 |
 | #31 | リスク管理3段階ガード | `OrderRepository.list_active` を参照（依存元）|
 | #32 | 自動復旧・リコンシリエーション | `list_uncertain` + `sync_order` を使用（依存元）|
