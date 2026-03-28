@@ -8,7 +8,6 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
 
 
 class OrderState(str, enum.Enum):
@@ -50,16 +49,24 @@ class OrderRecord:
     state: OrderState             # 現在の状態
     created_at: datetime          # UTC
     updated_at: datetime          # UTC
-    broker_order_id: Optional[str] = None    # 証券会社から受領した注文ID
-    filled_qty: int = 0                      # 約定済み数量
-    avg_fill_price: Optional[float] = None   # 約定平均価格
-    error_message: Optional[str] = None      # エラー詳細（Rejected 時など）
+    broker_order_id: str | None = None    # 証券会社から受領した注文ID
+    filled_qty: int = 0                   # 約定済み数量
+    avg_fill_price: float | None = None   # 約定平均価格
+    error_message: str | None = None      # エラー詳細（Rejected 時など）
 
-    def transition_to(self, new_state: OrderState, **kwargs) -> None:
+    def transition_to(
+        self,
+        new_state: OrderState,
+        *,
+        broker_order_id: str | None = None,
+        filled_qty: int | None = None,
+        avg_fill_price: float | None = None,
+        error_message: str | None = None,
+    ) -> None:
         """
         状態遷移を検証して self.state を更新する。
         不正な遷移は InvalidStateTransitionError を raise する。
-        kwargs には broker_order_id / filled_qty / avg_fill_price / error_message を渡せる。
+        broker_order_id / filled_qty / avg_fill_price / error_message はキーワード専用引数。
         updated_at は呼び出し時点の UTC に自動更新される。
         """
         allowed = _ALLOWED_TRANSITIONS.get(self.state, set())
@@ -72,11 +79,11 @@ class OrderRecord:
         self.updated_at = datetime.now(timezone.utc)
 
         # オプションフィールドの更新
-        if "broker_order_id" in kwargs:
-            self.broker_order_id = kwargs["broker_order_id"]
-        if "filled_qty" in kwargs:
-            self.filled_qty = kwargs["filled_qty"]
-        if "avg_fill_price" in kwargs:
-            self.avg_fill_price = kwargs["avg_fill_price"]
-        if "error_message" in kwargs:
-            self.error_message = kwargs["error_message"]
+        if broker_order_id is not None:
+            self.broker_order_id = broker_order_id
+        if filled_qty is not None:
+            self.filled_qty = filled_qty
+        if avg_fill_price is not None:
+            self.avg_fill_price = avg_fill_price
+        if error_message is not None:
+            self.error_message = error_message

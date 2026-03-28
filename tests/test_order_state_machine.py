@@ -5,6 +5,8 @@ Group 1: OrderRecord の状態遷移（DB なし・Mock なし）
 Group 2: OrderRepository（インメモリ SQLite）  ← 後続タスクで追記
 Group 3: OrderManager（MockBrokerClient + インメモリ SQLite）  ← 後続タスクで追記
 """
+import time
+
 import pytest
 from datetime import datetime, timezone
 
@@ -113,7 +115,6 @@ class TestOrderRecordTransitions:
 
     def test_transition_updates_updated_at(self):
         """transition_to は updated_at を更新する"""
-        import time
         r = _make_record()
         old_updated_at = r.updated_at
         time.sleep(0.01)
