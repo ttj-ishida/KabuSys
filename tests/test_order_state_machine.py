@@ -564,3 +564,77 @@ def test_sync_order_partial_progress_updates_filled_qty(repo):
     persisted = repo.get(r.client_order_id)
     assert persisted.filled_qty == 80
     assert persisted.avg_fill_price == 1510.0
+
+
+def test_send_order_invalid_state_raises(repo):
+    """send_order を OrderCreated 以外（例: OrderSent）の状態で呼ぶと InvalidStateTransitionError"""
+    from kabusys.execution.order_record import InvalidStateTransitionError
+
+    broker = MockBrokerClient(fill_mode="instant")
+    m = OrderManager(broker=broker, repo=repo)
+
+    # OrderSent 状態のレコードを直接 DB に保存
+    sent_record = _make_record(
+        signal_id="sig-send-invalid",
+        state=OrderState.OrderSent,
+        broker_order_id="broker-sent-001",
+    )
+    repo.save(sent_record)
+
+    with pytest.raises(InvalidStateTransitionError):
+        m.send_order(sent_record.client_order_id)
+
+
+def test_cancel_order_from_partial_fill(repo):
+    """cancel_order: PartialFill → Cancelled は許可された遷移"""
+    broker = MockBrokerClient(fill_mode="instant")
+    m = OrderManager(broker=broker, repo=repo)
+
+    partial = _make_record(
+        signal_id="sig-cancel-partial",
+        state=OrderState.PartialFill,
+        broker_order_id=None,
+        filled_qty=50,
+    )
+    repo.save(partial)
+
+    result = m.cancel_order(partial.client_order_id)
+    assert result.state == OrderState.Cancelled
+
+
+@pytest.mark.parametrize("broker_status,expected_state", [
+    ("cancelled", OrderState.Cancelled),
+    ("rejected",  OrderState.Rejected),
+])
+def test_sync_order_cancelled_and_rejected_mapping(repo, broker_status, expected_state):
+    """sync_order: broker が 'cancelled'/'rejected' を返したとき正しい状態にマッピングされる"""
+    from kabusys.execution.broker_api import OrderStatus
+
+    class StubBrokerTerminal:
+        def __init__(self, status: str):
+            self._status = status
+        def get_order_status(self, order_id):
+            return OrderStatus(
+                order_id=order_id,
+                code="1234",
+                side="buy",
+                qty=100,
+                filled_qty=0,
+                status=self._status,
+                price=None,
+            )
+        def send_order(self, order): pass
+        def cancel_order(self, order_id): pass
+        def get_positions(self): return []
+        def get_available_cash(self): return 1_000_000.0
+
+    r = _make_record(
+        signal_id=f"sig-sync-{broker_status}",
+        state=OrderState.OrderAccepted,
+        broker_order_id=f"broker-{broker_status}-001",
+    )
+    repo.save(r)
+
+    m = OrderManager(broker=StubBrokerTerminal(broker_status), repo=repo)
+    result = m.sync_order(r.client_order_id)
+    assert result.state == expected_state
