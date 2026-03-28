@@ -1,0 +1,163 @@
+# src/kabusys/execution/order_manager.py
+"""OrderManager — Order State Machine の外向き API。
+
+signal_queue からシグナルを受け取り、broker API 経由で発注・状態管理を行う。
+OrderRecord（純粋ロジック）と OrderRepository（SQLite）を組み合わせる。
+"""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+
+from kabusys.execution.broker_api import BrokerAPIProtocol, OrderRequest, OrderRejectedError
+from kabusys.execution.order_record import InvalidStateTransitionError, OrderRecord, OrderState
+from kabusys.execution.order_repository import OrderRepository
+
+
+class DuplicateOrderError(Exception):
+    """同一 signal_id の active 注文が既に存在する場合に raise される。"""
+
+
+_STATUS_TO_STATE: dict[str, OrderState] = {
+    "open": OrderState.OrderAccepted,
+    "partial": OrderState.PartialFill,
+    "filled": OrderState.Filled,
+    "cancelled": OrderState.Cancelled,
+    "rejected": OrderState.Rejected,
+}
+
+_TERMINAL_STATES = frozenset(
+    {OrderState.Closed, OrderState.Cancelled, OrderState.Rejected, OrderState.Filled}
+)
+
+
+class OrderManager:
+    def __init__(self, broker: BrokerAPIProtocol, repo: OrderRepository) -> None:
+        self._broker = broker
+        self._repo = repo
+
+    def create_order(self, signal_id: str, request: OrderRequest) -> OrderRecord:
+        """
+        OrderCreated レコードを生成して DB に保存する。
+        同一 signal_id の active 注文が存在する場合は DuplicateOrderError を raise。
+        client_order_id には uuid4 を採番する。
+        """
+        existing = self._repo.get_by_signal(signal_id)
+        active = [
+            r for r in existing
+            if r.state not in {OrderState.Closed, OrderState.Cancelled, OrderState.Rejected}
+        ]
+        if active:
+            raise DuplicateOrderError(
+                f"signal_id={signal_id} の active 注文が既に存在します: "
+                f"{active[0].client_order_id}"
+            )
+
+        now = datetime.now(timezone.utc)
+        record = OrderRecord(
+            client_order_id=str(uuid.uuid4()),
+            signal_id=signal_id,
+            code=request.code,
+            side=request.side,
+            qty=request.qty,
+            order_type=request.order_type,
+            price=request.price,
+            state=OrderState.OrderCreated,
+            created_at=now,
+            updated_at=now,
+        )
+        self._repo.save(record)
+        return record
+
+    def send_order(self, client_order_id: str) -> OrderRecord:
+        """
+        以下の順序で処理する（クラッシュ安全性のため OrderSent の永続化を broker 呼び出しの前に行う）:
+
+        1. OrderCreated → OrderSent に遷移して SQLite に保存（commit）
+        2. broker API の send_order を呼び出す
+        3. 成功: broker_order_id を受領 → OrderAccepted に遷移して SQLite を更新
+        4. 失敗（OrderRejectedError）: Rejected に遷移して SQLite を更新
+
+        ステップ1 と broker 呼び出しの間でクラッシュした場合、OrderSent レコードが残る。
+        Reconciliation（Issue #32）が list_uncertain() でこのレコードを検出して状態を回復する。
+        """
+        record = self._repo.get(client_order_id)
+        if record is None:
+            raise RuntimeError(f"注文が見つかりません: {client_order_id}")
+
+        # Step 1: OrderSent に遷移して永続化（broker 呼び出し前）
+        record.transition_to(OrderState.OrderSent)
+        self._repo.update(record)
+
+        # Step 2-4: broker API 呼び出し
+        api_request = OrderRequest(
+            code=record.code,
+            side=record.side,
+            qty=record.qty,
+            order_type=record.order_type,
+            price=record.price,
+        )
+        try:
+            response = self._broker.send_order(api_request)
+            record.transition_to(OrderState.OrderAccepted, broker_order_id=response.order_id)
+        except OrderRejectedError as exc:
+            record.transition_to(OrderState.Rejected, error_message=str(exc))
+
+        self._repo.update(record)
+        return record
+
+    def sync_order(self, client_order_id: str) -> OrderRecord:
+        """
+        broker API の get_order_status を呼び、最新状態に同期する。
+        broker が None を返した場合は状態を変更しない。
+        broker が None を返す可能性: broker_order_id 未設定（クラッシュ後）または注文が見つからない。
+        OrderSent に対して broker が 'open' を返した場合は OrderAccepted に遷移する。
+        """
+        record = self._repo.get(client_order_id)
+        if record is None:
+            raise RuntimeError(f"注文が見つかりません: {client_order_id}")
+
+        if record.broker_order_id is None:
+            return record
+
+        status = self._broker.get_order_status(record.broker_order_id)
+        if status is None:
+            return record
+
+        new_state = _STATUS_TO_STATE.get(status.status)
+        if new_state is None or new_state == record.state:
+            return record
+
+        try:
+            record.transition_to(
+                new_state,
+                filled_qty=status.filled_qty,
+                avg_fill_price=status.price,
+            )
+            self._repo.update(record)
+        except InvalidStateTransitionError:
+            pass  # 既に終端状態の場合は無視
+
+        return record
+
+    def cancel_order(self, client_order_id: str) -> OrderRecord:
+        """
+        DB の現在状態を確認し、終端状態（Closed / Filled / Cancelled / Rejected）の場合は
+        broker API を呼ばずに InvalidStateTransitionError を raise する。
+        それ以外の場合は broker API の cancel_order を呼び、Cancelled に遷移する。
+        """
+        record = self._repo.get(client_order_id)
+        if record is None:
+            raise RuntimeError(f"注文が見つかりません: {client_order_id}")
+
+        if record.state in _TERMINAL_STATES:
+            raise InvalidStateTransitionError(
+                f"終端状態 ({record.state.value}) の注文はキャンセルできません"
+            )
+
+        if record.broker_order_id:
+            self._broker.cancel_order(record.broker_order_id)
+
+        record.transition_to(OrderState.Cancelled)
+        self._repo.update(record)
+        return record
