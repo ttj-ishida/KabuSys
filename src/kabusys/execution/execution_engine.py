@@ -188,7 +188,6 @@ class ExecutionEngine:
         8:50 でシグナル処理 → 9:10 で発注締切 → 15:30 でセッション終了。
         テスト環境では _process_signals() と _drain_push_queue() を直接呼ぶこと。
         """
-        import time as _time
         from datetime import datetime
 
         logger.info("ExecutionEngine: セッション開始 target_date=%s", self._config.target_date)
