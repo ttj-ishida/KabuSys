@@ -26,7 +26,10 @@ _STATUS_TO_STATE: dict[str, OrderState] = {
     "rejected": OrderState.Rejected,
 }
 
-_TERMINAL_STATES = frozenset(
+# キャンセル不可能な状態。
+# order_repository.py の _TERMINAL_STATES（Filled 除く）とは意図が異なる:
+# Filled は position tracking 上は 'active' だが、キャンセル不可なのでここに含める。
+_CANCEL_INELIGIBLE_STATES = frozenset(
     {OrderState.Closed, OrderState.Cancelled, OrderState.Rejected, OrderState.Filled}
 )
 
@@ -102,6 +105,9 @@ class OrderManager:
             record.transition_to(OrderState.OrderAccepted, broker_order_id=response.order_id)
         except OrderRejectedError as exc:
             record.transition_to(OrderState.Rejected, error_message=str(exc))
+        # その他の例外（BrokerAPIError, RuntimeError 等）は catch しない。
+        # 例外が伝播する場合、レコードは OrderSent 状態のまま DB に残る（self._repo.update は実行されない）。
+        # Reconciliation（Issue #32）の list_uncertain() がこのレコードを検出して回復する。
 
         self._repo.update(record)
         return record
@@ -150,7 +156,7 @@ class OrderManager:
         if record is None:
             raise RuntimeError(f"注文が見つかりません: {client_order_id}")
 
-        if record.state in _TERMINAL_STATES:
+        if record.state in _CANCEL_INELIGIBLE_STATES:
             raise InvalidStateTransitionError(
                 f"終端状態 ({record.state.value}) の注文はキャンセルできません"
             )

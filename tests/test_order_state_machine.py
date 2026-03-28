@@ -367,12 +367,8 @@ def test_sync_order_sent_to_accepted(repo):
     assert result.state == OrderState.OrderAccepted
 
 
-def test_sync_order_filled(manager):
+def test_sync_order_filled(repo):
     """sync_order: broker が 'filled' を返したら Filled に遷移"""
-    request = OrderRequest(code="1234", side="buy", qty=100, order_type="market")
-    record = manager.create_order("sig-sync-filled", request)
-    manager.send_order(record.client_order_id)  # OrderAccepted
-
     from kabusys.execution.broker_api import OrderStatus
 
     class StubBrokerFilled:
@@ -391,18 +387,19 @@ def test_sync_order_filled(manager):
         def get_positions(self): return []
         def get_available_cash(self): return 1_000_000.0
 
-    # fill_mode="instant" なので既に Filled かもしれないが、
-    # Accepted に直接リセットするためリポジトリ経由で状態を操作
-    repo_direct = manager._repo
-    fetched = repo_direct.get(record.client_order_id)
-    if fetched.state != OrderState.OrderAccepted:
-        # すでに Filled ならこのテストはスキップ（fill_mode="instant" の影響）
-        pytest.skip("fill_mode=instant: order already filled before sync test")
+    # OrderAccepted 状態のレコードを直接 DB に保存
+    r = _make_record(
+        signal_id="sig-sync-filled",
+        state=OrderState.OrderAccepted,
+        broker_order_id="broker-filled-001",
+    )
+    repo.save(r)
 
-    from kabusys.execution.order_manager import OrderManager as OM
-    stub_manager = OM(broker=StubBrokerFilled(), repo=repo_direct)
-    result = stub_manager.sync_order(record.client_order_id)
+    m = OrderManager(broker=StubBrokerFilled(), repo=repo)
+    result = m.sync_order(r.client_order_id)
     assert result.state == OrderState.Filled
+    assert result.filled_qty == 100
+    assert result.avg_fill_price == 1500.0
 
 
 def test_sync_order_broker_returns_none(manager):
@@ -436,7 +433,6 @@ def test_cancel_order_accepted(manager):
 
     # fill_mode="instant" なので既に Filled になっている可能性があるため、
     # OrderAccepted 状態のレコードを直接作って cancel する
-    from kabusys.execution.order_record import InvalidStateTransitionError
     # broker_order_id=None: broker にはまだ送信前のレコードとしてキャンセルする
     # （broker_order_id が設定されていない場合、cancel_order は broker を呼ばない）
     accepted = _make_record(
@@ -449,7 +445,7 @@ def test_cancel_order_accepted(manager):
     assert result.state == OrderState.Cancelled
 
 
-def test_cancel_order_terminal_state_raises(manager, repo):
+def test_cancel_order_terminal_state_raises(manager):
     """cancel_order: Filled の注文は broker を呼ばず InvalidStateTransitionError"""
     from kabusys.execution.order_record import InvalidStateTransitionError
 
@@ -458,6 +454,6 @@ def test_cancel_order_terminal_state_raises(manager, repo):
         state=OrderState.Filled,
         broker_order_id="broker-filled-001",
     )
-    repo.save(filled)
+    manager._repo.save(filled)
     with pytest.raises(InvalidStateTransitionError):
         manager.cancel_order(filled.client_order_id)
