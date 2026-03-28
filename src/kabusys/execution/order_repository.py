@@ -21,17 +21,20 @@ _TERMINAL_STATES = frozenset({
 
 
 def init_orders_db(conn: sqlite3.Connection) -> None:
-    """orders テーブルとインデックスを作成する（べき等）。"""
+    """orders テーブルとインデックスを作成する（冪等）。"""
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS orders (
             client_order_id  TEXT     NOT NULL PRIMARY KEY,
             signal_id        TEXT     NOT NULL,
             code             TEXT     NOT NULL,
             side             TEXT     NOT NULL CHECK (side IN ('buy', 'sell')),
-            qty              INTEGER  NOT NULL,
+            qty              INTEGER  NOT NULL CHECK (qty > 0),
             order_type       TEXT     NOT NULL CHECK (order_type IN ('market', 'limit')),
-            price            REAL     NOT NULL DEFAULT 0.0,
-            state            TEXT     NOT NULL,
+            price            REAL     NOT NULL DEFAULT 0.0 CHECK (price >= 0.0),
+            state            TEXT     NOT NULL CHECK (state IN (
+                                 'created','sent','accepted','partial',
+                                 'filled','closed','cancelled','rejected'
+                             )),
             broker_order_id  TEXT,
             filled_qty       INTEGER  NOT NULL DEFAULT 0,
             avg_fill_price   REAL,
@@ -42,6 +45,12 @@ def init_orders_db(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_orders_state  ON orders (state);
         CREATE INDEX IF NOT EXISTS idx_orders_signal ON orders (signal_id);
+
+        -- 同一 signal_id の active 注文は1件のみ許可（レースコンディション対策）。
+        -- Closed / Cancelled / Rejected は終端なので除外。
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_unique_active_signal
+            ON orders (signal_id)
+            WHERE state NOT IN ('closed', 'cancelled', 'rejected');
     """)
     conn.commit()
 

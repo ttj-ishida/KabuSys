@@ -232,8 +232,10 @@ class TestOrderRepository:
         assert uncertain[0].state == OrderState.OrderSent
 
     def test_get_by_signal(self, repo):
-        """get_by_signal は signal_id に紐づく全レコードを返す"""
-        repo.save(_make_record(client_order_id="sig-test-001", signal_id="same-signal"))
+        """get_by_signal は signal_id に紐づく全レコードを返す
+        （1件目は Cancelled 済み、2件目は新規 OrderCreated — 現実の再発注シナリオ）"""
+        repo.save(_make_record(client_order_id="sig-test-001", signal_id="same-signal",
+                               state=OrderState.Cancelled))
         repo.save(_make_record(client_order_id="sig-test-002", signal_id="same-signal"))
         repo.save(_make_record(client_order_id="sig-test-003", signal_id="other-signal"))
 
@@ -457,3 +459,18 @@ def test_cancel_order_terminal_state_raises(manager):
     manager._repo.save(filled)
     with pytest.raises(InvalidStateTransitionError):
         manager.cancel_order(filled.client_order_id)
+
+
+@pytest.mark.parametrize("terminal_state,signal_id", [
+    (OrderState.Closed,    "sig-cancel-closed"),
+    (OrderState.Cancelled, "sig-cancel-cancelled"),
+    (OrderState.Rejected,  "sig-cancel-rejected"),
+])
+def test_cancel_order_all_terminal_states_raise(manager, terminal_state, signal_id):
+    """cancel_order: Closed / Cancelled / Rejected も InvalidStateTransitionError"""
+    from kabusys.execution.order_record import InvalidStateTransitionError
+
+    record = _make_record(signal_id=signal_id, state=terminal_state)
+    manager._repo.save(record)
+    with pytest.raises(InvalidStateTransitionError):
+        manager.cancel_order(record.client_order_id)
