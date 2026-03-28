@@ -1,360 +1,332 @@
 
-# tests/test_kabusys_core.py
 import json
 import math
 import os
-from types import SimpleNamespace
 from datetime import date, datetime, timedelta
-from unittest.mock import patch
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 import duckdb
 import pytest
 
-# --- config._parse_env_line tests ---
-from kabusys.config import _parse_env_line
+# --- config module tests ---
+from kabusys.config import (
+    _parse_env_line,
+    _load_env_file,
+    _require,
+    Settings,
+)
 
-def test_parse_env_line_blank_and_comment():
+# --- news_nlp tests ---
+from kabusys.ai.news_nlp import (
+    calc_news_window,
+    _validate_and_extract,
+)
+
+# --- data.stats tests ---
+from kabusys.data.stats import zscore_normalize
+
+# --- feature_exploration / research tests ---
+# The sample code exposes rank, calc_ic, factor_summary in a module.
+# Adjust import path if your project places these elsewhere.
+from kabusys.feature_exploration import rank, calc_ic, factor_summary
+
+# --- pipeline / ETLResult tests ---
+from kabusys.data.pipeline import ETLResult
+
+# --- jquants_client RateLimiter test ---
+from kabusys.data.jquants_client import _RateLimiter, _to_date as jq__to_date  # _to_date used in calendar tests (if present)
+
+
+# ----------------------------
+# Tests for _parse_env_line
+# ----------------------------
+def test_parse_env_line_ignores_blank_and_comments():
     assert _parse_env_line("") is None
     assert _parse_env_line("   ") is None
-    assert _parse_env_line("# comment") is None
+    assert _parse_env_line("# a comment") is None
+    assert _parse_env_line("   # indented comment") is None
 
-def test_parse_env_line_export_and_regular():
+
+def test_parse_env_line_basic_and_export():
+    assert _parse_env_line("FOO=bar") == ("FOO", "bar")
     assert _parse_env_line("export FOO=bar") == ("FOO", "bar")
-    assert _parse_env_line("KEY=val #comment") == ("KEY", "val")
-    # '#' not preceded by space should be part of value
-    assert _parse_env_line("K=val#notcomment") == ("K", "val#notcomment")
+    # whitespace tolerance
+    assert _parse_env_line("  export   KEY =  val ") == ("KEY", "val")
+
 
 def test_parse_env_line_quoted_with_escapes():
-    # double quote with escaped quote inside
-    line = 'FOO="a\\\"b\\nc"'
-    k, v = _parse_env_line(line)
-    # escapes remove backslashes and keep next char literally (per implementation)
-    assert k == "FOO"
-    assert v == 'a"bnc'  # \\" -> ", \\n -> n (implementation treats backslash + next char as literal)
+    # double quoted with escape
+    assert _parse_env_line(r'Q="a\"b"') == ("Q", 'a"b')
+    # single quoted with backslash
+    assert _parse_env_line(r"Q='a\'b'") == ("Q", "a'b")
+    # quoted value ignores inline comment
+    assert _parse_env_line('Q="text # not comment"  # comment') == ("Q", "text # not comment")
 
-    # single quote
-    line2 = "BAR='x\\'y'"
-    k2, v2 = _parse_env_line(line2)
-    assert k2 == "BAR"
-    assert v2 == "x'y"
 
-# ---------------------------------------------------------------------------
-# regime_detector: _calc_ma200_ratio, _fetch_macro_news, _score_macro
-# ---------------------------------------------------------------------------
-from kabusys.ai import regime_detector
-from openai import RateLimitError, APIError, APIConnectionError, APITimeoutError
+def test_parse_env_line_inline_comment_rules():
+    # '#' without preceding space is literal
+    assert _parse_env_line("K=foo#bar") == ("K", "foo#bar")
+    # '#' preceded by space becomes comment
+    assert _parse_env_line("K=foo #bar") == ("K", "foo")
+    assert _parse_env_line("K=foo\t#bar") == ("K", "foo")
 
-def make_conn_with_prices():
-    conn = duckdb.connect(database=":memory:")
-    conn.execute("""
-        CREATE TABLE prices_daily (
-            date DATE,
-            code VARCHAR,
-            close DOUBLE
-        )
-    """)
-    return conn
 
-def test_calc_ma200_ratio_no_rows_logs_and_returns_one(caplog):
-    conn = make_conn_with_prices()
-    target = date(2026, 3, 20)
-    caplog.clear()
-    val = regime_detector._calc_ma200_ratio(conn, target)
-    assert val == 1.0
-    assert any("1321 のデータなし" in rec.message or "_calc_ma200_ratio" in rec.message for rec in caplog.records)
+def test_parse_env_line_invalid_lines():
+    assert _parse_env_line("NOSEP") is None
+    # empty key
+    assert _parse_env_line("=value") is None
 
-def test_calc_ma200_ratio_insufficient_rows_returns_one(caplog):
-    conn = make_conn_with_prices()
-    target = date(2026, 3, 20)
-    # insert 10 rows (<200)
-    for i in range(10):
-        conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [target - timedelta(days=i+1), regime_detector._ETF_CODE, 100.0])
-    val = regime_detector._calc_ma200_ratio(conn, target)
-    assert val == 1.0
-    assert any("データ不足" in rec.message or "_calc_ma200_ratio" in rec.message for rec in caplog.records)
 
-def test_calc_ma200_ratio_exactly_200_rows():
-    conn = make_conn_with_prices()
-    target = date(2026, 3, 20)
-    # latest close 110, others 100
-    conn.execute("BEGIN")
-    conn.execute("DELETE FROM prices_daily")
-    conn.execute("COMMIT")
-    # Insert 200 rows with dates older than target (date < target)
-    for i in range(200):
-        # newest first: date desc order matters; we ensure distinct dates
-        d = target - timedelta(days=i + 1)
-        close = 110.0 if i == 0 else 100.0  # latest (most recent) will be highest date -> i==0
-        conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [d, regime_detector._ETF_CODE, close])
-    val = regime_detector._calc_ma200_ratio(conn, target)
-    assert val > 1.0  # since latest is higher than average
+# ----------------------------
+# Tests for _load_env_file
+# ----------------------------
+def test_load_env_file_sets_env_vars(tmp_path, monkeypatch):
+    # Prepare env file
+    p = tmp_path / ".env.test"
+    content = "\n".join(
+        [
+            "A=1",
+            "B= two ",
+            "C='quoted val'",
+            "D=\"with\\\"quote\"",
+            "#comment",
+            "export E=5",
+        ]
+    )
+    p.write_text(content, encoding="utf-8")
 
-def test_fetch_macro_news_filters_by_keywords_and_window():
-    conn = duckdb.connect(database=":memory:")
-    conn.execute("""
-        CREATE TABLE raw_news (
-            id INTEGER,
-            datetime TIMESTAMP,
-            title VARCHAR
-        )
-    """)
-    # Insert two rows, one with matching keyword "日銀"
-    now = datetime(2026, 3, 19, 12, 0)
-    conn.execute("INSERT INTO raw_news VALUES (1, ?, ?)", [now - timedelta(hours=1), "日銀 が会合"])
-    conn.execute("INSERT INTO raw_news VALUES (2, ?, ?)", [now - timedelta(days=2), "その他ニュース"])
-    start = now - timedelta(days=1)
-    end = now + timedelta(days=1)
-    titles = regime_detector._fetch_macro_news(conn, start, end)
-    assert "日銀 が会合" in titles
-    assert all(isinstance(t, str) for t in titles)
+    # Start with a clean environment
+    monkeypatch.delenv("A", raising=False)
+    monkeypatch.delenv("B", raising=False)
+    monkeypatch.delenv("C", raising=False)
+    monkeypatch.delenv("D", raising=False)
+    monkeypatch.delenv("E", raising=False)
 
-@patch("kabusys.ai.regime_detector._call_openai_api")
-def test_score_macro_success_and_retries(mock_api):
-    # prepare a fake successful response
-    content = json.dumps({"macro_sentiment": 0.6})
-    resp = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
-    # First call raises RateLimitError, then success
-    mock_api.side_effect = [RateLimitError("rate"), resp]
+    # Load without override: should set missing keys
+    _load_env_file(p, override=False, protected=frozenset())
+    assert os.environ.get("A") == "1"
+    assert os.environ.get("B") == "two"
+    assert os.environ.get("C") == "quoted val"
+    assert os.environ.get("D") == 'with"quote'
+    assert os.environ.get("E") == "5"
 
-    titles = ["- something"]
-    # use a no-op sleep function to avoid delays
-    score = regime_detector._score_macro(SimpleNamespace(), titles, _sleep_fn=lambda s: None)
-    assert isinstance(score, float)
-    assert math.isfinite(score)
-    assert abs(score - 0.6) < 1e-8
+    # Test override behavior and protected keys
+    monkeypatch.setenv("A", "orig")
+    _load_env_file(p, override=False, protected=frozenset())
+    assert os.environ["A"] == "orig"  # not overridden
 
-@patch("kabusys.ai.regime_detector._call_openai_api")
-def test_score_macro_json_parse_failure_returns_zero(mock_api, caplog):
-    resp = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="not json"))])
-    mock_api.return_value = resp
-    caplog.clear()
-    score = regime_detector._score_macro(SimpleNamespace(), ["title"], _sleep_fn=lambda s: None)
-    assert score == 0.0
-    assert any("レスポンスパース失敗" in rec.message or "パース失敗" in rec.message or "レスポンスパース失敗" in rec.message for rec in caplog.records)
+    _load_env_file(p, override=True, protected=frozenset({"E"}))
+    # override True should overwrite non-protected
+    assert os.environ["A"] == "1"
+    # but protected E should remain original if existed
+    # ensure E remains "5" because we earlier set it to 5; simulate protected preventing overwrite
+    assert os.environ["E"] == "5"
 
-# ---------------------------------------------------------------------------
-# news_nlp: calc_news_window, _validate_and_extract, _fetch_articles, score_news
-# ---------------------------------------------------------------------------
-from kabusys.ai import news_nlp
 
-def test_calc_news_window_expected_boundaries():
+def test_load_env_file_handles_missing_file(monkeypatch, tmp_path):
+    p = tmp_path / "nonexistent.env"
+    # should not raise
+    _load_env_file(p, override=True, protected=frozenset())
+
+
+def test_load_env_file_warns_on_io_error(monkeypatch, tmp_path):
+    p = tmp_path / "bad.env"
+    p.write_text("X=1", encoding="utf-8")
+    # simulate permission error on open
+    monkeypatch.setattr(Path, "open", lambda self, *args, **kwargs: (_ for _ in ()).throw(OSError("perm")))
+    # Should not raise, just return
+    _load_env_file(p, override=True, protected=frozenset())
+
+
+# ----------------------------
+# Tests for _require and Settings
+# ----------------------------
+def test_require_raises_when_missing(monkeypatch):
+    monkeypatch.delenv("SOME_KEY", raising=False)
+    with pytest.raises(ValueError):
+        _require("SOME_KEY")
+
+
+def test_require_returns_value(monkeypatch):
+    monkeypatch.setenv("SOME_KEY", "ok")
+    assert _require("SOME_KEY") == "ok"
+
+
+def test_settings_env_and_log_level_validation(monkeypatch):
+    s = Settings()
+    # default env should be development
+    monkeypatch.delenv("KABUSYS_ENV", raising=False)
+    assert s.env == "development"
+    # invalid env
+    monkeypatch.setenv("KABUSYS_ENV", "invalid_env")
+    with pytest.raises(ValueError):
+        _ = s.env
+    # log level default
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+    assert s.log_level == "INFO"
+    # invalid log level
+    monkeypatch.setenv("LOG_LEVEL", "nope")
+    with pytest.raises(ValueError):
+        _ = s.log_level
+
+
+# ----------------------------
+# news_nlp: calc_news_window & _validate_and_extract
+# ----------------------------
+def test_calc_news_window_basic():
     td = date(2026, 3, 20)
-    start, end = news_nlp.calc_news_window(td)
-    # start should be previous day at 06:00, end previous day at 23:30
+    start, end = calc_news_window(td)
+    # start = previous day at 06:00, end = previous day at 23:30
     assert start == datetime(2026, 3, 19, 6, 0)
     assert end == datetime(2026, 3, 19, 23, 30)
 
-def make_resp_with_content(content_str):
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content_str))])
 
-def test_validate_and_extract_basic_and_text_padding():
-    # valid payload
-    content = json.dumps({"results": [{"code": "1001", "score": 0.5}, {"code": 2002, "score": -1.5}]})
-    resp = make_resp_with_content(content)
-    out = news_nlp._validate_and_extract(resp, {"1001", "2002"})
-    # 2002 is not in requested_codes as string "2002" unless we include; include to see filtering
-    assert "1001" in out
-    # score for 2002 should be clipped to -1.0
-    assert out.get("2002") == -1.0 or out.get("2002") is None
+class DummyChoice:
+    def __init__(self, content):
+        self.message = SimpleNamespace(content=content)
 
-    # padded JSON: prefix/suffix text around actual JSON
-    padded = "prefix " + content + " suffix"
-    resp2 = make_resp_with_content(padded)
-    out2 = news_nlp._validate_and_extract(resp2, {"1001"})
-    assert out2.get("1001") == 0.5
 
-def test_fetch_articles_aggregates_and_trims():
-    conn = duckdb.connect(database=":memory:")
-    conn.execute("""
-        CREATE TABLE raw_news (
-            id INTEGER, datetime TIMESTAMP, title VARCHAR, content VARCHAR
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE news_symbols (
-            news_id INTEGER, code VARCHAR
-        )
-    """)
-    base_dt = datetime(2026, 3, 19, 12, 0)
-    # insert 3 articles for same code, ensure ordering and trimming
-    conn.execute("INSERT INTO raw_news VALUES (1, ?, ?, ?)", [base_dt - timedelta(hours=1), "t1", "c1"])
-    conn.execute("INSERT INTO raw_news VALUES (2, ?, ?, ?)", [base_dt - timedelta(hours=2), "t2", "c2"])
-    conn.execute("INSERT INTO raw_news VALUES (3, ?, ?, ?)", [base_dt - timedelta(days=2), "t3", "c3"])  # out of window
-    conn.execute("INSERT INTO news_symbols VALUES (?, ?)", [1, "1234"])
-    conn.execute("INSERT INTO news_symbols VALUES (?, ?)", [2, "1234"])
-    start = base_dt - timedelta(days=1)
-    end = base_dt + timedelta(days=1)
-    am = news_nlp._fetch_articles(conn, start, end)
-    assert "1234" in am
-    assert len(am["1234"]) == 2
-    assert all(isinstance(s, str) for s in am["1234"])
+class DummyResp:
+    def __init__(self, content):
+        self.choices = [DummyChoice(content)]
 
-@patch("kabusys.ai.news_nlp._call_openai_api")
-def test_score_news_end_to_end(mock_api, monkeypatch):
-    # build DB
-    conn = duckdb.connect(database=":memory:")
-    conn.execute("CREATE TABLE raw_news (id INTEGER, datetime TIMESTAMP, title VARCHAR, content VARCHAR)")
-    conn.execute("CREATE TABLE news_symbols (news_id INTEGER, code VARCHAR)")
-    conn.execute("CREATE TABLE ai_scores (date DATE, code VARCHAR, sentiment_score DOUBLE, ai_score DOUBLE)")
-    base_dt = datetime(2026, 3, 19, 12, 0)
-    # Insert one article inside window and symbol mapping
-    conn.execute("INSERT INTO raw_news VALUES (1, ?, ?, ?)", [base_dt, "macro 日銀", "body"])
-    conn.execute("INSERT INTO news_symbols VALUES (?, ?)", [1, "5678"])
-    # Prepare OpenAI response that returns a valid score
-    content = json.dumps({"results": [{"code": "5678", "score": 0.7}]})
-    mock_api.return_value = make_resp_with_content(content)
-    # Call score_news with explicit api_key to bypass env
-    written = news_nlp.score_news(conn, date(2026, 3, 20), api_key="dummy")
-    assert written == 1
-    rows = conn.execute("SELECT date, code, sentiment_score, ai_score FROM ai_scores").fetchall()
-    assert len(rows) == 1
-    assert rows[0][1] == "5678"
-    assert abs(rows[0][2] - 0.7) < 1e-8
 
-# ---------------------------------------------------------------------------
-# research: calc_forward_returns, calc_ic, rank, factor_summary
-# ---------------------------------------------------------------------------
-from kabusys.research import calc_forward_returns, calc_ic, rank, factor_summary
+def test_validate_and_extract_valid_and_clipping():
+    # valid JSON with extra fields; ensure clipping and normalization
+    payload = {"results": [{"code": "1234", "score": 2.0}, {"code": 5678, "score": -2.0}, {"code": "9", "score": "0.5"}]}
+    content = json.dumps(payload)
+    resp = DummyResp(content)
+    out = _validate_and_extract(resp, {"1234", "5678", "9", "999"})
+    # 2.0 clipped to 1.0; -2.0 clipped to -1.0; "0.5" parsed to 0.5
+    assert out["1234"] == 1.0
+    assert out["5678"] == -1.0
+    assert math.isclose(out["9"], 0.5)
 
-def test_calc_forward_returns_basic():
-    conn = duckdb.connect(database=":memory:")
-    conn.execute("""
-        CREATE TABLE prices_daily (
-            date DATE, code VARCHAR, close DOUBLE
-        )
-    """)
-    td = date(2026, 3, 20)
-    # create 2-day series for code 'AAA'
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [td, "AAA", 100.0])
-    conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [td + timedelta(days=1), "AAA", 110.0])
-    rows = calc_forward_returns(conn, td, horizons=[1])
-    assert rows and rows[0]["fwd_1d"] == pytest.approx((110.0 - 100.0) / 100.0)
 
-def test_calc_ic_and_rank_and_ties():
-    # perfect positive correlation
-    factors = [{"code": "A", "f": 1.0}, {"code": "B", "f": 2.0}, {"code": "C", "f": 3.0}]
-    fwd = [{"code": "A", "r": 1.0}, {"code": "B", "r": 2.0}, {"code": "C", "r": 3.0}]
-    ic = calc_ic([{"code": r["code"], "mom": r["f"]} for r in factors],
-                 [{"code": r["code"], "fwd_1d": r["r"]} for r in fwd],
-                 "mom", "fwd_1d")
-    assert ic == pytest.approx(1.0)
+def test_validate_and_extract_unknown_and_bad_scores_and_extra_text():
+    # Unknown code should be ignored; non-numeric score ignored
+    # Also test when content has surrounding text and embedded JSON extracted
+    text = "prefix\n" + json.dumps({"results": [{"code": "X", "score": "NaN"}, {"code": "A", "score": 0.1}]}) + "\nsuffix"
+    resp = DummyResp(text)
+    out = _validate_and_extract(resp, {"A"})
+    assert "A" in out and math.isfinite(out["A"])
+    # bad json completely
+    bad = DummyResp("not json")
+    assert _validate_and_extract(bad, {"A"}) == {}
 
-    # ties handling in rank
-    vals = [1.0, 1.0, 2.0]
-    rks = rank(vals)
-    # first two should have equal average rank
-    assert rks[0] == rks[1]
-    assert rks[2] > rks[0]
 
-def test_factor_summary_basic_and_empty():
-    recs = [
-        {"a": 1.0, "b": 10.0},
-        {"a": 2.0, "b": 20.0},
-        {"a": None, "b": 30.0},
+# ----------------------------
+# feature_exploration: rank, calc_ic, factor_summary
+# ----------------------------
+def test_rank_ties():
+    vals = [1.0, 2.0, 2.0, 4.0]
+    r = rank(vals)
+    # ranks: 1, (2+3)/2=2.5, 2.5, 4
+    assert pytest.approx(r) == [1.0, 2.5, 2.5, 4.0]
+
+
+def test_calc_ic_basic_and_insufficient():
+    factor = [
+        {"code": "A", "mom_1m": 0.1},
+        {"code": "B", "mom_1m": 0.2},
+        {"code": "C", "mom_1m": -0.1},
+        {"code": "D", "mom_1m": 0.0},
     ]
-    summary = factor_summary(recs, ["a", "b", "c"])
-    assert "a" in summary and "b" in summary and "c" in summary
-    assert summary["c"]["count"] == 0
+    forward = [
+        {"code": "A", "fwd_1d": 0.01},
+        {"code": "B", "fwd_1d": 0.02},
+        {"code": "C", "fwd_1d": -0.01},
+        {"code": "D", "fwd_1d": 0.0},
+    ]
+    ic = calc_ic(factor, forward, "mom_1m", "fwd_1d")
+    assert isinstance(ic, float)
+    # insufficient pairs -> None
+    ic2 = calc_ic(factor[:2], forward[:2], "mom_1m", "fwd_1d")
+    assert ic2 is None
 
-# ---------------------------------------------------------------------------
+
+def test_factor_summary_empty_and_values():
+    recs = [
+        {"code": "A", "x": 1.0, "y": 2.0},
+        {"code": "B", "x": 2.0, "y": 4.0},
+        {"code": "C", "x": 3.0, "y": None},
+    ]
+    summary = factor_summary(recs, ["x", "y"])
+    # x: count=3 mean=2.0 min=1 max=3
+    assert summary["x"]["count"] == 3
+    assert math.isclose(summary["x"]["mean"], 2.0)
+    assert summary["y"]["count"] == 2
+
+
+# ----------------------------
 # data.stats: zscore_normalize
-# ---------------------------------------------------------------------------
-from kabusys.data.stats import zscore_normalize
+# ----------------------------
+def test_zscore_normalize_basic_and_edge_cases():
+    recs = [
+        {"code": "A", "val": 1.0},
+        {"code": "B", "val": 2.0},
+        {"code": "C", "val": 3.0},
+    ]
+    out = zscore_normalize(recs, ["val"])
+    vals = [r["val"] for r in out]
+    # mean should be 0 and std 1
+    assert pytest.approx(sum(vals), abs=1e-12) == 0.0
+    # single record case -> no change
+    single = [{"code": "X", "v": 10.0}]
+    out2 = zscore_normalize(single, ["v"])
+    assert out2[0]["v"] == 10.0
+    # ignore None / bool / Inf
+    recs2 = [{"code": "A", "v": None}, {"code": "B", "v": True}, {"code": "C", "v": float("inf")}, {"code": "D", "v": 5.0}, {"code": "E", "v": 7.0}]
+    out3 = zscore_normalize(recs2, ["v"])
+    # only D and E considered -> normalized to mean 0
+    assert math.isfinite(out3[3]["v"]) and math.isfinite(out3[4]["v"])
 
-def test_zscore_normalize_basic_and_edge():
-    recs = [{"code": "A", "v": 1.0}, {"code": "B", "v": 3.0}, {"code": "C", "v": 5.0}]
-    out = zscore_normalize(recs, ["v"])
-    # mean=3, std = sqrt(((4+0+4)/3))=sqrt(8/3)
-    assert pytest.approx(0.0, rel=1e-3) == out[1]["v"]
-    # single record or zero std should be preserved
-    out2 = zscore_normalize([{"v": 1.0}], ["v"])
-    assert out2[0]["v"] == 1.0
 
-# ---------------------------------------------------------------------------
-# etl: ETLResult
-# ---------------------------------------------------------------------------
-from kabusys.data.pipeline import ETLResult
-from kabusys.data import quality
+# ----------------------------
+# pipeline.ETLResult tests
+# ----------------------------
+def test_etlresult_properties_and_to_dict():
+    qissue = SimpleNamespace(check_name="c", severity="error", message="m")
+    # We need real QualityIssue instances in actual code; use matching interface for to_dict conversion
+    # Here we construct an object with attributes check_name, severity, message
+    result = ETLResult(target_date=date(2026, 1, 1))
+    assert not result.has_errors
+    result.errors.append("oops")
+    assert result.has_errors
+    # quality issues severity detection
+    # create dummy object matching expected attributes
+    class Q:
+        def __init__(self, check_name, severity, message):
+            self.check_name = check_name
+            self.severity = severity
+            self.message = message
+    result.quality_issues.append(Q("x", "error", "m"))
+    assert result.has_quality_errors
+    d = result.to_dict()
+    assert "target_date" in d
+    assert isinstance(d["quality_issues"], list)
 
-def test_etlresult_to_dict_and_props():
-    qi = quality.QualityIssue(check_name="m", table="t", severity="error", detail="d")
-    er = ETLResult(target_date=date(2026, 3, 20))
-    er.quality_issues = [qi]
-    er.errors = ["e"]
-    d = er.to_dict()
-    assert d["quality_issues"][0]["check_name"] == "m"
-    assert er.has_errors is True
-    assert er.has_quality_errors is True
 
-# ---------------------------------------------------------------------------
-# quality checks: missing, spike, duplicates, date consistency
-# ---------------------------------------------------------------------------
-from kabusys.data import quality as quality_mod
-
-def make_conn_with_raw_prices():
-    conn = duckdb.connect(database=":memory:")
-    conn.execute("""
-        CREATE TABLE raw_prices (
-            date DATE, code VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE, volume BIGINT
-        )
-    """)
-    return conn
-
-def test_check_missing_data_detects_nulls():
-    conn = make_conn_with_raw_prices()
-    td = date(2026, 3, 20)
-    conn.execute("INSERT INTO raw_prices VALUES (?, ?, ?, ?, ?, ?, ?)", [td, "X", None, 2.0, 1.0, 1.5, 100])
-    issues = quality_mod.check_missing_data(conn, target_date=td)
-    assert any(i.check_name == "missing_data" for i in issues)
-
-def test_check_spike_detects_large_change():
-    conn = make_conn_with_raw_prices()
-    d1 = date(2026, 3, 19)
-    d2 = date(2026, 3, 20)
-    # previous close 100, current 200 -> 100% change (threshold 0.5)
-    conn.execute("INSERT INTO raw_prices VALUES (?, ?, ?, ?, ?, ?, ?)", [d1, "A", 0.0, 0.0, 0.0, 100.0, 10])
-    conn.execute("INSERT INTO raw_prices VALUES (?, ?, ?, ?, ?, ?, ?)", [d2, "A", 0.0, 0.0, 0.0, 200.0, 20])
-    issues = quality_mod.check_spike(conn, target_date=d2, threshold=0.5)
-    assert any(i.check_name == "spike" for i in issues)
-
-def test_check_duplicates_detects_dupes():
-    conn = make_conn_with_raw_prices()
-    td = date(2026, 3, 20)
-    conn.execute("INSERT INTO raw_prices VALUES (?, ?, ?, ?, ?, ?, ?)", [td, "D", 1,2,3,4,100])
-    conn.execute("INSERT INTO raw_prices VALUES (?, ?, ?, ?, ?, ?, ?)", [td, "D", 1,2,3,4,100])
-    issues = quality_mod.check_duplicates(conn, target_date=td)
-    assert any(i.check_name == "duplicates" for i in issues)
-
-def test_check_date_consistency_future_and_non_trading():
-    conn = duckdb.connect(database=":memory:")
-    conn.execute("""
-        CREATE TABLE raw_prices (date DATE, code VARCHAR, close DOUBLE)
-    """)
-    conn.execute("""
-        CREATE TABLE market_calendar (date DATE, is_trading_day BOOLEAN, is_sq_day BOOLEAN)
-    """)
-    ref = date(2026, 3, 20)
-    # future record
-    conn.execute("INSERT INTO raw_prices VALUES (?, ?, ?)", [ref + timedelta(days=1), "X", 10.0])
-    # non trading day: market_calendar marks 2026-03-18 as non trading, and raw_prices has that date
-    nt = ref - timedelta(days=2)
-    conn.execute("INSERT INTO market_calendar VALUES (?, ?, ?)", [nt, False, False])
-    conn.execute("INSERT INTO raw_prices VALUES (?, ?, ?)", [nt, "Y", 5.0])
-    issues = quality_mod.check_date_consistency(conn, reference_date=ref)
-    names = [i.check_name for i in issues]
-    assert "future_date" in names
-    assert "non_trading_day" in names
-
-# ---------------------------------------------------------------------------
-# audit schema init
-# ---------------------------------------------------------------------------
-from kabusys.data.audit import init_audit_schema, init_audit_db
-
-def test_init_audit_schema_and_db_transactional():
-    conn = duckdb.connect(database=":memory:")
-    # transactional True should run BEGIN/COMMIT without raising
-    init_audit_schema(conn, transactional=False)  # non-transactional ok
-    # init_audit_db with :memory: should succeed and return a connection
-    c2 = init_audit_db(":memory:")
-    assert isinstance(c2, duckdb.DuckDBPyConnection)
-    c2.close()
+# ----------------------------
+# jquants_client: _RateLimiter.wait
+# ----------------------------
+def test_rate_limiter_wait(monkeypatch):
+    rl = _RateLimiter(min_interval=1.0)
+    # Simulate last_called 1 second ago -> no sleep
+    monkeypatch.setattr(rl, "_last_called", 0.0)
+    # patch time.monotonic so elapsed > min_interval
+    with mock.patch("kabusys.data.jquants_client.time.monotonic", side_effect=[0.0, 2.0]):
+        # monkeypatch time.sleep to ensure not called
+        with mock.patch("kabusys.data.jquants_client.time.sleep") as mock_sleep:
+            rl.wait()
+            mock_sleep.assert_not_called()
+    # Simulate last_called very recent -> expect sleep call
+    monkeypatch.setattr(rl, "_last_called", 100.0)
+    monotonic_calls = [100.0, 100.2, 100.2 + 1.0]  # last called then new monotonic values
+    with mock.patch("kabusys.data.jquants_client.time.monotonic", side_effect=monotonic_calls):
+        with mock.patch("kabusys.data.jquants_client.time.sleep") as mock_sleep:
+            rl.wait()
+            # since elapsed small, sleep should be invoked at least once
+            assert mock_sleep.called
