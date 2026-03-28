@@ -1,7 +1,7 @@
 # Execution System (執行系・状態監視・復旧原則)
 
 - 対象: kabuステーションAPIを通じた発注およびリスク管理層
-- 版数: v1.0
+- 版数: v1.1
 
 ---
 
@@ -39,8 +39,10 @@
 [Y. Rejected] (エラー・証券会社拒否/リスク統制拒否)
 ```
 
-**※ 状態の不確実性（State Uncertainty）への対応**  
+**※ 状態の不確実性（State Uncertainty）への対応**
 `OrderSent` の状態でネットワークが切断されたりプロセスが落ちた場合、注文が通っているかいないか「不明」となる。この場合、再起動時は直ちに「注文照会API」を叩き、正しいステータスへ同期（Reconciliation）させる。
+
+実装上の安全保証: `send_order` は **SQLite に `OrderSent` を保存してから** broker API を呼び出す。クラッシュ時でも SQLite に `OrderSent` レコードが残るため、再起動時に検出できる（Section 4 参照）。
 
 ---
 
@@ -66,10 +68,12 @@ Strategy層が生成したシグナルは、実行層（Execution）へ渡る直
 
 サーバーの再起動、Windows Updateによる強制リブート、クラッシュに対し、システムは安全に自己復旧（Self-Healing）しなければならない。
 
-1. **起動時検知**: システム起動時、DBのステータスが `OrderSent` や処理途中のレコードを検出する。
-2. **安全隔離**: これらを一旦すべて「状態不明 (Unknown)」として隔離する。
-3. **リコンシリエーション (突合)**: kabuステーション「注文照会API」および「残高照会API」を叩き、実際の保有口座ポジション・注文状況と、ローカルDBの差分を突合する。
-4. **同期と再開**: 正しい状態にアップデート（例: `Filled` または `Rejected`）した後、未処理のキューの消化を再開する。
+1. **起動時検知**: `OrderRepository.list_uncertain()` を呼び、SQLite の `orders` テーブルから `state = "sent"` のレコードを抽出する。
+2. **リコンシリエーション (突合)**: 各レコードに対して `OrderManager.sync_order()` を呼び、kabuステーション「注文照会API」（`GET /orders`）で実際の状態を照合する。broker が `"open"` を返せば `OrderAccepted`、`"filled"` なら `Filled`、`"cancelled"` なら `Cancelled` に遷移して SQLite を更新する。broker が `None`（注文が見つからない）を返した場合は状態を変えず、ログに記録して手動確認待ちとする。
+3. **残高照合**: `GET /positions` で実際の口座ポジションを確認し、ローカルの想定ポジションとの差分をログに記録する。
+4. **再開**: 正しい状態に同期した後、`signal_queue` の `pending` キューの消化を再開する。
+
+> **実装**: Reconciliation ロジックは Issue #32 で実装する。`OrderRepository.list_uncertain()` と `OrderManager.sync_order()` のインターフェースは Issue #29 で提供済み。
 
 ---
 
@@ -100,15 +104,17 @@ class BrokerAPIProtocol(Protocol):
     def get_available_cash(self) -> float: ...
 ```
 
-Order State Machine（Section 2）のステータスと `OrderStatus.status` の対応:
+broker API の `OrderStatus.status`（GET /orders レスポンス）から Order State Machine の状態への変換:
 
-| State Machine | `OrderStatus.status` |
-|--------------|----------------------|
-| OrderCreated / OrderSent / OrderAccepted | `"open"` |
-| PartialFill | `"partial"` |
-| Filled / Closed | `"filled"` |
-| Cancelled | `"cancelled"` |
-| Rejected | `"rejected"` |
+| `OrderStatus.status` | `OrderState`（内部状態） | 備考 |
+|----------------------|------------------------|------|
+| `"open"` | `OrderAccepted` | 受付済み・市場待機中 |
+| `"partial"` | `PartialFill` | 一部約定済み |
+| `"filled"` | `Filled` | 全量約定済み |
+| `"cancelled"` | `Cancelled` | 取消済み |
+| `"rejected"` | `Rejected` | 拒否済み |
+
+> `OrderCreated` と `OrderSent` は内部状態のみ。broker API は受付前の状態を返さないため、これらへの逆マッピングは存在しない。
 
 ### 使用 REST エンドポイント
 
@@ -139,3 +145,52 @@ api = create_broker_api(mock=False, api_password="...", base_url="http://localho
 - 発注系 API はレート制限 5 req/sec（Section 3 第2関門で制御）
 - WebSocket（市場データ PUSH）は Execution Engine（Issue #30）で別途扱う
 - 詳細仕様: `docs/superpowers/specs/2026-03-26-broker-api-design.md`
+
+---
+
+## 6. Order State Machine 実装方針 (Issue #29)
+
+### DB 役割分担
+
+| DB | ファイル | テーブル | 用途 |
+|----|---------|---------|------|
+| SQLite | `data/kabusys.sqlite` | `orders` | **状態管理**: リアルタイムの現在状態・低レイテンシ読み書き |
+| DuckDB | `audit.py` 管理 | `order_requests` / `executions` | **監査ログ**: 追記専用・変更不可の証跡記録 |
+
+### ファイル構成
+
+```
+src/kabusys/execution/
+├── broker_api.py        ← BrokerAPIProtocol + データモデル（Issue #28）
+├── kabu_client.py       ← KabuStationClient（Issue #28）
+├── mock_client.py       ← MockBrokerClient（Issue #28）
+├── order_record.py      ← OrderRecord dataclass + 状態遷移ルール（DB なし純粋ロジック）
+├── order_repository.py  ← SQLite 読み書き（永続化のみ）
+└── order_manager.py     ← 外向き API（order_record + order_repository を組み合わせ）
+```
+
+### OrderState（enum 値）
+
+| 値 | 意味 |
+|----|------|
+| `"created"` | 内部キューに登録済み、未送信 |
+| `"sent"` | broker API に送信済み、応答待ち（クラッシュ時に不明状態になりうる） |
+| `"accepted"` | 証券会社受付済み、市場待機中 |
+| `"partial"` | 一部約定済み |
+| `"filled"` | 全量約定済み |
+| `"closed"` | ポジション確定済み（Filled 後処理完了） |
+| `"cancelled"` | 取消済み |
+| `"rejected"` | 証券会社拒否 or リスク統制拒否 |
+
+### OrderManager の主要メソッド
+
+| メソッド | 役割 |
+|---------|------|
+| `create_order(signal_id, request)` | `OrderCreated` レコードを生成・保存。同一 `signal_id` の active 注文があれば `DuplicateOrderError` |
+| `send_order(client_order_id)` | **SQLite に `OrderSent` を保存してから** broker を呼ぶ（クラッシュ安全）。成功で `OrderAccepted` に遷移 |
+| `sync_order(client_order_id)` | broker の `get_order_status` で最新状態に同期。Reconciliation の入口 |
+| `cancel_order(client_order_id)` | 終端状態なら broker を呼ばず `InvalidStateTransitionError`。それ以外は broker に cancel を送信 |
+
+### 詳細仕様
+
+`docs/superpowers/specs/2026-03-28-order-state-machine-design.md`
