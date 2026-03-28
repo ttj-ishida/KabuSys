@@ -52,7 +52,6 @@ class ExecutionEngine:
     def _process_signals(self) -> None:
         """今日のシグナルを読み込み、Gate 1/2 を通して発注する。"""
         from kabusys.execution.broker_api import OrderRequest
-        from kabusys.execution.order_record import InvalidStateTransitionError
 
         signals = self._read_signals()
         logger.info("シグナル処理開始: %d 件", len(signals))
