@@ -156,3 +156,47 @@ class TestGate2CheckExecution:
         rm.check_execution()        # OPEN → HALF_OPEN: プローブ1件許可
         rm.record_api_success()     # CLOSED に遷移
         assert rm.check_execution().passed  # CLOSED で通過
+
+
+class TestGate3CheckMetrics:
+
+    def test_passes_when_no_drawdown(self, repo):
+        broker = MockBrokerClient()
+        config = RiskConfig(
+            initial_portfolio_value=10_000_000.0,
+            max_drawdown=0.15,
+        )
+        rm = RiskManager(broker=broker, repo=repo, config=config)
+        result = rm.check_metrics(current_portfolio_value=10_000_000.0)
+        assert result.passed
+
+    def test_passes_when_drawdown_below_threshold(self, repo):
+        broker = MockBrokerClient()
+        config = RiskConfig(
+            initial_portfolio_value=10_000_000.0,
+            max_drawdown=0.15,
+        )
+        rm = RiskManager(broker=broker, repo=repo, config=config)
+        # 10% ドローダウン（< 15%）
+        result = rm.check_metrics(current_portfolio_value=9_000_000.0)
+        assert result.passed
+
+    def test_fails_when_drawdown_exceeds_threshold(self, repo):
+        broker = MockBrokerClient()
+        config = RiskConfig(
+            initial_portfolio_value=10_000_000.0,
+            max_drawdown=0.15,
+        )
+        rm = RiskManager(broker=broker, repo=repo, config=config)
+        # 20% ドローダウン（> 15%）→ NG
+        result = rm.check_metrics(current_portfolio_value=8_000_000.0)
+        assert not result.passed
+        assert "ドローダウン" in result.reason
+
+    def test_no_drawdown_when_initial_value_zero(self, repo):
+        """initial_portfolio_value=0 の場合は常に passed（ゼロ除算防止）"""
+        broker = MockBrokerClient()
+        config = RiskConfig(initial_portfolio_value=0.0, max_drawdown=0.15)
+        rm = RiskManager(broker=broker, repo=repo, config=config)
+        result = rm.check_metrics(current_portfolio_value=0.0)
+        assert result.passed

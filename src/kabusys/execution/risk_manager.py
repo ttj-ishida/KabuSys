@@ -208,3 +208,25 @@ class RiskManager:
         self._cb_open_observed = False
         logger.warning("サーキットブレーカー HALF_OPEN → OPEN: プローブ送信 (成功なら record_api_success() を呼ぶこと)")
         return RiskResult(True)
+
+    # ------------------------------------------------------------------
+    # Gate 3: メトリクスレベル（約定後監視）
+    # ------------------------------------------------------------------
+
+    def check_metrics(self, current_portfolio_value: float) -> RiskResult:
+        """ドローダウンを検査する。initial_portfolio_value=0 の場合はスキップ。"""
+        if self._config.initial_portfolio_value <= 0:
+            return RiskResult(True)
+
+        drawdown = (
+            self._config.initial_portfolio_value - current_portfolio_value
+        ) / self._config.initial_portfolio_value
+
+        if drawdown > self._config.max_drawdown:
+            return RiskResult(
+                False,
+                f"ドローダウン超過: {drawdown:.1%} > {self._config.max_drawdown:.1%} "
+                f"(現在={current_portfolio_value:.0f}円, 開始={self._config.initial_portfolio_value:.0f}円)",
+            )
+
+        return RiskResult(True)
