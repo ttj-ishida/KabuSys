@@ -165,6 +165,14 @@ class TestOrderRepository:
         assert fetched.filled_qty == r.filled_qty
         assert fetched.avg_fill_price == r.avg_fill_price
         assert fetched.error_message == r.error_message
+        # タイムスタンプのラウンドトリップ検証（タイムゾーン付きで復元される）
+        assert fetched.created_at is not None
+        assert fetched.updated_at is not None
+        assert fetched.created_at.tzinfo is not None  # timezone-aware であること
+        assert fetched.updated_at.tzinfo is not None
+        # ISO 文字列経由でもマイクロ秒まで一致する
+        assert fetched.created_at == r.created_at
+        assert fetched.updated_at == r.updated_at
 
     def test_save_duplicate_raises_integrity_error(self, repo):
         """save を同一 client_order_id で2回呼ぶと IntegrityError"""

@@ -123,11 +123,12 @@ class OrderRepository:
                 record.client_order_id,
             ),
         )
-        self._conn.commit()
         if cursor.rowcount == 0:
+            self._conn.rollback()
             raise RuntimeError(
                 f"更新対象の注文が見つかりません: {record.client_order_id}"
             )
+        self._conn.commit()
 
     def get(self, client_order_id: str) -> OrderRecord | None:
         cursor = self._conn.execute(
