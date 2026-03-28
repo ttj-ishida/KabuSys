@@ -227,11 +227,13 @@ class KabuStationClient:
             )
         positions = []
         for p in self._json(resp) or []:
+            raw_current = p.get("CurrentPrice")
             positions.append(
                 Position(
                     code=str(p.get("Symbol", "")),
                     qty=int(p.get("LeavesQty", 0)),
                     avg_price=float(p.get("Price", 0.0)),
+                    current_price=float(raw_current) if raw_current is not None else None,
                 )
             )
         return positions

@@ -43,8 +43,9 @@ class OrderStatus:
 @dataclass
 class Position:
     code: str
-    qty: int                # 保有株数
-    avg_price: float        # 平均取得単価
+    qty: int                         # 保有株数
+    avg_price: float                 # 平均取得単価
+    current_price: float | None = None  # 現在値（時価評価額計算用）
 
 
 @dataclass
