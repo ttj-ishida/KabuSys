@@ -109,6 +109,63 @@ class ExecutionEngine:
                 self._risk_manager.record_api_error()
                 logger.error("発注失敗: signal_id=%s: %s", signal_id, exc)
 
+    def _drain_push_queue(self) -> None:
+        """_push_queue を全件処理する（sync_order + Gate 3 チェック）。"""
+        while not self._push_queue.empty():
+            try:
+                payload = self._push_queue.get_nowait()
+            except queue.Empty:
+                break
+            self._handle_push(payload)
+
+    def _handle_push(self, payload: dict) -> None:
+        """push 通知1件を処理する。"""
+        order_id = payload.get("OrderID") or payload.get("order_id")
+        if not order_id:
+            logger.warning("push payload に OrderID がありません: %s", payload)
+            return
+
+        # broker_order_id から client_order_id を探す
+        active_orders = self._repo.list_active()
+        for order in active_orders:
+            if order.broker_order_id == str(order_id):
+                try:
+                    self._order_manager.sync_order(order.client_order_id)
+                    logger.debug("sync_order: client_order_id=%s", order.client_order_id)
+                except Exception as exc:
+                    logger.error("sync_order 失敗: %s", exc)
+                break
+
+        # Gate 3: ドローダウン監視
+        positions = self._broker.get_positions()
+        market_value = sum(
+            p.qty * p.current_price
+            for p in positions
+            if p.current_price is not None
+        )
+        current_portfolio_value = self._broker.get_available_cash() + market_value
+        self._check_gate3_and_maybe_kill(current_portfolio_value)
+
+    def _check_gate3_and_maybe_kill(self, current_portfolio_value: float) -> None:
+        """Gate 3 チェック。NG なら kill_switch() を発動。"""
+        g3 = self._risk_manager.check_metrics(current_portfolio_value)
+        if not g3.passed:
+            logger.warning("Gate 3 NG: kill_switch 発動 - %s", g3.reason)
+            self.kill_switch()
+
+    def kill_switch(self) -> None:
+        """全ループを停止し、全 active 注文をキャンセルする。"""
+        self._stop_event.set()
+        logger.warning("kill_switch 発動: 全 active 注文をキャンセルします")
+
+        from kabusys.execution.order_record import InvalidStateTransitionError
+        for order in self._repo.list_active():
+            try:
+                self._order_manager.cancel_order(order.client_order_id)
+                logger.info("注文キャンセル: client_order_id=%s", order.client_order_id)
+            except (InvalidStateTransitionError, RuntimeError) as exc:
+                logger.debug("cancel_order スキップ: %s - %s", order.client_order_id, exc)
+
     def _read_signals(self) -> list[dict]:
         """DuckDB から今日のシグナルを portfolio_targets と JOIN して返す。"""
         rows = self._duckdb_conn.execute(

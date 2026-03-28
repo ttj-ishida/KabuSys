@@ -4,6 +4,7 @@ from __future__ import annotations
 from kabusys.execution.broker_api import (
     BrokerAPIError,
     OrderRejectedError,
+    OrderSentPendingError,
     OrderRequest,
     OrderResponse,
     OrderStatus,
@@ -37,6 +38,22 @@ class MockBrokerClient:
             raise OrderRejectedError(f"発注拒否（fill_mode=reject）: {order.code}")
 
         order_id = self._next_order_id()
+
+        if self.fill_mode == "never":
+            # 注文番号を発行して _orders に "open" で格納し OrderSentPendingError を送出。
+            # OrderManager は order_id を保存したうえで OrderSent 状態のまま残す。
+            self._orders[order_id] = OrderStatus(
+                order_id=order_id,
+                code=order.code,
+                side=order.side,
+                qty=order.qty,
+                filled_qty=0,
+                status="open",
+                price=None,
+            )
+            raise OrderSentPendingError(
+                f"発注保留（fill_mode=never）: {order.code}", order_id=order_id
+            )
 
         if self.fill_mode == "instant":
             filled_qty = order.qty

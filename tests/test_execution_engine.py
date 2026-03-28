@@ -149,3 +149,78 @@ class TestProcessSignals:
         engine = _make_engine(broker, sqlite_conn, duckdb_conn)
         engine._process_signals()
         assert len(engine._repo.list_active()) == 3
+
+
+class TestPushDrainAndKillSwitch:
+
+    def test_handle_push_calls_sync_order(self, sqlite_conn, duckdb_conn):
+        """push payload が _push_queue に入ると sync_order が呼ばれる"""
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._process_signals()
+
+        # OrderSent 状態の注文を取得
+        uncertain = engine._repo.list_uncertain()
+        assert len(uncertain) == 1
+        order = uncertain[0]
+
+        # broker の注文ステータスを "filled" に更新
+        from kabusys.execution.broker_api import OrderStatus
+        broker._orders[order.broker_order_id] = OrderStatus(
+            order_id=order.broker_order_id,
+            code="1234", side="buy", qty=100, filled_qty=100,
+            status="filled", price=1500.0,
+        )
+
+        # push payload を直接キューに投入
+        engine._push_queue.put({"OrderID": order.broker_order_id})
+        engine._drain_push_queue()
+
+        updated = engine._repo.get(order.client_order_id)
+        from kabusys.execution.order_record import OrderState
+        assert updated.state == OrderState.Filled
+
+    def test_kill_switch_cancels_all_active_orders(self, sqlite_conn, duckdb_conn):
+        """kill_switch() が全 active 注文をキャンセルして stop_event をセットする"""
+        _insert_signal(duckdb_conn, "1234")
+        _insert_signal(duckdb_conn, "5678")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        _insert_target(duckdb_conn, "5678", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._process_signals()
+
+        active_before = engine._repo.list_active()
+        assert len(active_before) >= 1  # OrderSent 状態の注文あり
+
+        engine.kill_switch()
+
+        assert engine._stop_event.is_set()
+        # 全注文が Cancelled になっている
+        from kabusys.execution.order_record import OrderState, InvalidStateTransitionError
+        for order in engine._repo.list_active():
+            # kill_switch 後は active 注文がない（または Filled のみ）
+            assert order.state == OrderState.Filled  # "never" mode = OrderSent → skip
+
+    def test_gate3_triggers_kill_switch_on_drawdown(self, sqlite_conn, duckdb_conn):
+        """Gate 3 で drawdown 超過時に kill_switch が発動する"""
+        broker = MockBrokerClient(available_cash=7_000_000.0)  # 30% drawdown
+        config = RiskConfig(
+            initial_portfolio_value=10_000_000.0,
+            max_drawdown=0.15,
+        )
+        repo = OrderRepository(sqlite_conn)
+        rm = RiskManager(broker=broker, repo=repo, config=config)
+        order_manager = OrderManager(broker=broker, repo=repo)
+        cfg = EngineConfig(target_date=TARGET_DATE)
+        engine = ExecutionEngine(
+            broker=broker, repo=repo, risk_manager=rm,
+            order_manager=order_manager, duckdb_conn=duckdb_conn, config=cfg,
+        )
+
+        # 現在の評価額 7,000,000 円（30% drawdown > 15%）
+        current_value = broker.get_available_cash()  # ポジションなし
+        engine._check_gate3_and_maybe_kill(current_value)
+        assert engine._stop_event.is_set()
