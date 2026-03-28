@@ -198,11 +198,8 @@ class TestPushDrainAndKillSwitch:
         engine.kill_switch()
 
         assert engine._stop_event.is_set()
-        # 全注文が Cancelled になっている
-        from kabusys.execution.order_record import OrderState, InvalidStateTransitionError
-        for order in engine._repo.list_active():
-            # kill_switch 後は active 注文がない（または Filled のみ）
-            assert order.state == OrderState.Filled  # "never" mode = OrderSent → skip
+        # OrderSent 状態の全注文が Cancelled に遷移し active リストから消えていること
+        assert len(engine._repo.list_active()) == 0
 
     def test_gate3_triggers_kill_switch_on_drawdown(self, sqlite_conn, duckdb_conn):
         """Gate 3 で drawdown 超過時に kill_switch が発動する"""
