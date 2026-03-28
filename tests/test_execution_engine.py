@@ -100,3 +100,52 @@ class TestReadSignals:
         engine = _make_engine(broker, sqlite_conn, duckdb_conn)
         signals = engine._read_signals()
         assert len(signals) == 0
+
+
+class TestProcessSignals:
+
+    def test_orders_created_for_valid_signals(self, sqlite_conn, duckdb_conn):
+        """Gate 1/2 を通過したシグナルが OrderAccepted になる"""
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._process_signals()
+        repo = engine._repo
+        orders = repo.list_active()
+        # fill_mode="instant" → Filled 状態（active）
+        assert len(orders) == 1
+        assert orders[0].code == "1234"
+
+    def test_gate1_failure_skips_signal(self, sqlite_conn, duckdb_conn):
+        """余力不足のシグナルはスキップされる"""
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=0.0)  # 余力ゼロ
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._process_signals()
+        assert len(engine._repo.list_active()) == 0
+
+    def test_duplicate_order_is_skipped(self, sqlite_conn, duckdb_conn):
+        """DuplicateOrderError は skip（2回目呼び出しで重複にならない）"""
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._process_signals()
+        # 2回目: DuplicateOrderError が発生するが例外は出ない
+        engine._process_signals()
+        # 注文は1件のまま
+        # fill_mode="instant" の場合 Filled → list_active に残る
+        active = engine._repo.list_active()
+        assert len(active) == 1
+
+    def test_multiple_signals_processed(self, sqlite_conn, duckdb_conn):
+        """複数シグナルがすべて処理される"""
+        for code in ["1234", "5678", "9012"]:
+            _insert_signal(duckdb_conn, code)
+            _insert_target(duckdb_conn, code, qty=100, price=1000.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._process_signals()
+        assert len(engine._repo.list_active()) == 3

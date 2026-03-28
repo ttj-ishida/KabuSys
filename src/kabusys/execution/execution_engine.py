@@ -49,6 +49,67 @@ class ExecutionEngine:
         self._stop_event = threading.Event()
         self._push_queue: queue.Queue[dict] = queue.Queue()
 
+    def _process_signals(self) -> None:
+        """今日のシグナルを読み込み、Gate 1/2 を通して発注する。"""
+        from kabusys.execution.broker_api import OrderRequest
+        from kabusys.execution.order_record import InvalidStateTransitionError
+
+        signals = self._read_signals()
+        logger.info("シグナル処理開始: %d 件", len(signals))
+
+        for sig in signals:
+            if self._stop_event.is_set():
+                break
+
+            code: str = sig["code"]
+            side: str = sig["side"]
+            qty: int = sig["qty"]
+            price: float = sig["price"]
+            signal_id = f"{self._config.target_date.isoformat()}_{code}_{side}"
+            order_value = price * qty
+
+            # Gate 1: シグナルレベル検査
+            g1 = self._risk_manager.check_signal(signal_id, code, order_value)
+            if not g1.passed:
+                logger.info("Gate 1 NG - signal_id=%s: %s", signal_id, g1.reason)
+                continue
+
+            # Gate 2: エグゼキューションレベル検査（レート制限: リトライ最大3回）
+            g2_passed = False
+            for attempt in range(3):
+                g2 = self._risk_manager.check_execution()
+                if g2.passed:
+                    g2_passed = True
+                    break
+                if "サーキットブレーカー" in g2.reason:
+                    logger.warning("Gate 2 CB OPEN: シグナルループ停止 - %s", g2.reason)
+                    return  # ドレインループは継続するため return のみ
+                logger.debug("Gate 2 rate limit (attempt %d/3), waiting 0.2s", attempt + 1)
+                self._stop_event.wait(timeout=0.2)
+
+            if not g2_passed:
+                logger.info("Gate 2 NG - signal_id=%s: %s", signal_id, g2.reason)
+                continue
+
+            # 発注
+            try:
+                order_type = "market" if price == 0.0 else "limit"
+                record = self._order_manager.create_order(
+                    signal_id,
+                    OrderRequest(code=code, side=side, qty=qty, order_type=order_type, price=price),
+                )
+            except DuplicateOrderError:
+                logger.info("DuplicateOrderError - skip: signal_id=%s", signal_id)
+                continue
+
+            try:
+                self._order_manager.send_order(record.client_order_id)
+                self._risk_manager.record_api_success()
+                logger.info("発注成功: signal_id=%s, client_order_id=%s", signal_id, record.client_order_id)
+            except Exception as exc:
+                self._risk_manager.record_api_error()
+                logger.error("発注失敗: signal_id=%s: %s", signal_id, exc)
+
     def _read_signals(self) -> list[dict]:
         """DuckDB から今日のシグナルを portfolio_targets と JOIN して返す。"""
         rows = self._duckdb_conn.execute(
