@@ -120,3 +120,120 @@ class TestOrderRecordTransitions:
         time.sleep(0.01)
         r.transition_to(OrderState.OrderSent)
         assert r.updated_at > old_updated_at
+
+
+# ---------------------------------------------------------------------------
+# Group 2: OrderRepository（インメモリ SQLite）
+# ---------------------------------------------------------------------------
+
+import sqlite3
+
+from kabusys.execution.order_repository import OrderRepository, init_orders_db
+
+
+@pytest.fixture
+def conn():
+    """インメモリ SQLite 接続（各テスト独立）。"""
+    c = sqlite3.connect(":memory:")
+    init_orders_db(c)
+    yield c
+    c.close()
+
+
+@pytest.fixture
+def repo(conn):
+    return OrderRepository(conn)
+
+
+class TestOrderRepository:
+
+    def test_save_and_get_roundtrip(self, repo):
+        """save → get の往復でフィールドが一致する"""
+        r = _make_record(client_order_id="repo-test-001")
+        repo.save(r)
+        fetched = repo.get("repo-test-001")
+        assert fetched is not None
+        assert fetched.client_order_id == r.client_order_id
+        assert fetched.signal_id == r.signal_id
+        assert fetched.code == r.code
+        assert fetched.side == r.side
+        assert fetched.qty == r.qty
+        assert fetched.order_type == r.order_type
+        assert fetched.price == r.price
+        assert fetched.state == r.state
+        assert fetched.broker_order_id == r.broker_order_id
+        assert fetched.filled_qty == r.filled_qty
+        assert fetched.avg_fill_price == r.avg_fill_price
+        assert fetched.error_message == r.error_message
+
+    def test_save_duplicate_raises_integrity_error(self, repo):
+        """save を同一 client_order_id で2回呼ぶと IntegrityError"""
+        r = _make_record(client_order_id="dup-001")
+        repo.save(r)
+        with pytest.raises(sqlite3.IntegrityError):
+            repo.save(r)
+
+    def test_update(self, repo):
+        """update でフィールドが更新される"""
+        r = _make_record(client_order_id="update-001")
+        repo.save(r)
+        r.transition_to(OrderState.OrderSent)
+        repo.update(r)
+        fetched = repo.get("update-001")
+        assert fetched.state == OrderState.OrderSent
+
+    def test_update_nonexistent_raises_runtime_error(self, repo):
+        """update で存在しない ID は RuntimeError"""
+        r = _make_record(client_order_id="nonexistent-001")
+        with pytest.raises(RuntimeError):
+            repo.update(r)
+
+    def test_list_active_excludes_terminal_states(self, repo):
+        """list_active は Closed / Cancelled / Rejected を除外する"""
+        active_states = [
+            OrderState.OrderCreated,
+            OrderState.OrderSent,
+            OrderState.OrderAccepted,
+            OrderState.PartialFill,
+            OrderState.Filled,
+        ]
+        terminal_states = [
+            OrderState.Closed,
+            OrderState.Cancelled,
+            OrderState.Rejected,
+        ]
+        for i, s in enumerate(active_states):
+            repo.save(_make_record(client_order_id=f"active-{i}", signal_id=f"sig-active-{i}", state=s))
+        for i, s in enumerate(terminal_states):
+            repo.save(_make_record(client_order_id=f"terminal-{i}", signal_id=f"sig-terminal-{i}", state=s))
+
+        active = repo.list_active()
+        active_ids = {r.client_order_id for r in active}
+        assert all(f"active-{i}" in active_ids for i in range(len(active_states)))
+        assert all(f"terminal-{i}" not in active_ids for i in range(len(terminal_states)))
+
+    def test_list_uncertain_returns_only_sent(self, repo):
+        """list_uncertain は OrderSent のみ返す"""
+        repo.save(_make_record(client_order_id="sent-001", signal_id="sig-s1", state=OrderState.OrderSent))
+        repo.save(_make_record(client_order_id="created-001", signal_id="sig-c1", state=OrderState.OrderCreated))
+        repo.save(_make_record(client_order_id="accepted-001", signal_id="sig-a1", state=OrderState.OrderAccepted))
+
+        uncertain = repo.list_uncertain()
+        assert len(uncertain) == 1
+        assert uncertain[0].client_order_id == "sent-001"
+        assert uncertain[0].state == OrderState.OrderSent
+
+    def test_get_by_signal(self, repo):
+        """get_by_signal は signal_id に紐づく全レコードを返す"""
+        repo.save(_make_record(client_order_id="sig-test-001", signal_id="same-signal"))
+        repo.save(_make_record(client_order_id="sig-test-002", signal_id="same-signal"))
+        repo.save(_make_record(client_order_id="sig-test-003", signal_id="other-signal"))
+
+        results = repo.get_by_signal("same-signal")
+        assert len(results) == 2
+        ids = {r.client_order_id for r in results}
+        assert ids == {"sig-test-001", "sig-test-002"}
+
+    def test_get_returns_none_for_missing(self, repo):
+        """get は存在しない ID に対して None を返す"""
+        assert repo.get("nonexistent") is None
