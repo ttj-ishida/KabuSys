@@ -14,6 +14,7 @@ from datetime import date, time
 import duckdb
 
 from kabusys.execution.broker_api import BrokerAPIProtocol
+# DuplicateOrderError は _process_signals() (Task 7) で使用
 from kabusys.execution.order_manager import DuplicateOrderError, OrderManager
 from kabusys.execution.order_repository import OrderRepository
 from kabusys.execution.risk_manager import RiskManager

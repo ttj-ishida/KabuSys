@@ -1,5 +1,6 @@
 # tests/test_execution_engine.py
 """ExecutionEngine 統合テスト（Issue #30 / #34）"""
+# NOTE: 以下は Task 7/8 で追加するテストクラス用にプリステージ済み
 import queue
 import sqlite3
 import threading
@@ -88,6 +89,7 @@ class TestReadSignals:
         signals = engine._read_signals()
         assert len(signals) == 1
         assert signals[0]["code"] == "1234"
+        assert signals[0]["side"] == "buy"
         assert signals[0]["qty"] == 100
         assert signals[0]["price"] == 1500.0
 
