@@ -204,15 +204,18 @@ def run_session(self) -> None:
                    → NG: skip & log
         [Gate 2] risk_manager.check_execution()
                    → rate limit: sleep 0.2秒して再試行
-                   → circuit breaker OPEN: halt（kill_switch 判断は運用者に委ねる）
-        OrderManager.create_order(signal_id, OrderRequest(code, side, qty, order_type, price))
+                   → circuit breaker OPEN: シグナルループのみ停止（ステップ4のdrainループは継続する）
+        try:
+          OrderManager.create_order(signal_id, OrderRequest(code=code, side=side, qty=qty, order_type=order_type, price=price))
+        except DuplicateOrderError:
+          skip & log（Gate 1 通過後も terminal-state の同一 signal_id が存在する場合に発生しうる）
         OrderManager.send_order(client_order_id)
         risk_manager.record_api_success() / record_api_error()（結果に応じて）
 4. signal_send_end ～ market_close:
-   WebSocket push を drain するループ:
+   WebSocket push を drain するループ（circuit breaker OPEN 時もこのループは継続する）:
      payload = _push_queue.get(timeout=1.0)
      OrderManager.sync_order(client_order_id)
-     portfolio_value = broker.get_available_cash() + sum(p.market_value for p in broker.get_positions())
+     portfolio_value = broker.get_available_cash() + sum(p.qty * p.current_price for p in broker.get_positions() if p.current_price is not None)
      [Gate 3] risk_manager.check_metrics(portfolio_value)
                 → NG: kill_switch() 発動
 5. market_close: _stop_event.set()、WebSocket スレッド停止、セッション終了
@@ -373,5 +376,6 @@ class Position:
 
 - `BrokerAPIProtocol` の `get_available_cash() -> float`・`get_positions() -> list[Position]` は `broker_api.py` に定義済み
 - `MockBrokerClient` は `fill_mode` パラメータ対応済み — テストでそのまま使用可能
-- `OrderManager.create_order()` の `DuplicateOrderError` が冪等性を保証 — 追加ロジック不要
+- `OrderManager.create_order()` の `DuplicateOrderError` が冪等性を保証 — シグナルループで catch してスキップする
 - `order_repository.py` の `_TERMINAL_STATES`・`list_active()` が "active 注文" の定義源
+- `repo.get_by_signal(signal_id)` は `order_repository.py` の `OrderRepository.get_by_signal()` として実装済み（Gate 1 重複チェックで使用）
