@@ -58,6 +58,7 @@ class RiskManager:
         self._cb_state: str = "CLOSED"  # "CLOSED" | "OPEN" | "HALF_OPEN"
         self._cb_error_times: list[float] = []
         self._cb_open_at: float = 0.0
+        self._cb_open_observed: bool = False  # OPEN 状態を一度返したか
 
     # ------------------------------------------------------------------
     # Gate 1: シグナルレベル（発注前）
@@ -130,4 +131,79 @@ class RiskManager:
                     f"> {self._config.max_utilization:.0%}",
                 )
 
+        return RiskResult(True)
+
+    # ------------------------------------------------------------------
+    # Gate 2: エグゼキューションレベル（API 送信前）
+    # ------------------------------------------------------------------
+
+    def check_execution(self) -> RiskResult:
+        """レート制限・サーキットブレーカーを検査する。"""
+        # サーキットブレーカー
+        cb = self._check_circuit_breaker()
+        if not cb.passed:
+            return cb
+
+        # レート制限（トークンバケツ）
+        now = time.monotonic()
+        elapsed = now - self._last_refill
+        self._tokens = min(
+            float(self._config.rate_limit_per_sec),
+            self._tokens + elapsed * self._config.rate_limit_per_sec,
+        )
+        self._last_refill = now
+
+        if self._tokens >= 1.0:
+            self._tokens -= 1.0
+            return RiskResult(True)
+
+        return RiskResult(False, f"レート制限: {self._config.rate_limit_per_sec}回/秒を超過")
+
+    def record_api_error(self) -> None:
+        """API エラーを記録する（send_order 失敗時に呼ぶ）。"""
+        now = time.monotonic()
+        window = self._config.circuit_breaker_window_sec
+        if window > 0:
+            self._cb_error_times = [t for t in self._cb_error_times if now - t < window]
+        self._cb_error_times.append(now)
+
+        if (
+            self._cb_state == "CLOSED"
+            and len(self._cb_error_times) >= self._config.circuit_breaker_errors
+        ):
+            self._cb_state = "OPEN"
+            self._cb_open_at = now
+            self._cb_open_observed = False
+            logger.warning(
+                "サーキットブレーカー OPEN: %d秒以内に%dエラー",
+                window, len(self._cb_error_times),
+            )
+
+    def record_api_success(self) -> None:
+        """API 成功を記録する（HALF_OPEN → CLOSED 遷移用）。"""
+        self._cb_error_times.clear()
+        if self._cb_state in ("HALF_OPEN", "OPEN"):
+            self._cb_state = "CLOSED"
+            logger.info("サーキットブレーカー CLOSED")
+
+    def _check_circuit_breaker(self) -> RiskResult:
+        now = time.monotonic()
+        if self._cb_state == "CLOSED":
+            return RiskResult(True)
+
+        if self._cb_state == "OPEN":
+            # OPEN 状態を少なくとも1回返してからウィンドウ経過を確認する。
+            # これにより window_sec=0 でも最初の check で False を返し、
+            # 次の check で HALF_OPEN に遷移できる。
+            if self._cb_open_observed and now - self._cb_open_at >= self._config.circuit_breaker_window_sec:
+                self._cb_state = "HALF_OPEN"
+                logger.info("サーキットブレーカー HALF_OPEN")
+                return RiskResult(True)  # 1件試行許可
+            self._cb_open_observed = True
+            return RiskResult(False, "サーキットブレーカー OPEN: 発注停止中")
+
+        # HALF_OPEN: 1件だけ許可して OPEN に戻す（成功なら record_api_success() で CLOSED へ）
+        self._cb_state = "OPEN"
+        self._cb_open_at = now
+        self._cb_open_observed = False
         return RiskResult(True)

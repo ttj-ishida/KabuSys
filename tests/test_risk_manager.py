@@ -88,3 +88,71 @@ class TestGate1CheckSignal:
         result = rm.check_signal("2026-03-29_1234_buy", "1234", order_value=300_000.0)
         assert not result.passed
         assert "全体上限" in result.reason
+
+
+class TestGate2CheckExecution:
+
+    def test_passes_initially(self, repo):
+        broker = MockBrokerClient()
+        rm = _make_manager(broker, repo)
+        result = rm.check_execution()
+        assert result.passed
+
+    def test_rate_limit_rejects_after_burst(self, repo):
+        broker = MockBrokerClient()
+        config = RiskConfig(rate_limit_per_sec=3, initial_portfolio_value=10_000_000.0)
+        rm = RiskManager(broker=broker, repo=repo, config=config)
+        # 3回は通る
+        for _ in range(3):
+            r = rm.check_execution()
+            assert r.passed
+        # 4回目は reject
+        r = rm.check_execution()
+        assert not r.passed
+        assert "レート制限" in r.reason
+
+    def test_circuit_breaker_opens_after_n_errors(self, repo):
+        broker = MockBrokerClient()
+        config = RiskConfig(
+            circuit_breaker_errors=3,
+            circuit_breaker_window_sec=60,
+            initial_portfolio_value=10_000_000.0,
+        )
+        rm = RiskManager(broker=broker, repo=repo, config=config)
+        rm.record_api_error()
+        rm.record_api_error()
+        assert rm.check_execution().passed  # まだ CLOSED
+        rm.record_api_error()
+        result = rm.check_execution()
+        assert not result.passed
+        assert "サーキットブレーカー" in result.reason
+
+    def test_circuit_breaker_half_open_after_window(self, repo):
+        broker = MockBrokerClient()
+        config = RiskConfig(
+            circuit_breaker_errors=2,
+            circuit_breaker_window_sec=0,  # ウィンドウ = 0秒 → 即 HALF_OPEN
+            initial_portfolio_value=10_000_000.0,
+        )
+        rm = RiskManager(broker=broker, repo=repo, config=config)
+        rm.record_api_error()
+        rm.record_api_error()
+        assert not rm.check_execution().passed  # OPEN
+        # window=0 → 即 HALF_OPEN 遷移
+        result = rm.check_execution()
+        assert result.passed  # HALF_OPEN で1件許可
+
+    def test_circuit_breaker_closes_on_success(self, repo):
+        broker = MockBrokerClient()
+        config = RiskConfig(
+            circuit_breaker_errors=2,
+            circuit_breaker_window_sec=0,
+            initial_portfolio_value=10_000_000.0,
+        )
+        rm = RiskManager(broker=broker, repo=repo, config=config)
+        rm.record_api_error()
+        rm.record_api_error()
+        rm.check_execution()        # OPEN → HALF_OPEN
+        rm.check_execution()        # HALF_OPEN: 1件許可
+        rm.record_api_success()     # CLOSED に遷移
+        assert rm.check_execution().passed  # CLOSED で通過
