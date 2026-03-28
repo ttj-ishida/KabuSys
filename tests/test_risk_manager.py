@@ -4,7 +4,6 @@ import sqlite3
 import pytest
 from kabusys.execution.broker_api import Position
 from kabusys.execution.mock_client import MockBrokerClient
-from kabusys.execution.order_manager import OrderManager
 from kabusys.execution.order_record import OrderState
 from kabusys.execution.order_repository import OrderRepository, init_orders_db
 from kabusys.execution.risk_manager import RiskConfig, RiskManager

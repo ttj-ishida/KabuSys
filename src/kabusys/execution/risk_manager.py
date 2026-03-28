@@ -17,6 +17,10 @@ from kabusys.execution.order_repository import OrderRepository
 
 logger = logging.getLogger(__name__)
 
+_TERMINAL_STATES: frozenset[OrderState] = frozenset(
+    {OrderState.Closed, OrderState.Cancelled, OrderState.Rejected}
+)
+
 
 @dataclass
 class RiskConfig:
@@ -73,8 +77,7 @@ class RiskManager:
 
         # 2. 重複チェック（active 注文が存在するか）
         existing = self._repo.get_by_signal(signal_id)
-        _TERMINAL = {OrderState.Closed, OrderState.Cancelled, OrderState.Rejected}
-        active = [r for r in existing if r.state not in _TERMINAL]
+        active = [r for r in existing if r.state not in _TERMINAL_STATES]
         if active:
             return RiskResult(False, f"重複注文: signal_id={signal_id} の active 注文が存在します")
 
