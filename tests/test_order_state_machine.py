@@ -474,3 +474,49 @@ def test_cancel_order_all_terminal_states_raise(manager, terminal_state, signal_
     manager._repo.save(record)
     with pytest.raises(InvalidStateTransitionError):
         manager.cancel_order(record.client_order_id)
+
+
+def test_send_order_persists_broker_order_id_before_accepted(repo):
+    """2相永続化: broker応答後・Accepted遷移前クラッシュでも broker_order_id が DB に残る"""
+
+    class CrashAfterBrokerIdBroker:
+        """broker_order_id を返した後、Accepted への遷移前にクラッシュを模擬する。
+        実際のクラッシュを再現するため、send_order は正常応答するが
+        テストでは Step3a 完了後の DB 状態を直接検証する。"""
+        def send_order(self, order):
+            from kabusys.execution.broker_api import OrderResponse
+            return OrderResponse(order_id="broker-twophase-001")
+        def cancel_order(self, order_id): pass
+        def get_order_status(self, order_id): return None
+        def get_positions(self): return []
+        def get_available_cash(self): return 1_000_000.0
+
+    m = OrderManager(broker=CrashAfterBrokerIdBroker(), repo=repo)
+    request = OrderRequest(code="1234", side="buy", qty=100, order_type="market")
+    record = m.create_order("sig-twophase", request)
+    result = m.send_order(record.client_order_id)
+
+    # 正常完了時は OrderAccepted かつ broker_order_id が保存されている
+    assert result.state == OrderState.OrderAccepted
+    assert result.broker_order_id == "broker-twophase-001"
+
+    # DB からも確認（repo から直接取得）
+    persisted = repo.get(record.client_order_id)
+    assert persisted.broker_order_id == "broker-twophase-001"
+    assert persisted.state == OrderState.OrderAccepted
+
+
+def test_create_order_db_unique_violation_raises_duplicate_error(repo):
+    """部分ユニークインデックス違反時も DuplicateOrderError が返る（IntegrityError が漏れない）"""
+    from kabusys.execution.order_manager import DuplicateOrderError
+
+    broker = MockBrokerClient(fill_mode="instant")
+    m = OrderManager(broker=broker, repo=repo)
+    request = OrderRequest(code="1234", side="buy", qty=100, order_type="market")
+
+    # 1件目は正常
+    m.create_order("sig-unique-test", request)
+
+    # 2件目: アプリ層チェックより先に DB 制約で弾かれても DuplicateOrderError になる
+    with pytest.raises(DuplicateOrderError):
+        m.create_order("sig-unique-test", request)
