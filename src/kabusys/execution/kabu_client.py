@@ -261,10 +261,13 @@ class KabuStationClient:
         stop_event が set されるまで接続を維持する。接続断時は1秒後に再接続。
         スレッド内で呼び出すことを想定。
 
-        URL は base_url の http:// を ws:// に置換し末尾に /websocket を付加する。
+        URL は base_url の http:// を ws:// に、https:// を wss:// に置換し末尾に /websocket を付加する。
         例: http://localhost:18080/kabusapi → ws://localhost:18080/kabusapi/websocket
         """
-        ws_url = self._base_url.rstrip("/").replace("http://", "ws://") + "/websocket"
+        # URL スキーム変換: http→ws, https→wss
+        _scheme_map = {"http": "ws", "https": "wss"}
+        _scheme, _, _rest = self._base_url.rstrip("/").partition("://")
+        ws_url = _scheme_map.get(_scheme, "ws") + "://" + _rest + "/websocket"
 
         def _on_message(_ws: websocket.WebSocketApp, message: str) -> None:
             try:
@@ -281,12 +284,16 @@ class KabuStationClient:
         def _on_close(_ws: websocket.WebSocketApp, code: int | None, msg: str | None) -> None:
             logger.info("WebSocket クローズ: code=%s", code)
 
+        def _on_open(_ws: websocket.WebSocketApp) -> None:
+            logger.info("WebSocket 接続確立: %s", ws_url)
+
         while not stop_event.is_set():
             try:
                 token = self._get_token()
                 ws = websocket.WebSocketApp(
                     ws_url,
                     header={"X-API-KEY": token},
+                    on_open=_on_open,
                     on_message=_on_message,
                     on_error=_on_error,
                     on_close=_on_close,
