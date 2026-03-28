@@ -13,7 +13,7 @@ from datetime import date, time
 
 import duckdb
 
-from kabusys.execution.broker_api import BrokerAPIProtocol
+from kabusys.execution.broker_api import BrokerAPIProtocol, OrderSentPendingError
 # DuplicateOrderError は _process_signals() (Task 7) で使用
 from kabusys.execution.order_manager import DuplicateOrderError, OrderManager
 from kabusys.execution.order_repository import OrderRepository
@@ -105,6 +105,9 @@ class ExecutionEngine:
                 self._order_manager.send_order(record.client_order_id)
                 self._risk_manager.record_api_success()
                 logger.info("発注成功: signal_id=%s, client_order_id=%s", signal_id, record.client_order_id)
+            except OrderSentPendingError:
+                # broker_order_id は永続化済み。push drain で約定を待つ。エラーカウントしない
+                logger.info("発注保留（pending）: signal_id=%s", signal_id)
             except Exception as exc:
                 self._risk_manager.record_api_error()
                 logger.error("発注失敗: signal_id=%s: %s", signal_id, exc)
@@ -136,7 +139,8 @@ class ExecutionEngine:
                     logger.error("sync_order 失敗: %s", exc)
                 break
 
-        # Gate 3: ドローダウン監視
+        # Gate 3: ドローダウン監視（push の対象注文が見つからない場合も評価する。
+        # spurious push でも portfolio valuation を実行する設計は意図的）
         positions = self._broker.get_positions()
         market_value = sum(
             p.qty * p.current_price
