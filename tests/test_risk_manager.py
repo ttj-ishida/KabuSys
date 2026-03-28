@@ -152,7 +152,7 @@ class TestGate2CheckExecution:
         rm = RiskManager(broker=broker, repo=repo, config=config)
         rm.record_api_error()
         rm.record_api_error()
-        rm.check_execution()        # OPEN → HALF_OPEN
-        rm.check_execution()        # HALF_OPEN: 1件許可
+        rm.check_execution()        # OPEN 確認 (_cb_open_observed=True にするため)
+        rm.check_execution()        # OPEN → HALF_OPEN: プローブ1件許可
         rm.record_api_success()     # CLOSED に遷移
         assert rm.check_execution().passed  # CLOSED で通過

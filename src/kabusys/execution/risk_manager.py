@@ -206,4 +206,5 @@ class RiskManager:
         self._cb_state = "OPEN"
         self._cb_open_at = now
         self._cb_open_observed = False
+        logger.warning("サーキットブレーカー HALF_OPEN → OPEN: プローブ送信 (成功なら record_api_success() を呼ぶこと)")
         return RiskResult(True)
