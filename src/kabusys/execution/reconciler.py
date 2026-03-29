@@ -65,9 +65,10 @@ class Reconciler:
                 )
                 continue
             try:
+                before_state = record.state
                 updated = self._order_manager.sync_order(record.client_order_id)
-                if updated.state == record.state:
-                    if updated.state == OrderState.OrderSent:
+                if updated.state == before_state:
+                    if before_state == OrderState.OrderSent:
                         # broker が None を返した（注文レコードなし）
                         result.orders_no_status += 1
                         logger.warning(
@@ -78,7 +79,7 @@ class Reconciler:
                     result.orders_synced += 1
                     logger.info(
                         "注文状態同期: %s → %s (client_order_id=%s)",
-                        record.state.value, updated.state.value, record.client_order_id,
+                        before_state.value, updated.state.value, record.client_order_id,
                     )
             except BrokerAPIError:
                 logger.error(
@@ -112,9 +113,10 @@ class Reconciler:
         for record in active_orders:
             if record.state not in {OrderState.Filled, OrderState.PartialFill}:
                 continue
-            if record.side == "buy":
+            side = record.side.lower()
+            if side == "buy":
                 local_map[record.code] = local_map.get(record.code, 0) + record.filled_qty
-            elif record.side == "sell":
+            elif side == "sell":
                 local_map[record.code] = local_map.get(record.code, 0) - record.filled_qty
 
         # 差分照合

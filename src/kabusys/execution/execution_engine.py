@@ -202,13 +202,16 @@ class ExecutionEngine:
 
         # 起動時リコンシリエーション（reconciler が設定されている場合のみ）
         if self._reconciler is not None:
-            rec_result = self._reconciler.run()
-            logger.info(
-                "Reconciliation 完了: synced=%d, no_status=%d, position_discrepancies=%d",
-                rec_result.orders_synced,
-                rec_result.orders_no_status,
-                len(rec_result.position_discrepancies),
-            )
+            try:
+                rec_result = self._reconciler.run()
+                logger.info(
+                    "Reconciliation 完了: synced=%d, no_status=%d, position_discrepancies=%d",
+                    rec_result.orders_synced,
+                    rec_result.orders_no_status,
+                    len(rec_result.position_discrepancies),
+                )
+            except Exception:
+                logger.exception("Reconciliation 実行中に予期せぬ例外。セッションは続行します。")
 
         # WebSocket スレッド起動
         ws_thread = threading.Thread(target=self._websocket_worker, daemon=True, name="ws-push")

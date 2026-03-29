@@ -124,8 +124,11 @@ except BrokerAPIError:
   → position_discrepancies = []
 
 ローカル推定ポジション（code ごとにネット集計）:
-  対象状態: Filled / PartialFill / Closed
-    ※ Closed は決済済み（売り約定）だが、発注履歴から ポジションを正確に把握するために含める
+  対象状態: Filled / PartialFill
+    ※ Closed は現フェーズ（Phase 6）では Filled → Closed 遷移が未実装のため対象外。
+       list_active() は Closed を除外するが、現状すべての約定済み注文は Filled のまま残るため
+       Filled buy - Filled sell のネットで保有数量が正しく算出される。
+       将来 Filled → Closed 遷移を実装する際は本集計ロジックを再検討すること。
   buy:  record.filled_qty を加算
   sell: record.filled_qty を減算
   ※ filled_qty は OrderRecord.filled_qty: int = 0 (NOT NULL)。None になることはない。
