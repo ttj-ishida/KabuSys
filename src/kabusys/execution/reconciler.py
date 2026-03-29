@@ -50,7 +50,41 @@ class Reconciler:
         return result
 
     def _reconcile_orders(self, result: ReconcileResult) -> None:
-        pass  # Task 2 で実装
+        try:
+            uncertain = self._repo.list_uncertain()
+        except Exception:
+            logger.error("list_uncertain() 失敗: リコンシリエーションをスキップします", exc_info=True)
+            return
+
+        for record in uncertain:
+            if record.broker_order_id is None:
+                result.orders_no_status += 1
+                logger.warning(
+                    "broker_order_id 未設定（手動確認要）: client_order_id=%s",
+                    record.client_order_id,
+                )
+                continue
+            try:
+                updated = self._order_manager.sync_order(record.client_order_id)
+                if updated.state == record.state:
+                    if updated.state == OrderState.OrderSent:
+                        # broker が None を返した（注文レコードなし）
+                        result.orders_no_status += 1
+                        logger.warning(
+                            "broker に注文なし（手動確認要）: client_order_id=%s, broker_order_id=%s",
+                            record.client_order_id, record.broker_order_id,
+                        )
+                else:
+                    result.orders_synced += 1
+                    logger.info(
+                        "注文状態同期: %s → %s (client_order_id=%s)",
+                        record.state.value, updated.state.value, record.client_order_id,
+                    )
+            except BrokerAPIError:
+                logger.error(
+                    "sync_order 失敗（スキップ）: client_order_id=%s",
+                    record.client_order_id, exc_info=True,
+                )
 
     def _reconcile_positions(self, result: ReconcileResult) -> None:
         pass  # Task 3 で実装
