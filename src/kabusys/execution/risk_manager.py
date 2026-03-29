@@ -89,7 +89,7 @@ class RiskManager:
         売りはキャッシュを消費せず、エクスポージャを減らす方向にあるため。
         重複チェック（二重発注防止）は buy/sell 共通で実施する。
         """
-        # 1. 余力チェック（sell は不要）
+        # 1. 余力チェック（sell は不要 — sell は step 3 前に早期 return するため cash も不要）
         if side == "buy":
             cash = self._broker.get_available_cash()
             if cash < order_value:
@@ -98,8 +98,6 @@ class RiskManager:
                     f"余力不足: 余力={cash:.0f}円, 発注額={order_value:.0f}円",
                     reject_reason=RiskRejectReason.INSUFFICIENT_CASH,
                 )
-        else:
-            cash = self._broker.get_available_cash()
 
         # 2. 重複チェック（active 注文が存在するか）
         existing = self._repo.get_by_signal(signal_id)
