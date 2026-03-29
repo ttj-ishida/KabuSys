@@ -43,18 +43,29 @@ class Reconciler:
         self._order_manager = order_manager
 
     def run(self) -> ReconcileResult:
-        """Step 1: OrderSent 照合 → Step 2: ポジション差分照合"""
+        """Step 1: OrderSent 照合 → Step 2: ポジション差分照合
+
+        Step 1 で致命的障害（list_uncertain 例外）が発生した場合は Step 2 もスキップする。
+        OrdersDB が不安定な状態では local 推定ポジションも信頼できないため。
+        """
         result = ReconcileResult()
-        self._reconcile_orders(result)
+        if not self._reconcile_orders(result):
+            return result
         self._reconcile_positions(result)
         return result
 
-    def _reconcile_orders(self, result: ReconcileResult) -> None:
+    def _reconcile_orders(self, result: ReconcileResult) -> bool:
+        """OrderSent 注文をブローカーと照合する。
+
+        Returns:
+            True  — 照合完了（ポジション照合に進む）
+            False — list_uncertain() が失敗（ポジション照合をスキップ）
+        """
         try:
             uncertain = self._repo.list_uncertain()
         except Exception:
             logger.error("list_uncertain() 失敗: リコンシリエーションをスキップします", exc_info=True)
-            return
+            return False
 
         for record in uncertain:
             if not record.broker_order_id:
@@ -91,6 +102,7 @@ class Reconciler:
                     "sync_order 予期せぬ例外（スキップ）: client_order_id=%s",
                     record.client_order_id, exc_info=True,
                 )
+        return True
 
     def _reconcile_positions(self, result: ReconcileResult) -> None:
         try:

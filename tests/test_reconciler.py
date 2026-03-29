@@ -240,6 +240,27 @@ class TestReconcileOrders:
         assert result.orders_no_status == 0
         assert result.position_discrepancies == []
 
+    def test_list_uncertain_exception_skips_position_reconciliation(self, repo):
+        """list_uncertain が失敗した場合、ポジション照合もスキップされる（仕様準拠）
+
+        OrdersDB が不安定な状態では list_active() も信頼できないため、
+        誤差分アラートを避けるためにポジション照合をスキップする設計。
+        """
+        from unittest.mock import patch, MagicMock
+        from kabusys.execution.broker_api import Position
+        # broker にポジションがあっても position_discrepancies は空のまま
+        broker = MockBrokerClient(
+            initial_positions=[Position(code="1234", qty=100, avg_price=1500.0)]
+        )
+        reconciler = _make_reconciler(broker, repo)
+        get_positions_spy = MagicMock(wraps=broker.get_positions)
+        broker.get_positions = get_positions_spy
+        with patch.object(repo, "list_uncertain", side_effect=Exception("DB error")):
+            result = reconciler.run()
+        # ポジション照合が呼ばれていないことを確認
+        get_positions_spy.assert_not_called()
+        assert result.position_discrepancies == []
+
 
 class TestReconcilePositions:
 
