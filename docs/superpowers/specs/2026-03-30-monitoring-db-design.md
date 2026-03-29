@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS trade_logs (
     code            TEXT    NOT NULL,
     side            TEXT    NOT NULL,  -- 'buy'|'sell'
     qty             INTEGER NOT NULL,
-    price           REAL    NOT NULL,
+    price           REAL    NOT NULL DEFAULT 0.0,  -- 成行注文は 0.0（order_repository.py と同規約）
     filled_qty      INTEGER NOT NULL DEFAULT 0,
     state           TEXT    NOT NULL
 );
@@ -95,9 +95,11 @@ CREATE TABLE IF NOT EXISTS positions (
     current_price REAL,               -- NULL = 未取得
     updated_at    TEXT    NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_positions_updated_at ON positions (updated_at);
 ```
 
 用途: code ごとに最新の保有状況を保持。約定通知受信時に upsert、ポジション解消時に削除。
+`updated_at` インデックスは #37/#38 監視エンジンがポジション陳腐化チェック時に使用。
 
 ### 4.4 `risk_logs` — リスクイベントログ（追記）
 
@@ -121,7 +123,7 @@ CREATE INDEX IF NOT EXISTS idx_risk_logs_event_type  ON risk_logs (event_type);
 
 ```sql
 CREATE TABLE IF NOT EXISTS dashboard (
-    id                INTEGER PRIMARY KEY DEFAULT 1,
+    id                INTEGER PRIMARY KEY CHECK (id = 1),
     updated_at        TEXT    NOT NULL,
     portfolio_value   REAL    NOT NULL,
     cash              REAL    NOT NULL,
@@ -132,6 +134,14 @@ CREATE TABLE IF NOT EXISTS dashboard (
 ```
 
 用途: push 通知受信のたびに最新値を `INSERT OR REPLACE` で id=1 に上書き。Streamlit が常に最新状態を参照。
+
+`CHECK (id = 1)` により id=1 以外の行は DB レベルで拒否される。
+`upsert_dashboard` の INSERT 文では `id` を **必ず 1 として明示的にバインド** すること（DEFAULT に頼らない）:
+
+```sql
+INSERT OR REPLACE INTO dashboard (id, updated_at, portfolio_value, cash, drawdown_pct, open_order_count, position_count)
+VALUES (1, ?, ?, ?, ?, ?, ?)
+```
 
 ---
 
@@ -161,9 +171,9 @@ class MonitoringDB:
         code: str,
         side: str,
         qty: int,
-        price: float,
-        state: str,
-        filled_qty: int = 0,
+        price: float,           # 成行注文は 0.0（order_repository.py と同規約）
+        filled_qty: int = 0,    # スキーマ列順と一致させること
+        state: str = "",
         logged_at: datetime | None = None,
     ) -> None: ...
 
@@ -206,8 +216,11 @@ class MonitoringDB:
 
 **設計方針:**
 - 全書き込みメソッドの `*_at` 引数はデフォルト `None` → 内部で `datetime.now(timezone.utc)` を使用（テスト時は明示注入）
-- `upsert_dashboard`: `INSERT OR REPLACE INTO dashboard` で id=1 固定
+- `upsert_dashboard`: `INSERT OR REPLACE INTO dashboard` で **id=1 を明示的にバインド**（Section 4.5 参照）
 - `upsert_position`: `INSERT OR REPLACE INTO positions` で code をキー
+- `__init__` で `conn.row_factory = sqlite3.Row` を設定する（`order_repository.py` と同じパターン）。これは呼び出し元の conn オブジェクトへの副作用だが、`monitoring.db` と `orders.db` は別ファイルなので共有されない
+- `get_dashboard()` は `row_factory = sqlite3.Row` が設定済みであることを前提とする。`dict(row)` でキー付き辞書を返す
+- ログテーブル（`system_status`, `trade_logs`, `risk_logs`）の読み取りメソッドは今フェーズでは定義しない。#37/#38 の監視エンジンが直接 `conn` に SQL を発行する設計とする
 - エラーハンドリングは呼び出し側に委ねる（リポジトリ層は素直な読み書きのみ）
 
 ---
@@ -243,7 +256,7 @@ def monitoring_conn():
 | `test_tables_created_idempotently` | `init_monitoring_db` を2回呼んでもエラーなし |
 | `TestLogSystemStatus` | |
 | `test_appends_row` | 行が追記される |
-| `test_default_recorded_at_is_utc_now` | `recorded_at` 引数省略時に UTC タイムスタンプが入る |
+| `test_default_recorded_at_is_utc_now` | `recorded_at` 引数省略時に ISO8601 UTC 文字列が入り、`datetime.now(UTC)` との差が5秒以内 |
 | `TestLogTradeEvent` | |
 | `test_appends_row_with_correct_fields` | 全フィールドが正しく保存される |
 | `TestUpsertPosition` | |
