@@ -93,3 +93,22 @@ class MonitoringDB:
     def _now(self) -> str:
         """現在時刻を ISO8601 UTC 文字列で返す。"""
         return datetime.now(timezone.utc).isoformat()
+
+    def log_system_status(
+        self,
+        cpu_percent: float,
+        memory_percent: float,
+        disk_percent: float,
+        process_ok: bool,
+        recorded_at: datetime | None = None,
+    ) -> None:
+        """システム状態を system_status テーブルに追記する。"""
+        ts = recorded_at.isoformat() if recorded_at else self._now()
+        self._conn.execute(
+            """
+            INSERT INTO system_status (recorded_at, cpu_percent, memory_percent, disk_percent, process_ok)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (ts, cpu_percent, memory_percent, disk_percent, 1 if process_ok else 0),
+        )
+        self._conn.commit()
