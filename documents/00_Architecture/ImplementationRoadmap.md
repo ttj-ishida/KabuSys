@@ -192,24 +192,33 @@
 
 # Phase 7 --- Monitoring
 
-目的: システム監視
+目的: システム監視基盤の構築と運用
 
 実装項目
 
--   ログ記録
--   Streamlitダッシュボード
--   Slack通知
+-   SQLite監視ログDB（Issue #36）
+-   システム監視エンジン — CPU/メモリ/プロセス監視（Issue #37）
+-   リスク監視エンジン — ポジション/DD/Circuit Breaker（Issue #38）
+-   Slack アラート通知（Issue #39）
+-   発注監視エンジン（Issue #40）
+-   Streamlit ダッシュボード（Issue #35）
+-   統合テスト・Phase 7 完了確認（Issue #41）
 
 作成モジュール
 
     monitoring/
-        monitoring_service.py
-        alert_manager.py
+        monitoring_db.py        ← SQLite 永続化層（Issue #36）
+        system_monitor.py       ← システム状態監視（Issue #37）
+        risk_monitor.py         ← リスク監視（Issue #38）
+        alert_manager.py        ← Slack 通知（Issue #39）
+        order_monitor.py        ← 発注監視（Issue #40）
+        dashboard_app.py        ← Streamlit ダッシュボード（Issue #35）
 
 成果物
 
-    system_logs
-    trade_logs
+    monitoring.db（system_status, trade_logs, positions, risk_logs, dashboard）
+    Streamlit ダッシュボード
+    Slack アラート
 
 ------------------------------------------------------------------------
 
