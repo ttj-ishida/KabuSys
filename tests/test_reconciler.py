@@ -174,6 +174,40 @@ class TestReconcileOrders:
         assert result.orders_synced == 1
         assert repo.get("sent-ok-001").state == OrderState.OrderAccepted
 
+    def test_sync_order_unexpected_exception_skips_and_continues(self, repo):
+        """sync_order が BrokerAPIError 以外の例外を raise → スキップして他の注文は続行"""
+        from kabusys.execution.order_record import OrderRecord, OrderState
+        from kabusys.execution.broker_api import OrderStatus
+        from datetime import datetime, timezone
+        for i, cid in enumerate(["sent-exc-001", "sent-exc-ok-001"], start=1):
+            r = OrderRecord(
+                client_order_id=cid,
+                signal_id=f"2026-03-29_{2000+i}_buy",
+                code=str(2000 + i), side="buy", qty=100,
+                order_type="limit", price=1500.0,
+                state=OrderState.OrderSent,
+                broker_order_id=f"BROKER_E{i}",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+            repo.save(r)
+        broker = MockBrokerClient()
+        broker._orders["BROKER_E2"] = OrderStatus(
+            order_id="BROKER_E2", code="2002", side="buy",
+            qty=100, filled_qty=0, status="open", price=1500.0,
+        )
+        reconciler = _make_reconciler(broker, repo)
+        original_sync = reconciler._order_manager.sync_order
+        def patched_sync(cid):
+            if cid == "sent-exc-001":
+                raise RuntimeError("unexpected DB error")
+            return original_sync(cid)
+        reconciler._order_manager.sync_order = patched_sync
+        result = reconciler.run()
+        # 例外は伝播しない
+        assert result.orders_synced == 1
+        assert repo.get("sent-exc-ok-001").state == OrderState.OrderAccepted
+
     def test_list_uncertain_exception_returns_empty_result(self, repo):
         """list_uncertain が Exception → ReconcileResult(0, 0, []) を返す、例外は伝播しない"""
         from unittest.mock import patch

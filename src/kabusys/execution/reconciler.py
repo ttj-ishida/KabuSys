@@ -86,6 +86,11 @@ class Reconciler:
                     "sync_order 失敗（スキップ）: client_order_id=%s",
                     record.client_order_id, exc_info=True,
                 )
+            except Exception:
+                logger.error(
+                    "sync_order 予期せぬ例外（スキップ）: client_order_id=%s",
+                    record.client_order_id, exc_info=True,
+                )
 
     def _reconcile_positions(self, result: ReconcileResult) -> None:
         try:
