@@ -141,11 +141,11 @@ class ExecutionEngine:
 
         # Gate 3: ドローダウン監視（push の対象注文が見つからない場合も評価する。
         # spurious push でも portfolio valuation を実行する設計は意図的）
+        # current_price=None のポジションは avg_price でフォールバックし過小評価を防ぐ
         positions = self._broker.get_positions()
         market_value = sum(
-            p.qty * p.current_price
+            p.qty * (p.current_price if p.current_price is not None else p.avg_price)
             for p in positions
-            if p.current_price is not None
         )
         current_portfolio_value = self._broker.get_available_cash() + market_value
         self._check_gate3_and_maybe_kill(current_portfolio_value)

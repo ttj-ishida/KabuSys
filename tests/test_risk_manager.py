@@ -137,10 +137,12 @@ class TestGate2CheckExecution:
         rm = RiskManager(broker=broker, repo=repo, config=config)
         rm.record_api_error()
         rm.record_api_error()
-        assert not rm.check_execution().passed  # OPEN
-        # window=0 → 即 HALF_OPEN 遷移
+        assert not rm.check_execution().passed  # OPEN (_cb_open_observed=True)
+        # window=0 → OPEN → HALF_OPEN 遷移（このコールはまだ False）
+        assert not rm.check_execution().passed
+        # HALF_OPEN ブランチで1件だけ許可
         result = rm.check_execution()
-        assert result.passed  # HALF_OPEN で1件許可
+        assert result.passed
 
     def test_circuit_breaker_closes_on_success(self, repo):
         broker = MockBrokerClient()
@@ -152,9 +154,10 @@ class TestGate2CheckExecution:
         rm = RiskManager(broker=broker, repo=repo, config=config)
         rm.record_api_error()
         rm.record_api_error()
-        rm.check_execution()        # OPEN 確認 (_cb_open_observed=True にするため)
-        rm.check_execution()        # OPEN → HALF_OPEN: プローブ1件許可
-        rm.record_api_success()     # CLOSED に遷移
+        rm.check_execution()        # OPEN (_cb_open_observed=True にするため)
+        rm.check_execution()        # OPEN → HALF_OPEN 遷移 (False)
+        rm.check_execution()        # HALF_OPEN → OPEN: プローブ1件許可 (True)
+        rm.record_api_success()     # OPEN → CLOSED に遷移
         assert rm.check_execution().passed  # CLOSED で通過
 
 

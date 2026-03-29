@@ -24,7 +24,7 @@ from kabusys.execution.broker_api import (
 from kabusys.execution.order_record import InvalidStateTransitionError, OrderRecord, OrderState
 from kabusys.execution.order_repository import OrderRepository, init_orders_db
 from kabusys.execution.order_manager import DuplicateOrderError, OrderManager
-from kabusys.execution.risk_manager import RiskConfig, RiskManager, RiskResult
+from kabusys.execution.risk_manager import RiskConfig, RiskManager, RiskRejectReason, RiskResult
 from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine
 
 __all__ = [
@@ -47,6 +47,7 @@ __all__ = [
     "OrderManager",
     "RiskConfig",
     "RiskManager",
+    "RiskRejectReason",
     "RiskResult",
     "EngineConfig",
     "ExecutionEngine",

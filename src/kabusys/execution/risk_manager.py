@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from enum import Enum
 
 from kabusys.execution.broker_api import BrokerAPIProtocol
 from kabusys.execution.order_record import OrderState
@@ -20,6 +21,16 @@ logger = logging.getLogger(__name__)
 _TERMINAL_STATES: frozenset[OrderState] = frozenset(
     {OrderState.Closed, OrderState.Cancelled, OrderState.Rejected}
 )
+
+
+class RiskRejectReason(Enum):
+    INSUFFICIENT_CASH = "insufficient_cash"
+    DUPLICATE_ORDER = "duplicate_order"
+    POSITION_LIMIT = "position_limit"
+    UTILIZATION_LIMIT = "utilization_limit"
+    RATE_LIMIT = "rate_limit"
+    CIRCUIT_BREAKER = "circuit_breaker"
+    DRAWDOWN_LIMIT = "drawdown_limit"
 
 
 @dataclass
@@ -37,6 +48,7 @@ class RiskConfig:
 class RiskResult:
     passed: bool
     reason: str = ""
+    reject_reason: RiskRejectReason | None = None
 
 
 class RiskManager:
@@ -74,20 +86,29 @@ class RiskManager:
         # 1. 余力チェック
         cash = self._broker.get_available_cash()
         if cash < order_value:
-            return RiskResult(False, f"余力不足: 余力={cash:.0f}円, 発注額={order_value:.0f}円")
+            return RiskResult(
+                False,
+                f"余力不足: 余力={cash:.0f}円, 発注額={order_value:.0f}円",
+                reject_reason=RiskRejectReason.INSUFFICIENT_CASH,
+            )
 
         # 2. 重複チェック（active 注文が存在するか）
         existing = self._repo.get_by_signal(signal_id)
         active = [r for r in existing if r.state not in _TERMINAL_STATES]
         if active:
-            return RiskResult(False, f"重複注文: signal_id={signal_id} の active 注文が存在します")
+            return RiskResult(
+                False,
+                f"重複注文: signal_id={signal_id} の active 注文が存在します",
+                reject_reason=RiskRejectReason.DUPLICATE_ORDER,
+            )
 
         # 3. ポジション上限チェック
         positions = self._broker.get_positions()
+        # total_market_value: current_price=None のポジションは avg_price でフォールバック
+        # （check_signal の分子と total_fallback の分母で同一ロジックを使い、過小評価を防ぐ）
         total_market_value = sum(
-            p.qty * p.current_price
+            p.qty * (p.current_price if p.current_price is not None else p.avg_price)
             for p in positions
-            if p.current_price is not None
         )
         # 同銘柄の現在評価額
         same_code_value = sum(
@@ -111,6 +132,7 @@ class RiskManager:
                     f"ポジション上限超過: 銘柄={code}, "
                     f"新規評価額={new_position_value:.0f}円 / 総資産={total_assets:.0f}円 "
                     f"> {self._config.max_position_pct:.0%}",
+                    reject_reason=RiskRejectReason.POSITION_LIMIT,
                 )
 
         # 3b. 全体上限
@@ -129,6 +151,7 @@ class RiskManager:
                     False,
                     f"全体上限超過: 全ポジション評価額+発注額={new_total_market:.0f}円 / 総資産={utilization_base:.0f}円 "
                     f"> {self._config.max_utilization:.0%}",
+                    reject_reason=RiskRejectReason.UTILIZATION_LIMIT,
                 )
 
         return RiskResult(True)
@@ -157,7 +180,11 @@ class RiskManager:
             self._tokens -= 1.0
             return RiskResult(True)
 
-        return RiskResult(False, f"レート制限: {self._config.rate_limit_per_sec}回/秒を超過")
+        return RiskResult(
+            False,
+            f"レート制限: {self._config.rate_limit_per_sec}回/秒を超過",
+            reject_reason=RiskRejectReason.RATE_LIMIT,
+        )
 
     def record_api_error(self) -> None:
         """API エラーを記録する（send_order 失敗時に呼ぶ）。"""
@@ -196,11 +223,22 @@ class RiskManager:
             # これにより window_sec=0 でも最初の check で False を返し、
             # 次の check で HALF_OPEN に遷移できる。
             if self._cb_open_observed and now - self._cb_open_at >= self._config.circuit_breaker_window_sec:
+                # HALF_OPEN へ遷移するが、このコールでは True を返さない。
+                # 次のコールで HALF_OPEN ブランチが 1 件だけ許可することで
+                # 「2連続 True」バグを防ぐ。
                 self._cb_state = "HALF_OPEN"
-                logger.info("サーキットブレーカー HALF_OPEN")
-                return RiskResult(True)  # 1件試行許可
+                logger.info("サーキットブレーカー HALF_OPEN: 次回1件プローブ許可")
+                return RiskResult(
+                    False,
+                    "サーキットブレーカー HALF_OPEN: プローブ待機中",
+                    reject_reason=RiskRejectReason.CIRCUIT_BREAKER,
+                )
             self._cb_open_observed = True
-            return RiskResult(False, "サーキットブレーカー OPEN: 発注停止中")
+            return RiskResult(
+                False,
+                "サーキットブレーカー OPEN: 発注停止中",
+                reject_reason=RiskRejectReason.CIRCUIT_BREAKER,
+            )
 
         # HALF_OPEN: 1件だけ許可して OPEN に戻す（成功なら record_api_success() で CLOSED へ）
         self._cb_state = "OPEN"
@@ -227,6 +265,7 @@ class RiskManager:
                 False,
                 f"ドローダウン超過: {drawdown:.1%} > {self._config.max_drawdown:.1%} "
                 f"(現在={current_portfolio_value:.0f}円, 開始={self._config.initial_portfolio_value:.0f}円)",
+                reject_reason=RiskRejectReason.DRAWDOWN_LIMIT,
             )
 
         return RiskResult(True)

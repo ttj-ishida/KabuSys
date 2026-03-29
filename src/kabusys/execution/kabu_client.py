@@ -287,18 +287,32 @@ class KabuStationClient:
         def _on_open(_ws: websocket.WebSocketApp) -> None:
             logger.info("WebSocket 接続確立: %s", ws_url)
 
+        # stop_event がセットされたとき、現在の ws を close() するための参照
+        # リストでラップして closure からの書き換えを可能にする
+        _ws_current: list[websocket.WebSocketApp | None] = [None]
+
+        def _stop_watcher() -> None:
+            """stop_event を監視し、接続中の ws を強制クローズする。"""
+            stop_event.wait()
+            if _ws_current[0] is not None:
+                _ws_current[0].close()
+
+        threading.Thread(target=_stop_watcher, daemon=True, name="ws-stop-watcher").start()
+
         while not stop_event.is_set():
             try:
                 token = self._get_token()
                 ws = websocket.WebSocketApp(
                     ws_url,
-                    header={"X-API-KEY": token},
+                    header=[f"X-API-KEY: {token}"],  # websocket-client 公式形式はリスト
                     on_open=_on_open,
                     on_message=_on_message,
                     on_error=_on_error,
                     on_close=_on_close,
                 )
+                _ws_current[0] = ws
                 ws.run_forever(ping_interval=30, ping_timeout=10)
+                _ws_current[0] = None
             except Exception as exc:
                 logger.error("WebSocket 接続失敗: %s", exc)
             if not stop_event.is_set():
