@@ -10,7 +10,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 
-from kabusys.execution.broker_api import BrokerAPIProtocol, OrderRequest, OrderRejectedError
+from kabusys.execution.broker_api import BrokerAPIProtocol, OrderRequest, OrderRejectedError, OrderSentPendingError
 from kabusys.execution.order_record import InvalidStateTransitionError, OrderRecord, OrderState
 from kabusys.execution.order_repository import OrderRepository
 
@@ -131,6 +131,14 @@ class OrderManager:
             record.transition_to(OrderState.Rejected, error_message=str(exc))
             self._repo.update(record)
 
+        except OrderSentPendingError as exc:
+            # broker は注文番号を発行したが約定しない（タイムアウト/never fill 等）。
+            # broker_order_id を永続化したうえで OrderSent 状態のまま残す（Reconciliation 対象）。
+            record.broker_order_id = exc.order_id
+            record.updated_at = datetime.now(timezone.utc)
+            self._repo.update(record)
+            raise  # OrderSentPendingError を呼び出し元へ伝播
+
         return record
 
     def sync_order(self, client_order_id: str) -> OrderRecord:
@@ -171,6 +179,15 @@ class OrderManager:
             return record
 
         try:
+            # OrderSent → Filled/PartialFill は直接遷移不可のため OrderAccepted を経由する。
+            # 例: ネットワーク障害後の Reconciliation で broker が "filled" を返した場合。
+            if (
+                record.state == OrderState.OrderSent
+                and new_state in {OrderState.Filled, OrderState.PartialFill}
+            ):
+                record.transition_to(OrderState.OrderAccepted)
+                self._repo.update(record)
+
             record.transition_to(
                 new_state,
                 filled_qty=status.filled_qty,

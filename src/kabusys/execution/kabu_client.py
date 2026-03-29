@@ -6,9 +6,13 @@ DB には一切触れない。トークン管理は内部で完結（_get_token 
 """
 from __future__ import annotations
 
+import json
 import logging
+import threading
+from typing import Callable
 
 import httpx
+import websocket
 
 from kabusys.execution.broker_api import (
     BrokerAPIError,
@@ -227,11 +231,13 @@ class KabuStationClient:
             )
         positions = []
         for p in self._json(resp) or []:
+            raw_current = p.get("CurrentPrice")
             positions.append(
                 Position(
                     code=str(p.get("Symbol", "")),
                     qty=int(p.get("LeavesQty", 0)),
                     avg_price=float(p.get("Price", 0.0)),
+                    current_price=float(raw_current) if raw_current is not None else None,
                 )
             )
         return positions
@@ -244,6 +250,73 @@ class KabuStationClient:
                 f"余力照会失敗: {resp.status_code}", status_code=resp.status_code
             )
         return float(self._json(resp).get("StockAccountWallet", 0.0))
+
+    def stream_push(
+        self,
+        on_message: Callable[[dict], None],
+        stop_event: threading.Event,
+    ) -> None:
+        """WebSocket で kabu station の push 通知を受信するブロッキングメソッド。
+
+        stop_event が set されるまで接続を維持する。接続断時は1秒後に再接続。
+        スレッド内で呼び出すことを想定。
+
+        URL は base_url の http:// を ws:// に、https:// を wss:// に置換し末尾に /websocket を付加する。
+        例: http://localhost:18080/kabusapi → ws://localhost:18080/kabusapi/websocket
+        """
+        # URL スキーム変換: http→ws, https→wss
+        _scheme_map = {"http": "ws", "https": "wss"}
+        _scheme, _, _rest = self._base_url.rstrip("/").partition("://")
+        ws_url = _scheme_map.get(_scheme, "ws") + "://" + _rest + "/websocket"
+
+        def _on_message(_ws: websocket.WebSocketApp, message: str) -> None:
+            try:
+                payload = json.loads(message)
+                on_message(payload)
+            except json.JSONDecodeError as exc:
+                logger.warning("WebSocket: JSON デコード失敗: %s", exc)
+            except Exception as exc:
+                logger.error("WebSocket: on_message ハンドラ例外: %s", exc)
+
+        def _on_error(_ws: websocket.WebSocketApp, error: Exception) -> None:
+            logger.error("WebSocket エラー: %s", error)
+
+        def _on_close(_ws: websocket.WebSocketApp, code: int | None, msg: str | None) -> None:
+            logger.info("WebSocket クローズ: code=%s", code)
+
+        def _on_open(_ws: websocket.WebSocketApp) -> None:
+            logger.info("WebSocket 接続確立: %s", ws_url)
+
+        # stop_event がセットされたとき、現在の ws を close() するための参照
+        # リストでラップして closure からの書き換えを可能にする
+        _ws_current: list[websocket.WebSocketApp | None] = [None]
+
+        def _stop_watcher() -> None:
+            """stop_event を監視し、接続中の ws を強制クローズする。"""
+            stop_event.wait()
+            if _ws_current[0] is not None:
+                _ws_current[0].close()
+
+        threading.Thread(target=_stop_watcher, daemon=True, name="ws-stop-watcher").start()
+
+        while not stop_event.is_set():
+            try:
+                token = self._get_token()
+                ws = websocket.WebSocketApp(
+                    ws_url,
+                    header=[f"X-API-KEY: {token}"],  # websocket-client 公式形式はリスト
+                    on_open=_on_open,
+                    on_message=_on_message,
+                    on_error=_on_error,
+                    on_close=_on_close,
+                )
+                _ws_current[0] = ws
+                ws.run_forever(ping_interval=30, ping_timeout=10)
+                _ws_current[0] = None
+            except Exception as exc:
+                logger.error("WebSocket 接続失敗: %s", exc)
+            if not stop_event.is_set():
+                stop_event.wait(timeout=1.0)  # 1秒後に再接続
 
     def close(self) -> None:
         """HTTP クライアントを閉じる。"""

@@ -43,8 +43,9 @@ class OrderStatus:
 @dataclass
 class Position:
     code: str
-    qty: int                # 保有株数
-    avg_price: float        # 平均取得単価
+    qty: int                         # 保有株数
+    avg_price: float                 # 平均取得単価
+    current_price: float | None = None  # 現在値（時価評価額計算用）
 
 
 @dataclass
@@ -66,6 +67,18 @@ class BrokerAPIError(Exception):
 
 class OrderRejectedError(BrokerAPIError):
     """発注が証券会社に拒否された（余力不足・規制等）。"""
+
+
+class OrderSentPendingError(BrokerAPIError):
+    """発注は受け付けられたが約定しない（fill_mode=never / タイムアウト等）。
+
+    order_id 属性に broker 側の注文番号が格納されており、
+    OrderManager はこれを使って broker_order_id を永続化してから再スローする。
+    """
+
+    def __init__(self, message: str, order_id: str) -> None:
+        super().__init__(message)
+        self.order_id = order_id
 
 
 class RateLimitError(BrokerAPIError):
