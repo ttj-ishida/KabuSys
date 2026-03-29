@@ -60,9 +60,15 @@ Runbook）** を定義する。
 手順
 
     1. execution_service 起動
-    2. API接続確認
-    3. Signal Queue 読み込み
-    4. Monitoring 起動
+    2. 自動リコンシリエーション実行（起動時に自動）
+       - OrderSent 注文をブローカーと突合・同期
+       - ポジション差分をログに記録（差分があれば手動確認）
+    3. API接続確認
+    4. Signal Queue 読み込み
+    5. Monitoring 起動
+
+> リコンシリエーション結果はログに出力される。
+> `orders_no_status > 0` または `position_discrepancies > 0` の場合は手動確認を行うこと。
 
 ------------------------------------------------------------------------
 

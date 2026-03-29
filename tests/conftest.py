@@ -6,7 +6,9 @@ init_schema() の代わりに最小 DDL でテーブルを作成する共通フ�
 from __future__ import annotations
 
 import duckdb
+import sqlite3
 import pytest
+from kabusys.execution.order_repository import init_orders_db
 
 # テスト対象テーブルのみ作成（FK CASCADE/SET NULL を持つテーブルは除外）
 MINIMAL_DDL = [
@@ -53,5 +55,26 @@ def mem_db():
     conn = duckdb.connect(":memory:")
     for ddl in MINIMAL_DDL:
         conn.execute(ddl)
+    yield conn
+    conn.close()
+
+
+@pytest.fixture
+def sqlite_conn():
+    c = sqlite3.connect(":memory:")
+    init_orders_db(c)
+    yield c
+    c.close()
+
+
+@pytest.fixture
+def duckdb_conn():
+    conn = duckdb.connect(":memory:")
+    conn.execute("""
+        CREATE TABLE signals (date DATE, code VARCHAR, side VARCHAR, score FLOAT, signal_rank INTEGER)
+    """)
+    conn.execute("""
+        CREATE TABLE portfolio_targets (date DATE, code VARCHAR, target_size INTEGER, entry_price FLOAT)
+    """)
     yield conn
     conn.close()

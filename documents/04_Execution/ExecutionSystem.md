@@ -73,7 +73,36 @@ Strategy層が生成したシグナルは、実行層（Execution）へ渡る直
 3. **残高照合**: `GET /positions` で実際の口座ポジションを確認し、ローカルの想定ポジションとの差分をログに記録する。
 4. **再開**: 正しい状態に同期した後、`signal_queue` の `pending` キューの消化を再開する。
 
-> **実装**: Reconciliation ロジックは Issue #32 で実装する。`OrderRepository.list_uncertain()` と `OrderManager.sync_order()` のインターフェースは Issue #29 で提供済み。
+> **実装**: Issue #32 にて実装済み（PR #133）。`Reconciler` クラスが上記フローを担う。
+
+### Reconciler クラス (Issue #32 実装済み)
+
+`src/kabusys/execution/reconciler.py` に独立クラスとして実装。`ExecutionEngine.__init__` に Optional で注入し、`run_session()` の先頭（WebSocket スレッド起動前）で呼び出す。
+
+```python
+class Reconciler:
+    def __init__(self, broker: BrokerAPIProtocol, repo: OrderRepository, order_manager: OrderManager) -> None: ...
+    def run(self) -> ReconcileResult: ...
+```
+
+**戻り値** `ReconcileResult`:
+
+| フィールド | 内容 |
+|-----------|------|
+| `orders_synced` | 状態が変化した OrderSent 件数 |
+| `orders_no_status` | broker_order_id 未設定 または broker に注文レコードなし（手動確認要）の件数 |
+| `position_discrepancies` | ブローカーとローカル推定の差分リスト（`PositionDiscrepancy` のリスト） |
+
+**エラーハンドリング方針**:
+- `sync_order` が `BrokerAPIError` → そのレコードをスキップ、他は続行
+- `get_positions` が `BrokerAPIError` → ポジション照合ステップ全体をスキップ（`position_discrepancies=[]`）
+- `list_uncertain` が `Exception` → `ReconcileResult(0, 0, [])` を返して続行（`run_session` は停止しない）
+
+**ExecutionEngine への注入例**:
+```python
+reconciler = Reconciler(broker=broker, repo=repo, order_manager=order_manager)
+engine = ExecutionEngine(..., reconciler=reconciler)
+```
 
 ---
 
@@ -166,7 +195,10 @@ src/kabusys/execution/
 ├── mock_client.py       ← MockBrokerClient（Issue #28）
 ├── order_record.py      ← OrderRecord dataclass + 状態遷移ルール（DB なし純粋ロジック）
 ├── order_repository.py  ← SQLite 読み書き（永続化のみ）
-└── order_manager.py     ← 外向き API（order_record + order_repository を組み合わせ）
+├── order_manager.py     ← 外向き API（order_record + order_repository を組み合わせ）
+├── risk_manager.py      ← RiskManager 3段階ガード（Issue #31）
+├── execution_engine.py  ← ExecutionEngine run_session / kill_switch（Issue #30）
+└── reconciler.py        ← Reconciler 起動時自動復旧（Issue #32）
 ```
 
 ### OrderState（enum 値）
