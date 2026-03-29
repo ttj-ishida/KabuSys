@@ -267,6 +267,35 @@ class TestReconcilePositions:
         assert result.position_discrepancies == []
         # 処理は続行している（例外が伝播していない）
 
+    def test_list_active_exception_skips_position_check(self, repo):
+        """`list_active()` が Exception → position_discrepancies=[] で続行、例外は伝播しない"""
+        from unittest.mock import patch
+        from kabusys.execution.broker_api import Position
+        broker = MockBrokerClient(
+            initial_positions=[Position(code="1234", qty=100, avg_price=1500.0)]
+        )
+        reconciler = _make_reconciler(broker, repo)
+        with patch.object(repo, "list_active", side_effect=Exception("DB error")):
+            result = reconciler.run()
+        assert result.position_discrepancies == []
+
+    def test_broker_same_code_multiple_positions_are_summed(self, repo):
+        """broker が同一コードで複数エントリを返した場合、合算される"""
+        from unittest.mock import patch
+        from kabusys.execution.broker_api import Position
+        self._insert_filled_order(repo, "1234", "buy", 100, "pos-005")
+        broker = MockBrokerClient()
+        reconciler = _make_reconciler(broker, repo)
+        # MockBrokerClient は内部 dict でコードを上書きするため get_positions を直接モック
+        multi_positions = [
+            Position(code="1234", qty=60, avg_price=1500.0),
+            Position(code="1234", qty=40, avg_price=1520.0),
+        ]
+        with patch.object(broker, "get_positions", return_value=multi_positions):
+            result = reconciler.run()
+        # broker 合計 100 == local 100 → 差分なし
+        assert result.position_discrepancies == []
+
 
 class TestExecutionEngineIntegration:
 

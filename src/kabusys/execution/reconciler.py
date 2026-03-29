@@ -93,15 +93,23 @@ class Reconciler:
             logger.warning("get_positions() 失敗: ポジション照合をスキップします", exc_info=True)
             return
 
-        # ブローカーポジション: {code: qty}
-        broker_map: dict[str, int] = {p.code: p.qty for p in broker_positions}
+        # ブローカーポジション: {code: qty} — 同一コードの複数エントリは合算
+        broker_map: dict[str, int] = {}
+        for p in broker_positions:
+            broker_map[p.code] = broker_map.get(p.code, 0) + p.qty
 
         # ローカル推定ポジション: Filled / PartialFill の注文から code ごとにネット集計
         # list_active() は Closed/Cancelled/Rejected を除く。Filled と PartialFill は含まれる。
         # ※ Closed 状態（ポジションクローズ済）は list_active() では取得できないため対象外。
-        #   実運用では Filled buy - Filled sell のネットが現在保有数量に相当する。
+        #   現フェーズでは Filled → Closed 遷移は未実装のため、Filled buy - Filled sell のネットが
+        #   現在保有数量に相当する。将来 Closed 遷移を実装する際は再検討が必要。
         local_map: dict[str, int] = {}
-        for record in self._repo.list_active():
+        try:
+            active_orders = self._repo.list_active()
+        except Exception:
+            logger.warning("list_active() 失敗: ポジション照合をスキップします", exc_info=True)
+            return
+        for record in active_orders:
             if record.state not in {OrderState.Filled, OrderState.PartialFill}:
                 continue
             if record.side == "buy":
