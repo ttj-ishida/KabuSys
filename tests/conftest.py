@@ -9,6 +9,7 @@ import duckdb
 import sqlite3
 import pytest
 from kabusys.execution.order_repository import init_orders_db
+from kabusys.monitoring.monitoring_db import init_monitoring_db
 
 # テスト対象テーブルのみ作成（FK CASCADE/SET NULL を持つテーブルは除外）
 MINIMAL_DDL = [
@@ -76,5 +77,14 @@ def duckdb_conn():
     conn.execute("""
         CREATE TABLE portfolio_targets (date DATE, code VARCHAR, target_size INTEGER, entry_price FLOAT)
     """)
+    yield conn
+    conn.close()
+
+
+@pytest.fixture
+def monitoring_conn():
+    """テスト用インメモリ SQLite（監視ログ DB スキーマ）を返すフィクスチャ。"""
+    conn = sqlite3.connect(":memory:")
+    init_monitoring_db(conn)
     yield conn
     conn.close()
