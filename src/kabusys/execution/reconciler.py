@@ -87,4 +87,43 @@ class Reconciler:
                 )
 
     def _reconcile_positions(self, result: ReconcileResult) -> None:
-        pass  # Task 3 で実装
+        try:
+            broker_positions = self._broker.get_positions()
+        except BrokerAPIError:
+            logger.warning("get_positions() 失敗: ポジション照合をスキップします", exc_info=True)
+            return
+
+        # ブローカーポジション: {code: qty}
+        broker_map: dict[str, int] = {p.code: p.qty for p in broker_positions}
+
+        # ローカル推定ポジション: Filled / PartialFill の注文から code ごとにネット集計
+        # list_active() は Closed/Cancelled/Rejected を除く。Filled と PartialFill は含まれる。
+        # ※ Closed 状態（ポジションクローズ済）は list_active() では取得できないため対象外。
+        #   実運用では Filled buy - Filled sell のネットが現在保有数量に相当する。
+        local_map: dict[str, int] = {}
+        for record in self._repo.list_active():
+            if record.state not in {OrderState.Filled, OrderState.PartialFill}:
+                continue
+            if record.side == "buy":
+                local_map[record.code] = local_map.get(record.code, 0) + record.filled_qty
+            elif record.side == "sell":
+                local_map[record.code] = local_map.get(record.code, 0) - record.filled_qty
+
+        # 差分照合
+        for code in set(broker_map) | set(local_map):
+            broker_qty = broker_map.get(code, 0)
+            local_qty = local_map.get(code, 0)
+            diff = broker_qty - local_qty
+            if diff != 0:
+                result.position_discrepancies.append(
+                    PositionDiscrepancy(
+                        code=code,
+                        broker_qty=broker_qty,
+                        local_qty=local_qty,
+                        diff=diff,
+                    )
+                )
+                logger.warning(
+                    "ポジション差分検出: code=%s, broker=%d, local=%d, diff=%+d",
+                    code, broker_qty, local_qty, diff,
+                )
