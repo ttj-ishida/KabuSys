@@ -110,11 +110,11 @@ class RiskManager:
             p.qty * (p.current_price if p.current_price is not None else p.avg_price)
             for p in positions
         )
-        # 同銘柄の現在評価額
+        # 同銘柄の現在評価額（current_price=None は avg_price でフォールバック）
         same_code_value = sum(
-            p.qty * p.current_price
+            p.qty * (p.current_price if p.current_price is not None else p.avg_price)
             for p in positions
-            if p.code == code and p.current_price is not None
+            if p.code == code
         )
         # 総資産 = キャッシュ + ポジション時価評価額（current_price が None のものは avg_price でフォールバック）
         total_fallback = sum(

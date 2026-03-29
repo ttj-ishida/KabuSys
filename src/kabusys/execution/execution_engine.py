@@ -17,7 +17,7 @@ from kabusys.execution.broker_api import BrokerAPIProtocol, OrderSentPendingErro
 # DuplicateOrderError は _process_signals() (Task 7) で使用
 from kabusys.execution.order_manager import DuplicateOrderError, OrderManager
 from kabusys.execution.order_repository import OrderRepository
-from kabusys.execution.risk_manager import RiskManager
+from kabusys.execution.risk_manager import RiskManager, RiskRejectReason
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ class ExecutionEngine:
                 if g2.passed:
                     g2_passed = True
                     break
-                if "サーキットブレーカー" in g2.reason:
+                if g2.reject_reason == RiskRejectReason.CIRCUIT_BREAKER:
                     logger.warning("Gate 2 CB OPEN: シグナルループ停止 - %s", g2.reason)
                     return  # ドレインループは継続するため return のみ
                 logger.debug("Gate 2 rate limit (attempt %d/3), waiting 0.2s", attempt + 1)
