@@ -22,32 +22,6 @@ from kabusys.execution.risk_manager import RiskConfig, RiskManager
 TARGET_DATE = date(2026, 3, 29)
 
 
-@pytest.fixture
-def sqlite_conn():
-    c = sqlite3.connect(":memory:")
-    init_orders_db(c)
-    yield c
-    c.close()
-
-
-@pytest.fixture
-def duckdb_conn():
-    conn = duckdb.connect(":memory:")
-    conn.execute("""
-        CREATE TABLE signals (
-            date DATE, code VARCHAR, side VARCHAR,
-            score FLOAT, signal_rank INTEGER
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE portfolio_targets (
-            date DATE, code VARCHAR,
-            target_size INTEGER, entry_price FLOAT
-        )
-    """)
-    yield conn
-    conn.close()
-
 
 def _make_engine(broker, sqlite_conn, duckdb_conn, *, config=None) -> ExecutionEngine:
     repo = OrderRepository(sqlite_conn)

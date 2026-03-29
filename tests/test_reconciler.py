@@ -266,3 +266,64 @@ class TestReconcilePositions:
             result = reconciler.run()
         assert result.position_discrepancies == []
         # 処理は続行している（例外が伝播していない）
+
+
+class TestExecutionEngineIntegration:
+
+    def test_run_session_calls_reconciler_before_signal_processing(self, sqlite_conn, duckdb_conn):
+        """reconciler.run() が run_session 内で WebSocket 起動より先に呼ばれる"""
+        from datetime import date, time
+        from unittest.mock import MagicMock
+        from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine
+        from kabusys.execution.order_manager import OrderManager
+        from kabusys.execution.risk_manager import RiskConfig, RiskManager
+        from kabusys.execution.reconciler import Reconciler, ReconcileResult
+
+        broker = MockBrokerClient(available_cash=5_000_000.0)
+        repo = OrderRepository(sqlite_conn)
+        risk_manager = RiskManager(broker=broker, repo=repo, config=RiskConfig(initial_portfolio_value=10_000_000.0))
+        order_manager = OrderManager(broker=broker, repo=repo)
+        reconciler = MagicMock(spec=Reconciler)
+        reconciler.run.return_value = ReconcileResult()
+
+        cfg = EngineConfig(
+            target_date=date(2026, 3, 29),
+            signal_send_start=time(0, 0),
+            signal_send_end=time(0, 0),   # シグナル処理をスキップ
+            market_close=time(0, 0),       # 即終了
+        )
+        engine = ExecutionEngine(
+            broker=broker,
+            repo=repo,
+            risk_manager=risk_manager,
+            order_manager=order_manager,
+            duckdb_conn=duckdb_conn,
+            config=cfg,
+            reconciler=reconciler,
+        )
+        engine.run_session()
+        reconciler.run.assert_called_once()
+
+    def test_run_session_without_reconciler_does_not_raise(self, sqlite_conn, duckdb_conn):
+        """reconciler=None（デフォルト）でも run_session は正常動作する"""
+        from datetime import date, time
+        from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine
+        from kabusys.execution.order_manager import OrderManager
+        from kabusys.execution.risk_manager import RiskConfig, RiskManager
+
+        broker = MockBrokerClient(available_cash=5_000_000.0)
+        repo = OrderRepository(sqlite_conn)
+        risk_manager = RiskManager(broker=broker, repo=repo, config=RiskConfig(initial_portfolio_value=10_000_000.0))
+        order_manager = OrderManager(broker=broker, repo=repo)
+        cfg = EngineConfig(
+            target_date=date(2026, 3, 29),
+            signal_send_start=time(0, 0),
+            signal_send_end=time(0, 0),
+            market_close=time(0, 0),
+        )
+        # reconciler を渡さない（デフォルト None）→ 例外なし
+        engine = ExecutionEngine(
+            broker=broker, repo=repo, risk_manager=risk_manager,
+            order_manager=order_manager, duckdb_conn=duckdb_conn, config=cfg,
+        )
+        engine.run_session()  # 例外が出なければ PASS

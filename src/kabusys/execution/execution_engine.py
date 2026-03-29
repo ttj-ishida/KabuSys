@@ -17,6 +17,7 @@ from kabusys.execution.broker_api import BrokerAPIProtocol, OrderSentPendingErro
 # DuplicateOrderError は _process_signals() (Task 7) で使用
 from kabusys.execution.order_manager import DuplicateOrderError, OrderManager
 from kabusys.execution.order_repository import OrderRepository
+from kabusys.execution.reconciler import Reconciler
 from kabusys.execution.risk_manager import RiskManager, RiskRejectReason
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ class ExecutionEngine:
         order_manager: OrderManager,
         duckdb_conn: duckdb.DuckDBPyConnection,
         config: EngineConfig,
+        reconciler: Reconciler | None = None,
     ) -> None:
         self._broker = broker
         self._repo = repo
@@ -46,6 +48,7 @@ class ExecutionEngine:
         self._order_manager = order_manager
         self._duckdb_conn = duckdb_conn
         self._config = config
+        self._reconciler = reconciler
         self._stop_event = threading.Event()
         self._push_queue: queue.Queue[dict] = queue.Queue()
 
@@ -196,6 +199,16 @@ class ExecutionEngine:
         from datetime import datetime
 
         logger.info("ExecutionEngine: セッション開始 target_date=%s", self._config.target_date)
+
+        # 起動時リコンシリエーション（reconciler が設定されている場合のみ）
+        if self._reconciler is not None:
+            rec_result = self._reconciler.run()
+            logger.info(
+                "Reconciliation 完了: synced=%d, no_status=%d, position_discrepancies=%d",
+                rec_result.orders_synced,
+                rec_result.orders_no_status,
+                len(rec_result.position_discrepancies),
+            )
 
         # WebSocket スレッド起動
         ws_thread = threading.Thread(target=self._websocket_worker, daemon=True, name="ws-push")
