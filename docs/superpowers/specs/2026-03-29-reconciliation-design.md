@@ -85,35 +85,50 @@ class Reconciler:
 
 ```
 list_uncertain() → [OrderSent レコード一覧]
+  ※ list_uncertain が Exception を raise した場合:
+    → logger.error してスキップ（run_session は停止しない）
+    → ReconcileResult(0, 0, []) を返す
+
   for each record:
     if broker_order_id is None:
-      → orders_no_status++
+      → orders_no_status++   ← broker_order_id 未設定は照合不能
       → logger.warning（手動確認推奨）
       → スキップ
     else:
       try:
         before_state = record.state
-        sync_order(client_order_id)
-        after_state = repo.get(client_order_id).state
-        if before_state != after_state:
+        updated = sync_order(client_order_id)   ← 戻り値を直接使用（再DB読みは不要）
+        if before_state != updated.state:
           orders_synced++
       except BrokerAPIError:
         → logger.error してスキップ（他の注文は続行）
+
+  ※ sync_order 内部で broker.get_order_status() が None を返した場合:
+    → sync_order は状態を変更せず元の record を返す
+    → orders_no_status++ / logger.warning（broker 側に注文なし、手動確認推奨）
 ```
+
+`orders_no_status` は以下の2ケースを合算する：
+- `broker_order_id is None`（クラッシュで永続化前にプロセス停止）
+- `get_order_status()` が `None` を返す（broker 側に注文レコードなし）
 
 ### Step 2 — ポジション差分照合
 
 ```
 try:
   broker_positions = broker.get_positions()
+  # → list[Position]。Position.qty は常に非負（保有数量）
+  # → dict[str, int] に変換: {p.code: p.qty for p in broker_positions}
 except BrokerAPIError:
   → logger.warning してステップ全体をスキップ
   → position_discrepancies = []
 
-ローカル推定ポジション:
-  DB の Filled / PartialFill 注文を code ごとにネット集計
-    buy:  filled_qty を加算（filled_qty が None なら qty を使用）
-    sell: filled_qty を減算（filled_qty が None なら qty を使用）
+ローカル推定ポジション（code ごとにネット集計）:
+  対象状態: Filled / PartialFill / Closed
+    ※ Closed は決済済み（売り約定）だが、発注履歴から ポジションを正確に把握するために含める
+  buy:  record.filled_qty を加算
+  sell: record.filled_qty を減算
+  ※ filled_qty は OrderRecord.filled_qty: int = 0 (NOT NULL)。None になることはない。
 
 差分照合:
   union(broker_codes, local_codes) を走査
@@ -174,12 +189,12 @@ def run_session(self) -> None:
 
 ## 7. エラーハンドリング方針
 
-| 障害 | 挙動 |
-|------|------|
-| `sync_order` が `BrokerAPIError` | そのレコードをスキップ、他の照合は続行 |
-| `get_positions` が失敗 | ポジション照合ステップ全体をスキップ（`position_discrepancies=[]`） |
-| `list_uncertain` が失敗 | `ReconcileResult(0, 0, [])` を返して続行（ログ記録） |
-| いずれのエラーも | `run_session()` を停止させない |
+| 障害 | 捕捉する例外型 | 挙動 |
+|------|--------------|------|
+| `sync_order` が失敗 | `BrokerAPIError` | そのレコードをスキップ、他の照合は続行 |
+| `get_positions` が失敗 | `BrokerAPIError` | ポジション照合ステップ全体をスキップ（`position_discrepancies=[]`） |
+| `list_uncertain` が失敗 | `Exception`（SQLite 接続断等） | `ReconcileResult(0, 0, [])` を返して続行。SQLite 障害は後続の発注でも顕在化するため、ここでの握りつぶしは許容範囲。`logger.error` で記録する。 |
+| いずれのエラーも | — | `run_session()` を停止させない |
 
 ---
 
@@ -190,13 +205,14 @@ def run_session(self) -> None:
 | uncertain なし | `ReconcileResult(0, 0, [])` を返す |
 | OrderSent + broker → `"open"` | `OrderAccepted` に遷移、`orders_synced=1` |
 | OrderSent + broker → `"filled"` | `Filled` に遷移、`orders_synced=1` |
-| OrderSent + broker_order_id なし | 状態変化なし、`orders_no_status=1` |
-| broker が `None` を返す | 状態変化なし、`orders_no_status=1` |
-| ポジション差分あり | `PositionDiscrepancy` リストに含まれ処理続行 |
+| OrderSent + `broker_order_id=None` | 状態変化なし、`orders_no_status=1`（broker 呼び出しなし） |
+| `broker_order_id` 設定済みだが `get_order_status()` が `None` を返す | 状態変化なし、`orders_no_status=1` |
+| ポジション差分あり（broker 100株、local 80株） | `PositionDiscrepancy(code=..., broker_qty=100, local_qty=80, diff=20)` リストに含まれ処理続行 |
 | ポジション一致 | `position_discrepancies=[]` |
-| `sync_order` が `BrokerAPIError` | スキップして他を処理、例外は伝播しない |
-| `get_positions` が失敗 | `position_discrepancies=[]` で続行 |
-| `ExecutionEngine.run_session` 統合 | `reconciler.run()` が signal_send_start 待機より先に呼ばれる |
+| `sync_order` が `BrokerAPIError` | そのレコードをスキップ、他は処理継続、例外は伝播しない |
+| `get_positions` が `BrokerAPIError` | `position_discrepancies=[]` で続行 |
+| `list_uncertain` が `Exception` | `ReconcileResult(0, 0, [])` を返す、例外は伝播しない |
+| `ExecutionEngine.run_session` 統合 | `reconciler.run()` が WebSocket スレッド起動・`signal_send_start` 待機より先に呼ばれる |
 
 ---
 
@@ -206,5 +222,5 @@ def run_session(self) -> None:
 |---------|---------|------|
 | `src/kabusys/execution/reconciler.py` | 新規作成 | `Reconciler` クラス、`ReconcileResult`、`PositionDiscrepancy` |
 | `src/kabusys/execution/execution_engine.py` | 修正 | `__init__` に `reconciler` 追加、`run_session` の先頭で呼ぶ |
-| `src/kabusys/execution/__init__.py` | 修正 | `Reconciler`、`ReconcileResult`、`PositionDiscrepancy` をエクスポート |
+| `src/kabusys/execution/__init__.py` | 修正 | 既存エクスポートに `Reconciler`、`ReconcileResult`、`PositionDiscrepancy` を追加 |
 | `tests/test_reconciler.py` | 新規作成 | 上記テストケース |
