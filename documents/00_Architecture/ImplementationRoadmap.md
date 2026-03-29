@@ -159,19 +159,28 @@
 
 # Phase 6 --- Execution Engine
 
-目的: 自動発注
+目的: 自動発注・リスク管理・自動復旧
 
 実装項目
 
--   kabuステーションAPI接続
--   注文送信
--   約定管理
+-   kabuステーションAPI接続 (Issue #28)
+-   注文ステートマシン・発注管理 (Issue #29)
+-   ExecutionEngine — シグナル処理・WebSocket Push・Kill Switch (Issue #30)
+-   RiskManager — 3段階ガード（余力/重複/Drawdown） (Issue #31)
+-   Reconciler — 起動時自動復旧・ポジション差分照合 (Issue #32)
 
 作成モジュール
 
     execution/
-        execution_engine.py
+        broker_api.py
+        kabu_client.py
+        mock_client.py
+        order_record.py
+        order_repository.py
         order_manager.py
+        risk_manager.py
+        execution_engine.py
+        reconciler.py
 
 成果物
 
