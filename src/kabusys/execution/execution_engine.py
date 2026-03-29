@@ -116,7 +116,7 @@ class ExecutionEngine:
 
     def _drain_push_queue(self) -> None:
         """_push_queue を全件処理する（sync_order + Gate 3 チェック）。"""
-        while not self._push_queue.empty():
+        while True:
             try:
                 payload = self._push_queue.get_nowait()
             except queue.Empty:

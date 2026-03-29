@@ -89,6 +89,8 @@ class RiskManager:
         売りはキャッシュを消費せず、エクスポージャを減らす方向にあるため。
         重複チェック（二重発注防止）は buy/sell 共通で実施する。
         """
+        side = side.lower()  # "BUY"/"SELL" などの大文字バリエーションを正規化
+
         # 1. 余力チェック（sell は不要 — sell は step 3 前に早期 return するため cash も不要）
         if side == "buy":
             cash = self._broker.get_available_cash()
