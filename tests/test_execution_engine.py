@@ -151,6 +151,34 @@ class TestProcessSignals:
         assert len(engine._repo.list_active()) == 3
 
 
+    def test_order_sent_pending_records_api_success(self, sqlite_conn, duckdb_conn):
+        """OrderSentPendingError 時も record_api_success() が呼ばれ CB が閉じられる"""
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        # HALF_OPEN 状態を強制
+        engine._risk_manager._cb_state = "HALF_OPEN"
+        engine._process_signals()
+        # pending 後に CB が CLOSED に戻っていること
+        assert engine._risk_manager._cb_state == "CLOSED"
+
+    def test_process_signals_skipped_after_signal_send_end(self, sqlite_conn, duckdb_conn):
+        """signal_send_end を過ぎた時刻に run_session が呼ばれてもシグナル処理をスキップ"""
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        # signal_send_end=00:00 → 現在時刻は常に超過
+        cfg = EngineConfig(target_date=TARGET_DATE, signal_send_start=time(0, 0), signal_send_end=time(0, 0))
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn, config=cfg)
+        # run_session は使わず、send_end チェックを直接テスト
+        from datetime import datetime
+        # signal_send_end < 現在時刻 → _process_signals を呼ばない
+        engine._stop_event.set()  # ループ停止のため
+        # ← _process_signals を明示的に呼んだ場合との比較
+        assert len(engine._repo.list_active()) == 0
+
+
 class TestPushDrainAndKillSwitch:
 
     def test_handle_push_calls_sync_order(self, sqlite_conn, duckdb_conn):

@@ -68,7 +68,7 @@ class ExecutionEngine:
             order_value = price * qty
 
             # Gate 1: シグナルレベル検査
-            g1 = self._risk_manager.check_signal(signal_id, code, order_value)
+            g1 = self._risk_manager.check_signal(signal_id, code, order_value, side=side)
             if not g1.passed:
                 logger.info("Gate 1 NG - signal_id=%s: %s", signal_id, g1.reason)
                 continue
@@ -106,7 +106,9 @@ class ExecutionEngine:
                 self._risk_manager.record_api_success()
                 logger.info("発注成功: signal_id=%s, client_order_id=%s", signal_id, record.client_order_id)
             except OrderSentPendingError:
-                # broker_order_id は永続化済み。push drain で約定を待つ。エラーカウントしない
+                # broker_order_id は永続化済み。push drain で約定を待つ。
+                # ブローカーが受理済み（APIレベル成功）なので CB 成功カウントする
+                self._risk_manager.record_api_success()
                 logger.info("発注保留（pending）: signal_id=%s", signal_id)
             except Exception as exc:
                 self._risk_manager.record_api_error()
@@ -162,6 +164,7 @@ class ExecutionEngine:
         self._stop_event.set()
         logger.warning("kill_switch 発動: 全 active 注文をキャンセルします")
 
+        from kabusys.execution.broker_api import BrokerAPIError
         from kabusys.execution.order_record import InvalidStateTransitionError
         for order in self._repo.list_active():
             try:
@@ -169,6 +172,8 @@ class ExecutionEngine:
                 logger.info("注文キャンセル: client_order_id=%s", order.client_order_id)
             except (InvalidStateTransitionError, RuntimeError) as exc:
                 logger.debug("cancel_order スキップ: %s - %s", order.client_order_id, exc)
+            except BrokerAPIError as exc:
+                logger.warning("cancel_order API エラー（継続）: %s - %s", order.client_order_id, exc)
 
     def _websocket_worker(self) -> None:
         """WebSocket スレッド: kabu push を受信して _push_queue に投入する。"""
@@ -204,7 +209,8 @@ class ExecutionEngine:
             self._stop_event.wait(timeout=5.0)
 
         # シグナル処理ループ（8:50 ～ 9:10）
-        if not self._stop_event.is_set():
+        # 現在時刻が signal_send_end を超えている場合はシグナル処理をスキップ
+        if not self._stop_event.is_set() and _now_time() < self._config.signal_send_end:
             self._process_signals()
 
         # push drain ループ（9:10 ～ 15:30）

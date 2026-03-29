@@ -81,16 +81,25 @@ class RiskManager:
         signal_id: str,
         code: str,
         order_value: float,
+        side: str = "buy",
     ) -> RiskResult:
-        """余力・重複・ポジション上限を検査する。"""
-        # 1. 余力チェック
-        cash = self._broker.get_available_cash()
-        if cash < order_value:
-            return RiskResult(
-                False,
-                f"余力不足: 余力={cash:.0f}円, 発注額={order_value:.0f}円",
-                reject_reason=RiskRejectReason.INSUFFICIENT_CASH,
-            )
+        """余力・重複・ポジション上限を検査する。
+
+        売り注文（side="sell"）は余力チェックとポジション上限チェックをスキップする。
+        売りはキャッシュを消費せず、エクスポージャを減らす方向にあるため。
+        重複チェック（二重発注防止）は buy/sell 共通で実施する。
+        """
+        # 1. 余力チェック（sell は不要）
+        if side == "buy":
+            cash = self._broker.get_available_cash()
+            if cash < order_value:
+                return RiskResult(
+                    False,
+                    f"余力不足: 余力={cash:.0f}円, 発注額={order_value:.0f}円",
+                    reject_reason=RiskRejectReason.INSUFFICIENT_CASH,
+                )
+        else:
+            cash = self._broker.get_available_cash()
 
         # 2. 重複チェック（active 注文が存在するか）
         existing = self._repo.get_by_signal(signal_id)
@@ -102,26 +111,19 @@ class RiskManager:
                 reject_reason=RiskRejectReason.DUPLICATE_ORDER,
             )
 
-        # 3. ポジション上限チェック
+        # 3. ポジション上限チェック（sell は不要）
+        if side != "buy":
+            return RiskResult(True)
+
         positions = self._broker.get_positions()
-        # total_market_value: current_price=None のポジションは avg_price でフォールバック
-        # （check_signal の分子と total_fallback の分母で同一ロジックを使い、過小評価を防ぐ）
-        total_market_value = sum(
-            p.qty * (p.current_price if p.current_price is not None else p.avg_price)
-            for p in positions
-        )
-        # 同銘柄の現在評価額（current_price=None は avg_price でフォールバック）
-        same_code_value = sum(
-            p.qty * (p.current_price if p.current_price is not None else p.avg_price)
-            for p in positions
-            if p.code == code
-        )
-        # 総資産 = キャッシュ + ポジション時価評価額（current_price が None のものは avg_price でフォールバック）
-        total_fallback = sum(
-            p.qty * (p.current_price if p.current_price is not None else p.avg_price)
-            for p in positions
-        )
-        total_assets = cash + total_fallback
+        # 評価額計算: current_price=None は avg_price でフォールバック（過小評価を防ぐ）
+        def _eval(p) -> float:
+            return p.qty * (p.current_price if p.current_price is not None else p.avg_price)
+
+        total_market_value = sum(_eval(p) for p in positions)
+        same_code_value = sum(_eval(p) for p in positions if p.code == code)
+        # total_market_value と同一ロジックのため total_fallback は統合
+        total_assets = cash + total_market_value
 
         # 3a. 1銘柄上限
         if total_assets > 0:
