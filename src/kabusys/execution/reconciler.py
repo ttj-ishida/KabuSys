@@ -57,7 +57,7 @@ class Reconciler:
             return
 
         for record in uncertain:
-            if record.broker_order_id is None:
+            if not record.broker_order_id:
                 result.orders_no_status += 1
                 logger.warning(
                     "broker_order_id 未設定（手動確認要）: client_order_id=%s",
@@ -123,6 +123,11 @@ class Reconciler:
                 local_map[record.code] = local_map.get(record.code, 0) + record.filled_qty
             elif side == "sell":
                 local_map[record.code] = local_map.get(record.code, 0) - record.filled_qty
+            else:
+                logger.warning(
+                    "未知のsideをスキップ（ポジション集計から除外）: client_order_id=%s, side=%s",
+                    record.client_order_id, record.side,
+                )
 
         # 差分照合
         for code in set(broker_map) | set(local_map):

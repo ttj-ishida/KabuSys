@@ -63,6 +63,27 @@ class TestReconcileOrders:
         updated = repo.get("test-sent-001")
         assert updated.state == OrderState.OrderSent
 
+    def test_broker_order_id_empty_string_increments_no_status(self, repo):
+        """broker_order_id='' の OrderSent は orders_no_status をインクリメント（空文字ガード）"""
+        from kabusys.execution.order_record import OrderRecord, OrderState
+        from datetime import datetime, timezone
+        record = OrderRecord(
+            client_order_id="test-sent-empty",
+            signal_id="2026-03-29_1234_buy",
+            code="1234", side="buy", qty=100,
+            order_type="limit", price=1500.0,
+            state=OrderState.OrderSent,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        record.broker_order_id = ""  # 空文字を強制セット
+        repo.save(record)
+        broker = MockBrokerClient()
+        reconciler = _make_reconciler(broker, repo)
+        result = reconciler.run()
+        assert result.orders_no_status == 1
+        assert result.orders_synced == 0
+
     def test_broker_returns_open_transitions_to_accepted(self, repo):
         """broker → 'open' なら OrderAccepted に遷移し orders_synced=1"""
         from kabusys.execution.order_record import OrderRecord, OrderState
@@ -311,6 +332,36 @@ class TestReconcilePositions:
         reconciler = _make_reconciler(broker, repo)
         with patch.object(repo, "list_active", side_effect=Exception("DB error")):
             result = reconciler.run()
+        assert result.position_discrepancies == []
+
+    def test_unknown_side_is_skipped_with_warning(self, repo):
+        """未知のsideを持つ Filled 注文はポジション集計からスキップされる"""
+        from unittest.mock import patch
+        from kabusys.execution.broker_api import Position
+        from kabusys.execution.order_record import OrderRecord, OrderState
+        from datetime import datetime, timezone
+        # buy 100株 (DB) + 未知side "short" 50株 (モック); broker 100株 → local=100 → 差分なし
+        self._insert_filled_order(repo, "1234", "buy", 100, "pos-unknown-buy")
+        buy_record = repo.get("pos-unknown-buy")
+        unknown_record = OrderRecord(
+            client_order_id="pos-unknown-side",
+            signal_id="sig_pos-unknown-side",
+            code="1234", side="short", qty=50,
+            order_type="limit", price=1500.0,
+            state=OrderState.Filled,
+            filled_qty=50,
+            broker_order_id="BRK_UNKNOWN",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        broker = MockBrokerClient(
+            initial_positions=[Position(code="1234", qty=100, avg_price=1500.0)]
+        )
+        reconciler = _make_reconciler(broker, repo)
+        # list_active() に buy_record + unknown_record を返させる
+        with patch.object(repo, "list_active", return_value=[buy_record, unknown_record]):
+            result = reconciler.run()
+        # "short" はスキップされ local=100 == broker=100 → 差分なし
         assert result.position_discrepancies == []
 
     def test_broker_same_code_multiple_positions_are_summed(self, repo):
