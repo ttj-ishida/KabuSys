@@ -47,3 +47,46 @@ class TestLogSystemStatus:
         ).fetchone()
         recorded = datetime.fromisoformat(row[0])
         assert before - timedelta(seconds=5) <= recorded <= after + timedelta(seconds=5)
+
+
+class TestLogTradeEvent:
+
+    def test_appends_row_with_correct_fields(self, mdb, monitoring_conn):
+        """全フィールドが正しく保存される"""
+        ts = datetime(2026, 3, 30, 9, 0, 0, tzinfo=timezone.utc)
+        mdb.log_trade_event(
+            event_type="filled",
+            client_order_id="order-001",
+            code="1234",
+            side="buy",
+            qty=100,
+            price=1500.0,
+            filled_qty=100,
+            state="filled",
+            logged_at=ts,
+        )
+        row = monitoring_conn.execute(
+            "SELECT * FROM trade_logs WHERE client_order_id = 'order-001'"
+        ).fetchone()
+        assert row["event_type"] == "filled"
+        assert row["code"] == "1234"
+        assert row["qty"] == 100
+        assert row["price"] == 1500.0
+        assert row["filled_qty"] == 100
+        assert row["state"] == "filled"
+
+    def test_market_order_price_defaults_to_zero(self, mdb, monitoring_conn):
+        """成行注文は price=0.0 で記録できる（order_repository.py と同規約）"""
+        mdb.log_trade_event(
+            event_type="order_created",
+            client_order_id="order-002",
+            code="5678",
+            side="buy",
+            qty=100,
+            price=0.0,
+            state="created",
+        )
+        row = monitoring_conn.execute(
+            "SELECT price FROM trade_logs WHERE client_order_id = 'order-002'"
+        ).fetchone()
+        assert row[0] == 0.0

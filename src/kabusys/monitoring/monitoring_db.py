@@ -112,3 +112,31 @@ class MonitoringDB:
             (ts, cpu_percent, memory_percent, disk_percent, 1 if process_ok else 0),
         )
         self._conn.commit()
+
+    def log_trade_event(
+        self,
+        event_type: str,
+        client_order_id: str,
+        code: str,
+        side: str,
+        qty: int,
+        price: float,
+        filled_qty: int = 0,
+        state: str = "",
+        logged_at: datetime | None = None,
+    ) -> None:
+        """発注イベントを trade_logs テーブルに追記する。
+
+        price: 成行注文は 0.0（order_repository.py と同規約）
+        filled_qty / state: スキーマ列順と一致させること
+        """
+        ts = logged_at.isoformat() if logged_at else self._now()
+        self._conn.execute(
+            """
+            INSERT INTO trade_logs
+                (logged_at, event_type, client_order_id, code, side, qty, price, filled_qty, state)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (ts, event_type, client_order_id, code, side, qty, price, filled_qty, state),
+        )
+        self._conn.commit()
