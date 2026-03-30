@@ -164,3 +164,26 @@ class MonitoringDB:
         """ポジション解消時に code を削除する。"""
         self._conn.execute("DELETE FROM positions WHERE code = ?", (code,))
         self._conn.commit()
+
+    def log_risk_event(
+        self,
+        event_type: str,
+        metric_name: str,
+        metric_value: float,
+        threshold: float,
+        detail: str | None = None,
+        logged_at: datetime | None = None,
+    ) -> None:
+        """リスクイベントを risk_logs テーブルに追記する。
+
+        detail: JSON 文字列等の追加情報（NULL 可）
+        """
+        ts = logged_at.isoformat() if logged_at else self._now()
+        self._conn.execute(
+            """
+            INSERT INTO risk_logs (logged_at, event_type, metric_name, metric_value, threshold, detail)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (ts, event_type, metric_name, metric_value, threshold, detail),
+        )
+        self._conn.commit()

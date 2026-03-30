@@ -124,3 +124,30 @@ class TestUpsertPosition:
             "SELECT COUNT(*) FROM positions WHERE code = '1234'"
         ).fetchone()[0]
         assert count == 0
+
+
+class TestLogRiskEvent:
+
+    def test_appends_row(self, mdb, monitoring_conn):
+        """全フィールドが正しく保存される"""
+        ts = datetime(2026, 3, 30, 9, 0, 0, tzinfo=timezone.utc)
+        mdb.log_risk_event(
+            event_type="drawdown_warning",
+            metric_name="drawdown_pct",
+            metric_value=5.5,
+            threshold=5.0,
+            detail='{"portfolio_value": 9450000}',
+            logged_at=ts,
+        )
+        row = monitoring_conn.execute("SELECT * FROM risk_logs").fetchone()
+        assert row["event_type"] == "drawdown_warning"
+        assert row["metric_name"] == "drawdown_pct"
+        assert row["metric_value"] == 5.5
+        assert row["threshold"] == 5.0
+        assert row["detail"] == '{"portfolio_value": 9450000}'
+
+    def test_detail_can_be_none(self, mdb, monitoring_conn):
+        """`detail` は NULL 可"""
+        mdb.log_risk_event("circuit_breaker", "api_error_count", 3.0, 3.0)
+        row = monitoring_conn.execute("SELECT detail FROM risk_logs").fetchone()
+        assert row[0] is None
