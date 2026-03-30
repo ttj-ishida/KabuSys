@@ -90,3 +90,37 @@ class TestLogTradeEvent:
             "SELECT price FROM trade_logs WHERE client_order_id = 'order-002'"
         ).fetchone()
         assert row[0] == 0.0
+
+
+class TestUpsertPosition:
+
+    def test_insert_new_position(self, mdb, monitoring_conn):
+        """新規 code が挿入される"""
+        mdb.upsert_position("1234", 100, 1500.0)
+        count = monitoring_conn.execute(
+            "SELECT COUNT(*) FROM positions"
+        ).fetchone()[0]
+        assert count == 1
+
+    def test_update_existing_position(self, mdb, monitoring_conn):
+        """同一 code を2回 upsert すると上書きされる（行数は1のまま）"""
+        mdb.upsert_position("1234", 100, 1500.0)
+        mdb.upsert_position("1234", 50, 1600.0)
+        count = monitoring_conn.execute(
+            "SELECT COUNT(*) FROM positions"
+        ).fetchone()[0]
+        assert count == 1
+        row = monitoring_conn.execute(
+            "SELECT qty, avg_price FROM positions WHERE code = '1234'"
+        ).fetchone()
+        assert row[0] == 50
+        assert row[1] == 1600.0
+
+    def test_delete_position(self, mdb, monitoring_conn):
+        """`delete_position` 後にその code は取得されない"""
+        mdb.upsert_position("1234", 100, 1500.0)
+        mdb.delete_position("1234")
+        count = monitoring_conn.execute(
+            "SELECT COUNT(*) FROM positions WHERE code = '1234'"
+        ).fetchone()[0]
+        assert count == 0

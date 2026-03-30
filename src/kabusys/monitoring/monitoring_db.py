@@ -140,3 +140,27 @@ class MonitoringDB:
             (ts, event_type, client_order_id, code, side, qty, price, filled_qty, state),
         )
         self._conn.commit()
+
+    def upsert_position(
+        self,
+        code: str,
+        qty: int,
+        avg_price: float,
+        current_price: float | None = None,
+        updated_at: datetime | None = None,
+    ) -> None:
+        """保有ポジションを upsert する（code をキーに上書き）。"""
+        ts = updated_at.isoformat() if updated_at else self._now()
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO positions (code, qty, avg_price, current_price, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (code, qty, avg_price, current_price, ts),
+        )
+        self._conn.commit()
+
+    def delete_position(self, code: str) -> None:
+        """ポジション解消時に code を削除する。"""
+        self._conn.execute("DELETE FROM positions WHERE code = ?", (code,))
+        self._conn.commit()
