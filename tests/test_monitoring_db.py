@@ -151,3 +151,38 @@ class TestLogRiskEvent:
         mdb.log_risk_event("circuit_breaker", "api_error_count", 3.0, 3.0)
         row = monitoring_conn.execute("SELECT detail FROM risk_logs").fetchone()
         assert row[0] is None
+
+
+class TestUpsertDashboard:
+
+    def test_first_upsert_creates_row(self, mdb, monitoring_conn):
+        """最初の upsert でレコードが作成される"""
+        mdb.upsert_dashboard(10_000_000.0, 5_000_000.0, 0.0, 3, 5)
+        count = monitoring_conn.execute(
+            "SELECT COUNT(*) FROM dashboard"
+        ).fetchone()[0]
+        assert count == 1
+
+    def test_second_upsert_overwrites(self, mdb, monitoring_conn):
+        """2回 upsert しても行数は1のまま、値は最新"""
+        mdb.upsert_dashboard(10_000_000.0, 5_000_000.0, 0.0, 3, 5)
+        mdb.upsert_dashboard(9_500_000.0, 4_500_000.0, 5.0, 1, 3)
+        count = monitoring_conn.execute(
+            "SELECT COUNT(*) FROM dashboard"
+        ).fetchone()[0]
+        assert count == 1
+
+    def test_get_dashboard_returns_latest(self, mdb):
+        """`get_dashboard()` が最新の dict を返す"""
+        mdb.upsert_dashboard(10_000_000.0, 5_000_000.0, 0.0, 3, 5)
+        mdb.upsert_dashboard(9_500_000.0, 4_500_000.0, 5.0, 1, 3)
+        result = mdb.get_dashboard()
+        assert result is not None
+        assert result["portfolio_value"] == 9_500_000.0
+        assert result["drawdown_pct"] == 5.0
+        assert result["position_count"] == 3
+
+    def test_get_dashboard_returns_none_when_empty(self, mdb):
+        """レコードなし時は None を返す"""
+        result = mdb.get_dashboard()
+        assert result is None

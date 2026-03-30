@@ -187,3 +187,37 @@ class MonitoringDB:
             (ts, event_type, metric_name, metric_value, threshold, detail),
         )
         self._conn.commit()
+
+    def upsert_dashboard(
+        self,
+        portfolio_value: float,
+        cash: float,
+        drawdown_pct: float,
+        open_order_count: int,
+        position_count: int,
+        updated_at: datetime | None = None,
+    ) -> None:
+        """ダッシュボード集計を更新する（常に id=1 の1行のみ保持）。
+
+        id=1 を明示的にバインドすること（DEFAULT に頼らない）。
+        CHECK (id = 1) 制約により DB レベルでも id=1 以外は拒否される。
+        """
+        ts = updated_at.isoformat() if updated_at else self._now()
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO dashboard
+                (id, updated_at, portfolio_value, cash, drawdown_pct, open_order_count, position_count)
+            VALUES (1, ?, ?, ?, ?, ?, ?)
+            """,
+            (ts, portfolio_value, cash, drawdown_pct, open_order_count, position_count),
+        )
+        self._conn.commit()
+
+    def get_dashboard(self) -> dict | None:
+        """ダッシュボード集計を dict で返す。レコードなしの場合は None。
+
+        row_factory = sqlite3.Row が設定済みであることを前提とする。
+        """
+        cursor = self._conn.execute("SELECT * FROM dashboard WHERE id = 1")
+        row = cursor.fetchone()
+        return dict(row) if row else None
