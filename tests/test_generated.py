@@ -74,7 +74,8 @@ def test_load_env_file_override_and_protected(tmp_path, monkeypatch):
 
 
 def test_load_env_file_open_failure_warns(monkeypatch, tmp_path):
-    broken = tmp_path / "noexist.env"
+    broken = tmp_path / "broken.env"
+    broken.touch()  # ファイルを作成して path.exists() を通過させる
 
     # Patch builtins.open to raise OSError when trying to open that specific path
     with mock.patch("builtins.open", side_effect=OSError("fail")):

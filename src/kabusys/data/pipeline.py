@@ -91,14 +91,14 @@ class ETLResult:
     def to_dict(self) -> dict[str, Any]:
         """ETLResult を辞書に変換する（監査ログ書き込みやデバッグに利用）。
 
-        quality_issues は (check_name, severity, message) のタプルリストに変換する。
+        quality_issues は (check_name, severity, detail) のタプルリストに変換する。
 
         Returns:
             ETLResult の全フィールドを含む辞書。
         """
         d = asdict(self)
         d["quality_issues"] = [
-            {"check_name": i.check_name, "severity": i.severity, "message": i.message}
+            {"check_name": i.check_name, "severity": i.severity, "detail": i.detail}
             for i in self.quality_issues
         ]
         return d
