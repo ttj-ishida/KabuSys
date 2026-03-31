@@ -36,20 +36,26 @@ AI監視 | AIスコア生成 |
 
 監視対象
 
-| 項目 | 内容 |
-|----|----|
-CPU使用率 | 高負荷検知 |
-メモリ使用量 | メモリリーク検知 |
-ディスク容量 | データ容量監視 |
-プロセス状態 | システム停止検知 |
+| 項目 | 内容 | 閾値 |
+|----|----|----|
+CPU使用率 | 高負荷検知 | > 90% |
+メモリ使用量 | メモリリーク検知 | > 85% |
+ディスク容量 | データ容量監視 | > 90% |
+プロセス状態 | Execution プロセス生存確認 | PID ファイル方式 |
 
-例
+### プロセス生存確認（PID ファイル方式）
 
-```
-CPU > 90%
-```
+- `ExecutionEngine.run_session()` 起動時に `data/execution.pid` に PID を書き出す
+- 正常終了時は `finally` ブロックで PID ファイルを削除
+- `SystemMonitor.check_once()` が PID ファイルの存在とプロセス生存を確認
 
-アラート発報
+| 状態 | 判定 |
+|---|---|
+| PID ファイルなし | 未起動 or 正常終了（`process_ok=False`） |
+| PID ファイルあり・プロセス生存 | 正常稼働（`process_ok=True`） |
+| PID ファイルあり・プロセス死亡 | 異常終了 → stale PID 削除・アラート |
+
+異常終了時のリカバリ: プロセスの自動再起動は行わない。`Reconciler` が次回起動時に状態復旧を担当。
 
 ---
 
@@ -59,18 +65,18 @@ CPU > 90%
 
 監視項目
 
-| データ | 内容 |
-|------|------|
-株価データ | 更新時刻 |
-ニュースデータ | 取得成功 |
-特徴量 | 生成完了 |
-AIスコア | 更新状況 |
+| データ | 内容 | 判定方法 |
+|------|------|------|
+株価データ | 更新時刻 | DuckDB `get_last_price_date()` で最終更新日を取得、3日以上古い場合を異常とする |
+ニュースデータ | 取得成功 | （#38 以降で実装） |
+特徴量 | 生成完了 | （#38 以降で実装） |
+AIスコア | 更新状況 | （#38 以降で実装） |
 
 異常例
 
-- データ更新停止
+- データ更新停止（株価データが 3 日以上未更新）
 - ETL失敗
-- データ欠損
+- データ欠損（`get_last_price_date()` が None を返す）
 
 ---
 
@@ -276,6 +282,27 @@ MonitoringDB(conn)
   .upsert_dashboard(portfolio_value, cash, drawdown_pct, open_order_count, position_count, updated_at=None)
   .get_dashboard() -> dict | None
 ```
+
+### SystemMonitor API（Phase 7 実装、Issue #37）
+
+`src/kabusys/monitoring/system_monitor.py` に実装。`psutil` でシステムメトリクスを取得し、`MonitoringDB` に記録する。呼び出し元がポーリング間隔を管理する（内部ループなし）。
+
+```python
+SystemMonitor(conn, duckdb_conn, pid_file=Path("data/execution.pid"))
+  .check_once(today=None) -> SystemCheckResult
+```
+
+`SystemCheckResult` フィールド:
+
+| フィールド | 型 | 内容 |
+|---|---|---|
+| `recorded_at` | str | ISO8601 UTC |
+| `cpu_percent` | float | CPU 使用率 |
+| `memory_percent` | float | メモリ使用率 |
+| `disk_percent` | float | ディスク使用率 |
+| `process_ok` | bool | Execution プロセス生存 |
+| `data_freshness_ok` | bool | 株価データが 3 日以内に更新済み |
+| `stale_pid_detected` | bool | 異常終了の PID ファイルを検出・削除した場合 True |
 
 ## Phase 2 (将来拡張)
 
