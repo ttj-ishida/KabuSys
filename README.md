@@ -1,128 +1,115 @@
 # KabuSys
 
-日本株のデータプラットフォームと自動売買・リサーチ基盤のライブラリです。  
-ETL（J-Quants からの株価/財務/カレンダー取得）、ニュース収集・NLP スコアリング、研究用ファクター計算、監査ログ（オーダー/約定追跡）などの機能を提供します。
+日本株向けの自動売買・データプラットフォーム用ライブラリ（KabuSys）。  
+ETL（J-Quants からの株価・財務・カレンダー取得）、ニュース収集・NLP（OpenAI を利用したセンチメント）、市場レジーム判定、研究用ファクター計算、監査ログ（約定トレーサビリティ）などを提供します。
 
-バージョン: 0.1.0
-
----
-
-## 主要機能
-
-- データ取得 / ETL
-  - J-Quants API からの株価日足、財務データ、マーケットカレンダー取得（ページネーション対応・リトライ・レートリミット）
-  - 差分更新 / バックフィル機能
-  - 品質チェック（欠損・スパイク・重複・日付不整合）
-- ニュース処理・NLP
-  - RSS 収集（SSRF 対策、トラッキングパラメータ除去、前処理）
-  - OpenAI（gpt-4o-mini）を用いた銘柄別ニュースセンチメント（score_news）
-  - マクロニュース + MA200 乖離で市場レジーム判定（score_regime）
-- リサーチ / ファクター
-  - Momentum / Volatility / Value 等のファクター計算
-  - 将来リターン計算、IC（Information Coefficient）や統計サマリ、Z スコア正規化
-- 監査（Audit）
-  - signal_events, order_requests, executions テーブル定義と初期化ユーティリティ（監査ログ）
-- ユーティリティ
-  - 環境設定読み込み（.env 自動読み込み、環境変数優先）
-  - 汎用統計関数（zscore_normalize）など
+主な設計方針：
+- DuckDB をデータ格納に利用（軽量で高速な分析向け組み込み DB）
+- J-Quants / OpenAI 等外部 API 呼び出しはリトライ・レート制御付きで安全に実施
+- ETL / スコアリング処理はルックアヘッドバイアスを避ける設計（date.today() を直接参照しない等）
+- DB 書き込みは可能な限り冪等（ON CONFLICT / トランザクション）で実装
 
 ---
 
-## 必要条件 / 推奨環境
-
-- Python 3.10+
-- 依存ライブラリ（代表例）
-  - duckdb
-  - openai
-  - defusedxml
-- （開発）pipenv / poetry / virtualenv など仮想環境を推奨
-
-requirements.txt / pyproject.toml がある前提でインストールしてください。例:
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[all]"   # or pip install -r requirements.txt
-```
-
-（注）実行環境により追加の依存が必要な場合があります。OpenAI クライアントや duckdb は明示的に必要です。
+目次
+- プロジェクト概要
+- 機能一覧
+- セットアップ手順
+- 使い方（サンプル）
+- 環境変数（.env）例
+- ディレクトリ構成
+- 注意事項 / 設計上のポイント
 
 ---
 
-## 環境変数 / .env
+プロジェクト概要
+- KabuSys は日本株のデータ ETL、ニュースセンチメント解析、ファクタ研究、監査ログ、監視・発注連携等を行うためのライブラリ群です。
+- DuckDB を中心としたローカル DB にデータを蓄積し、研究・バックテスト・実運用の各レイヤーで利用できるモジュールを提供します。
 
-プロジェクトルート（.git または pyproject.toml が存在するディレクトリ）に置いた `.env` / `.env.local` を自動読み込みします。OS 環境変数が優先され、`.env.local` は `.env` を上書きできます。自動ロードを無効化するには:
+機能一覧
+- Data（kabusys.data）
+  - J-Quants API クライアント（fetch / save / id_token 管理・レート制御・リトライ）
+  - ETL パイプライン（run_daily_etl：カレンダー→株価→財務→品質チェック）
+  - カレンダー管理（営業日判定 / next/prev_trading_day / calendar update job）
+  - ニュース収集（RSS の安全取得・正規化・raw_news への保存）
+  - データ品質チェック（欠損・重複・スパイク・日付整合性）
+  - 監査ログスキーマ初期化・監査 DB（signal / order_request / executions）
+  - ユーティリティ（統計関数 zscore_normalize 等）
+- AI（kabusys.ai）
+  - ニュースの銘柄ごとセンチメント付与（score_news。OpenAI を用いる）
+  - 市場レジーム判定（ETF 1321 の MA200 とマクロ記事の LLM センチメントを合成、score_regime）
+  - OpenAI 呼び出しは JSON-mode を使い、リトライ/フェイルセーフの設計
+- Research（kabusys.research）
+  - ファクター計算（momentum / value / volatility）
+  - 将来リターン計算、IC（Information Coefficient）計算、統計サマリ等
+- 設定管理（kabusys.config）
+  - .env / 環境変数の自動ロード（プロジェクトルート検出）と Settings インターフェース
 
-```bash
-export KABUSYS_DISABLE_AUTO_ENV_LOAD=1
+セットアップ手順（最小構成）
+1. Python 仮想環境を作成・有効化
+   - python -m venv .venv
+   - source .venv/bin/activate  (Windows: .venv\Scripts\activate)
+
+2. 依存パッケージをインストール（例）
+   - pip install duckdb openai defusedxml
+
+   ※プロジェクトで使用する追加パッケージがある場合は requirements.txt を用意している想定です。
+
+3. リポジトリをインストール（開発モード）
+   - pip install -e .
+
+4. 環境変数を用意
+   - プロジェクトルート（.git または pyproject.toml があるディレクトリ）に .env/.env.local を置くと自動で読み込まれます（自動ロードを無効にするには KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定）。
+
+主な環境変数（必須 / 推奨）
+- JQUANTS_REFRESH_TOKEN: J-Quants のリフレッシュトークン（必須）
+- OPENAI_API_KEY: OpenAI API キー（score_news / score_regime 等で利用）
+- KABU_API_PASSWORD: kabuステーション API パスワード（発注連携がある場合）
+- SLACK_BOT_TOKEN: Slack 通知用（必要に応じて）
+- SLACK_CHANNEL_ID: Slack チャネル ID
+- DUCKDB_PATH: DuckDB ファイルパス（デフォルト: data/kabusys.duckdb）
+- SQLITE_PATH: 監視用 SQLite パス（デフォルト: data/monitoring.db）
+- KABUSYS_ENV: development | paper_trading | live（デフォルト development）
+- LOG_LEVEL: DEBUG | INFO | WARNING | ERROR | CRITICAL（デフォルト INFO）
+
+.env の例（.env.example 参照）
 ```
-
-主な環境変数（README 用抜粋）
-
-- JQUANTS_REFRESH_TOKEN: J-Quants リフレッシュトークン（必須）
-- KABU_API_PASSWORD: kabu ステーション API パスワード（必須）
-- KABU_API_BASE_URL: kabu API ベース URL（デフォルト: http://localhost:18080/kabusapi）
-- SLACK_BOT_TOKEN: Slack ボットトークン（必須）
-- SLACK_CHANNEL_ID: Slack チャネル ID（必須）
-- DUCKDB_PATH: デフォルト DuckDB ファイルパス（例: data/kabusys.duckdb）
-- SQLITE_PATH: 監視用 SQLite パス（例: data/monitoring.db）
-- KABUSYS_ENV: environment (development | paper_trading | live)（デフォルト development）
-- LOG_LEVEL: ログレベル（DEBUG|INFO|WARNING|ERROR|CRITICAL）
-- OPENAI_API_KEY: OpenAI API キー（AI モジュールで使用）
-
-例 `.env`（サンプル）:
-```
-JQUANTS_REFRESH_TOKEN=your_jquants_refresh_token
-OPENAI_API_KEY=sk-...
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_CHANNEL_ID=C12345678
+JQUANTS_REFRESH_TOKEN=xxxx
+OPENAI_API_KEY=sk-xxxx
+KABU_API_PASSWORD=your_kabu_password
+SLACK_BOT_TOKEN=xoxb-xxxx
+SLACK_CHANNEL_ID=C01234567
 DUCKDB_PATH=data/kabusys.duckdb
 KABUSYS_ENV=development
 LOG_LEVEL=INFO
 ```
 
----
-
-## セットアップ手順（ローカル開発向け）
-
-1. リポジトリをクローン
-2. 仮想環境を作成して有効化
-3. 依存をインストール
-   - pip install -e . や pyproject.toml / requirements.txt に従ってインストール
-4. プロジェクトルートに `.env` を作成し、上記の必須キーを設定
-5. DuckDB ファイルのディレクトリを作成（`data/` 等）
-6. 初期スキーマや監査 DB を必要に応じて初期化
-
----
-
-## 使い方（主要な例）
-
-以下はライブラリ API の一例です。各モジュールは duckdb の接続（duckdb.connect(...)）を引数として受け取る設計です。
-
-- ETL（日次パイプライン実行）
+使い方（サンプルコード）
+- DuckDB 接続を作り ETL を実行する（run_daily_etl）
 
 ```python
-from datetime import date
 import duckdb
+from datetime import date
 from kabusys.config import settings
 from kabusys.data.pipeline import run_daily_etl
 
+# settings.duckdb_path は Path オブジェクト
 conn = duckdb.connect(str(settings.duckdb_path))
-result = run_daily_etl(conn, target_date=date(2026, 3, 30))
+result = run_daily_etl(conn, target_date=date(2026, 3, 20))
 print(result.to_dict())
 ```
 
-- ニュースセンチメント (OpenAI を使用)
+- ニュースセンチメントを生成（OpenAI API キーが必要）
 
 ```python
-from datetime import date
 import duckdb
+from datetime import date
 from kabusys.ai.news_nlp import score_news
 from kabusys.config import settings
 
 conn = duckdb.connect(str(settings.duckdb_path))
-# api_key を明示的に渡すか環境変数 OPENAI_API_KEY を設定
-n = score_news(conn, target_date=date(2026, 3, 30), api_key=None)
-print(f"scored {n} tickers")
+num_written = score_news(conn, target_date=date(2026, 3, 20), api_key=None)  # None -> 環境変数 OPENAI_API_KEY を使用
+print(f"wrote {num_written} ai_scores")
 ```
 
 - 市場レジーム判定
@@ -131,90 +118,67 @@ print(f"scored {n} tickers")
 from datetime import date
 import duckdb
 from kabusys.ai.regime_detector import score_regime
+from kabusys.config import settings
 
 conn = duckdb.connect(str(settings.duckdb_path))
-score_regime(conn, target_date=date(2026, 3, 30), api_key=None)
+score_regime(conn, target_date=date(2026,3,20), api_key=None)
 ```
 
-- 監査ログの初期化（監査専用 DB を作る場合）
+- 監査ログ DB を初期化（監査専用 DB を作る）
 
 ```python
 from kabusys.data.audit import init_audit_db
-from kabusys.config import settings
-
-# settings.duckdb_path を使うか別 DB を指定
-conn = init_audit_db(settings.duckdb_path)
-# これで signal_events / order_requests / executions テーブルが作成される
+conn_audit = init_audit_db("data/audit.duckdb")
+# conn_audit を使って signal_events / order_requests / executions の操作が可能
 ```
 
-- 研究用関数例
+- 設定の自動ロードを無効化（テストなど）
 
-```python
-from datetime import date
-import duckdb
-from kabusys.research.factor_research import calc_momentum
-from kabusys.config import settings
-
-conn = duckdb.connect(str(settings.duckdb_path))
-recs = calc_momentum(conn, target_date=date(2026, 3, 30))
-# recs は [{'date': date, 'code': 'XXXX', 'mom_1m': ..., ...}, ...]
+```bash
+export KABUSYS_DISABLE_AUTO_ENV_LOAD=1
 ```
 
-注意:
-- OpenAI 呼び出しは API キー（OPENAI_API_KEY）を必要とします。各関数はテスト容易性のため api_key を引数で受け取れる設計です。
-- 多くの DB 書き込み関数は冪等（ON CONFLICT / DELETE→INSERT 等）を意識しています。
-
----
-
-## 開発・テストのヒント
-
-- 自動環境読み込みを無効化する:
-  - KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定すると .env 自動ロードを無効化できます（ユニットテスト時に便利）。
-- OpenAI / ネットワーク呼び出しはモック可能:
-  - ai.news_nlp._call_openai_api や ai.regime_detector._call_openai_api を unittest.mock.patch で差し替えてテストできます。
-- DuckDB の executemany に空リストを渡すとエラーになるため、コード内で空チェックが入っています。ユニットテストでもこれを考慮してください。
-
----
-
-## ディレクトリ構成（主なファイル）
-
+ディレクトリ構成（主要ファイル）
 - src/kabusys/
-  - __init__.py
-  - config.py                  — 環境変数・設定管理
+  - __init__.py (パッケージエクスポート)
+  - config.py (環境変数・Settings)
   - ai/
     - __init__.py
-    - news_nlp.py               — ニュース NLP スコアリング
-    - regime_detector.py        — マーケットレジーム判定
+    - news_nlp.py (ニュースセンチメント取得・score_news)
+    - regime_detector.py (市場レジーム判定・score_regime)
   - data/
     - __init__.py
-    - jquants_client.py         — J-Quants API クライアント & 保存処理
-    - pipeline.py               — ETL パイプライン（run_daily_etl 等）
-    - etl.py                    — ETL 公開インターフェース（ETLResult）
-    - calendar_management.py    — マーケットカレンダー管理
-    - news_collector.py         — RSS ニュース収集
-    - quality.py                — データ品質チェック
-    - stats.py                  — 統計ユーティリティ（zscore_normalize）
-    - audit.py                  — 監査ログ定義と初期化
+    - jquants_client.py (J-Quants API クライアント、fetch/save 等)
+    - pipeline.py (ETL のメイン: run_daily_etl, run_prices_etl 等)
+    - etl.py (ETLResult の再エクスポート)
+    - calendar_management.py (市場カレンダー・営業日判定)
+    - news_collector.py (RSS 収集・正規化)
+    - quality.py (データ品質チェック)
+    - stats.py (zscore_normalize 等ユーティリティ)
+    - audit.py (監査ログスキーマ初期化)
   - research/
     - __init__.py
-    - factor_research.py        — Momentum/Value/Volatility 等
-    - feature_exploration.py    — forward returns / IC / summary / rank
-  - research/（その他ファイル）
-- pyproject.toml / setup.cfg / requirements.txt 等（プロジェクトルート）
+    - factor_research.py (momentum / value / volatility)
+    - feature_exploration.py (forward returns, IC, factor summary)
+  - ai/、research/、data/ 以下に詳細なモジュール実装あり
+
+注意事項 / 設計上のポイント
+- ルックアヘッドバイアスの防止
+  - 多くの関数が内部で date.today() を直接参照せず、target_date を引数で受け取ります。バックテストや研究での誤った情報流入を防ぎます。
+- 冪等性
+  - J-Quants から取得したデータの保存は ON CONFLICT DO UPDATE により冪等に実装されています。
+- レート制御 / リトライ
+  - J-Quants API は固定間隔レートリミッタを利用（120 req/min 相当）。OpenAI 呼び出しもリトライや 5xx/429 の取り扱いが実装されています。
+- セキュリティ
+  - RSS 取得は SSRF 対策、受信サイズ上限、defusedxml による XML 安全化などの対策を実装しています。
+- テスト/モックしやすい設計
+  - OpenAI 呼び出しなどは内部関数をパッチしてテスト可能なように分離されています。
+- DuckDB バージョン依存
+  - 一部実装は DuckDB の executemany / リストバインドに注意して実装されています（空パラメータを避ける等）。
+
+ライセンス / コントリビューション
+- 本リポジトリのライセンス表記やコントリビューションガイドはプロジェクトルートの LICENSE / CONTRIBUTING を参照してください（本コードベースには含まれていないため、実装に合わせて追記してください）。
 
 ---
 
-## 設計上の注記
-
-- Look-ahead bias を避ける設計が各モジュールで採られています（内部で datetime.today() を参照しない、または明示的に target_date を使う等）。
-- ネットワーク呼び出しはリトライと指数バックオフ、ステータスコード別の扱いを実装しています（J-Quants / OpenAI）。
-- DB 操作は可能な限り冪等に設計（ON CONFLICT や個別 DELETE→INSERT）されています。
-- セキュリティ対策: RSS 収集では SSRF 対策（リダイレクト検査、プライベート IP の拒否）、XML パースに defusedxml を使用、レスポンスサイズ上限のチェック等を実装しています。
-
----
-
-## 参考 / 連絡
-
-ソースコードに各機能の詳細や設計方針コメントを含めています。実運用（本番口座接続や実際の発注）を行う際は、KABUSYS_ENV の設定（paper_trading / live）や十分なテストを行ってください。
-
-不明点や README に追記してほしい内容があれば教えてください。
+起動や運用で不明点があれば、どの機能をどう使いたいか（例: ETL 日次バッチを Cron で回したい、OpenAI 呼び出しの課金最適化をしたい 等）を教えてください。具体的な運用例や Docker 化、systemd / Airflow 連携などのサンプルも提供できます。
