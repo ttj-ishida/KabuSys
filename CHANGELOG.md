@@ -1,95 +1,89 @@
-# CHANGELOG
+# Changelog
 
-すべての重要な変更は Keep a Changelog の形式で記録します。  
-このプロジェクトの初期リリースは以下の内容を含みます。コードから仕様・設計方針を推測して記載しています。
+すべての重要な変更をここに記録します。本ファイルは Keep a Changelog のフォーマットに準拠します。  
+リリースの順序は新しいものが上です。
 
-全般的な注意
-- 日付はこの CHANGELOG 作成時点 (2026-03-31) を用いています。実際のリリース日を適宜更新してください。
-- 環境変数（特に OpenAI / J-Quants / kabu ステーション / Slack 関連）は多数必須です。詳細は各モジュールのドキュメントおよび .env.example を参照してください。
+## [0.1.0] - 初期リリース (Unreleased)
+最初の公開バージョン。日本株自動売買システムのコアライブラリを実装しました。以下の主要機能・モジュールを含みます。
 
-## [0.1.0] - 2026-03-31
+### 追加 (Added)
+- パッケージ基本情報
+  - kabusys パッケージ採用、バージョン __0.1.0__ を設定。
+  - 公開サブパッケージ: data, strategy, execution, monitoring（__all__ に定義）。
 
-### Added
-- パッケージ基盤
-  - パッケージエントリポイント `kabusys` を追加。バージョンは `0.1.0`。
-  - 公開サブパッケージ: data, strategy, execution, monitoring（__all__ に設定）。
+- 設定・環境管理 (kabusys.config)
+  - .env ファイルおよび環境変数の自動読み込み機構を実装。
+    - プロジェクトルート検出は .git または pyproject.toml を基準に行い、CWD に依存しない実装。
+    - 読み込み優先順位: OS 環境変数 > .env.local > .env。
+    - 自動ロードを無効化する環境変数: KABUSYS_DISABLE_AUTO_ENV_LOAD=1。
+  - .env パーサ実装（export 形式、クォート・エスケープ、インラインコメント対応）。
+  - Settings クラスを提供し、環境変数からアプリケーション設定を取得。
+    - 必須項目は取得失敗時に ValueError を送出（例: JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID）。
+    - DB パス（DUCKDB_PATH / SQLITE_PATH）やログレベル、環境種別（development / paper_trading / live）を扱うユーティリティプロパティを提供。
 
-- 設定管理 (`kabusys.config`)
-  - 環境変数の読み込み機能を実装（プロジェクトルート検出: `.git` または `pyproject.toml` を基準）。
-  - 自動 `.env` ロード順序: OS環境変数 > `.env.local` > `.env`。自動ロードは `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` で無効化可能。
-  - `.env` パーサーは `export KEY=val`、クォートやエスケープ、インラインコメントなどに対応。
-  - 環境変数保護機能（既存 OS 環境変数を保護する `protected` セット）を実装。
-  - Settings クラスを追加し、主要設定をプロパティ経由で取得:
-    - J-Quants、kabu API、Slack トークン/チャンネル、DB パス（DuckDB, SQLite）、実行環境（development/paper_trading/live）、ログレベルなど。
-  - 設定値のバリデーション（`KABUSYS_ENV` と `LOG_LEVEL` の有効値チェック）と必須変数未設定時の明確なエラーを提供。
+- AI モジュール (kabusys.ai)
+  - ニュースセンチメント分析 (news_nlp.score_news)
+    - raw_news / news_symbols を元に記事を銘柄ごとに集約し、OpenAI（gpt-4o-mini, JSON Mode）でバッチ評価して ai_scores テーブルへ保存。
+    - バッチ処理単位、トリム（記事数・文字数制限）、最大リトライ、429/ネットワーク/タイムアウト/5xx に対する指数バックオフ等を実装。
+    - レスポンス検証機構を実装し、不正レスポンスはスキップするフェイルセーフ挙動。
+    - テスト用に _call_openai_api を patch 可能（ユニットテスト容易化）。
+    - calc_news_window ユーティリティ（JST ウィンドウ → UTC naive datetime 変換）。
+  - 市場レジーム判定 (regime_detector.score_regime)
+    - ETF 1321 の 200 日移動平均乖離（重み 70%）とマクロニュース LLM センチメント（重み 30%）を合成して日次レジーム（bull/neutral/bear）判定を行い market_regime へ冪等書き込み。
+    - マクロキーワードによる記事抽出、OpenAI 呼び出し（gpt-4o-mini）、API リトライ挙動、フェイルセーフ（API 失敗時は macro_sentiment=0.0）等を実装。
+    - ルックアヘッドバイアス防止のため、内部で datetime.today() / date.today() を参照せず、必ず target_date 引数を使用。
 
-- AI モジュール
-  - ニュース NLP (`kabusys.ai.news_nlp`)
-    - raw_news と news_symbols を使い、銘柄ごとのニュースを集約して OpenAI (gpt-4o-mini) によりセンチメントスコアを算出。
-    - タイムウィンドウ定義（前日 15:00 JST ～ 当日 08:30 JST）を実装（UTC naive datetime で DB と比較）。
-    - バッチング（最大 20 銘柄 / API コール）、トークン肥大対策（記事数上限・文字数トリム）を実装。
-    - API 呼び出しは JSON Mode を利用、レスポンス検証（構造・型・既知コード・数値検証）を実装。
-    - レート制限・ネットワーク断・タイムアウト・5xx を対象とした指数バックオフリトライを実装。
-    - フェイルセーフ設計: API 失敗やパースエラーはスキップして継続、致命例外を抑制。
-    - テスト容易性のため `_call_openai_api` を patch して差し替え可能。
-    - 成果は `ai_scores` テーブルへ書き込み（部分失敗時に既存スコアを保護するため code を絞って DELETE → INSERT）。
+- データプラットフォーム (kabusys.data)
+  - ETL パイプライン (pipeline.ETLResult / data.etl 再エクスポート)
+    - 差分更新、バックフィル、品質チェック（quality モジュールとの連携）を想定した ETLResult データクラスを実装。
+    - DuckDB を用いた最大日付取得などのユーティリティを実装。
+  - カレンダー管理 (calendar_management)
+    - market_calendar テーブルの夜間バッチ更新（calendar_update_job）と営業日判定ユーティリティを実装。
+    - DB データ優先、未登録日は曜日ベースでフォールバックする一貫した判定ロジック（is_trading_day / next_trading_day / prev_trading_day / get_trading_days / is_sq_day）。
+    - JPX カレンダー取得用の jquants_client 経由の差分取得と冪等保存を想定。
+    - 健全性チェック・バックフィル設定を含む。
 
-  - 市場レジーム判定 (`kabusys.ai.regime_detector`)
-    - ETF 1321（日経225連動型）200日移動平均乖離（重み 70%）とマクロニュース由来の LLM センチメント（重み 30%）を合成して日次で市場レジーム（bull/neutral/bear）を判定。
-    - prices_daily からの MA200 計算はルックアヘッドバイアスを避ける実装（target_date 未満のみ使用）。
-    - マクロニュースは `news_nlp.calc_news_window` とキーワードフィルタで抽出し、OpenAI に投げて JSON をパース。
-    - API 障害時は macro_sentiment=0.0 としてフェイルセーフ継続。
-    - 計算結果は `market_regime` テーブルへ冪等的に書き込み（BEGIN/DELETE/INSERT/COMMIT）。DB 書込失敗時はロールバック処理あり。
-    - テスト用に `_call_openai_api` を差し替え可能。
+- リサーチ機能 (kabusys.research)
+  - ファクター計算 (factor_research)
+    - Momentum（1M/3M/6M リターン、ma200 乖離）、Volatility（20 日 ATR、相対 ATR、平均売買代金、出来高比率）、Value（PER、ROE）計算関数を実装。
+    - DuckDB SQL を用いた実装で、prices_daily / raw_financials のみ参照。
+  - 特徴量探索 (feature_exploration)
+    - 将来リターン計算（calc_forward_returns）、IC（Information Coefficient）計算（calc_ic）、ファクター統計サマリー（factor_summary）、ランク変換ユーティリティ（rank）を実装。
+    - pandas 等に依存せず標準ライブラリと DuckDB のみで実装。
 
-- データプラットフォーム (`kabusys.data`)
-  - カレンダー管理 (`calendar_management`)
-    - JPX カレンダーの管理、営業日判定機能を提供:
-      - is_trading_day, next_trading_day, prev_trading_day, get_trading_days, is_sq_day
-    - market_calendar が未取得の場合は曜日ベースのフォールバック（平日を営業日扱い）を実装。
-    - 最大探索日数や健全性チェック、バックフィル方針（直近 _BACKFILL_DAYS 日を再取得）を実装。
-    - 夜間バッチ `calendar_update_job` により J-Quants から差分取得して保存するフローを実装（fetch/save 関数は jquants_client に委譲、例外ハンドリングあり）。
+### 変更 (Changed)
+- 初期リリースのため該当なし。
 
-  - ETL パイプライン (`pipeline`, `etl` 再エクスポート)
-    - ETL のインターフェースと `ETLResult` データクラスを提供。ETL の取得数・保存数、品質チェック結果、エラーを集約。
-    - 差分更新、バックフィル、品質チェック（quality モジュール連携）を行う設計方針を採用。
-    - 内部ユーティリティ（テーブル存在チェック、最大日付取得等）を実装。
+### 修正 (Fixed)
+- 初期リリースのため該当なし。
 
-- Research（研究用）モジュール (`kabusys.research`)
-  - ファクター計算 (`factor_research`)
-    - Momentum（1M/3M/6M リターン、200 日 MA 乖離）、Volatility（20 日 ATR、相対 ATR、20 日平均売買代金、出来高比率）、Value（PER, ROE）を計算する関数を実装。
-    - DuckDB を用いた SQL ベースの計算により、price/financials のみ参照。出力は (date, code) ベースの辞書リスト。
-    - データ不足時の None ハンドリング、ログ出力を実装。
+### 警告 / 注意事項 (Notes)
+- 環境変数関連
+  - 必須環境変数: JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID（Settings のプロパティ参照時に必須チェック）。
+  - OpenAI API は各 AI 関数で OPENAI_API_KEY（もしくは関数引数 api_key）を参照。未設定の場合は ValueError を送出。
+  - .env 自動ロードはプロジェクトルートが特定できない場合はスキップされます（パッケージ配布後の安全策）。
+- DB スキーマ期待値
+  - 各機能は DuckDB の特定テーブルを前提としています（例: prices_daily, raw_news, news_symbols, ai_scores, raw_financials, market_calendar, market_regime）。これらのテーブルが存在しない場合、該当機能は適切に動作しないか None/空結果を返します。
+- ルックアヘッド対策
+  - AI / 指標計算モジュールは全て target_date 引数ベースで動作し、date.today()/datetime.today() を参照しない設計です（バックテスト等でのルックアヘッドバイアスを防止）。
+- フェイルセーフ設計
+  - OpenAI 呼び出し失敗時は例外を投げずにフェイルセーフ値（例えば macro_sentiment=0.0 やスキップ）で継続する箇所が多く存在します。部分的な失敗が全体を停止させない設計です。
+- テスト性
+  - news_nlp._call_openai_api / regime_detector._call_openai_api などはユニットテストで patch して置き換え可能に実装されています。
+- OpenAI モデル
+  - 現時点で gpt-4o-mini を使用するようにハードコードされています。将来的なモデル変更は該当定数を更新してください。
 
-  - 特徴量探索 (`feature_exploration`)
-    - 将来リターン計算（任意ホライズン、デフォルト [1,5,21] 営業日）、IC（Spearman の ρ）計算、ランキング（同順位は平均ランク）、ファクター統計サマリーを実装。
-    - pandas 等に依存せず標準ライブラリと DuckDB で実装。
-    - rank 関数は浮動小数の丸め（round(v,12)）を用いて ties を適切に処理。
+### 既知の制約
+- DuckDB executemany に関する互換性考慮が散見される（空リストを渡さないガードなど）。
+- 一部 SQL 文で日付のスキャン範囲をカレンダーバッファで確保しているため、データ量によってはクエリコストがかかる可能性があります。
+- news_nlp / regime_detector ともに JSON Mode を前提にレスポンスを期待しているため、OpenAI の応答形式の変更があった場合にパースエラーが発生する可能性があります（その際はフェイルセーフでスキップされます）。
 
-### Changed
-- （初回リリースのため該当なし）
-
-### Fixed
-- （初回リリースのため該当なし）
-
-### Removed
-- （初回リリースのため該当なし）
-
-### Security
-- OpenAI API キーはデフォルトで環境変数 `OPENAI_API_KEY` を参照。関数は引数 `api_key` で注入可能（テストやキー管理に配慮）。
-- 自動 .env ロードは環境変数で無効化可能（`KABUSYS_DISABLE_AUTO_ENV_LOAD`）。
-
-### Notes / 実装上の注意点
-- すべての日付処理はルックアヘッドバイアスを避ける方針で実装（関数は内部で date.today()/datetime.today() を参照しない設計を意識）。
-- DuckDB のバージョン差異対策（executemany の空リスト制約やリスト型バインドの挙動）に配慮した実装が各所にあります。
-- OpenAI 呼び出しの共通化は行っているが、テスト検証のためモジュール内で `_call_openai_api` をローカルに持ち、外部モジュールとプライベート実装を共有しない設計になっています。
-- 必須環境変数（例）:
-  - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID, OPENAI_API_KEY など。未設定時は Settings のプロパティアクセスで明確な ValueError を投げる。
+## 未定義 / 今後の改善案（例）
+- API キー管理の強化（キーローテーション・秘密管理サービスとの連携）
+- ai モジュールのモデル切替オプション化
+- DuckDB スキーマのマイグレーションスクリプト追加
+- より詳細な品質チェック / アラート機構の強化（メール／Slack 通知など）
 
 ---
 
-今後のリリースで記録すべき主な候補
-- strategy / execution / monitoring の実装状況に応じた機能追加。
-- テストカバレッジ、CI/CD の追加とテスト用フックの拡充。
-- デプロイ・運用に関するドキュメント（シークレット管理、バックテストワークフローなど）。
-- jquants_client / kabu API クライアントのエラー・レート制御の改善。
+参考: Keep a Changelog — https://keepachangelog.com/ja/1.0.0/
