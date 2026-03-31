@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime as _real_datetime, datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -158,6 +158,14 @@ class TestDataFreshness:
         assert result.data_freshness_ok is False
 
 
+class _FakeDatetime(_real_datetime):
+    """datetime.now() を 08:55 に固定するフェイク。シグナルウィンドウ内に収まる。"""
+
+    @classmethod
+    def now(cls, tz=None):
+        return _real_datetime(2026, 3, 31, 8, 55, 0)
+
+
 class TestExecutionEnginePid:
 
     def _make_engine(self, tmp_path):
@@ -195,7 +203,8 @@ class TestExecutionEnginePid:
             pid_existed_during.append(pid_file.exists())
             raise KeyboardInterrupt
 
-        with patch.object(engine, "_process_signals", side_effect=capture_and_raise), \
+        with patch("datetime.datetime", _FakeDatetime), \
+             patch.object(engine, "_process_signals", side_effect=capture_and_raise), \
              patch.object(engine, "_drain_push_queue", side_effect=drain_and_raise), \
              patch.object(engine, "_websocket_worker"):
             with pytest.raises(KeyboardInterrupt):
@@ -207,7 +216,8 @@ class TestExecutionEnginePid:
         """finally ブロックで PID ファイルが削除される"""
         engine, pid_file = self._make_engine(tmp_path)
 
-        with patch.object(engine, "_process_signals", side_effect=KeyboardInterrupt), \
+        with patch("datetime.datetime", _FakeDatetime), \
+             patch.object(engine, "_process_signals", side_effect=KeyboardInterrupt), \
              patch.object(engine, "_drain_push_queue", side_effect=KeyboardInterrupt), \
              patch.object(engine, "_websocket_worker"):
             with pytest.raises(KeyboardInterrupt):
