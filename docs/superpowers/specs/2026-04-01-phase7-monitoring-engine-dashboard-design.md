@@ -61,7 +61,7 @@ Monitoring.md § 3 の仕様に完全準拠。
 ```python
 @dataclass
 class SystemCheckResult:
-    recorded_at: str          # ISO8601 UTC
+    recorded_at: str          # ISO8601 UTC (例: "2026-04-01T12:34:56.789012+00:00")
     cpu_percent: float        # psutil.cpu_percent()
     memory_percent: float     # psutil.virtual_memory().percent
     disk_percent: float       # psutil.disk_usage("C:\\").percent
@@ -69,6 +69,8 @@ class SystemCheckResult:
     data_freshness_ok: bool   # 株価データが3日以内に更新済み
     stale_pid_detected: bool  # 異常終了 PID を検出・削除した場合 True
 ```
+
+**注:** `stale_pid_detected` は DB スキーマの変更不要。True の場合は `MonitoringDB.log_risk_event(event_type="STALE_PID", ...)` で risk_logs に記録する。
 
 ### クラス API
 
@@ -94,11 +96,13 @@ class SystemMonitor:
 
 ### データ鮮度チェック
 
-`DuckDBRepository.get_last_price_date()` を呼び出し、最終更新日が `today - 3日` より古い場合（または None）を `data_freshness_ok=False` とする。
+`src.kabusys.data.pipeline.get_last_price_date(duckdb_conn)` を呼び出し、最終更新日が `today - 3日` より古い場合（または None）を `data_freshness_ok=False` とする。この関数は `duckdb.DuckDBPyConnection` を受け取り `date | None` を返すモジュールレベル関数（`pipeline.py` line 212）。
 
 ### 書き込み
 
-`check_once()` 内で `MonitoringDB.log_system_status()` を呼び出す。
+`check_once()` 内で以下を呼び出す：
+- `MonitoringDB.log_system_status()` — cpu/memory/disk/process_ok を system_status に記録
+- `stale_pid_detected=True` の場合のみ `MonitoringDB.log_risk_event(event_type="STALE_PID", metric_name="process", metric_value=0.0, threshold=1.0, detail="stale PID file detected and removed")` を risk_logs に追記
 
 ---
 
@@ -112,8 +116,8 @@ Monitoring.md § 6 の仕様に準拠。
 @dataclass
 class TradeCheckResult:
     logged_at: str
-    stale_orders: list[str]    # 30分以上 Created/Sent/Accepted 状態の client_order_id
-    anomaly_fills: list[str]   # 約定価格が参照価格 ±20% 超の client_order_id
+    stale_orders: list[str]    # 30分以上アクティブ状態の client_order_id
+    anomaly_fills: list[str]   # 約定価格が発注価格 ±20% 超の client_order_id
 ```
 
 ### クラス API
@@ -122,7 +126,8 @@ class TradeCheckResult:
 class TradeMonitor:
     def __init__(
         self,
-        conn: sqlite3.Connection,
+        monitoring_conn: sqlite3.Connection,  # monitoring.db (risk_logs 書き込み用)
+        order_repo: OrderRepository,          # orders.db (order states 読み取り用)
         stale_minutes: int = 30,
         price_anomaly_pct: float = 0.20,
     ) -> None
@@ -130,10 +135,12 @@ class TradeMonitor:
     def check_once(self, now: datetime | None = None) -> TradeCheckResult
 ```
 
+**注:** `monitoring_conn` と `order_repo` は別 SQLite DB。`trade_logs` は monitoring.db のイベント履歴、注文状態は `order_repo.list_active()` で取得する（orders.db）。
+
 ### ロジック
 
-- **注文滞留検出:** `trade_logs` テーブルから `state IN ('Created', 'Sent', 'Accepted')` の注文を取得し、`logged_at` から `stale_minutes` 分以上経過しているものを `stale_orders` に追加。
-- **約定異常価格検出:** 同一 `client_order_id` の `price`（発注価格）と `Filled` イベントの `price` を比較し、乖離率が `price_anomaly_pct` 超の場合を `anomaly_fills` に追加。
+- **注文滞留検出:** `order_repo.list_active()` でアクティブ注文を取得し、`created_at` から `stale_minutes` 分以上経過している `client_order_id` を `stale_orders` に追加。
+- **約定異常価格検出:** `order_repo.list_active()` のうち `state == OrderState.PartialFill` または `Filled` の注文を対象に、`avg_fill_price` と `price`（発注価格、0.0 の場合は成行=チェック対象外）を比較し、乖離率が `price_anomaly_pct` 超の場合を `anomaly_fills` に追加。
 
 ### 書き込み
 
@@ -164,7 +171,6 @@ class RiskMonitor:
     def __init__(
         self,
         conn: sqlite3.Connection,
-        peak_value: float,        # ポートフォリオ最高値（外部から注入）
         max_positions: int = 10,
         dd_threshold: float = 0.10,
     ) -> None
@@ -172,10 +178,14 @@ class RiskMonitor:
     def check_once(self, now: datetime | None = None) -> RiskCheckResult
 ```
 
+**peak_value の管理:** `RiskMonitor` は内部で `_peak_value: float` を保持する。初回 `check_once()` 呼び出し時に `dashboard` テーブルの `portfolio_value` で初期化し、以降は `portfolio_value > _peak_value` の場合に更新する（ハイウォーターマーク方式）。`dashboard` テーブルが空の場合は `drawdown_pct=0.0` / `drawdown_alert=False` として処理する。
+
+**ドローダウン閾値について（Phase 7 スコープ）:** Phase 7 では `dd_threshold=0.10`（10%）の1閾値のみを監視・アラート対象とする。RiskManagement.md の 5%（ポジション半減）・15%（全決済）は ExecutionEngine/RiskManager の執行パスで実施されており、MonitoringEngine は重複して執行制御を行わない。
+
 ### ロジック
 
 - **ドローダウン計算:** `dashboard` テーブルの `portfolio_value` を取得し、`(peak_value - portfolio_value) / peak_value` で計算。
-- **ポジション数:** `positions` テーブルの行数をカウント。
+- **ポジション数:** `positions` テーブルの `qty != 0` の行数をカウント（qty=0 の閉じたポジションを除外）。
 - **アラート判定:** 閾値超過時に `MonitoringDB.log_risk_event()` に記録。
 
 ---
@@ -252,13 +262,13 @@ DB パスはコマンドライン引数で受け取る（デフォルト: `data/
 
 | テスト対象 | 内容 |
 |---|---|
-| `SystemMonitor.check_once()` | PID なし / PID あり + プロセス生存 / stale PID の3ケース、データ鮮度 OK/NG |
-| `TradeMonitor.check_once()` | 滞留なし / 滞留あり / 約定異常あり |
-| `RiskMonitor.check_once()` | DD 閾値以下 / 超過、ポジション数正常 / 超過 |
-| `MonitoringEngine.run_once()` | 3 Monitor が呼ばれることを確認（mock） |
+| `SystemMonitor.check_once()` | PID なし / PID あり + プロセス生存 / stale PID の3ケース、データ鮮度 OK/NG、DuckDB が空（`get_last_price_date` returns None） |
+| `TradeMonitor.check_once()` | 滞留なし / 滞留あり / 約定異常あり / `list_active()` が空のケース |
+| `RiskMonitor.check_once()` | DD 閾値以下 / 超過、ポジション数正常 / 超過、初回（dashboard が空）のケース、peak_value ハイウォーターマーク更新 |
+| `MonitoringEngine.run_once()` | 3 Monitor が呼ばれることを確認（mock）、`check_once()` が例外を投げても継続するケース |
 | `StreamlitDashboard` | `get_dashboard()` の None / データあり、positions/orders 表示ロジック |
 
-`psutil` / `duckdb` の呼び出しはテスト内で mock する。Streamlit のテストは `unittest.mock.patch("streamlit.*")` で UI 呼び出しをモックする。
+`psutil` / `duckdb` / `get_last_price_date` の呼び出しはテスト内で mock する。Streamlit のテストは `unittest.mock.patch("streamlit.*")` で UI 呼び出しをモックする。
 
 ---
 
@@ -281,6 +291,8 @@ DB パスはコマンドライン引数で受け取る（デフォルト: `data/
 
 | ライブラリ | 用途 | 追加要否 |
 |---|---|---|
-| `psutil` | CPU/メモリ/ディスク取得 | 要確認（未追加の可能性） |
-| `streamlit` | ダッシュボード UI | 要確認（未追加の可能性） |
+| `psutil` | CPU/メモリ/ディスク取得 | 実装時に `requirements.txt` を確認し、未追加なら追加 |
+| `streamlit` | ダッシュボード UI | 実装時に `requirements.txt` を確認し、未追加なら追加 |
 | `duckdb` | データ鮮度チェック | 既存 |
+
+**実装者への注意:** `psutil` と `streamlit` が `requirements.txt` に含まれているか実装開始前に確認すること。不足の場合は `requirements.txt` に追記する。
