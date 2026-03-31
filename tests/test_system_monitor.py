@@ -156,3 +156,62 @@ class TestDataFreshness:
             result = mon.check_once(today=date(2026, 3, 31))
 
         assert result.data_freshness_ok is False
+
+
+class TestExecutionEnginePid:
+
+    def _make_engine(self, tmp_path):
+        """テスト用 ExecutionEngine を最小モックで構築する。"""
+        from datetime import date, time
+        from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine
+
+        broker = MagicMock()
+        repo = MagicMock()
+        risk_manager = MagicMock()
+        order_manager = MagicMock()
+        duckdb_conn = MagicMock()
+        cfg = EngineConfig(
+            target_date=date(2026, 3, 31),
+            signal_send_start=time(8, 50),
+            signal_send_end=time(9, 10),
+            market_close=time(15, 30),
+        )
+        pid_file = tmp_path / "execution.pid"
+        return ExecutionEngine(
+            broker, repo, risk_manager, order_manager, duckdb_conn, cfg,
+            pid_file=pid_file,
+        ), pid_file
+
+    def test_pid_file_written_on_start(self, tmp_path):
+        """run_session() 開始時に PID ファイルが生成される"""
+        engine, pid_file = self._make_engine(tmp_path)
+        pid_existed_during = []
+
+        def capture_and_raise():
+            pid_existed_during.append(pid_file.exists())
+            raise KeyboardInterrupt
+
+        def drain_and_raise():
+            pid_existed_during.append(pid_file.exists())
+            raise KeyboardInterrupt
+
+        with patch.object(engine, "_process_signals", side_effect=capture_and_raise), \
+             patch.object(engine, "_drain_push_queue", side_effect=drain_and_raise), \
+             patch.object(engine, "_websocket_worker"):
+            with pytest.raises(KeyboardInterrupt):
+                engine.run_session()
+
+        assert pid_existed_during[0] is True  # 実行中は PID ファイルが存在した
+
+    def test_pid_file_removed_on_clean_exit(self, tmp_path):
+        """finally ブロックで PID ファイルが削除される"""
+        engine, pid_file = self._make_engine(tmp_path)
+
+        with patch.object(engine, "_process_signals", side_effect=KeyboardInterrupt), \
+             patch.object(engine, "_drain_push_queue", side_effect=KeyboardInterrupt), \
+             patch.object(engine, "_websocket_worker"):
+            with pytest.raises(KeyboardInterrupt):
+                engine.run_session()
+
+        # KeyboardInterrupt 後も finally で削除される
+        assert not pid_file.exists()

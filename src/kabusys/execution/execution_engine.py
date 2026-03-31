@@ -6,10 +6,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import threading
 from dataclasses import dataclass
 from datetime import date, time
+from pathlib import Path
 
 import duckdb
 
@@ -41,6 +43,7 @@ class ExecutionEngine:
         duckdb_conn: duckdb.DuckDBPyConnection,
         config: EngineConfig,
         reconciler: Reconciler | None = None,
+        pid_file: Path | None = None,
     ) -> None:
         self._broker = broker
         self._repo = repo
@@ -49,6 +52,7 @@ class ExecutionEngine:
         self._duckdb_conn = duckdb_conn
         self._config = config
         self._reconciler = reconciler
+        self._pid_file: Path | None = pid_file
         self._stop_event = threading.Event()
         self._push_queue: queue.Queue[dict] = queue.Queue()
 
@@ -213,31 +217,40 @@ class ExecutionEngine:
             except Exception:
                 logger.exception("Reconciliation 実行中に予期せぬ例外。セッションは続行します。")
 
-        # WebSocket スレッド起動
-        ws_thread = threading.Thread(target=self._websocket_worker, daemon=True, name="ws-push")
-        ws_thread.start()
+        # PID ファイルへの書き出し（None の場合は config.pid_file_path を使用）
+        from kabusys.config import settings as _config
+        _active_pid_file = self._pid_file if self._pid_file is not None else _config.pid_file_path
+        _active_pid_file.parent.mkdir(parents=True, exist_ok=True)
+        _active_pid_file.write_text(str(os.getpid()))
 
-        def _now_time() -> time:
-            return datetime.now().time().replace(microsecond=0)
+        try:
+            # WebSocket スレッド起動
+            ws_thread = threading.Thread(target=self._websocket_worker, daemon=True, name="ws-push")
+            ws_thread.start()
 
-        # signal_send_start まで待機
-        while _now_time() < self._config.signal_send_start and not self._stop_event.is_set():
-            self._stop_event.wait(timeout=5.0)
+            def _now_time() -> time:
+                return datetime.now().time().replace(microsecond=0)
 
-        # シグナル処理ループ（8:50 ～ 9:10）
-        # 現在時刻が signal_send_end を超えている場合はシグナル処理をスキップ
-        if not self._stop_event.is_set() and _now_time() < self._config.signal_send_end:
-            self._process_signals()
+            # signal_send_start まで待機
+            while _now_time() < self._config.signal_send_start and not self._stop_event.is_set():
+                self._stop_event.wait(timeout=5.0)
 
-        # push drain ループ（9:10 ～ 15:30）
-        while _now_time() < self._config.market_close and not self._stop_event.is_set():
-            self._drain_push_queue()
-            self._stop_event.wait(timeout=1.0)
+            # シグナル処理ループ（8:50 ～ 9:10）
+            # 現在時刻が signal_send_end を超えている場合はシグナル処理をスキップ
+            if not self._stop_event.is_set() and _now_time() < self._config.signal_send_end:
+                self._process_signals()
 
-        # セッション終了
-        self._stop_event.set()
-        ws_thread.join(timeout=5.0)
-        logger.info("ExecutionEngine: セッション終了")
+            # push drain ループ（9:10 ～ 15:30）
+            while _now_time() < self._config.market_close and not self._stop_event.is_set():
+                self._drain_push_queue()
+                self._stop_event.wait(timeout=1.0)
+
+            # セッション終了
+            self._stop_event.set()
+            ws_thread.join(timeout=5.0)
+            logger.info("ExecutionEngine: セッション終了")
+        finally:
+            _active_pid_file.unlink(missing_ok=True)
 
     def _read_signals(self) -> list[dict]:
         """DuckDB から今日のシグナルを portfolio_targets と JOIN して返す。"""
