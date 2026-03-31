@@ -91,7 +91,7 @@ class ETLResult:
     def to_dict(self) -> dict[str, Any]:
         """ETLResult を辞書に変換する（監査ログ書き込みやデバッグに利用）。
 
-        quality_issues は (check_name, severity, detail) のタプルリストに変換する。
+        quality_issues は {"check_name", "severity", "detail"} キーを持つ dict のリストに変換する。
 
         Returns:
             ETLResult の全フィールドを含む辞書。
