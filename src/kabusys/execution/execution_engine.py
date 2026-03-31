@@ -10,7 +10,7 @@ import os
 import queue
 import threading
 from dataclasses import dataclass
-from datetime import date, time
+from datetime import date, datetime, time
 from pathlib import Path
 
 import duckdb
@@ -200,8 +200,6 @@ class ExecutionEngine:
         8:50 でシグナル処理 → 9:10 で発注締切 → 15:30 でセッション終了。
         テスト環境では _process_signals() と _drain_push_queue() を直接呼ぶこと。
         """
-        from datetime import datetime
-
         logger.info("ExecutionEngine: セッション開始 target_date=%s", self._config.target_date)
 
         # 起動時リコンシリエーション（reconciler が設定されている場合のみ）

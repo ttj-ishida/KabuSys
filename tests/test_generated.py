@@ -123,11 +123,14 @@ def test_calc_ma200_ratio_insufficient_rows_returns_one(caplog):
 def test_calc_ma200_ratio_exact_window_computation():
     conn = duckdb.connect(":memory:")
     _make_prices_table(conn)
-    # 200 rows of 100.0, latest 110.0 at top -> ratio = 110 / 100 = 1.1
+    # クエリは date < target_date（排他）のため start_date は target_date の 1 日前にする。
+    # これで 200 行すべてが date < date(2026,3,20) に収まる。
+    # MA200 = (110 + 100 * 199) / 200 = 100.05; ratio = 110 / 100.05
     closes = [110.0] + [100.0] * (rd._MA_WINDOW - 1)
-    _insert_prices(conn, date(2026,3,20), rd._ETF_CODE, closes)
-    val = rd._calc_ma200_ratio(conn, date(2026,3,20))
-    assert pytest.approx(val, rel=1e-6) == 1.1
+    _insert_prices(conn, date(2026, 3, 19), rd._ETF_CODE, closes)
+    val = rd._calc_ma200_ratio(conn, date(2026, 3, 20))
+    expected = 110.0 / ((110.0 + 100.0 * 199) / 200)
+    assert pytest.approx(val, rel=1e-6) == expected
 
 def test_fetch_macro_news_filters_keywords_and_window():
     conn = duckdb.connect(":memory:")

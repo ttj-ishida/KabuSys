@@ -203,7 +203,7 @@ class TestExecutionEnginePid:
             pid_existed_during.append(pid_file.exists())
             raise KeyboardInterrupt
 
-        with patch("datetime.datetime", _FakeDatetime), \
+        with patch("kabusys.execution.execution_engine.datetime", _FakeDatetime), \
              patch.object(engine, "_process_signals", side_effect=capture_and_raise), \
              patch.object(engine, "_drain_push_queue", side_effect=drain_and_raise), \
              patch.object(engine, "_websocket_worker"):
@@ -216,7 +216,7 @@ class TestExecutionEnginePid:
         """finally ブロックで PID ファイルが削除される"""
         engine, pid_file = self._make_engine(tmp_path)
 
-        with patch("datetime.datetime", _FakeDatetime), \
+        with patch("kabusys.execution.execution_engine.datetime", _FakeDatetime), \
              patch.object(engine, "_process_signals", side_effect=KeyboardInterrupt), \
              patch.object(engine, "_drain_push_queue", side_effect=KeyboardInterrupt), \
              patch.object(engine, "_websocket_worker"):

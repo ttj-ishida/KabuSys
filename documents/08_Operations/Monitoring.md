@@ -304,6 +304,8 @@ SystemMonitor(conn, duckdb_conn, pid_file=Path("data/execution.pid"))
 | `data_freshness_ok` | bool | 株価データが 3 日以内に更新済み |
 | `stale_pid_detected` | bool | 異常終了の PID ファイルを検出・削除した場合 True |
 
+> **注:** `config` に追加した `cpu_threshold_pct` / `memory_threshold_pct` / `disk_threshold_pct` は、現フェーズでは収集・記録のみを行い、`SystemMonitor` 内では使用しない。将来の Slack アラート実装（Issue #39）で閾値判定に利用する予定。
+
 ## Phase 2 (将来拡張)
 
 システム規模拡大時や専用監視環境への切り出し時に移行可能。
