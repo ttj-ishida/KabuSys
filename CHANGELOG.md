@@ -1,89 +1,95 @@
 # CHANGELOG
 
-すべての変更は Keep a Changelog のフォーマットに従っています。  
-このファイルはコードベースの内容から推測して作成した初期リリース向けの変更履歴です。
+すべての注目すべき変更を記録します。  
+フォーマットは "Keep a Changelog" に準拠しています。
+
+- リリース方針: 主要な機能追加や重要な振る舞い、バグ修正、互換性に影響する変更を明記します。
+- 日付はリリース日を示します。
 
 ## [Unreleased]
-- 開発中。主な機能は v0.1.0 にて初期公開済み。
+（現在未リリースの変更はありません）
 
 ## [0.1.0] - 2026-03-31
-初回リリース。日本株自動売買システム「KabuSys」の基本コンポーネントを実装しました。以下は主要な追加点・設計上の注記です。
+初回公開リリース。
 
-### Added
-- パッケージのエントリポイント
-  - src/kabusys/__init__.py: バージョン情報と公開サブパッケージ（data, strategy, execution, monitoring）の定義。
+### 追加（Added）
+- 基本パッケージ構成
+  - パッケージ名: kabusys
+  - バージョン: 0.1.0
+  - 公開モジュール: data, strategy, execution, monitoring（__all__ 経由で公開）
 
-- 設定・環境変数管理
-  - src/kabusys/config.py
-    - .env / .env.local の自動ロード（プロジェクトルートは .git または pyproject.toml を基準に探索）。
-    - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動ロード無効化。
-    - .env パーサの実装（export プレフィックス、シングル/ダブルクォート、エスケープ、インラインコメントの扱い）。
-    - OS 環境変数を保護するための protected キー判定（.env.local は既存 OS 環境変数を上書きしない）。
-    - 必須変数取得時に未設定で ValueError を送出する _require。
-    - 設定オブジェクト Settings （J-Quants トークン、kabu API、Slack、DB パス、環境種別・ログレベル検証など）。
-    - デフォルトの DB パス: DUCKDB_PATH= data/kabusys.duckdb、SQLITE_PATH= data/monitoring.db。
+- 環境設定/読み込み機能（kabusys.config）
+  - .env / .env.local ファイルまたは環境変数から設定を読み込む自動ロード機能を実装。
+  - プロジェクトルート判定: __file__ を起点に .git または pyproject.toml を探索してルートを検出。
+  - .env パーサ: コメント行、export プレフィックス、シングル/ダブルクォート、バックスラッシュエスケープ、インラインコメント処理に対応。
+  - 自動ロードの無効化: 環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 でスキップ可能。
+  - OS 環境変数の保護: .env ロード時に既存の環境変数を保護する仕組みを導入（.env.local は上書き可能だが OS のキーは保護）。
+  - Settings クラスを提供し、必要な設定値をプロパティで取得:
+    - JQUANTS_REFRESH_TOKEN（必須）
+    - KABU_API_PASSWORD（必須）
+    - KABU_API_BASE_URL（デフォルト: http://localhost:18080/kabusapi）
+    - SLACK_BOT_TOKEN / SLACK_CHANNEL_ID（必須）
+    - DUCKDB_PATH / SQLITE_PATH（デフォルトパスを提供）
+    - KABUSYS_ENV（development, paper_trading, live の検証）
+    - LOG_LEVEL（DEBUG/INFO/... の検証）
+    - is_live / is_paper / is_dev のユーティリティプロパティ
 
-- AI（自然言語処理）関連
-  - src/kabusys/ai/news_nlp.py
-    - raw_news と news_symbols を使ったニュース集約（銘柄ごとに最大記事数・文字数でトリム）。
-    - OpenAI（gpt-4o-mini）を JSON Mode で呼び出して銘柄ごとのセンチメントスコアを生成。
-    - バッチ処理（1コールあたり最大20銘柄）、レスポンス検証（results 配列の構造検査、コード照合、数値検証）。
-    - 429 / ネットワーク断 / タイムアウト / 5xx に対する指数バックオフによるリトライ。
-    - スコアは ±1.0 にクリップ。部分失敗時に既存スコアを消さないための部分置換（DELETE → INSERT）ロジック。
-    - テスト容易性を考慮した _call_openai_api の差し替えポイント。
-    - calc_news_window: JST ベースのニュース収集ウィンドウ計算（前日15:00〜当日08:30 JST を UTC に変換して扱う）。
+- ニュースNLP（kabusys.ai.news_nlp）
+  - raw_news と news_symbols を用いて銘柄ごとのニュースを集約し、OpenAI（gpt-4o-mini）でセンチメント評価を行い ai_scores テーブルへ書き込み。
+  - 時間ウィンドウ: JST 前日15:00〜当日08:30（UTC では前日06:00〜23:30）をサポート。calc_news_window 関数を提供。
+  - バッチ処理: 最大 20 銘柄/コール、各銘柄は最新10記事・最大3000文字でトリム。
+  - 再試行/フォールバック: 429/ネットワーク断/タイムアウト/5xx に対する指数バックオフリトライ。API 失敗時は該当チャンクをスキップして継続。
+  - レスポンス検証: JSON パース、results フィールド、コード整合性、数値検証。スコアは ±1.0 にクリップ。
+  - DB 書き込みは冪等性確保（対象コードのみ DELETE → INSERT）および DuckDB の executemany 空リスト制約に配慮。
 
-  - src/kabusys/ai/regime_detector.py
-    - ETF 1321（日経225連動型）200日移動平均乖離（重み70%）と、マクロニュースの LLM センチメント（重み30%）を合成して日次の市場レジーム（bull/neutral/bear）を判定。
-    - _calc_ma200_ratio（ルックアヘッド対策で target_date 未満のデータのみ使用、データ不足時は中立扱い）。
-    - マクロニュース抽出（マクロキーワードによるフィルタ）と OpenAI 呼び出し（gpt-4o-mini、JSON Mode、リトライ/フォールバック）。
-    - レジームスコア計算、ラベリング閾値（BULL/BEAR）設定、market_regime テーブルへの冪等書き込み（BEGIN / DELETE / INSERT / COMMIT）。
-    - API キー注入可（api_key 引数または環境変数 OPENAI_API_KEY）。API 失敗時は macro_sentiment=0.0 で継続。
+- 市場レジーム判定（kabusys.ai.regime_detector）
+  - ETF 1321（日経225 連動型）200日移動平均乖離（重み70%）とマクロニュース由来の LLM センチメント（重み30%）を合成して日次で市場レジーム（bull / neutral / bear）を算出。
+  - マクロニュース抽出はキーワードリストに基づき raw_news からタイトルを取得。
+  - OpenAI（gpt-4o-mini）呼び出しで macro_sentiment を取得。API失敗時は 0.0 にフォールバック。
+  - MA 計算・ニュースウィンドウ取得・スコア合成の各ステップを提供（score_regime 関数）。
+  - DB 書き込みはトランザクション（BEGIN/DELETE/INSERT/COMMIT）で冪等に処理。失敗時は ROLLBACK を試行。
 
-- データ基盤（DataPlatform）
-  - src/kabusys/data/calendar_management.py
-    - JPX カレンダー管理（market_calendar テーブルの参照/更新、営業日判定、前後営業日の計算、期間内営業日の取得、SQ日判定）。
-    - DB 登録がない日や NULL 値に対する曜日ベースのフォールバック（週末除外）。
-    - calendar_update_job: J-Quants API から差分取得して market_calendar を冪等的に保存。バックフィルと健全性チェックを実装。
-    - 最大探索日数制限（_MAX_SEARCH_DAYS）で無限ループを防止。
+- データ処理・ETL（kabusys.data.pipeline / etl / jquants クライアント連携）
+  - ETLResult データクラスを公開（kabusys.data.etl で再エクスポート）。
+  - 差分取得、backfill、品質チェック（quality モジュールとの連携）を想定した設計。ETLResult には品質問題とエラーの集約を保持。
+  - DuckDB のテーブル存在チェックや最大日付取得などユーティリティを実装。
 
-  - src/kabusys/data/pipeline.py / src/kabusys/data/etl.py
-    - ETLResult データクラス（取得/保存件数、品質チェック結果、エラー一覧などを保持）。
-    - 差分取得・保存・品質チェックの設計に準拠した ETL パイプラインの基礎（J-Quants クライアント連携、バックフィル、idempotent 保存）。
-    - DuckDB 互換性への配慮（executemany に空リスト不可等のハンドリング）。
-    - 内部ユーティリティ（テーブル存在チェック、最大日付取得、カレンダーヘルパー）を実装。
+- マーケットカレンダー（kabusys.data.calendar_management）
+  - market_calendar テーブルを元に営業日判定・前後営業日の検索・期間内営業日取得・SQ判定などのAPIを提供:
+    - is_trading_day, is_sq_day, next_trading_day, prev_trading_day, get_trading_days, calendar_update_job
+  - DB データがない/欠損時は曜日ベースのフォールバック（土日を非営業日と扱う）。
+  - calendar_update_job は J-Quants API から差分取得して保存（バックフィル、健全性チェック、保存数を返す）。
 
-- リサーチ（研究）機能
-  - src/kabusys/research/*
-    - factor_research.py: Momentum / Volatility / Value 等のファクター計算（mom_1m/3m/6m、ma200_dev、atr_20、avg_turnover、per、roe 等）。
-      - DuckDB SQL を駆使した実装。データ不足時は None を返す。結果は (date, code) をキーとする dict のリストで返却。
-    - feature_exploration.py: 将来リターン計算（calc_forward_returns）、IC（calc_ic）、ランク関数（rank）、統計サマリー（factor_summary）を提供。
-      - calc_forward_returns は任意ホライズンに対応（horizons 検証あり）。
-      - calc_ic はスピアマン（ランク相関）を計算し、サンプル数不足時は None。
-    - research パッケージ __init__ でユーティリティをエクスポート（zscore_normalize などの再エクスポート含む）。
+- 研究用ユーティリティ（kabusys.research）
+  - ファクター計算: calc_momentum, calc_value, calc_volatility（prices_daily / raw_financials に基づく）。
+  - 特徴量探索: calc_forward_returns, calc_ic, factor_summary, rank（外部依存を用いず純粋に DuckDB と標準ライブラリで実装）。
+  - zscore_normalize を data.stats から再公開。
 
-### Changed
-- （初回リリースのため該当なし）設計上の決定・方針はモジュールドキュメンテーション内に明記（例: ルックアヘッドバイアス回避のため datetime.today() を直接参照しない等）。
+### 変更（Changed）
+（初回リリースのため該当なし）
 
-### Fixed
-- （初回リリースのため該当なし）
+### 修正（Fixed）
+（初回リリースのため該当なし）
 
-### Security
-- 環境変数取得は必須項目に対して明確に検証を行い、未設定時は ValueError を発生させる（JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID など）。
-- OS 環境変数を優先・保護する設計によりテスト時に意図しない上書きを防止。
+### 既知の振る舞い / 注意点（Notes）
+- OpenAI API の利用:
+  - モデルは gpt-4o-mini を使用（JSON mode を想定）。
+  - API キーは関数引数で注入可能。省略時は環境変数 OPENAI_API_KEY を参照する。未設定時は ValueError を送出。
+  - レスポンスの堅牢化（JSON 前後余計テキストの復元など）を行っているが、LLM の出力形式変化には注意。
 
-### Notes / 実装上の重要事項
-- OpenAI との連携は gpt-4o-mini（JSON mode）を想定。レスポンスパースに失敗した場合は安全側へフォールバック（スコア = 0.0 または該当銘柄スキップ）。
-- テスト容易性のため各モジュールで API 呼び出し関数を差し替えられるよう設計（unittest.mock.patch による置換を想定）。
-- DB 書き込みは基本的にトランザクション（BEGIN/COMMIT/ROLLBACK）で行い、部分失敗時に他データを守る実装（例: ai_scores の部分DELETE/INSERT）。
-- DuckDB のバージョン互換性（executemany の空リスト不可等）に配慮したコードパスを含む。
-- 日付および時間は明示的に date/datetime オブジェクトで扱い、timezone 混入を避ける方針。
+- ルックアヘッドバイアス防止:
+  - datetime.today() / date.today() をデフォルト内部処理で参照しない方針を採用。target_date を明示的に与えるAPI仕様。
 
-### Known limitations / 今後の改善候補
-- News NLP / Regime Detector の LLM 呼び出しは現在 JSON Mode のパースに依存しているため、将来的な API 仕様変更に対するラッパーの強化が必要。
-- ファクターモジュールには PBR・配当利回りなど未実装の指標があり、拡張の余地あり（calc_value の注記参照）。
-- ETL 周りで J-Quants クライアント（jquants_client）実装に依存する箇所があるため、ローカルテスト用スタブ/モックの整備が望ましい。
+- DuckDB 互換性:
+  - executemany に対する空リストバグ対応（呼び出し前に空チェック）。
+  - 日付型取り扱いで date オブジェクトに正規化するユーティリティを利用。
+
+- エラーハンドリング:
+  - LLM/API 関連の致命的失敗は基本的にローカルフォールバック（例: macro_sentiment=0.0）やチャンクスキップして継続する設計。必要に応じて呼び出し元で厳密なエラーハンドリングを行ってください。
+
+### 互換性（Compatibility）
+- 初回リリースのため後方互換破壊の履歴はありません。公開 API（関数名/引数/戻り値）を将来変更する可能性があるため、利用時はバージョン管理に注意してください。
 
 ---
 
-（このCHANGELOGはコードの実装内容とモジュールドキュメント文字列から推測して作成しています。実際のリリースノート作成時は変更差分・コミット履歴に基づく精査を行ってください。）
+今後のリリースでは、テストカバレッジ、より詳細な品質チェックモジュール、追加のエクスポート/インポートツール、実運用向けの監視・アラート機能（monitoring モジュールの拡充）などを予定しています。
