@@ -54,9 +54,8 @@ class SystemMonitor:
 
         cpu = psutil.cpu_percent(interval=1)
         mem = psutil.virtual_memory().percent
-        # Windows 対応: "/" は無効。Path.cwd().drive（例: "C:\\"）を使用。
-        # 空の場合（Linux/テスト）は "/" にフォールバック。
-        disk_path = Path.cwd().drive + "\\" if Path.cwd().drive else "/"
+        # Path.cwd().anchor は Windows で "C:\\"、Linux/テストで "/" を返す。
+        disk_path = str(Path.cwd().anchor) or "/"
         disk = psutil.disk_usage(disk_path).percent
 
         process_ok, stale_pid_detected = self._check_process()
