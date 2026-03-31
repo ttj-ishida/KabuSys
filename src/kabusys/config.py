@@ -165,6 +165,23 @@ class Settings:
     def sqlite_path(self) -> Path:
         return Path(os.environ.get("SQLITE_PATH", "data/monitoring.db")).expanduser()
 
+    # --- 監視設定 ---
+    @property
+    def pid_file_path(self) -> Path:
+        return Path(os.environ.get("PID_FILE_PATH", "data/execution.pid")).expanduser()
+
+    @property
+    def cpu_threshold_pct(self) -> float:
+        return float(os.environ.get("CPU_THRESHOLD_PCT", "90.0"))
+
+    @property
+    def memory_threshold_pct(self) -> float:
+        return float(os.environ.get("MEMORY_THRESHOLD_PCT", "85.0"))
+
+    @property
+    def disk_threshold_pct(self) -> float:
+        return float(os.environ.get("DISK_THRESHOLD_PCT", "90.0"))
+
     # --- システム設定 ---
     @property
     def env(self) -> str:
