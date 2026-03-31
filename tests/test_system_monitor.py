@@ -50,3 +50,52 @@ class TestCheckOnce:
         assert isinstance(result.process_ok, bool)
         assert isinstance(result.data_freshness_ok, bool)
         assert isinstance(result.stale_pid_detected, bool)
+
+
+class TestProcessCheck:
+
+    def test_no_pid_file_process_ok_false(self, monitor):
+        """PID ファイルなし → process_ok=False, stale_pid_detected=False"""
+        with patch("psutil.cpu_percent", return_value=10.0), \
+             patch("psutil.virtual_memory") as mock_mem, \
+             patch("psutil.disk_usage") as mock_disk:
+            mock_mem.return_value = MagicMock(percent=20.0)
+            mock_disk.return_value = MagicMock(percent=30.0)
+            result = monitor.check_once(today=date(2026, 3, 31))
+
+        assert result.process_ok is False
+        assert result.stale_pid_detected is False
+
+    def test_valid_pid_process_ok_true(self, monitor, tmp_path):
+        """自プロセスの PID を書いたファイル → process_ok=True"""
+        pid_file = tmp_path / "execution.pid"
+        pid_file.write_text(str(os.getpid()))
+        mon = SystemMonitor(monitor._db._conn, monitor._duckdb_conn, pid_file=pid_file)
+
+        with patch("psutil.cpu_percent", return_value=10.0), \
+             patch("psutil.virtual_memory") as mock_mem, \
+             patch("psutil.disk_usage") as mock_disk:
+            mock_mem.return_value = MagicMock(percent=20.0)
+            mock_disk.return_value = MagicMock(percent=30.0)
+            result = mon.check_once(today=date(2026, 3, 31))
+
+        assert result.process_ok is True
+        assert result.stale_pid_detected is False
+
+    def test_stale_pid_detected_and_deleted(self, monitor, tmp_path):
+        """存在しない PID → process_ok=False, stale_pid_detected=True, ファイル削除"""
+        pid_file = tmp_path / "execution.pid"
+        pid_file.write_text("999999999")  # 存在しない PID
+        mon = SystemMonitor(monitor._db._conn, monitor._duckdb_conn, pid_file=pid_file)
+
+        with patch("psutil.cpu_percent", return_value=10.0), \
+             patch("psutil.virtual_memory") as mock_mem, \
+             patch("psutil.disk_usage") as mock_disk, \
+             patch("psutil.pid_exists", return_value=False):
+            mock_mem.return_value = MagicMock(percent=20.0)
+            mock_disk.return_value = MagicMock(percent=30.0)
+            result = mon.check_once(today=date(2026, 3, 31))
+
+        assert result.process_ok is False
+        assert result.stale_pid_detected is True
+        assert not pid_file.exists()
