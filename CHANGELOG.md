@@ -1,104 +1,92 @@
 # CHANGELOG
 
-すべての変更は Keep a Changelog のフォーマットに準拠して記載しています。  
-このファイルはコードベース（kabusys）から推測できる機能追加・設計方針・互換性注意点に基づき作成しています。
+このプロジェクトは Keep a Changelog の形式に従って変更履歴を管理します。主にコードベースから推測した初期リリース内容と設計上の注意点を記載しています。
 
-※ 生成日: 2026-03-31
+全般的な注記
+- 日時の扱いはルックアヘッドバイアス防止のため、内部で datetime.today() / date.today() を不用意に参照しない設計になっています（関数は target_date 等を引数で受け取る）。
+- DuckDB を主要な永続層として利用しています。SQL はパフォーマンスと互換性を考慮した実装になっています。
+- OpenAI（gpt-4o-mini）を用いた NLP 処理は JSON Mode を利用し、レスポンスのバリデーション・リトライ・フェイルセーフ（API失敗時はスコアを 0 にフォールバック）を組み込んでいます。
+- .env 自動ロード機能を備え、プロジェクトルート（.git または pyproject.toml）を基準に .env / .env.local を読み込みます。環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で無効化可能です。
 
-## [Unreleased]
+Unreleased
+- （なし）
 
-### Added
-- 採用予定の機能や開発中の改善点をここに記載してください。
+[0.1.0] - 2026-03-31
+Added
+- パッケージ全体
+  - 初期パッケージ構成を追加（kabusys パッケージ、サブパッケージ: data, ai, research 等の骨組み）。
+  - __version__ を "0.1.0" に設定。
 
----
-
-## [0.1.0] - 2026-03-31
-
-最初の公開リリース（初期実装）。主にデータ基盤、リサーチユーティリティ、AIベースのニュース・レジーム判定、および環境設定管理のコア機能を実装。
-
-### Added
-- パッケージ初期化
-  - kabusys パッケージの __version__ を "0.1.0" に設定し、主要サブパッケージ（data, strategy, execution, monitoring）をエクスポート。
-
-- 環境変数 / 設定管理（kabusys.config）
-  - .env/.env.local の自動ロード機能を実装（プロジェクトルートを .git または pyproject.toml から検出）。
-  - .env パーサーを実装（コメント、export プレフィックス、シングル／ダブルクォート内のエスケープを処理）。
-  - 自動ロードの無効化フラグ KABUSYS_DISABLE_AUTO_ENV_LOAD をサポート。
-  - 環境変数保護（OS 環境変数を protected set として上書き防止）機構を実装。
-  - Settings クラスを導入し、主要設定をプロパティとして提供（J-Quants / kabu API / Slack / DB パス / 監視閾値 / 環境区分 / ログレベル等）。
-  - 必須キー取得時に未設定なら ValueError を送出する _require を提供。
-  - 有効な環境値のバリデーション（KABUSYS_ENV, LOG_LEVEL）。
+- 環境・設定管理（kabusys.config）
+  - .env / .env.local の自動読み込み機能を実装（プロジェクトルート探索、読み込み順: OS 環境 > .env.local > .env）。
+  - export KEY=val 形式やシングル／ダブルクォート、行内コメントに対応する堅牢な .env パーサーを実装。
+  - Settings クラスを導入し、J-Quants / kabuステーション / Slack / DB / 監視閾値等の設定をプロパティ経由で取得。
+  - 環境値検証（KABUSYS_ENV の許容値、LOG_LEVEL の許容値）を追加。
 
 - AI モジュール（kabusys.ai）
-  - ニュース NLP（kabusys.ai.news_nlp）
-    - raw_news / news_symbols から銘柄ごとに記事を集約し、OpenAI（gpt-4o-mini）を用いて銘柄ごとのセンチメント（ai_score）を算出。
-    - バッチ処理（最大 20 銘柄/チャンク）、1銘柄あたりの記事数・文字数制限、JSON Mode の応答バリデーションを実装。
-    - レート制限・ネットワーク障害・5xx に対するエクスポネンシャルバックオフとリトライ。
-    - レスポンスの堅牢なパースとスコアクリップ（±1.0）。部分成功時に既存スコアを保護するための個別 DELETE → INSERT ロジックを採用（DuckDB 互換性配慮）。
-    - 時間ウィンドウ計算（JST に基づく前日 15:00 ～ 当日 08:30 相当）を提供する calc_news_window。
+  - news_nlp.score_news:
+    - raw_news と news_symbols を集約し、銘柄ごとに最大記事数・文字数でトリムして OpenAI にバッチ送信する処理を実装。
+    - バッチ処理（最大 20 銘柄 / リクエスト）・JSON Mode 利用・レスポンス検証（構造・型チェック・既知コードのみ取り込み）を実装。
+    - 429/ネットワーク断/タイムアウト/5xx に対する指数バックオフのリトライ実装。
+    - DuckDB への書き込みは部分置換（対象コードのみ DELETE → INSERT）し、部分失敗時に既存データを保護する設計。
+    - テスト容易性のため _call_openai_api をモック差し替え可能。
 
-  - 市場レジーム判定（kabusys.ai.regime_detector）
-    - ETF 1321（日経225 連動）200 日移動平均乖離（重み 70%）とマクロニュースの LLM センチメント（重み 30%）を合成して日次レジーム（bull/neutral/bear）を判定・保存。
-    - prices_daily / raw_news を参照し、DuckDB 経由で ma200_ratio を計算、マクロニュースはキーワードベースで抽出。
-    - OpenAI 呼び出しは独立実装でリトライ・例外ハンドリングを備える（フェイルセーフとして API 失敗時は macro_sentiment=0.0）。
-    - 判定結果は market_regime テーブルへ冪等的に書き込み（BEGIN/DELETE/INSERT/COMMIT）。
+  - regime_detector.score_regime:
+    - ETF 1321（日経225連動型）の 200 日移動平均乖離（重み 70%）とマクロニュースの LLM センチメント（重み 30%）を合成して market_regime テーブルに冪等的に書き込む処理を実装。
+    - マクロニュース抽出（キーワードフィルタ）・OpenAI 呼び出し（gpt-4o-mini）とリトライ・フェイルセーフを実装。
+    - レジームスコアの閾値に基づき 'bull' / 'neutral' / 'bear' を判定。
+    - DB 書き込みは BEGIN/DELETE/INSERT/COMMIT の冪等方式。エラー発生時は ROLLBACK を試行して上位へ例外伝播。
 
-- データプラットフォーム（kabusys.data）
-  - ETL パイプライン基盤（kabusys.data.pipeline）
-    - ETLResult データクラスを導入し、ETL 実行結果（取得数／保存数／品質問題／エラー）を構造化して返却。
-    - ETL の差分更新・バックフィル・品質チェック設計を注記（実装済のユーティリティ関数・定数を含む）。
-  - ETL 公開インターフェース（kabusys.data.etl）で ETLResult を再エクスポート。
-  - マーケットカレンダー管理（kabusys.data.calendar_management）
-    - market_calendar テーブルを基に営業日判定ロジックを実装（is_trading_day / next_trading_day / prev_trading_day / get_trading_days / is_sq_day）。
-    - DB 登録値優先、未登録日は曜日ベースでフォールバックする一貫した挙動を採用。
-    - calendar_update_job を実装し J-Quants API から差分取得して市場カレンダーを冪等に更新（バックフィル・健全性チェックあり）。
-    - DuckDB からの日付変換ユーティリティやテーブル存在確認ユーティリティを提供。
+- Data モジュール（kabusys.data）
+  - calendar_management:
+    - market_calendar を使った営業日判定ユーティリティを実装（is_trading_day, next_trading_day, prev_trading_day, get_trading_days, is_sq_day）。
+    - DB 登録値優先、未登録日は曜日（土日）フォールバックする一貫した挙動。
+    - calendar_update_job を実装（J-Quants から差分取得して保存、バックフィルと健全性チェックを含む）。
+  - pipeline / etl:
+    - ETLResult データクラスの追加（ETL 実行結果の整形、品質チェック結果・エラー一覧の保持）。
+    - ETL パイプラインの設計方針（差分更新、バックフィル、品質チェックの考え方）を実装下地として追加。
+    - DuckDB でのテーブル存在チェックなどのユーティリティを実装。
+  - etl モジュールから ETLResult を再エクスポート。
 
-- リサーチ / ファクター計算（kabusys.research）
-  - factor_research モジュールに以下を実装:
-    - calc_momentum: 1M/3M/6M リターンと ma200 乖離を計算（データ不足時は None）。
-    - calc_volatility: 20 日 ATR、相対 ATR、20 日平均売買代金、出来高比率を計算。
-    - calc_value: raw_financials から EPS/ROE を取得し PER/ROE を計算（PBR/配当利回りは未実装）。
-  - feature_exploration モジュールに以下を実装:
-    - calc_forward_returns: 任意ホライズンの将来リターン（デフォルト: 1,5,21 営業日）。
-    - calc_ic: ファクターと将来リターンの Spearman ランク相関（IC）を計算。
-    - rank: 同順位は平均ランクで扱うランク変換ユーティリティ（丸め処理で ties 検出を安定化）。
-    - factor_summary: 基本統計量（count/mean/std/min/max/median）の計算。
+- Research モジュール（kabusys.research）
+  - factor_research:
+    - calc_momentum: 1M/3M/6M リターン、200 日 MA 乖離を計算する関数を追加。データ不足時の None 処理を実装。
+    - calc_volatility: 20 日 ATR、ATR 比率、20 日平均売買代金、出来高比率等を計算する関数を追加。
+    - calc_value: raw_financials から最新の財務指標を取得し PER / ROE を計算する関数を追加。
+  - feature_exploration:
+    - calc_forward_returns: 複数ホライズンの将来リターンを一度に取得する機能を追加（ホライズン入力検証あり）。
+    - calc_ic: スピアマンランク相関（IC）を計算するユーティリティを追加（レコード結合・欠損除外・最小サンプルチェック）。
+    - rank: 同順位は平均ランクで扱うランク付け実装（丸めによる ties 対策あり）。
+    - factor_summary: 各ファクターの count/mean/std/min/max/median を計算する集計ユーティリティを追加。
+  - research パッケージは data.stats の zscore_normalize を再エクスポート。
 
-### Fixed
-- DuckDB 周りの互換性配慮
-  - executemany に空リストを渡せない DuckDB 0.10 の挙動を考慮し、空パラメータを渡さないガードを追加。
-  - テーブル存在確認や日付型の取り扱いをユーティリティ化して堅牢性を向上。
+Changed
+- （初期リリースのためメジャーな「変更」はありません。設計上の配慮やフェイルセーフが盛り込まれています）
+  - API 呼び出し周りはエラー耐性を重視（特定の例外に対するリトライ、非 5xx やパースエラーではフォールバックして継続）。
 
-### Security
-- 環境変数の取り扱い改善
-  - .env 読み込み時に OS の既存環境変数を保護する protected set を導入し、意図しない上書きを防止。
-  - 必須トークン（OPENAI_API_KEY, JQUANTS_REFRESH_TOKEN, SLACK_BOT_TOKEN など）は未設定時に明確な例外を発生させることでミスを早期検出。
+Fixed
+- （初期リリースのため「修正履歴」はなし）
 
-### Notes / Migration
-- 必須環境変数
-  - 本リリースで利用される主要な環境変数:
-    - OPENAI_API_KEY（OpenAI 呼び出し）
-    - JQUANTS_REFRESH_TOKEN（J-Quants API）
-    - KABU_API_PASSWORD / KABU_API_BASE_URL（kabuステーション API）
-    - SLACK_BOT_TOKEN / SLACK_CHANNEL_ID（通知用 Slack）
-  - .env.example を参考に .env/.env.local を用意してください。自動ロードはプロジェクトルート（.git または pyproject.toml 参照）から行われます。自動ロードを無効にするには KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください。
+Security
+- 必須の外部 API キー（OpenAI 等）は Settings 経由で取得し、未設定時は明示的に ValueError を投げて早期検出するようにしています。
 
-- デフォルト DB パス
-  - DuckDB: data/kabusys.duckdb（環境変数 DUCKDB_PATH で変更可能）
-  - SQLite（監視用）: data/monitoring.db（環境変数 SQLITE_PATH で変更可能）
+Deprecated
+- なし
 
-- OpenAI 呼び出し
-  - gpt-4o-mini を使用、JSON Mode（response_format={"type": "json_object"}）で厳密な JSON を期待する設計。
-  - テスト容易性のため内部の _call_openai_api はモック差し替えが想定されている（unittest.mock.patch の利用を想定）。
+Removed
+- なし
 
-- レジーム判定 / ニュース解析
-  - ルックアヘッドバイアス防止のため、本実装は内部で datetime.today() / date.today() を参照せず、明示的な target_date パラメータで処理を行う設計。
-  - API 失敗時はフェイルセーフで「中立」や「スコア算出スキップ（0相当）」へフォールバックする挙動。
+Notes / 既知の問題
+- pipeline._get_max_date の末尾に不完全な行（`return date.fro` のような未完の戻り処理）が見られます。これは明らかにタイポ／未完成コードの痕跡で、ランタイムエラーを引き起こします。修正案:
+  - 正しくは DuckDB から返る値を date に変換して返す必要があります（例: 値が date インスタンスならそのまま返し、文字列等なら date.fromisoformat を使う等）。
+- 一部モジュール（例: data/__init__.py は空、strategy / execution / monitoring の実装参照があるが提示コードには未掲載）については実装の骨格のみまたは未公開のため、機能が揃っていない可能性があります。
+- OpenAI 依存部分は API レスポンス形式や SDK のバージョン差異に影響を受ける可能性があります。テストでは _call_openai_api をモックすることが想定されています。
 
-### Removed
-- なし（初回リリース）
+今後の推奨作業（提案）
+- pipeline._get_max_date の不完全実装を修正してユニットテスト追加。
+- data, strategy, execution, monitoring の欠落しているエントリポイントやユニットテストの整備。
+- OpenAI 関連の統合テスト（API 変化や JSON Mode の挙動確認）と料金・レート管理に関する運用ドキュメントの追加。
+- DuckDB バージョン差分による executemany の挙動（空リスト不可等）に関するテスト・ドキュメント化。
 
 ---
-
-開発者・利用者向けの補足やバグ報告・機能要望はリポジトリの Issue にお願いします。
+この CHANGELOG はコードベースの内容を解析して推測したもので、実際のコミット履歴とは異なる場合があります。必要であれば、各項目をより厳密にコミット単位で分解して記載できます。
