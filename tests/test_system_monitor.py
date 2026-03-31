@@ -99,3 +99,60 @@ class TestProcessCheck:
         assert result.process_ok is False
         assert result.stale_pid_detected is True
         assert not pid_file.exists()
+
+
+class TestDataFreshness:
+
+    def _make_monitor(self, monitoring_conn, duckdb_prices_conn, tmp_path):
+        pid_file = tmp_path / "execution.pid"
+        return SystemMonitor(monitoring_conn, duckdb_prices_conn, pid_file=pid_file)
+
+    def test_fresh_data_ok(self, monitoring_conn, duckdb_prices_conn, tmp_path):
+        """当日の株価データあり → data_freshness_ok=True"""
+        today = date(2026, 3, 31)
+        duckdb_prices_conn.execute(
+            "INSERT INTO raw_prices (date, code) VALUES (?, ?)",
+            [today, "1234"],
+        )
+        mon = self._make_monitor(monitoring_conn, duckdb_prices_conn, tmp_path)
+
+        with patch("psutil.cpu_percent", return_value=10.0), \
+             patch("psutil.virtual_memory") as mock_mem, \
+             patch("psutil.disk_usage") as mock_disk:
+            mock_mem.return_value = MagicMock(percent=20.0)
+            mock_disk.return_value = MagicMock(percent=30.0)
+            result = mon.check_once(today=today)
+
+        assert result.data_freshness_ok is True
+
+    def test_stale_data_not_ok(self, monitoring_conn, duckdb_prices_conn, tmp_path):
+        """4日以上古い株価データ → data_freshness_ok=False"""
+        today = date(2026, 3, 31)
+        stale_date = date(2026, 3, 27)  # 4日前
+        duckdb_prices_conn.execute(
+            "INSERT INTO raw_prices (date, code) VALUES (?, ?)",
+            [stale_date, "1234"],
+        )
+        mon = self._make_monitor(monitoring_conn, duckdb_prices_conn, tmp_path)
+
+        with patch("psutil.cpu_percent", return_value=10.0), \
+             patch("psutil.virtual_memory") as mock_mem, \
+             patch("psutil.disk_usage") as mock_disk:
+            mock_mem.return_value = MagicMock(percent=20.0)
+            mock_disk.return_value = MagicMock(percent=30.0)
+            result = mon.check_once(today=today)
+
+        assert result.data_freshness_ok is False
+
+    def test_no_data_not_ok(self, monitoring_conn, duckdb_prices_conn, tmp_path):
+        """データなし（空テーブル）→ data_freshness_ok=False"""
+        mon = self._make_monitor(monitoring_conn, duckdb_prices_conn, tmp_path)
+
+        with patch("psutil.cpu_percent", return_value=10.0), \
+             patch("psutil.virtual_memory") as mock_mem, \
+             patch("psutil.disk_usage") as mock_disk:
+            mock_mem.return_value = MagicMock(percent=20.0)
+            mock_disk.return_value = MagicMock(percent=30.0)
+            result = mon.check_once(today=date(2026, 3, 31))
+
+        assert result.data_freshness_ok is False
