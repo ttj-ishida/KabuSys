@@ -1,90 +1,86 @@
-# Changelog
+# CHANGELOG
 
-すべての変更は Keep a Changelog の形式に従います。  
-このプロジェクトはセマンティックバージョニングを使用します。
-
-一覧:
-- [Unreleased]
-- [0.1.0] - 2026-03-31
+このファイルは Keep a Changelog の形式に従っています。  
+全ての変更は SemVer に従ってバージョン管理されています。
 
 ## [Unreleased]
-（なし）
+
+（現時点で未リリースの変更はありません）
 
 ## [0.1.0] - 2026-03-31
 
-### Added
-- 基本パッケージ初期実装
-  - パッケージメタ情報: kabusys.__version__ = 0.1.0、公開サブパッケージとして data, strategy, execution, monitoring を定義。
+初回公開リリース。本リポジトリに含まれる主要機能と実装上の注意点を記載します。
 
-- 環境変数 / 設定管理 (kabusys.config)
-  - .env および .env.local を自動読み込みする仕組みを導入（プロジェクトルートは .git または pyproject.toml を基準に探索）。
-  - 自動ロードを無効化する環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD をサポート。
-  - .env パーサーの実装（コメント、export プレフィックス、シングル/ダブルクォートとエスケープ処理、インラインコメントの扱い等を考慮）。
-  - Settings クラスを実装し、アプリケーションで使用する設定値を集中管理:
-    - J-Quants / kabuステーション / Slack / DB（DuckDB/SQLite）パス / 監視閾値 / 環境（development/paper_trading/live） / ログレベル 等のプロパティを提供。
-    - 必須キー未設定時に明示的な ValueError を送出する _require() を採用。
-    - env, log_level に対する入力検証を実装（許容値チェック）。
+### 追加（Added）
+- パッケージ初期化
+  - kabusys パッケージの基本公開 API を追加（__version__ = 0.1.0、__all__ に data/strategy/execution/monitoring を定義）。
 
-- AI モジュール群
-  - kabusys.ai.news_nlp
-    - score_news: raw_news と news_symbols を集約し、OpenAI（gpt-4o-mini, JSON Mode）で銘柄ごとのセンチメント（ai_score）を算出して ai_scores テーブルへ書き込む処理を実装。
-    - タイムウィンドウ計算（前日 15:00 JST ～ 当日 08:30 JST を UTC に変換）を calc_news_window として提供。
-    - API 呼び出しのバッチ処理（最大 _BATCH_SIZE=20 銘柄/回）、トークン膨張対策（記事数・文字数上限）、再試行（429/ネットワーク断/タイムアウト/5xx に対する指数バックオフ）を実装。
-    - レスポンス検証ロジック（JSON 抽出、results 配列と要素検証、スコア数値・有限性チェック、±1.0 でクリップ）。
-    - DuckDB に対する idempotent な書き込み（DELETE → INSERT、executemany の空リスト回避）を実装。
-    - フェイルセーフ設計: API 失敗やパース失敗は個別チャンクをスキップし、全体処理を継続。
+- 設定・環境変数管理（kabusys.config）
+  - .env ファイル（.env, .env.local）および環境変数から設定を自動読み込みする仕組みを実装。プロジェクトルート検出は .git または pyproject.toml を基準に行うため、CWD に依存しない読み込みが可能。
+  - .env パーサ実装：コメント行、export プレフィックス、シングル/ダブルクォート、バックスラッシュエスケープ、インラインコメントの扱いに対応。
+  - 自動読み込みは KABUSYS_DISABLE_AUTO_ENV_LOAD 環境変数で無効化可能。
+  - Settings クラスを提供し、J-Quants / kabuステーション / Slack / DB / 監視閾値 / システム設定のプロパティアクセスを実装。必須項目は _require() で明示的にエラー化。
+  - KABUSYS_ENV と LOG_LEVEL の値チェック（許容値検証）を実装。
 
-  - kabusys.ai.regime_detector
-    - score_regime: ETF 1321（TOPIX 日経225連動型 ETF）の 200 日移動平均乖離（ma200_ratio）とマクロニュースの LLM センチメントを組み合わせて市場レジーム（bull/neutral/bear）を日次判定し market_regime テーブルへ冪等書き込みする処理を実装。
-    - マクロニュース抽出（キーワードベース）、LLM 呼び出し（JSON Mode）、リトライ/バックオフ、API エラー時のフォールバック（macro_sentiment=0.0）を実装。
-    - ma200_ratio 計算はルックアヘッドバイアスを避けるため target_date 未満のデータのみ参照し、データ不足時は中立（1.0）を返す。
-    - OpenAI クライアント呼び出しはモジュール単位で独立実装（モジュール結合を避ける設計）。
+- AI（自然言語処理）機能（kabusys.ai）
+  - ニュースセンチメント（銘柄単位）スコアリング（kabusys.ai.news_nlp）
+    - raw_news / news_symbols を元に指定時間ウィンドウのニュースを銘柄ごとに集約。
+    - OpenAI（gpt-4o-mini）へバッチ送信（複数銘柄を最大 20 件ずつ）。
+    - JSON Mode を利用した厳密なレスポンス想定とレスポンスのバリデーション実装。
+    - 429 / ネットワーク断 / タイムアウト / 5xx に対する指数バックオフでのリトライ処理を実装。
+    - スコアは ±1 にクリップして ai_scores テーブルへ冪等的に (DELETE → INSERT) 書き込み。
+    - 公開関数: score_news(conn, target_date, api_key=None)
+    - 補助関数: calc_news_window, _fetch_articles, _score_chunk, _validate_and_extract など。
 
-  - kabusys.ai.__init__
-    - score_news を公開 API としてエクスポート。
+  - 市場レジーム判定（kabusys.ai.regime_detector）
+    - ETF 1321（Nikkei-225 連動型）の 200 日移動平均乖離（重み 70%）と、マクロニュース LLM センチメント（重み 30%）を合成して market_regime テーブルへ日次の判定を保存。
+    - OpenAI（gpt-4o-mini）呼び出しを内部で行い、API障害時は macro_sentiment を 0.0 にフォールバック。
+    - 冪等な DB 書き込み（BEGIN / DELETE / INSERT / COMMIT）を行う。
+    - 公開関数: score_regime(conn, target_date, api_key=None)
 
-- データプラットフォーム関連 (kabusys.data)
-  - calendar_management
-    - JPX マーケットカレンダー管理と営業日ロジックを実装。
-    - is_trading_day / is_sq_day / next_trading_day / prev_trading_day / get_trading_days 等のユーティリティを提供。
-    - market_calendar が未取得の場合は曜日ベースでフォールバック（土日を非営業日扱い）。
-    - calendar_update_job にて J-Quants から差分取得 → 冪等保存（ON CONFLICT 相当）を行うフローを実装。バックフィル、健全性チェック（future days の閾値）を含む。
-    - DB に不整合（NULL 等）があった場合のログ出力とフォールバックを実装。
+- データ管理（kabusys.data）
+  - マーケットカレンダー管理（kabusys.data.calendar_management）
+    - market_calendar を用いた営業日判定ロジックを提供（is_trading_day, next_trading_day, prev_trading_day, get_trading_days, is_sq_day）。
+    - DB 登録値を優先し、未登録日は曜日ベース（週末除外）でフォールバックする一貫した挙動を実装。
+    - calendar_update_job: J-Quants から差分でカレンダーを取得・保存する夜間バッチ処理（バックフィル、健全性チェック含む）。
+  - ETL / パイプライン（kabusys.data.pipeline / etl）
+    - ETLResult データクラスを公開（パイプラインの実行結果集約）。
+    - 差分取得・保存・品質チェックの方針を反映した ETL パイプライン用ユーティリティを実装（jquants_client, quality モジュールと連携する設計）。
+    - テーブル存在チェックや最大日付取得などのヘルパー関数を実装。
 
-  - pipeline / etl
-    - ETLResult dataclass を導入し、ETL 実行結果（取得数/保存数/品質問題/エラー等）を表現。
-    - pipeline と etl の内部ユーティリティで DuckDB テーブル存在確認や最大日付取得などを実装（差分更新、backfill、品質チェックの想定設計を含む）。
-    - data.etl で ETLResult を再エクスポート。
+- リサーチ（kabusys.research）
+  - ファクター計算（kabusys.research.factor_research）
+    - モメンタム（1M/3M/6M リターン）、200 日移動平均乖離、ATR（20 日）、流動性指標（20 日平均売買代金、出来高比）などを DuckDB 上で計算する関数を実装。
+    - 公開関数: calc_momentum, calc_volatility, calc_value
+  - 特徴量探索（kabusys.research.feature_exploration）
+    - 将来リターン計算（calc_forward_returns）、IC（calc_ic）、ランク変換（rank）、統計サマリー（factor_summary）を標準ライブラリのみで実装。
+    - pandas 等の外部依存を避け、DuckDB と組み合わせて使用する設計。
 
-- 研究（Research）モジュール (kabusys.research)
-  - factor_research
-    - calc_momentum: 約1M/3M/6M リターン、200 日 MA 乖離の算出（prices_daily 参照、データ不足ハンドリング）。
-    - calc_volatility: 20 日 ATR（true range の算出方法含む）、相対 ATR、20 日平均売買代金、出来高比率等の算出。
-    - calc_value: raw_financials と prices_daily を組み合わせて PER, ROE を計算（最新財務レコードの取得ロジックを含む）。
-    - DuckDB 上のウィンドウ関数や行数条件によりデータ不足時に None を返す堅牢な実装。
-  - feature_exploration
-    - calc_forward_returns: 任意ホライズン（デフォルト [1,5,21]）での将来リターン計算。ホライズン検証（正の整数・閾値）あり。
-    - calc_ic: スピアマンのランク相関を実装（欠損除外、十分サンプルがなければ None）。
-    - rank: 同順位の平均ランク処理（丸めで ties 検出の安定化）。
-    - factor_summary: count/mean/std/min/max/median を計算する統計サマリ機能。
-  - research.__init__ で主要関数をエクスポート。
+### 変更（Changed）
+- 設計上の重要な方針をコードに反映
+  - 全ての時刻/日付は明示的に引数で与え、datetime.today() / date.today() を直接参照しない実装（ルックアヘッドバイアス防止）。
+  - OpenAI 呼び出しは各モジュール内で独立して実装し、モジュール間でプライベート関数を共有しないことで結合度を低く保つ設計。
+  - DuckDB への書き込みは可能な限り冪等操作（DELETE → INSERT、または ON CONFLICT 相当）で行い、部分失敗時に既存データを不必要に消さない実装。
 
-### Changed
-- （初回リリースのため該当なし）
+### 修正（Fixed）
+- 耐障害性向上
+  - OpenAI API 呼び出しでの 5xx/429/接続エラー/タイムアウトについて適切にリトライし、全リトライ失敗時はフェイルセーフとして処理を進める（スコアを 0.0 とするか対象をスキップ）。
+  - JSON レスポンスのパースで余計な前後テキストが混入するケースを考慮して { ... } 抽出のフェールバックを実装。
+  - DuckDB executemany の空リストバインドに対する互換性問題を回避するため、空チェックを行ってから executemany を実行。
 
-### Fixed
-- （初回リリースのため該当なし）
+### セキュリティ（Security）
+- 環境変数に依存する API キー（OPENAI_API_KEY / JQUANTS_REFRESH_TOKEN / SLACK_BOT_TOKEN など）は Settings 経由で必須チェックを行い、未設定時は明示的にエラーを投げる実装。
 
-### Security
-- OpenAI API キーは引数で注入可能（テスト容易性）かつ環境変数 OPENAI_API_KEY からも解決する設計。未設定時は明示的な例外を発生させる。
+### 互換性（Compatibility）
+- 本バージョンは DuckDB を想定しており、SQL 文や executemany の挙動は DuckDB のバージョン差に敏感な箇所があるため、DuckDB 0.10 系列との互換性を想定して実装されています。
+- OpenAI SDK の例外型（APIError.subclass の status_code など）に配慮した互換性対策を実装。
 
-### Implementation / Design notes
-- ルックアヘッドバイアス対策: 各種処理で datetime.today() / date.today() に依存せず、必ず外部から target_date を受け取る設計。
-- DuckDB 互換性: executemany の空リスト回避や日付型ハンドリングのユーティリティを実装。
-- 冪等性: DB 書き込みは可能な限り冪等（DELETE → INSERT、ON CONFLICT 相当）を意識して実装。
-- フェイルセーフ: 外部 API 失敗は基本的にフェイルセーフ（スコア = 0 やチャンクスキップ）で処理継続する方針。
-- ロギング: 各処理に詳細な logger メッセージを追加し、失敗時の診断を容易に。
+### 注意事項 / マイグレーションノート（Notes）
+- OpenAI API 使用部分は実行時に有効な OPENAI_API_KEY が必要です。テスト時は api_key 引数で注入するか、該当モジュールの _call_openai_api をモックしてください。
+- .env 自動ロードはプロジェクトルート検出に依存します。パッケージ配布後やテスト環境で自動ロードを無効化したい場合は KABUSYS_DISABLE_AUTO_ENV_LOAD を設定してください。
+- calendar_update_job は外部 J-Quants クライアント（kabusys.data.jquants_client）に依存します。API 呼び出しの失敗はジョブが 0 を返す形で表現されます。
+- ETL / pipeline 部分は jquants_client, quality の実装に依存します。これらの接続・保存ロジックは idempotent 保存を前提としています。
 
 ---
 
-注: 本 CHANGELOG はソースコードから推測して作成しています。実装の詳細や未掲載ファイル（例: jquants_client, quality, data.stats 等）の具体的な振る舞いに依存する部分は省略または要約されています。必要であれば特定モジュールごとにさらに詳細な変更点を生成します。
+（今後のリリースではバグ修正、追加機能、API 互換性の変更をこの CHANGELOG に追記していきます。）
