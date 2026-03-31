@@ -247,9 +247,35 @@ Windows 1台での稼働を前提とし、オーバーヘッドの少ない構�
 
 | 種類 | ツール / 技術 | 用途・保存先 |
 |----|----|----|
-| データベース | SQLite | `monitoring.db` (テーブル: `system_status`, `trade_logs`, `risk_logs`, `dashboard`) |
+| データベース | SQLite | `monitoring.db` (テーブル: `system_status`, `trade_logs`, `positions`, `risk_logs`, `dashboard`) |
 | ダッシュボード | Streamlit | Equity, Positions, Orders, Drawdownの画面 |
 | アラート | Slack | Slack API 経由での異常通知 |
+
+### SQLite テーブル設計（Phase 7 実装）
+
+`src/kabusys/monitoring/monitoring_db.py` に `init_monitoring_db(conn)` + `MonitoringDB(conn)` として実装する。
+接続管理は呼び出し側（監視エンジン等）が担当し、`MonitoringDB` は `conn` を受け取るのみ。
+
+| テーブル | 書き込み方式 | 用途 |
+|---|---|---|
+| `system_status` | 追記（60秒ポーリング） | CPU/メモリ/ディスク/プロセス状態 |
+| `trade_logs` | 追記（イベント駆動） | 発注・約定・キャンセル等のイベント履歴 |
+| `positions` | upsert（code をキー） | 保有ポジション最新状態 |
+| `risk_logs` | 追記（イベント駆動） | DD超過・ポジション上限等のリスクイベント |
+| `dashboard` | 1行 upsert（id=1固定） | Streamlit向け最新集計値 |
+
+`MonitoringDB` API:
+
+```python
+MonitoringDB(conn)
+  .log_system_status(cpu_percent, memory_percent, disk_percent, process_ok, recorded_at=None)
+  .log_trade_event(event_type, client_order_id, code, side, qty, price, filled_qty=0, state="", logged_at=None)
+  .upsert_position(code, qty, avg_price, current_price=None, updated_at=None)
+  .delete_position(code)
+  .log_risk_event(event_type, metric_name, metric_value, threshold, detail=None, logged_at=None)
+  .upsert_dashboard(portfolio_value, cash, drawdown_pct, open_order_count, position_count, updated_at=None)
+  .get_dashboard() -> dict | None
+```
 
 ## Phase 2 (将来拡張)
 
