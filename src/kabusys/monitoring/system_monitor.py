@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import duckdb
@@ -12,10 +12,10 @@ import psutil
 from kabusys.data.pipeline import get_last_price_date
 from kabusys.monitoring.monitoring_db import MonitoringDB
 
-_FRESHNESS_DAYS = 3
+_FRESHNESS_DAYS = 3  # ≤3 日は許容（週末・祝日のギャップをカバー）
 
 
-@dataclass
+@dataclass(frozen=True)
 class SystemCheckResult:
     recorded_at: str          # ISO8601 UTC
     cpu_percent: float
@@ -41,7 +41,8 @@ class SystemMonitor:
 
     def check_once(self, today: date | None = None) -> SystemCheckResult:
         today = today or date.today()
-        recorded_at = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
+        recorded_at = now.isoformat()
 
         cpu = psutil.cpu_percent(interval=0.1)
         mem = psutil.virtual_memory().percent
@@ -55,6 +56,7 @@ class SystemMonitor:
             memory_percent=mem,
             disk_percent=disk,
             process_ok=process_ok,
+            recorded_at=now,
         )
 
         if stale_pid:
