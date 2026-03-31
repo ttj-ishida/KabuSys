@@ -1011,8 +1011,12 @@ class MonitoringEngine:
         """本番用: KeyboardInterrupt まで interval_sec 間隔でポーリング。"""
         logger.info("MonitoringEngine starting (interval=%ds)", self._interval_sec)
         while True:
-            self.run_once()
-            time.sleep(self._interval_sec)
+            try:
+                self.run_once()
+                time.sleep(self._interval_sec)
+            except KeyboardInterrupt:
+                logger.info("MonitoringEngine stopped")
+                break
 ```
 
 - [ ] **Step 4: テストが PASS することを確認**

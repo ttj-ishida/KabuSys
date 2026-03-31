@@ -81,10 +81,13 @@ class SystemMonitor:
         conn: sqlite3.Connection,
         duckdb_conn: duckdb.DuckDBPyConnection,
         pid_file: Path = Path("data/execution.pid"),
+        disk_path: str = "C:\\",
     ) -> None
 
     def check_once(self, today: date | None = None) -> SystemCheckResult
 ```
+
+- `disk_path`: テスト環境の互換性のためパラメータ化。本番は `"C:\\"` (Windows 単一ノード構成)。
 
 ### PID ファイル方式（Monitoring.md § 3 準拠）
 
