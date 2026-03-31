@@ -178,21 +178,25 @@ class SystemMonitor:
 
         cpu = psutil.cpu_percent(interval=1)
         mem = psutil.virtual_memory().percent
-        disk = psutil.disk_usage("/").percent
+        # Windows 対応: "/" は無効。Path.cwd().drive（例: "C:\\"）を使用。
+        # 空の場合（Linux/テスト）は "/" にフォールバック。
+        disk_path = Path.cwd().drive + "\\" if Path.cwd().drive else "/"
+        disk = psutil.disk_usage(disk_path).percent
 
         process_ok, stale_pid_detected = self._check_process()
         data_freshness_ok = self._check_data_freshness(today)
 
-        recorded_at = datetime.now(timezone.utc).isoformat()
+        now_utc = datetime.now(timezone.utc)
         self._db.log_system_status(
             cpu_percent=cpu,
             memory_percent=mem,
             disk_percent=disk,
             process_ok=process_ok,
+            recorded_at=now_utc,  # SystemCheckResult と DB の recorded_at を一致させる
         )
 
         return SystemCheckResult(
-            recorded_at=recorded_at,
+            recorded_at=now_utc.isoformat(),
             cpu_percent=cpu,
             memory_percent=mem,
             disk_percent=disk,
@@ -278,6 +282,34 @@ def duckdb_prices_conn():
     yield conn
     conn.close()
 ```
+
+> **注意:** 既存の `mem_db` フィクスチャも `raw_prices` を含むが、別の目的（既存 ETL テスト）で使われている。`duckdb_prices_conn` は `SystemMonitor` テスト専用として分離する。
+
+**`TestExecutionEnginePid` のテスト停止方法:**
+
+`run_session()` はタイマーループを持つため、テストでは `_process_signals` と WebSocket を全てモックして即時終了させる:
+
+```python
+def test_pid_file_written_on_start(tmp_path, ...):
+    pid_file = tmp_path / "execution.pid"
+    engine = ExecutionEngine(..., pid_file=pid_file)
+    # run_session の内部ループをモックして即座に return させる
+    with patch.object(engine, "_process_signals", side_effect=KeyboardInterrupt):
+        with pytest.raises(KeyboardInterrupt):
+            engine.run_session()
+    assert pid_file.exists()
+
+def test_pid_file_removed_on_clean_exit(tmp_path, ...):
+    pid_file = tmp_path / "execution.pid"
+    engine = ExecutionEngine(..., pid_file=pid_file)
+    with patch.object(engine, "_process_signals", side_effect=KeyboardInterrupt):
+        with pytest.raises(KeyboardInterrupt):
+            engine.run_session()
+    # finally ブロックで削除されるため、KeyboardInterrupt 後もファイルは消えている
+    assert not pid_file.exists()
+```
+
+> **注意:** `pid_file` パラメータは `ExecutionEngine` に直接渡せるよう `__init__` に `pid_file: Path | None = None` を追加する（`None` 時は `config.pid_file_path` を使用）。
 
 | テストクラス / ケース | 検証内容 |
 |---|---|
