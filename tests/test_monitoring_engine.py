@@ -10,6 +10,7 @@ import pytest
 
 from kabusys.monitoring.monitoring_db import MonitoringDB, init_monitoring_db
 from kabusys.monitoring.system_monitor import SystemMonitor
+from kabusys.monitoring.trade_monitor import TradeMonitor
 
 
 # ─── Fixtures ───────────────────────────────────────────────────────────────
@@ -132,3 +133,133 @@ def test_system_monitor_data_freshness_none(mon_conn, mock_duckdb, tmp_path):
         result = monitor.check_once(today=date.today())
 
     assert result.data_freshness_ok is False
+
+
+# ─── TradeMonitor ─────────────────────────────────────────────────────────────
+
+import uuid
+from datetime import timedelta
+
+from kabusys.execution.order_record import OrderRecord, OrderState
+from kabusys.execution.order_repository import OrderRepository
+
+
+def _make_order(
+    *,
+    state: OrderState = OrderState.OrderCreated,
+    price: float = 1000.0,
+    avg_fill_price: float | None = None,
+    created_at: datetime | None = None,
+    order_type: str = "limit",
+) -> OrderRecord:
+    """テスト用 OrderRecord ファクトリ。"""
+    return OrderRecord(
+        client_order_id=str(uuid.uuid4()),
+        signal_id=str(uuid.uuid4()),
+        code="7203",
+        side="buy",
+        qty=100,
+        order_type=order_type,
+        price=price,
+        state=state,
+        created_at=created_at or datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        avg_fill_price=avg_fill_price,
+    )
+
+
+def test_trade_monitor_no_active_orders(mon_conn):
+    """アクティブ注文なし → stale_orders/anomaly_fills ともに空"""
+    repo = MagicMock()
+    repo.list_active.return_value = []
+    monitor = TradeMonitor(mon_conn, repo)
+
+    result = monitor.check_once()
+
+    assert result.stale_orders == []
+    assert result.anomaly_fills == []
+
+
+def test_trade_monitor_fresh_order_not_stale(mon_conn):
+    """作成5分後の注文 → stale 判定なし"""
+    now = datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc)
+    order = _make_order(
+        state=OrderState.OrderAccepted,
+        created_at=now - timedelta(minutes=5),
+    )
+    repo = MagicMock()
+    repo.list_active.return_value = [order]
+    monitor = TradeMonitor(mon_conn, repo, stale_minutes=30)
+
+    result = monitor.check_once(now=now)
+
+    assert result.stale_orders == []
+
+
+def test_trade_monitor_stale_order_detected(mon_conn):
+    """作成31分後の注文 → stale_orders に追加, risk_log 記録"""
+    now = datetime(2026, 4, 1, 9, 31, 0, tzinfo=timezone.utc)
+    order = _make_order(
+        state=OrderState.OrderAccepted,
+        created_at=datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc),
+    )
+    repo = MagicMock()
+    repo.list_active.return_value = [order]
+    monitor = TradeMonitor(mon_conn, repo, stale_minutes=30)
+
+    result = monitor.check_once(now=now)
+
+    assert order.client_order_id in result.stale_orders
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='STALE_ORDER'").fetchall()
+    assert len(rows) == 1
+
+
+def test_trade_monitor_normal_fill_no_anomaly(mon_conn):
+    """約定価格が発注価格の 5% 乖離 → anomaly なし"""
+    order = _make_order(
+        state=OrderState.Filled,
+        price=1000.0,
+        avg_fill_price=1050.0,  # 5% 乖離
+    )
+    repo = MagicMock()
+    repo.list_active.return_value = [order]
+    monitor = TradeMonitor(mon_conn, repo, price_anomaly_pct=0.20)
+
+    result = monitor.check_once()
+
+    assert result.anomaly_fills == []
+
+
+def test_trade_monitor_price_anomaly_detected(mon_conn):
+    """約定価格が発注価格の 30% 乖離 → anomaly_fills に追加"""
+    order = _make_order(
+        state=OrderState.Filled,
+        price=1000.0,
+        avg_fill_price=1300.0,  # 30% 乖離
+    )
+    repo = MagicMock()
+    repo.list_active.return_value = [order]
+    monitor = TradeMonitor(mon_conn, repo, price_anomaly_pct=0.20)
+
+    result = monitor.check_once()
+
+    assert order.client_order_id in result.anomaly_fills
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='PRICE_ANOMALY'").fetchall()
+    assert len(rows) == 1
+
+
+def test_trade_monitor_market_order_excluded(mon_conn):
+    """成行注文（price=0.0）は約定異常チェック対象外"""
+    order = _make_order(
+        state=OrderState.Filled,
+        price=0.0,
+        avg_fill_price=1500.0,
+        order_type="market",
+    )
+    repo = MagicMock()
+    repo.list_active.return_value = [order]
+    monitor = TradeMonitor(mon_conn, repo, price_anomaly_pct=0.20)
+
+    result = monitor.check_once()
+
+    assert result.anomaly_fills == []
