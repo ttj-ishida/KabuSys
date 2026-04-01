@@ -46,6 +46,16 @@ ExecutionEngine.run_session()（別プロセス）
 
 ## 3. KillSwitch (`kill_switch.py`)
 
+### インポート
+
+```python
+from kabusys.monitoring.system_monitor import SystemCheckResult
+from kabusys.monitoring.trade_monitor import TradeCheckResult
+from kabusys.monitoring.risk_monitor import RiskCheckResult
+```
+
+これらのモジュールは `KillSwitch` を import しないため、循環 import は発生しない。
+
 ### トリガー条件
 
 | 条件 | kill.flag | LINE レベル |
@@ -61,7 +71,9 @@ ExecutionEngine.run_session()（別プロセス）
 
 ```python
 class KillSwitch:
-    def __init__(self, flag_path: Path = Path("data/kill.flag")) -> None
+    def __init__(self, flag_path: Path) -> None
+    # flag_path は呼び出し元が Settings.kill_flag_path から渡す（デフォルト値なし）。
+    # これにより KillSwitch が Settings に直接依存することを避け、テスト容易性を確保する。
 
     def evaluate(
         self,
@@ -103,11 +115,13 @@ class AlertManager:
         cooldown_minutes: int = 30,
     ) -> None
 
-    def notify(self, message: str, level: str = "INFO") -> bool
+    def notify(self, message: str, level: str = "INFO", category: str = "") -> bool
     # LINE Messaging API push message を送信する。
-    # 同一 level の直近送信から cooldown_minutes 以内はスキップ（ログのみ）。
+    # 同一 (level, category) の直近送信から cooldown_minutes 以内はスキップ（ログのみ）。
+    # category を省略した場合は level のみでクールダウン管理する。
     # 送信した場合 True、スキップした場合 False を返す。
     # channel_access_token / user_id が空の場合は警告ログのみ（送信しない）。
+    # requests.exceptions.RequestException または非 2xx レスポンス時はエラーログを出力し False を返す（例外を外部に伝播しない）。
 ```
 
 ### LINE メッセージ形式
@@ -131,7 +145,9 @@ requests.post(
 
 ### cooldown 管理
 
-`AlertManager` はインスタンス変数 `_last_sent: dict[str, datetime]` で level ごとの最終送信時刻を管理する（プロセスメモリ内）。プロセス再起動でリセットされるが、60秒ポーリング運用では十分な抑制効果がある。
+`AlertManager` はインスタンス変数 `_last_sent: dict[tuple[str, str], datetime]` で `(level, category)` ごとの最終送信時刻を管理する（プロセスメモリ内）。
+
+これにより `drawdown_alert`（category="DRAWDOWN"）と `process_ok=False`（category="PROCESS"）が同一 CRITICAL レベルでも互いのクールダウンに影響しない。プロセス再起動でリセットされるが、60秒ポーリング運用では十分な抑制効果がある。
 
 ---
 
@@ -154,8 +170,22 @@ class MonitoringEngine:
     ) -> None
 
     def run_once(self) -> None:
-        # 1. 各 Monitor の check_once() を呼び出す（既存）
-        # 2. KillSwitch.evaluate() でトリガー判定・flag 書き込み
+        # 既存の汎用ループ（self._monitors を順に呼び出す）を廃止し、
+        # 各 Monitor を個別に呼び出して戻り値を変数で受け取る形に変更する。
+        #
+        # 変更後のシグネチャ（概念コード）:
+        #   sys_result   = self._system_monitor.check_once()
+        #   trade_result = self._trade_monitor.check_once()
+        #   risk_result  = self._risk_monitor.check_once()
+        #
+        # KillSwitch / AlertManager はこれらの結果を受け取って動作するため、
+        # __init__ で monitors を list に格納する既存設計を
+        # 3つの個別インスタンス変数 (_system_monitor, _trade_monitor, _risk_monitor)
+        # に分解する必要がある。
+        # **重要:** 既存の `self._monitors` リストは完全に削除する。
+        # 残存すると run_once() が各 Monitor を二重呼び出しし、DB に重複行が書き込まれる。
+        #
+        # 2. KillSwitch.evaluate(sys_result, trade_result, risk_result)
         # 3. AlertManager.notify() でアラート条件を通知
 ```
 
@@ -163,45 +193,62 @@ class MonitoringEngine:
 
 ### アラート送信ロジック（run_once 末尾）
 
+`AlertManager.notify()` の `category` 引数には条件を識別する固定文字列を渡す。これにより同一 level の異なる条件がクールダウンで相互干渉しない。
+
+**二重アラートについて:** `drawdown_alert=True` / `position_limit_alert=True` の場合、kill-switch ブロックと個別アラートブロックの両方からメッセージが送信される（category が異なるためクールダウンは干渉しない）。これは意図的な設計で、kill-switch メッセージは「flag 書き込み実行」、個別アラートメッセージは「条件の詳細値」をそれぞれ通知する。
+
 ```python
 # Kill Switch 評価
 if self._kill_switch:
     reason = self._kill_switch.evaluate(sys_result, trade_result, risk_result)
-    if reason:
-        self._notify(f"Kill Switch 発動: {reason}", "CRITICAL")
+    if reason and self._alert_manager:
+        self._alert_manager.notify(f"Kill Switch 発動: {reason}", "CRITICAL", category="KILL_SWITCH")
 
 # 個別アラート
 if self._alert_manager:
     if not sys_result.process_ok:
-        self._notify("Execution プロセス停止を検出", "CRITICAL")
+        self._alert_manager.notify("Execution プロセス停止を検出", "CRITICAL", category="PROCESS")
     if trade_result.stale_orders:
-        self._notify(f"滞留注文 {len(trade_result.stale_orders)} 件", "WARNING")
+        self._alert_manager.notify(f"滞留注文 {len(trade_result.stale_orders)} 件", "WARNING", category="STALE_ORDER")
     if trade_result.anomaly_fills:
-        self._notify(f"約定異常価格 {len(trade_result.anomaly_fills)} 件", "WARNING")
+        self._alert_manager.notify(f"約定異常価格 {len(trade_result.anomaly_fills)} 件", "WARNING", category="PRICE_ANOMALY")
     if risk_result.drawdown_alert:
-        self._notify(f"DD {risk_result.drawdown_pct*100:.1f}% 超過", "CRITICAL")
+        self._alert_manager.notify(f"DD {risk_result.drawdown_pct*100:.1f}% 超過", "CRITICAL", category="DRAWDOWN")
     if risk_result.position_limit_alert:
-        self._notify(f"ポジション上限超過: {risk_result.position_count} 銘柄", "WARNING")
+        self._alert_manager.notify(f"ポジション上限超過: {risk_result.position_count} 銘柄", "WARNING", category="POSITION_LIMIT")
     if not sys_result.data_freshness_ok:
-        self._notify("株価データ鮮度異常", "WARNING")
+        self._alert_manager.notify("株価データ鮮度異常", "WARNING", category="DATA_FRESHNESS")
 ```
 
 ---
 
 ## 6. ExecutionEngine 改修 (`execution_engine.py`)
 
-`_process_signals()` の先頭に kill.flag チェックを追加する（3行）。
+### 起動時クリーンアップ（`run_session()` 追加）
+
+`run_session()` の既存 `settings` インポート直後に kill.flag のクリアを追加する。これにより前回実行で残った kill.flag が起動時に自動削除される。
+
+```python
+# run_session() 内（既存の from kabusys.config import settings as _config の直後）
+from kabusys.config import settings as _settings
+_settings.kill_flag_path.unlink(missing_ok=True)   # 起動時に kill.flag をクリア
+```
+
+### シグナル処理チェック（`_process_signals()` 追加）
+
+`_process_signals()` の先頭に kill.flag チェックを追加する（4行）。
+
+`self._config` は `EngineConfig` dataclass（`target_date` などを持つ実行設定）であり、`kill_flag_path` は持たない。`Settings` シングルトンは `run_session()` 内で既に `from kabusys.config import settings as _config`（line 219）として利用されているパターンと同じく、メソッド先頭でインポートして参照する。
 
 ```python
 def _process_signals(self) -> None:
-    if self._config.kill_flag_path.exists():   # kill.flag チェック
+    from kabusys.config import settings as _settings   # kill.flag パス取得
+    if _settings.kill_flag_path.exists():
         logger.warning("kill.flag を検出 — kill_switch を発動します")
         self.kill_switch()
         return
     # 以下、既存のシグナル処理（変更なし）
 ```
-
-`kill_flag_path` は `Settings` から取得する（下記参照）。
 
 ---
 
@@ -225,7 +272,10 @@ def kill_flag_path(self) -> Path:
     return Path(os.environ.get("KILL_FLAG_PATH", "data/kill.flag")).expanduser()
 ```
 
+**デプロイメント制約:** `KILL_FLAG_PATH` が未設定の場合、パスは実行時の CWD に対する相対パスとなる。`MonitoringEngine` と `ExecutionEngine` は**必ず同一 CWD から起動すること**（既存の `execution.pid` も同じ制約に従っている）。本番運用では `KILL_FLAG_PATH` に絶対パスを設定することを推奨する。
+
 既存の `slack_bot_token` / `slack_channel_id` プロパティは削除する（LINE に置き換え）。
+事前調査により、これらのプロパティは `src/kabusys/config.py` 以外では参照されていないことを確認済み（安全に削除可能）。
 
 ---
 
@@ -237,6 +287,7 @@ def kill_flag_path(self) -> Path:
 |---|---|
 | `KillSwitch.evaluate()` | drawdown_alert=True → flag 書き込み・理由返却 |
 | `KillSwitch.evaluate()` | position_limit_alert=True → flag 書き込み |
+| `KillSwitch.evaluate()` | process_ok=False のみ → flag **書き込まない**・None 返却 |
 | `KillSwitch.evaluate()` | flag 既存時は再書き込みしない（冪等） |
 | `KillSwitch.evaluate()` | 全条件 False → None 返却・flag なし |
 | `KillSwitch.is_flagged()` | flag あり/なし |
@@ -245,9 +296,13 @@ def kill_flag_path(self) -> Path:
 | `AlertManager.notify()` | トークン空 → スキップ（例外なし） |
 | `AlertManager.notify()` | cooldown 内 → スキップ |
 | `AlertManager.notify()` | cooldown 外 → 送信 |
+| `AlertManager.notify()` | `requests.exceptions.RequestException` → False 返却・例外非伝播 |
+| `AlertManager.notify()` | LINE API 非 2xx レスポンス → False 返却・例外非伝播 |
+| `AlertManager.notify()` | 同一 level・異なる category → クールダウン非干渉（両方送信） |
 | `MonitoringEngine.run_once()` | kill_switch/alert_manager が呼ばれること（mock） |
 | `ExecutionEngine._process_signals()` | kill.flag あり → kill_switch() 発動・シグナル処理スキップ |
 | `ExecutionEngine._process_signals()` | kill.flag なし → 通常処理 |
+| `ExecutionEngine.run_session()` | 起動時に kill.flag が存在する場合は削除される |
 
 `requests.post` は `unittest.mock.patch` でモックする。
 
