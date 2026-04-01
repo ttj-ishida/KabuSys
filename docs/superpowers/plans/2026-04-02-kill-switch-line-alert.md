@@ -802,7 +802,16 @@ git commit -m "feat: export KillSwitch and AlertManager from monitoring package"
 
 - [ ] **Step 1: テストケースを `tests/test_execution_engine.py` に追加する**
 
-ファイル末尾に追加:
+**まず** ファイル先頭の import 行を更新する（line 8）:
+
+```python
+# 変更前
+from unittest.mock import MagicMock
+# 変更後
+from unittest.mock import MagicMock, patch
+```
+
+次に、ファイル末尾にクラスを追加する:
 
 ```python
 class TestKillFlagPolling:
@@ -874,6 +883,10 @@ class TestKillFlagPolling:
             engine._process_signals()
 
         assert engine._stop_event.is_set()
+        # ループ途中で停止したため、全3シグナルのうち一部は未処理
+        from kabusys.execution.order_repository import OrderRepository
+        repo = OrderRepository(sqlite_conn)
+        assert len(repo.list_active()) < 3
 
     def test_run_session_clears_kill_flag_on_startup(self, sqlite_conn, duckdb_conn, tmp_path):
         """起動時に kill.flag が存在する場合は削除される"""
@@ -883,6 +896,8 @@ class TestKillFlagPolling:
 
         broker = MockBrokerClient()
         engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        # _pid_file を設定することで run_session() 内の _active_pid_file が tmp_path 配下になる
+        # （これはローカルの _config.pid_file_path ではなく engine._pid_file 優先パスを使う）
         engine._pid_file = pid_file
 
         with patch("kabusys.execution.execution_engine.settings") as mock_settings, \
@@ -890,7 +905,7 @@ class TestKillFlagPolling:
              patch.object(engine, "_process_signals"), \
              patch.object(engine, "_drain_push_queue"):
             mock_settings.kill_flag_path = flag_path
-            mock_settings.pid_file_path = pid_file
+            # mock_settings.pid_file_path は run_session() 内の local re-import に影響しないため設定不要
             engine._stop_event.set()  # 即座に停止
             try:
                 engine.run_session()
