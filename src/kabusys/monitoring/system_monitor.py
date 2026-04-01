@@ -35,12 +35,12 @@ class SystemMonitor:
         conn: sqlite3.Connection,
         duckdb_conn: duckdb.DuckDBPyConnection,
         pid_file: Path = Path("data/execution.pid"),
-        disk_path: str = "C:\\",
+        disk_path: str | None = None,
     ) -> None:
         self._db = MonitoringDB(conn)
         self._duckdb_conn = duckdb_conn
         self._pid_file = pid_file
-        self._disk_path = disk_path
+        self._disk_path = disk_path or (str(Path.cwd().anchor) or "/")
 
     def check_once(self, today: date | None = None) -> SystemCheckResult:
         today = today or date.today()

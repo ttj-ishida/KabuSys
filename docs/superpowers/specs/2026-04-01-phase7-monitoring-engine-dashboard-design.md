@@ -48,7 +48,7 @@ src/kabusys/monitoring/
 **設計原則:**
 - 各 Monitor は内部ループを持たない（`check_once()` のみ）→ テスト容易性確保
 - `MonitoringEngine` が `while True` + `time.sleep(interval)` でポーリング管理
-- Streamlit は `st.rerun(every=30)` で30秒自動リフレッシュ
+- Streamlit はサイドバーの Refresh ボタンで手動更新（`st.rerun()` + `st.button`）
 
 ---
 
@@ -243,10 +243,14 @@ Monitoring.md § 10 の仕様に準拠。
 | Orders | trade_logs 最新20件（logged_at / event_type / code / side / qty / state） | `trade_logs` テーブル |
 | System | system_status 最新状態 + risk_logs 最新10件 | `system_status` / `risk_logs` テーブル |
 
-### 自動リフレッシュ
+### 手動リフレッシュ
+
+サイドバーに Refresh ボタンを配置し、クリック時に `st.rerun()` を呼び出す。
 
 ```python
-st.rerun(every=30)  # 30秒ごとに自動更新
+with st.sidebar:
+    if st.button("Refresh"):
+        st.rerun()
 ```
 
 ### 起動方法

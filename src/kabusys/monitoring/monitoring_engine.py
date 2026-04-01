@@ -40,3 +40,5 @@ class MonitoringEngine:
             except KeyboardInterrupt:
                 logger.info("MonitoringEngine stopped")
                 break
+            except Exception:
+                logger.exception("MonitoringEngine run loop error — continuing")

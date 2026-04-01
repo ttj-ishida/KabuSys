@@ -376,7 +376,7 @@ MonitoringEngine(system_monitor, trade_monitor, risk_monitor, interval_sec=60)
 
 ### StreamlitDashboard（Phase 7 実装、Issue #35）
 
-`src/kabusys/monitoring/streamlit_dashboard.py` に実装。`MonitoringDB` を直接読み取り、30秒自動リフレッシュで表示する。`MonitoringEngine` と独立して動作する。
+`src/kabusys/monitoring/streamlit_dashboard.py` に実装。`MonitoringDB` を直接読み取り、サイドバーの Refresh ボタンで手動更新する。`MonitoringEngine` と独立して動作する。
 
 **起動方法:**
 
