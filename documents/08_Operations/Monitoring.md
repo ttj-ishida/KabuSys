@@ -395,6 +395,8 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 
 **依存ライブラリ:** `psutil`（SystemMonitor）、`streamlit`（ダッシュボード UI）— `requirements.txt` に追加すること。
 
+> **注:** `cpu_threshold_pct` / `memory_threshold_pct` / `disk_threshold_pct` は、現フェーズでは収集・記録のみを行い、`SystemMonitor` 内では使用しない。将来の Slack アラート実装（Issue #39）で閾値判定に利用する予定。
+
 ## Phase 2 (将来拡張)
 
 システム規模拡大時や専用監視環境への切り出し時に移行可能。

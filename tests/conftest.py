@@ -88,3 +88,22 @@ def monitoring_conn():
     init_monitoring_db(conn)
     yield conn
     conn.close()
+
+
+@pytest.fixture
+def duckdb_prices_conn():
+    """raw_prices テーブルを持つインメモリ DuckDB（SystemMonitor テスト専用）。"""
+    conn = duckdb.connect(":memory:")
+    conn.execute("""
+        CREATE TABLE raw_prices (
+            date DATE NOT NULL,
+            code VARCHAR NOT NULL,
+            open DECIMAL(18,4), high DECIMAL(18,4),
+            low DECIMAL(18,4), close DECIMAL(18,4),
+            volume BIGINT, turnover DECIMAL(18,2),
+            fetched_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+            PRIMARY KEY (date, code)
+        )
+    """)
+    yield conn
+    conn.close()
