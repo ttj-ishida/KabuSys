@@ -1,77 +1,93 @@
 # CHANGELOG
 
-全ての重要な変更を記録します。本ファイルは「Keep a Changelog」形式に準拠します。
-
-現在のバージョン: 0.1.0
+すべての変更は Keep a Changelog 仕様に準拠して記載しています。  
+この CHANGELOG はコードベース（初期リリース相当）の内容から推測して作成しています。
 
 ## [Unreleased]
-（なし）
 
 ## [0.1.0] - 2026-04-01
-初回リリース。日本株自動売買プラットフォームのコアライブラリを提供します。以下の主要機能・設計方針・注意点を含みます。
+初回公開リリース。日本株自動売買プラットフォームのコア機能群を実装しました。主な追加点と挙動は以下の通りです。
 
 ### 追加 (Added)
-- パッケージ初期化
-  - kabusys パッケージの公開インターフェースとバージョンを追加（__version__ = 0.1.0）。
-  - モジュール群: data, research, ai, execution, strategy, monitoring 等を想定した __all__ を定義。
+- パッケージの基本構成
+  - kabusys パッケージのエントリポイントを追加（__version__ = 0.1.0）。公開サブパッケージとして data, research, ai, などを想定した名前空間を用意。
 
-- 設定・環境変数管理
-  - .env ファイルおよび環境変数から設定を読み込む settings モジュールを追加。
-  - プロジェクトルート検出ロジックを実装（.git または pyproject.toml を探索、CWD 非依存）。
-  - .env/.env.local の自動ロード（OS 環境変数優先、.env.local は上書き可）。自動ロードは KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で無効化可能。
-  - 複雑な .env 行パーサを実装（export プレフィックス、シングル/ダブルクォート内のエスケープ、行末コメントの扱い等）。
-  - 必須鍵取得ヘルパ _require と Settings クラスを提供（JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID 等）。
-  - システム設定（env, log_level）のバリデーションと is_live / is_paper / is_dev プロパティ。
-  - DB パス（duckdb, sqlite）や監視閾値などの既定値を設定。
+- 環境設定管理 (kabusys.config)
+  - .env ファイルと OS 環境変数を統合して読み込む自動ローダーを実装。
+    - プロジェクトルートは __file__ の親ディレクトリから .git または pyproject.toml を探して決定するため、CWD に依存しない自動読み込みを実現。
+    - 読み込み優先順位: OS 環境変数 > .env.local > .env。
+    - KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で自動ロードを無効化可能（テスト用途を想定）。
+    - .env の読み込みで保護された OS 環境変数は上書きされない（protected 機能）。
+  - .env パースの強化（コメント、export 形式、クォート内のバックスラッシュエスケープ、インラインコメント処理などに対応）。
+  - Settings クラスを実装し、使用可能な設定値をプロパティで提供:
+    - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID, OPENAI_API_KEY（利用時に参照）
+    - データベースパスのデフォルト: DUCKDB_PATH="data/kabusys.duckdb", SQLITE_PATH="data/monitoring.db"
+    - 監視・閾値: PID_FILE_PATH、CPU_THRESHOLD_PCT、MEMORY_THRESHOLD_PCT、DISK_THRESHOLD_PCT
+    - 環境モードとログレベル検証: KABUSYS_ENV は development/paper_trading/live、LOG_LEVEL は標準レベルに制約
+    - is_live / is_paper / is_dev のユーティリティプロパティ
 
-- データプラットフォーム機能（data モジュール）
-  - ETL パイプラインの結果を表す ETLResult データクラスの追加（品質チェック情報やエラー一覧を含む）。
-  - ETL 用ユーティリティ (pipeline, etl) のインターフェース実装（差分取得、バックフィル設計、品質チェックとの連携設計）。
-  - 市場カレンダー管理モジュールを追加（market_calendar テーブル操作、営業日判定、next/prev_trading_day、get_trading_days、is_sq_day）。
-  - calendar_update_job：J-Quants からの差分取得、バックフィル、健全性チェック、冪等保存を行う夜間バッチジョブ。
+- AI モジュール (kabusys.ai)
+  - ニュースセンチメントスコアリング (news_nlp.score_news)
+    - raw_news と news_symbols を集計し、銘柄ごとに OpenAI（gpt-4o-mini）へバッチ送信してセンチメントを算出。
+    - 入力テキスト/トークン膨張対策: 1銘柄あたりの記事数と文字数上限を導入（デフォルト: 最大10記事、最大3000文字）。
+    - バッチサイズ: 1回の API コールで最大20銘柄。
+    - JSON Mode を利用し厳密な JSON レスポンスを期待。レスポンスの検証・サニタイズ処理あり（前後の余分なテキストから JSON を抽出する復元処理など）。
+    - リトライ戦略: 429（RateLimit）・ネットワーク断・タイムアウト・5xx に対する指数バックオフ。その他のエラーはスキップして継続（フェイルセーフ）。
+    - スコアは ±1.0 にクリップ。処理後に ai_scores テーブルへ冪等的に書き込み（該当コードのみ DELETE→INSERT）。
+    - ルックアヘッドバイアスを避けるため datetime.today()/date.today() を直接参照しない設計。target_date ベースのウィンドウ計算を明示。
+  - 市場レジーム判定 (regime_detector.score_regime)
+    - ETF 1321（日経225連動型）の 200 日移動平均乖離（重み 70%）とマクロニュースの LLM センチメント（重み 30%）を合成して日次の市場レジームを判定（bull/neutral/bear）。
+    - マクロニュースの抽出用キーワード群を定義し、最大20記事までを LLM に渡す。
+    - OpenAI 呼び出しは独立実装で、news_nlp とは内部実装を共有しない（モジュール結合の低減）。
+    - API 失敗時は macro_sentiment=0.0 として継続（フェイルセーフ）。
+    - 計算結果は market_regime テーブルに冪等書き込み（BEGIN/DELETE/INSERT/COMMIT）。失敗時は ROLLBACK 実行を試みて例外を伝播。
 
-- ニュース NLP / AI モジュール（ai モジュール）
-  - news_nlp.score_news: raw_news と news_symbols を用いて銘柄ごとのニュースを集約し、OpenAI（gpt-4o-mini）でセンチメントを算出、ai_scores テーブルへ保存する処理を実装。
-    - 時間ウィンドウ: 前日 15:00 JST ～ 当日 08:30 JST（DB は UTC で比較）。
-    - バッチ化（1回あたり最大 20 銘柄）、記事数・文字数トリム、JSON Mode 応答の検証、スコア ±1.0 でクリップ。
-    - レート制限やネットワーク断、5xx を対象に指数バックオフによるリトライ。
-    - API キー注入可（api_key 引数 or OPENAI_API_KEY 環境変数）。
-    - テスト容易性のため _call_openai_api を patch 可能。
+- データ基盤・ETL (kabusys.data)
+  - マーケットカレンダー管理 (calendar_management)
+    - market_calendar テーブルを基に営業日判定・次/前営業日の取得・期間内営業日の列挙・SQ日判定を実装。
+    - DB にデータがない場合は曜日ベース（平日を営業日扱い）でフォールバックする堅牢な設計。
+    - calendar_update_job を実装し、J-Quants API からの差分フェッチと冪等保存（ON CONFLICT 想定）を行う。直近バックフィル・健全性チェック等を備える。
+  - ETL パイプライン (pipeline, ETLResult)
+    - ETL 実行結果を表す ETLResult データクラスを追加（品質チェック結果や各種取得・保存件数、エラー集約を含む）。
+    - 差分取得・バックフィル・品質チェックの設計方針を実装（jquants_client と quality モジュールを呼び出す想定）。
+    - テーブル存在チェックや最大日付取得などのユーティリティを実装。
+  - jquants_client を介した外部データ取得の抽象（モジュール参照箇所は存在）。
 
-  - regime_detector.score_regime: ETF 1321（Nikkei 225 連動型）の 200 日 MA 乖離（重み 70%）と、news_nlp によるマクロセンチメント（重み 30%）を合成して日次で市場レジーム（bull/neutral/bear）を判定・market_regime テーブルへ冪等書き込み。
-    - MA 計算は target_date 未満のデータのみを使用しルックアヘッドバイアスを防止。
-    - マクロニュースはマクロキーワードでフィルタ、LLM 応答は JSON パース・バリデーション、API 失敗時は macro_sentiment=0.0 としてフォールバック。
-    - OpenAI 呼び出しは内部で OpenAI クライアントを生成（api_key 注入可）、リトライロジックあり。
-    - レジームはスコア閾値でラベル化し、DB への書き込みは BEGIN/DELETE/INSERT/COMMIT の冪等操作を行う。
+- リサーチ / ファクター計算 (kabusys.research)
+  - ファクター計算 (factor_research)
+    - モメンタム（1M/3M/6M）、200 日移動平均乖離、ATR(20)、出来高/売買代金の流動性指標、PER / ROE の取得と計算を DuckDB 上の SQL + Python ロジックで実装。
+    - データ不足時は None を返す等、堅牢性を確保。
+  - 特徴量探索 (feature_exploration)
+    - 将来リターン計算（複数ホライズン対応、horizons 引数でカスタマイズ、入力検証あり）
+    - IC（Spearman の ρ）計算、ランク付けユーティリティ（同順位は平均ランク）、ファクター統計サマリー（count/mean/std/min/max/median）を実装。
+    - pandas 等に依存しない純粋標準ライブラリ実装。
 
-- リサーチ機能（research モジュール）
-  - factor_research: モメンタム（1M/3M/6M リターン、200 日 MA 乖離）、ボラティリティ（20 日 ATR）、流動性（20 日平均売買代金・出来高比率）、バリュー（PER, ROE）を計算する関数を提供（calc_momentum, calc_volatility, calc_value）。
-    - DuckDB のウィンドウ関数を活用した実装。データ不足時は None を返す設計。
-    - ルックアヘッドバイアス防止のため target_date 以前のデータのみ参照。
-  - feature_exploration: 将来リターン計算（calc_forward_returns、任意ホライズン対応）、IC（calc_ic：Spearman の ρ）、rank、factor_summary（count/mean/std/min/max/median）など統計解析ユーティリティを追加。
-    - 外部依存を持たず標準ライブラリのみで実装。
+- DuckDB 利用方針
+  - 内部は DuckDB 接続（duckdb.DuckDBPyConnection）を受け取り SQL を主体に処理。DB 書き込みは冪等性を考慮（DELETE→INSERT や ON CONFLICT を想定）して行う。
 
 ### 変更 (Changed)
-- 初期設計段階の堅牢化
-  - DuckDB との互換性考慮（executemany に対する空リスト回避等）。
-  - DB 書き込み失敗時のトランザクションロールバック保護と警告ログ出力を徹底。
-  - API 呼び出し部分はモジュール間でプライベート関数を共有せず、それぞれ独立実装（テスト容易性・モジュール結合低減）。
+- （初回リリースのため該当なし）
 
 ### 修正 (Fixed)
-- フォールバック挙動の明確化
-  - MA など計算に必要な十分なデータがない場合、明示的に中立値（例: ma200_ratio=1.0）を使用して継続するよう設計（WARNING ログ出力）。
-  - OpenAI レスポンスのパース失敗や API エラーは例外で全体を止めず、該当部分を 0.0 にフォールバックして処理を継続（フェイルセーフ設計）。
+- .env 読み込み時のエラーハンドリングを強化（ファイルオープン失敗時に warnings.warn、解析エラーはスキップ）。
+- OpenAI 呼び出しにおける例外分類とリトライ条件を明確化（429/ネットワーク/タイムアウト/5xx をリトライ、それ以外はログ出力してフォールバック）。
 
-### セキュリティ／運用上の注意 (Security / Ops)
-- OpenAI API キー、各種トークン（J-Quants, kabu-station, Slack など）は環境変数で管理。Settings は未設定時に ValueError を放出して明示的に失敗させる箇所があるため、運用時に必ず設定が必要。
-- .env 自動ロードはプロジェクトルート探索に依存するため、配布後に自動ロードを期待する場合は .git または pyproject.toml の配置に注意。
-- calendar_update_job は最後のカレンダー日付の健全性チェックを行い、極端に将来の日付が検出された場合は処理をスキップする安全策あり。
+### 非推奨 (Deprecated)
+- （初回リリースのため該当なし）
 
-### 既知の制約 (Known limitations)
-- OpenAI を利用する処理は外部 API に依存するため、API コストやレート制限の影響を受ける。429/ネットワーク断/5xx に対してはリトライロジックがあるが、永続障害時は該当日のスコアが得られないことがあり得る。
-- PBR や配当利回りなど一部バリューファクターは現バージョンで未実装。
-- DuckDB のバージョン差異（リスト型バインド等）に対して互換性を考慮した実装を行っているが、極端に古い/新しいバージョンでは追加調整が必要になる場合がある。
+### 削除 (Removed)
+- （初回リリースのため該当なし）
+
+### セキュリティ (Security)
+- API キーやシークレットは環境変数経由で取得。必須 env（JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID）は Settings プロパティで未設定時に ValueError を投げるため、ランタイム前に適切に設定する必要があります。
+- .env 自動ロードはテスト時に KABUSYS_DISABLE_AUTO_ENV_LOAD で無効化可能。
 
 ---
 
-このリリースはコードベースから推測した初期機能セットをまとめたものです。将来的なリリースでは、追加ファクター、戦略実行モジュール、モニタリング・アラート機能、テストカバレッジ改善、ドキュメント強化などを予定しています。
+注意事項（マイグレーション / 利用時のヒント）
+- OpenAI を使う API 呼び出し機能 (news_nlp, regime_detector) を利用するには OPENAI_API_KEY を環境変数に設定するか、各関数に api_key を明示的に渡してください。未設定時は ValueError が発生します。
+- DuckDB のスキーマ（prices_daily / raw_news / news_symbols / ai_scores / market_regime / market_calendar / raw_financials 等）は本 CHANGELOG のコードに基づく前提です。初回導入時は対応するテーブル作成が必要です。
+- .env の自動読み込みはプロジェクトルート検出に依存します（.git または pyproject.toml が親ディレクトリに存在すること）。環境により意図せず読み込まれる場合は KABUSYS_DISABLE_AUTO_ENV_LOAD を設定してください。
+- news_nlp と regime_detector は外部 OpenAI API のレスポンスに依存するため、API のレート制限やレスポンス仕様変更に対しては運用上の注意が必要です（ロギングとフェイルセーフが組み込まれていますが、動作確認を推奨します）。
+
+（この CHANGELOG はコード内の実装と docstring・コメントを基に自動的に推測して作成しています。実際のリリースや運用ポリシーはプロジェクトの実際の仕様に合わせて調整してください。）
