@@ -147,14 +147,14 @@ class Settings:
     def kabu_api_base_url(self) -> str:
         return os.environ.get("KABU_API_BASE_URL", "http://localhost:18080/kabusapi")
 
-    # --- Slack ---
+    # --- LINE Messaging API ---
     @property
-    def slack_bot_token(self) -> str:
-        return _require("SLACK_BOT_TOKEN")
+    def line_channel_access_token(self) -> str:
+        return os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 
     @property
-    def slack_channel_id(self) -> str:
-        return _require("SLACK_CHANNEL_ID")
+    def line_user_id(self) -> str:
+        return os.environ.get("LINE_USER_ID", "")
 
     # --- データベース ---
     @property
@@ -169,6 +169,10 @@ class Settings:
     @property
     def pid_file_path(self) -> Path:
         return Path(os.environ.get("PID_FILE_PATH", "data/execution.pid")).expanduser()
+
+    @property
+    def kill_flag_path(self) -> Path:
+        return Path(os.environ.get("KILL_FLAG_PATH", "data/kill.flag")).expanduser()
 
     @property
     def cpu_threshold_pct(self) -> float:
