@@ -67,10 +67,10 @@ CPU使用率 | 高負荷検知 | > 90% |
 
 | データ | 内容 | 判定方法 |
 |------|------|------|
-株価データ | 更新時刻 | DuckDB `get_last_price_date()` で最終更新日を取得、3日以上古い場合を異常とする |
-ニュースデータ | 取得成功 | （#38 以降で実装） |
-特徴量 | 生成完了 | （#38 以降で実装） |
-AIスコア | 更新状況 | （#38 以降で実装） |
+株価データ | 更新時刻 | `pipeline.get_last_price_date(duckdb_conn)` で最終更新日を取得、3日以上古い場合（または None）を異常とする。`SystemMonitor.check_once()` で実施。 |
+ニュースデータ | 取得成功 | 将来フェーズで実装 |
+特徴量 | 生成完了 | 将来フェーズで実装 |
+AIスコア | 更新状況 | 将来フェーズで実装 |
 
 異常例
 
@@ -118,13 +118,13 @@ Cancelled
 Rejected
 ```
 
-監視項目
+監視項目（`TradeMonitor.check_once()` で実施）
 
-| 項目 | 内容 |
-|----|----|
-未約定注文 | 長時間滞留 |
-注文失敗 | APIエラー |
-約定価格 | 異常価格 |
+| 項目 | 内容 | 閾値 |
+|----|----|---|
+未約定注文 | 長時間滞留（Created/Sent/Accepted） | 30分以上経過で `STALE_ORDER` アラート |
+注文失敗 | APIエラー | OrderRepository の state 参照 |
+約定価格 | 発注価格との乖離 | ±20% 超で `PRICE_ANOMALY` アラート（成行注文は除外） |
 
 ---
 
@@ -132,22 +132,14 @@ Rejected
 
 ポートフォリオリスクを監視する。
 
-監視項目
+監視項目（`RiskMonitor.check_once()` で実施）
 
-| 指標 | 内容 |
-|----|----|
-ポジションサイズ | 上限チェック |
-銘柄数 | 上限チェック |
-セクター集中 | 分散確認 |
-ドローダウン | リスク制御 |
+| 指標 | 内容 | 閾値 |
+|----|----|---|
+ドローダウン | ポートフォリオ最高値からの下落率 | > 10% でアラート（monitoring のみ。5%/15% の執行制御は RiskManager が担当） |
+保有銘柄数 | `positions` テーブルの `qty != 0` 行数 | > 10 でアラート |
 
-例
-
-```
-DD > 10%
-```
-
-警告
+**注意:** Phase 7 の RiskMonitor は観測・アラートのみ行う。RiskManagement.md の 5%（ポジション半減）・15%（全決済）トリガーは `ExecutionEngine` / `RiskManager` の執行パスで実施される。
 
 ---
 
@@ -296,15 +288,114 @@ SystemMonitor(conn, duckdb_conn, pid_file=Path("data/execution.pid"))
 
 | フィールド | 型 | 内容 |
 |---|---|---|
-| `recorded_at` | str | ISO8601 UTC |
+| `recorded_at` | str | ISO8601 UTC（例: `"2026-04-01T12:34:56.789012+00:00"`） |
 | `cpu_percent` | float | CPU 使用率 |
 | `memory_percent` | float | メモリ使用率 |
-| `disk_percent` | float | ディスク使用率 |
+| `disk_percent` | float | ディスク使用率（`C:\` ドライブ） |
 | `process_ok` | bool | Execution プロセス生存 |
 | `data_freshness_ok` | bool | 株価データが 3 日以内に更新済み |
 | `stale_pid_detected` | bool | 異常終了の PID ファイルを検出・削除した場合 True |
 
-> **注:** `config` に追加した `cpu_threshold_pct` / `memory_threshold_pct` / `disk_threshold_pct` は、現フェーズでは収集・記録のみを行い、`SystemMonitor` 内では使用しない。将来の Slack アラート実装（Issue #39）で閾値判定に利用する予定。
+- `stale_pid_detected=True` の場合は `system_status` テーブルではなく `risk_logs` に `event_type="STALE_PID"` で記録する（`system_status` スキーマ変更なし）。
+- データ鮮度チェックは `src.kabusys.data.pipeline.get_last_price_date(duckdb_conn)` を使用（`pipeline.py` モジュールレベル関数）。
+
+---
+
+### TradeMonitor API（Phase 7 実装、Issue #38）
+
+`src/kabusys/monitoring/trade_monitor.py` に実装。`OrderRepository.list_active()` でアクティブ注文を取得し、滞留・異常価格を検出する。
+
+```python
+TradeMonitor(monitoring_conn, order_repo, stale_minutes=30, price_anomaly_pct=0.20)
+  .check_once(now=None) -> TradeCheckResult
+```
+
+- `monitoring_conn`: monitoring.db の `sqlite3.Connection`（risk_logs 書き込み用）
+- `order_repo`: `OrderRepository` インスタンス（orders.db、アクティブ注文読み取り用）
+
+`TradeCheckResult` フィールド:
+
+| フィールド | 型 | 内容 |
+|---|---|---|
+| `logged_at` | str | ISO8601 UTC |
+| `stale_orders` | list[str] | 30分以上アクティブ状態の `client_order_id` リスト |
+| `anomaly_fills` | list[str] | 約定価格が発注価格 ±20% 超の `client_order_id` リスト |
+
+**ロジック:**
+- **注文滞留検出:** `order_repo.list_active()` の `created_at` から `stale_minutes` 分以上経過している注文を `stale_orders` に追加。
+- **約定異常価格検出:** `state == PartialFill or Filled` かつ `price != 0.0`（成行除外）の注文で `avg_fill_price` と `price` の乖離率が `price_anomaly_pct` 超の場合を `anomaly_fills` に追加。
+- 異常検出時のみ `MonitoringDB.log_risk_event(event_type="STALE_ORDER" or "PRICE_ANOMALY")` で記録。
+
+---
+
+### RiskMonitor API（Phase 7 実装、Issue #38）
+
+`src/kabusys/monitoring/risk_monitor.py` に実装。`dashboard` / `positions` テーブルを読み取り、ドローダウン・ポジション上限を監視する。
+
+```python
+RiskMonitor(conn, max_positions=10, dd_threshold=0.10)
+  .check_once(now=None) -> RiskCheckResult
+```
+
+`RiskCheckResult` フィールド:
+
+| フィールド | 型 | 内容 |
+|---|---|---|
+| `logged_at` | str | ISO8601 UTC |
+| `drawdown_pct` | float | 現在のドローダウン率 |
+| `drawdown_alert` | bool | `drawdown_pct > dd_threshold`（デフォルト 10%） |
+| `position_count` | int | 保有銘柄数（`qty != 0` の行数） |
+| `position_limit_alert` | bool | `position_count > max_positions`（デフォルト 10） |
+
+**peak_value の管理（ハイウォーターマーク方式）:**
+- 内部で `_peak_value: float` を保持。
+- 初回 `check_once()` で `dashboard.portfolio_value` を初期値として設定。
+- 以降は `portfolio_value > _peak_value` のときに更新。
+- `dashboard` テーブルが空の場合は `drawdown_pct=0.0` / `drawdown_alert=False` として処理。
+
+**Phase 7 の閾値スコープ:**
+- Phase 7 では `dd_threshold=0.10`（10%）の 1 閾値のみを監視・アラート対象とする。
+- RiskManagement.md の 5%（ポジション半減）・15%（全決済）は `ExecutionEngine`/`RiskManager` の執行パスで実施されており、`MonitoringEngine` は重複して執行制御を行わない。
+
+---
+
+### MonitoringEngine API（Phase 7 実装、Issue #38）
+
+`src/kabusys/monitoring/monitoring_engine.py` に実装。各 Monitor を束ね、60秒間隔でポーリングする。
+
+```python
+MonitoringEngine(system_monitor, trade_monitor, risk_monitor, interval_sec=60)
+  .run_once() -> None   # テスト用：各 Monitor の check_once() を1回呼び出す
+  .run() -> None        # 本番用：KeyboardInterrupt まで interval_sec 間隔でポーリング
+```
+
+**ポーリング動作:**
+- `run_once()` 内の例外はログに残し、次のポーリングサイクルを継続（システム全体の停止を防ぐ）。
+
+---
+
+### StreamlitDashboard（Phase 7 実装、Issue #35）
+
+`src/kabusys/monitoring/streamlit_dashboard.py` に実装。`MonitoringDB` を直接読み取り、サイドバーの Refresh ボタンで手動更新する。`MonitoringEngine` と独立して動作する。
+
+**起動方法:**
+
+```bash
+streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
+```
+
+**4タブ構成:**
+
+| タブ | 表示内容 | データソース |
+|---|---|---|
+| Overview | portfolio_value / cash / drawdown_pct | `dashboard` テーブル |
+| Positions | 保有ポジション一覧（code / qty / avg_price / current_price） | `positions` テーブル |
+| Orders | trade_logs 最新20件（logged_at / event_type / code / side / qty / state） | `trade_logs` テーブル |
+| System | system_status 最新状態 + risk_logs 最新10件 | `system_status` / `risk_logs` テーブル |
+
+**依存ライブラリ:** `psutil`（SystemMonitor）、`streamlit`（ダッシュボード UI）— `requirements.txt` に追加すること。
+
+> **注:** `cpu_threshold_pct` / `memory_threshold_pct` / `disk_threshold_pct` は、現フェーズでは収集・記録のみを行い、`SystemMonitor` 内では使用しない。将来の Slack アラート実装（Issue #39）で閾値判定に利用する予定。
 
 ## Phase 2 (将来拡張)
 

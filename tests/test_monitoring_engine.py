@@ -1,0 +1,415 @@
+"""tests/test_monitoring_engine.py — Phase 7 監視エンジン テスト"""
+from __future__ import annotations
+
+import sqlite3
+import uuid
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from kabusys.monitoring.monitoring_db import MonitoringDB, init_monitoring_db
+from kabusys.monitoring.monitoring_engine import MonitoringEngine
+from kabusys.monitoring.risk_monitor import RiskMonitor
+from kabusys.monitoring.system_monitor import SystemMonitor
+from kabusys.monitoring.trade_monitor import TradeMonitor
+
+
+# ─── Fixtures ───────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def mon_conn():
+    """インメモリ monitoring.db。"""
+    conn = sqlite3.connect(":memory:")
+    init_monitoring_db(conn)
+    return conn
+
+
+@pytest.fixture
+def mock_duckdb():
+    return MagicMock()
+
+
+# ─── SystemMonitor ────────────────────────────────────────────────────────────
+
+def test_system_monitor_no_pid_file(mon_conn, mock_duckdb, tmp_path):
+    """PID ファイルなし → process_ok=False, stale_pid_detected=False"""
+    pid_file = tmp_path / "execution.pid"
+    monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
+
+    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=date.today()), \
+         patch("psutil.cpu_percent", return_value=30.0), \
+         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
+         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+        result = monitor.check_once(today=date.today())
+
+    assert result.process_ok is False
+    assert result.stale_pid_detected is False
+    assert result.cpu_percent == 30.0
+    assert result.memory_percent == 50.0
+    assert result.disk_percent == 40.0
+
+
+def test_system_monitor_pid_alive(mon_conn, mock_duckdb, tmp_path):
+    """PID ファイルあり + プロセス生存 → process_ok=True, stale_pid_detected=False"""
+    pid_file = tmp_path / "execution.pid"
+    pid_file.write_text("12345")
+    monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
+
+    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=date.today()), \
+         patch("psutil.pid_exists", return_value=True), \
+         patch("psutil.cpu_percent", return_value=30.0), \
+         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
+         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+        result = monitor.check_once(today=date.today())
+
+    assert result.process_ok is True
+    assert result.stale_pid_detected is False
+    assert pid_file.exists()  # ファイルは残る
+
+
+def test_system_monitor_stale_pid(mon_conn, mock_duckdb, tmp_path):
+    """PID ファイルあり + プロセス死亡 → stale_pid_detected=True, ファイル削除, risk_log記録"""
+    pid_file = tmp_path / "execution.pid"
+    pid_file.write_text("12345")
+    monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
+
+    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=date.today()), \
+         patch("psutil.pid_exists", return_value=False), \
+         patch("psutil.cpu_percent", return_value=30.0), \
+         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
+         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+        result = monitor.check_once(today=date.today())
+
+    assert result.process_ok is False
+    assert result.stale_pid_detected is True
+    assert not pid_file.exists()  # ファイルが削除される
+
+    # risk_logs に STALE_PID が記録されているか確認
+    mon_conn.row_factory = sqlite3.Row
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='STALE_PID'").fetchall()
+    assert len(rows) == 1
+
+
+def test_system_monitor_invalid_pid_file(mon_conn, mock_duckdb, tmp_path):
+    """PID ファイルが不正内容 → ファイル削除・stale_pid_detected=True・risk_log記録"""
+    pid_file = tmp_path / "execution.pid"
+    pid_file.write_text("not-a-number")
+    monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
+
+    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=date.today()), \
+         patch("psutil.cpu_percent", return_value=30.0), \
+         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
+         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+        result = monitor.check_once(today=date.today())
+
+    assert result.process_ok is False
+    assert result.stale_pid_detected is True
+    assert not pid_file.exists()
+
+    mon_conn.row_factory = sqlite3.Row
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='STALE_PID'").fetchall()
+    assert len(rows) == 1
+
+
+def test_system_monitor_data_freshness_ok(mon_conn, mock_duckdb, tmp_path):
+    """株価データが 2 日前 → data_freshness_ok=True"""
+    today = date(2026, 4, 1)
+    last_price = date(2026, 3, 30)  # 2日前
+    pid_file = tmp_path / "execution.pid"
+    monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
+
+    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=last_price), \
+         patch("psutil.cpu_percent", return_value=30.0), \
+         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
+         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+        result = monitor.check_once(today=today)
+
+    assert result.data_freshness_ok is True
+
+
+def test_system_monitor_data_freshness_ng(mon_conn, mock_duckdb, tmp_path):
+    """株価データが 4 日前 → data_freshness_ok=False"""
+    today = date(2026, 4, 1)
+    last_price = date(2026, 3, 28)  # 4日前
+    pid_file = tmp_path / "execution.pid"
+    monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
+
+    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=last_price), \
+         patch("psutil.cpu_percent", return_value=30.0), \
+         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
+         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+        result = monitor.check_once(today=today)
+
+    assert result.data_freshness_ok is False
+
+
+def test_system_monitor_data_freshness_none(mon_conn, mock_duckdb, tmp_path):
+    """get_last_price_date が None（空 DuckDB）→ data_freshness_ok=False"""
+    pid_file = tmp_path / "execution.pid"
+    monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
+
+    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=None), \
+         patch("psutil.cpu_percent", return_value=30.0), \
+         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
+         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+        result = monitor.check_once(today=date.today())
+
+    assert result.data_freshness_ok is False
+
+
+# ─── TradeMonitor ─────────────────────────────────────────────────────────────
+
+from kabusys.execution.order_record import OrderRecord, OrderState
+from kabusys.execution.order_repository import OrderRepository
+
+
+def _make_order(
+    *,
+    state: OrderState = OrderState.OrderCreated,
+    price: float = 1000.0,
+    avg_fill_price: float | None = None,
+    created_at: datetime | None = None,
+    order_type: str = "limit",
+) -> OrderRecord:
+    """テスト用 OrderRecord ファクトリ。"""
+    return OrderRecord(
+        client_order_id=str(uuid.uuid4()),
+        signal_id=str(uuid.uuid4()),
+        code="7203",
+        side="buy",
+        qty=100,
+        order_type=order_type,
+        price=price,
+        state=state,
+        created_at=created_at or datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        avg_fill_price=avg_fill_price,
+    )
+
+
+def test_trade_monitor_no_active_orders(mon_conn):
+    """アクティブ注文なし → stale_orders/anomaly_fills ともに空"""
+    repo = MagicMock()
+    repo.list_active.return_value = []
+    monitor = TradeMonitor(mon_conn, repo)
+
+    result = monitor.check_once()
+
+    assert result.stale_orders == []
+    assert result.anomaly_fills == []
+
+
+def test_trade_monitor_fresh_order_not_stale(mon_conn):
+    """作成5分後の注文 → stale 判定なし"""
+    now = datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc)
+    order = _make_order(
+        state=OrderState.OrderAccepted,
+        created_at=now - timedelta(minutes=5),
+    )
+    repo = MagicMock()
+    repo.list_active.return_value = [order]
+    monitor = TradeMonitor(mon_conn, repo, stale_minutes=30)
+
+    result = monitor.check_once(now=now)
+
+    assert result.stale_orders == []
+
+
+def test_trade_monitor_stale_order_detected(mon_conn):
+    """作成31分後の注文 → stale_orders に追加, risk_log 記録"""
+    now = datetime(2026, 4, 1, 9, 31, 0, tzinfo=timezone.utc)
+    order = _make_order(
+        state=OrderState.OrderAccepted,
+        created_at=datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc),
+    )
+    repo = MagicMock()
+    repo.list_active.return_value = [order]
+    monitor = TradeMonitor(mon_conn, repo, stale_minutes=30)
+
+    result = monitor.check_once(now=now)
+
+    assert order.client_order_id in result.stale_orders
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='STALE_ORDER'").fetchall()
+    assert len(rows) == 1
+
+
+def test_trade_monitor_normal_fill_no_anomaly(mon_conn):
+    """約定価格が発注価格の 5% 乖離 → anomaly なし"""
+    order = _make_order(
+        state=OrderState.Filled,
+        price=1000.0,
+        avg_fill_price=1050.0,  # 5% 乖離
+    )
+    repo = MagicMock()
+    repo.list_active.return_value = [order]
+    monitor = TradeMonitor(mon_conn, repo, price_anomaly_pct=0.20)
+
+    result = monitor.check_once()
+
+    assert result.anomaly_fills == []
+
+
+def test_trade_monitor_price_anomaly_detected(mon_conn):
+    """約定価格が発注価格の 30% 乖離 → anomaly_fills に追加"""
+    order = _make_order(
+        state=OrderState.Filled,
+        price=1000.0,
+        avg_fill_price=1300.0,  # 30% 乖離
+    )
+    repo = MagicMock()
+    repo.list_active.return_value = [order]
+    monitor = TradeMonitor(mon_conn, repo, price_anomaly_pct=0.20)
+
+    result = monitor.check_once()
+
+    assert order.client_order_id in result.anomaly_fills
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='PRICE_ANOMALY'").fetchall()
+    assert len(rows) == 1
+
+
+def test_trade_monitor_market_order_excluded(mon_conn):
+    """成行注文（price=0.0）は約定異常チェック対象外"""
+    order = _make_order(
+        state=OrderState.Filled,
+        price=0.0,
+        avg_fill_price=1500.0,
+        order_type="market",
+    )
+    repo = MagicMock()
+    repo.list_active.return_value = [order]
+    monitor = TradeMonitor(mon_conn, repo, price_anomaly_pct=0.20)
+
+    result = monitor.check_once()
+
+    assert result.anomaly_fills == []
+
+
+# ─── RiskMonitor ─────────────────────────────────────────────────────────────
+
+def _setup_dashboard(conn: sqlite3.Connection, portfolio_value: float, cash: float = 0.0) -> None:
+    """dashboard テーブルに1行セットアップ。"""
+    db = MonitoringDB(conn)
+    db.upsert_dashboard(
+        portfolio_value=portfolio_value,
+        cash=cash,
+        drawdown_pct=0.0,
+        open_order_count=0,
+        position_count=0,
+    )
+
+
+def test_risk_monitor_empty_dashboard(mon_conn):
+    """dashboard テーブルが空 → drawdown=0, アラートなし"""
+    monitor = RiskMonitor(mon_conn)
+    result = monitor.check_once()
+
+    assert result.drawdown_pct == 0.0
+    assert result.drawdown_alert is False
+    assert result.position_count == 0
+    assert result.position_limit_alert is False
+
+
+def test_risk_monitor_no_drawdown(mon_conn):
+    """portfolio_value が peak 以上 → drawdown=0, アラートなし"""
+    _setup_dashboard(mon_conn, portfolio_value=1_000_000)
+    monitor = RiskMonitor(mon_conn, dd_threshold=0.10)
+
+    result = monitor.check_once()
+
+    assert result.drawdown_pct == pytest.approx(0.0)
+    assert result.drawdown_alert is False
+
+
+def test_risk_monitor_drawdown_alert(mon_conn):
+    """DD が閾値（10%）超 → drawdown_alert=True, risk_log 記録"""
+    _setup_dashboard(mon_conn, portfolio_value=1_000_000)
+    monitor = RiskMonitor(mon_conn, dd_threshold=0.10)
+    monitor.check_once()  # peak = 1,000,000
+
+    _setup_dashboard(mon_conn, portfolio_value=850_000)
+    result = monitor.check_once()
+
+    assert result.drawdown_pct == pytest.approx(0.15)
+    assert result.drawdown_alert is True
+
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='DRAWDOWN_ALERT'").fetchall()
+    assert len(rows) == 1
+
+
+def test_risk_monitor_high_watermark_update(mon_conn):
+    """portfolio_value が peak を上回った場合に peak が更新される"""
+    _setup_dashboard(mon_conn, portfolio_value=1_000_000)
+    monitor = RiskMonitor(mon_conn, dd_threshold=0.10)
+    monitor.check_once()  # peak = 1,000,000
+
+    _setup_dashboard(mon_conn, portfolio_value=1_200_000)
+    monitor.check_once()  # peak = 1,200,000
+
+    # ちょうど10%下落はアラートなし（> 閾値のため）
+    _setup_dashboard(mon_conn, portfolio_value=1_080_000)
+    result = monitor.check_once()
+
+    assert result.drawdown_pct == pytest.approx(0.10)
+    assert result.drawdown_alert is False  # 10% ちょうどはアラートなし（> 閾値）
+
+
+def test_risk_monitor_position_limit_alert(mon_conn):
+    """ポジション数が max_positions 超 → position_limit_alert=True"""
+    _setup_dashboard(mon_conn, portfolio_value=1_000_000)
+    db = MonitoringDB(mon_conn)
+    for i in range(11):
+        db.upsert_position(code=f"{7000+i}", qty=100, avg_price=1000.0)
+
+    monitor = RiskMonitor(mon_conn, max_positions=10)
+    result = monitor.check_once()
+
+    assert result.position_count == 11
+    assert result.position_limit_alert is True
+
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='POSITION_LIMIT'").fetchall()
+    assert len(rows) == 1
+
+
+def test_risk_monitor_qty_zero_excluded(mon_conn):
+    """qty=0 のポジションは銘柄数カウントから除外"""
+    _setup_dashboard(mon_conn, portfolio_value=1_000_000)
+    db = MonitoringDB(mon_conn)
+    db.upsert_position(code="7203", qty=0, avg_price=1000.0)
+
+    monitor = RiskMonitor(mon_conn, max_positions=10)
+    result = monitor.check_once()
+
+    assert result.position_count == 0
+    assert result.position_limit_alert is False
+
+
+# ─── MonitoringEngine ─────────────────────────────────────────────────────────
+
+def test_monitoring_engine_run_once_calls_all_monitors():
+    """run_once() が 3 つの Monitor の check_once() をすべて呼び出す"""
+    sys_mon = MagicMock()
+    trade_mon = MagicMock()
+    risk_mon = MagicMock()
+
+    engine = MonitoringEngine(sys_mon, trade_mon, risk_mon)
+    engine.run_once()
+
+    sys_mon.check_once.assert_called_once()
+    trade_mon.check_once.assert_called_once()
+    risk_mon.check_once.assert_called_once()
+
+
+def test_monitoring_engine_exception_does_not_stop_other_monitors():
+    """1つの Monitor が例外を投げても残りの Monitor は実行される"""
+    sys_mon = MagicMock()
+    sys_mon.check_once.side_effect = RuntimeError("system check failed")
+    trade_mon = MagicMock()
+    risk_mon = MagicMock()
+
+    engine = MonitoringEngine(sys_mon, trade_mon, risk_mon)
+    engine.run_once()  # 例外が伝播しないこと
+
+    trade_mon.check_once.assert_called_once()
+    risk_mon.check_once.assert_called_once()
