@@ -36,9 +36,13 @@ class MonitoringEngine:
         while True:
             try:
                 self.run_once()
-                time.sleep(self._interval_sec)
             except KeyboardInterrupt:
                 logger.info("MonitoringEngine stopped")
                 break
             except Exception:
                 logger.exception("MonitoringEngine run loop error — continuing")
+            try:
+                time.sleep(self._interval_sec)
+            except KeyboardInterrupt:
+                logger.info("MonitoringEngine stopped")
+                break

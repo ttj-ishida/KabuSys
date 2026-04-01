@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+from pathlib import Path
 
 import streamlit as st
 
@@ -62,7 +63,8 @@ def main(db_path: str) -> None:
             st.rerun()
 
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+        conn = sqlite3.connect(uri, uri=True)
     except sqlite3.OperationalError:
         st.error(f"Database not found or cannot open (read-only): {db_path}. Start MonitoringEngine first.")
         return
