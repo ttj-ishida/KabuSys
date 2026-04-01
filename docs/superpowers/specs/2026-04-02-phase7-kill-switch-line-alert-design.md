@@ -49,12 +49,14 @@ ExecutionEngine.run_session()（別プロセス）
 ### インポート
 
 ```python
+from __future__ import annotations
+
 from kabusys.monitoring.system_monitor import SystemCheckResult
 from kabusys.monitoring.trade_monitor import TradeCheckResult
 from kabusys.monitoring.risk_monitor import RiskCheckResult
 ```
 
-これらのモジュールは `KillSwitch` を import しないため、循環 import は発生しない。
+`from __future__ import annotations` はプロジェクト全体の慣例（`execution_engine.py` line 1、`monitoring_engine.py` line 1 等）に合わせる。これらのモジュールは `KillSwitch` を import しないため、循環 import は発生しない。
 
 ### トリガー条件
 
@@ -147,6 +149,9 @@ requests.post(
 
 `AlertManager` はインスタンス変数 `_last_sent: dict[tuple[str, str], datetime]` で `(level, category)` ごとの最終送信時刻を管理する（プロセスメモリ内）。
 
+- `category` を指定した場合: キーは `(level, category)` — 例: `("CRITICAL", "DRAWDOWN")`
+- `category` を省略（`""`）した場合: キーは `(level, "")` — 常に level のみで識別
+
 これにより `drawdown_alert`（category="DRAWDOWN"）と `process_ok=False`（category="PROCESS"）が同一 CRITICAL レベルでも互いのクールダウンに影響しない。プロセス再起動でリセットされるが、60秒ポーリング運用では十分な抑制効果がある。
 
 ---
@@ -167,7 +172,14 @@ class MonitoringEngine:
         interval_sec: int = 60,
         kill_switch: KillSwitch | None = None,
         alert_manager: AlertManager | None = None,
-    ) -> None
+    ) -> None:
+        # 既存の self._monitors リストは削除し、個別インスタンス変数に分解する
+        self._system_monitor = system_monitor
+        self._trade_monitor = trade_monitor
+        self._risk_monitor = risk_monitor
+        self._interval_sec = interval_sec
+        self._kill_switch = kill_switch
+        self._alert_manager = alert_manager
 
     def run_once(self) -> None:
         # 既存の汎用ループ（self._monitors を順に呼び出す）を廃止し、
@@ -226,13 +238,15 @@ if self._alert_manager:
 
 ### 起動時クリーンアップ（`run_session()` 追加）
 
-`run_session()` の既存 `settings` インポート直後に kill.flag のクリアを追加する。これにより前回実行で残った kill.flag が起動時に自動削除される。
+**PID ファイル書き込みの直後** に kill.flag のクリアを追加する。settings import の直後ではない点に注意。これにより前回実行で残った kill.flag が起動時に自動削除され、かつ PID ファイルが書き込まれた後なので MonitoringEngine が `process_ok=True` を検出した状態でクリアが行われる（競合状態を回避）。
 
 ```python
-# run_session() 内（既存の from kabusys.config import settings as _config の直後）
-from kabusys.config import settings as _settings
-_settings.kill_flag_path.unlink(missing_ok=True)   # 起動時に kill.flag をクリア
+# run_session() 内 — PID ファイル書き込みの直後（_active_pid_file.write_text(...) の次の行）
+_active_pid_file.write_text(str(os.getpid()))    # 既存行
+_config.kill_flag_path.unlink(missing_ok=True)   # NEW: 起動時に kill.flag をクリア
 ```
+
+`_config` は既存の `from kabusys.config import settings as _config`（line 219）で取得済みの変数を再利用する。
 
 ### シグナル処理チェック（`_process_signals()` 追加）
 
