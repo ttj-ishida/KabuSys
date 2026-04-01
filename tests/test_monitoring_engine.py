@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime, timezone
+import uuid
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -138,9 +139,6 @@ def test_system_monitor_data_freshness_none(mon_conn, mock_duckdb, tmp_path):
 
 
 # ─── TradeMonitor ─────────────────────────────────────────────────────────────
-
-import uuid
-from datetime import timedelta
 
 from kabusys.execution.order_record import OrderRecord, OrderState
 from kabusys.execution.order_repository import OrderRepository
