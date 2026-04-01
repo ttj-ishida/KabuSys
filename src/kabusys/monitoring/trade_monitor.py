@@ -10,7 +10,7 @@ from kabusys.execution.order_repository import OrderRepository
 from kabusys.monitoring.monitoring_db import MonitoringDB
 
 
-@dataclass
+@dataclass(frozen=True)
 class TradeCheckResult:
     logged_at: str
     stale_orders: list[str] = field(default_factory=list)
