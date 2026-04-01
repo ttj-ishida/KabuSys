@@ -84,6 +84,7 @@ class KillSwitch:
         risk: RiskCheckResult,
     ) -> str | None
     # トリガー条件を評価。該当すれば flag 書き込み＋理由文字列を返す（複数条件は最初の1件）。
+    # 評価順序はトリガー条件テーブルの上から順（drawdown_alert → position_limit_alert）。
     # flag が既に存在する場合は再書き込みしない（冪等）。
     # 該当なしは None を返す。
 
@@ -184,21 +185,35 @@ class MonitoringEngine:
     def run_once(self) -> None:
         # 既存の汎用ループ（self._monitors を順に呼び出す）を廃止し、
         # 各 Monitor を個別に呼び出して戻り値を変数で受け取る形に変更する。
-        #
-        # 変更後のシグネチャ（概念コード）:
-        #   sys_result   = self._system_monitor.check_once()
-        #   trade_result = self._trade_monitor.check_once()
-        #   risk_result  = self._risk_monitor.check_once()
-        #
-        # KillSwitch / AlertManager はこれらの結果を受け取って動作するため、
-        # __init__ で monitors を list に格納する既存設計を
-        # 3つの個別インスタンス変数 (_system_monitor, _trade_monitor, _risk_monitor)
-        # に分解する必要がある。
         # **重要:** 既存の `self._monitors` リストは完全に削除する。
         # 残存すると run_once() が各 Monitor を二重呼び出しし、DB に重複行が書き込まれる。
         #
-        # 2. KillSwitch.evaluate(sys_result, trade_result, risk_result)
-        # 3. AlertManager.notify() でアラート条件を通知
+        # 各 check_once() は独立した try/except で囲み、例外が発生しても
+        # 後続 Monitor の実行を継続する（既存の isolation 保証を維持）。
+        # 例外発生時は result を None とする。
+        # KillSwitch.evaluate() は 3 結果がすべて non-None の場合のみ呼び出す。
+        # AlertManager の個別アラートは各 result が non-None の場合のみ参照する。
+        #
+        # 実装イメージ（概念コード）:
+        #   sys_result = None
+        #   try:
+        #       sys_result = self._system_monitor.check_once()
+        #   except Exception:
+        #       logger.exception("SystemMonitor failed")
+        #
+        #   trade_result = None
+        #   try:
+        #       trade_result = self._trade_monitor.check_once()
+        #   except Exception:
+        #       logger.exception("TradeMonitor failed")
+        #
+        #   risk_result = None
+        #   try:
+        #       risk_result = self._risk_monitor.check_once()
+        #   except Exception:
+        #       logger.exception("RiskMonitor failed")
+        #
+        # KillSwitch / AlertManager 呼び出しは Section 5 下部参照。
 ```
 
 既存テストへの影響をゼロにするため、`kill_switch` / `alert_manager` はデフォルト `None`（省略可能）とする。
@@ -209,26 +224,28 @@ class MonitoringEngine:
 
 **二重アラートについて:** `drawdown_alert=True` / `position_limit_alert=True` の場合、kill-switch ブロックと個別アラートブロックの両方からメッセージが送信される（category が異なるためクールダウンは干渉しない）。これは意図的な設計で、kill-switch メッセージは「flag 書き込み実行」、個別アラートメッセージは「条件の詳細値」をそれぞれ通知する。
 
+各 result が None の場合（Monitor が例外を投げた場合）は KillSwitch / AlertManager の該当ブロックをスキップする。
+
 ```python
-# Kill Switch 評価
-if self._kill_switch:
+# Kill Switch 評価（全 result が揃っている場合のみ）
+if self._kill_switch and sys_result and trade_result and risk_result:
     reason = self._kill_switch.evaluate(sys_result, trade_result, risk_result)
     if reason and self._alert_manager:
         self._alert_manager.notify(f"Kill Switch 発動: {reason}", "CRITICAL", category="KILL_SWITCH")
 
-# 個別アラート
+# 個別アラート（各 result が None でない場合のみ参照）
 if self._alert_manager:
-    if not sys_result.process_ok:
+    if sys_result and not sys_result.process_ok:
         self._alert_manager.notify("Execution プロセス停止を検出", "CRITICAL", category="PROCESS")
-    if trade_result.stale_orders:
+    if trade_result and trade_result.stale_orders:
         self._alert_manager.notify(f"滞留注文 {len(trade_result.stale_orders)} 件", "WARNING", category="STALE_ORDER")
-    if trade_result.anomaly_fills:
+    if trade_result and trade_result.anomaly_fills:
         self._alert_manager.notify(f"約定異常価格 {len(trade_result.anomaly_fills)} 件", "WARNING", category="PRICE_ANOMALY")
-    if risk_result.drawdown_alert:
+    if risk_result and risk_result.drawdown_alert:
         self._alert_manager.notify(f"DD {risk_result.drawdown_pct*100:.1f}% 超過", "CRITICAL", category="DRAWDOWN")
-    if risk_result.position_limit_alert:
+    if risk_result and risk_result.position_limit_alert:
         self._alert_manager.notify(f"ポジション上限超過: {risk_result.position_count} 銘柄", "WARNING", category="POSITION_LIMIT")
-    if not sys_result.data_freshness_ok:
+    if sys_result and not sys_result.data_freshness_ok:
         self._alert_manager.notify("株価データ鮮度異常", "WARNING", category="DATA_FRESHNESS")
 ```
 
