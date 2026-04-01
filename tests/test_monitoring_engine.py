@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kabusys.monitoring.monitoring_db import MonitoringDB, init_monitoring_db
+from kabusys.monitoring.monitoring_engine import MonitoringEngine
+from kabusys.monitoring.risk_monitor import RiskMonitor
 from kabusys.monitoring.system_monitor import SystemMonitor
 from kabusys.monitoring.trade_monitor import TradeMonitor
 
@@ -263,3 +265,132 @@ def test_trade_monitor_market_order_excluded(mon_conn):
     result = monitor.check_once()
 
     assert result.anomaly_fills == []
+
+
+# ─── RiskMonitor ─────────────────────────────────────────────────────────────
+
+def _setup_dashboard(conn: sqlite3.Connection, portfolio_value: float, cash: float = 0.0) -> None:
+    """dashboard テーブルに1行セットアップ。"""
+    db = MonitoringDB(conn)
+    db.upsert_dashboard(
+        portfolio_value=portfolio_value,
+        cash=cash,
+        drawdown_pct=0.0,
+        open_order_count=0,
+        position_count=0,
+    )
+
+
+def test_risk_monitor_empty_dashboard(mon_conn):
+    """dashboard テーブルが空 → drawdown=0, アラートなし"""
+    monitor = RiskMonitor(mon_conn)
+    result = monitor.check_once()
+
+    assert result.drawdown_pct == 0.0
+    assert result.drawdown_alert is False
+    assert result.position_count == 0
+    assert result.position_limit_alert is False
+
+
+def test_risk_monitor_no_drawdown(mon_conn):
+    """portfolio_value が peak 以上 → drawdown=0, アラートなし"""
+    _setup_dashboard(mon_conn, portfolio_value=1_000_000)
+    monitor = RiskMonitor(mon_conn, dd_threshold=0.10)
+
+    result = monitor.check_once()
+
+    assert result.drawdown_pct == pytest.approx(0.0)
+    assert result.drawdown_alert is False
+
+
+def test_risk_monitor_drawdown_alert(mon_conn):
+    """DD が閾値（10%）超 → drawdown_alert=True, risk_log 記録"""
+    _setup_dashboard(mon_conn, portfolio_value=1_000_000)
+    monitor = RiskMonitor(mon_conn, dd_threshold=0.10)
+    monitor.check_once()  # peak = 1,000,000
+
+    _setup_dashboard(mon_conn, portfolio_value=850_000)
+    result = monitor.check_once()
+
+    assert result.drawdown_pct == pytest.approx(0.15)
+    assert result.drawdown_alert is True
+
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='DRAWDOWN_ALERT'").fetchall()
+    assert len(rows) == 1
+
+
+def test_risk_monitor_high_watermark_update(mon_conn):
+    """portfolio_value が peak を上回った場合に peak が更新される"""
+    _setup_dashboard(mon_conn, portfolio_value=1_000_000)
+    monitor = RiskMonitor(mon_conn, dd_threshold=0.10)
+    monitor.check_once()  # peak = 1,000,000
+
+    _setup_dashboard(mon_conn, portfolio_value=1_200_000)
+    monitor.check_once()  # peak = 1,200,000
+
+    # ちょうど10%下落はアラートなし（> 閾値のため）
+    _setup_dashboard(mon_conn, portfolio_value=1_080_000)
+    result = monitor.check_once()
+
+    assert result.drawdown_pct == pytest.approx(0.10)
+    assert result.drawdown_alert is False  # 10% ちょうどはアラートなし（> 閾値）
+
+
+def test_risk_monitor_position_limit_alert(mon_conn):
+    """ポジション数が max_positions 超 → position_limit_alert=True"""
+    _setup_dashboard(mon_conn, portfolio_value=1_000_000)
+    db = MonitoringDB(mon_conn)
+    for i in range(11):
+        db.upsert_position(code=f"{7000+i}", qty=100, avg_price=1000.0)
+
+    monitor = RiskMonitor(mon_conn, max_positions=10)
+    result = monitor.check_once()
+
+    assert result.position_count == 11
+    assert result.position_limit_alert is True
+
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='POSITION_LIMIT'").fetchall()
+    assert len(rows) == 1
+
+
+def test_risk_monitor_qty_zero_excluded(mon_conn):
+    """qty=0 のポジションは銘柄数カウントから除外"""
+    _setup_dashboard(mon_conn, portfolio_value=1_000_000)
+    db = MonitoringDB(mon_conn)
+    db.upsert_position(code="7203", qty=0, avg_price=1000.0)
+
+    monitor = RiskMonitor(mon_conn, max_positions=10)
+    result = monitor.check_once()
+
+    assert result.position_count == 0
+    assert result.position_limit_alert is False
+
+
+# ─── MonitoringEngine ─────────────────────────────────────────────────────────
+
+def test_monitoring_engine_run_once_calls_all_monitors():
+    """run_once() が 3 つの Monitor の check_once() をすべて呼び出す"""
+    sys_mon = MagicMock()
+    trade_mon = MagicMock()
+    risk_mon = MagicMock()
+
+    engine = MonitoringEngine(sys_mon, trade_mon, risk_mon)
+    engine.run_once()
+
+    sys_mon.check_once.assert_called_once()
+    trade_mon.check_once.assert_called_once()
+    risk_mon.check_once.assert_called_once()
+
+
+def test_monitoring_engine_exception_does_not_stop_other_monitors():
+    """1つの Monitor が例外を投げても残りの Monitor は実行される"""
+    sys_mon = MagicMock()
+    sys_mon.check_once.side_effect = RuntimeError("system check failed")
+    trade_mon = MagicMock()
+    risk_mon = MagicMock()
+
+    engine = MonitoringEngine(sys_mon, trade_mon, risk_mon)
+    engine.run_once()  # 例外が伝播しないこと
+
+    trade_mon.check_once.assert_called_once()
+    risk_mon.check_once.assert_called_once()
