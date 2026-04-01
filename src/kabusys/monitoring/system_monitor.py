@@ -1,10 +1,13 @@
 """system_monitor.py — システム状態・データ鮮度を監視する。"""
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 import duckdb
 import psutil
@@ -85,7 +88,9 @@ class SystemMonitor:
         try:
             pid = int(self._pid_file.read_text().strip())
         except (ValueError, OSError):
-            return False, False
+            logger.warning("Invalid PID file %s — removing", self._pid_file)
+            self._pid_file.unlink(missing_ok=True)
+            return False, True
         if psutil.pid_exists(pid):
             return True, False
         # stale PID — 削除してアラート

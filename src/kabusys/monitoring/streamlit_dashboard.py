@@ -10,7 +10,7 @@ import sqlite3
 
 import streamlit as st
 
-from kabusys.monitoring.monitoring_db import MonitoringDB, init_monitoring_db
+from kabusys.monitoring.monitoring_db import MonitoringDB
 
 
 def _get_db_path() -> str:
@@ -57,8 +57,15 @@ def main(db_path: str) -> None:
     st.set_page_config(page_title="KabuSys Monitor", layout="wide")
     st.title("KabuSys 監視ダッシュボード")
 
-    conn = sqlite3.connect(db_path)
-    init_monitoring_db(conn)
+    with st.sidebar:
+        if st.button("Refresh"):
+            st.rerun()
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.OperationalError:
+        st.error(f"Database not found or cannot open (read-only): {db_path}. Start MonitoringEngine first.")
+        return
     db = MonitoringDB(conn)
 
     tab_overview, tab_positions, tab_orders, tab_system = st.tabs(
@@ -107,7 +114,6 @@ def main(db_path: str) -> None:
             st.subheader("Recent Risk Events")
             st.dataframe(risk_logs, use_container_width=True)
 
-    st.rerun(every=30)
 
 
 if __name__ == "__main__":

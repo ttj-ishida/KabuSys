@@ -92,6 +92,27 @@ def test_system_monitor_stale_pid(mon_conn, mock_duckdb, tmp_path):
     assert len(rows) == 1
 
 
+def test_system_monitor_invalid_pid_file(mon_conn, mock_duckdb, tmp_path):
+    """PID ファイルが不正内容 → ファイル削除・stale_pid_detected=True・risk_log記録"""
+    pid_file = tmp_path / "execution.pid"
+    pid_file.write_text("not-a-number")
+    monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
+
+    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=date.today()), \
+         patch("psutil.cpu_percent", return_value=30.0), \
+         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
+         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+        result = monitor.check_once(today=date.today())
+
+    assert result.process_ok is False
+    assert result.stale_pid_detected is True
+    assert not pid_file.exists()
+
+    mon_conn.row_factory = sqlite3.Row
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='STALE_PID'").fetchall()
+    assert len(rows) == 1
+
+
 def test_system_monitor_data_freshness_ok(mon_conn, mock_duckdb, tmp_path):
     """株価データが 2 日前 → data_freshness_ok=True"""
     today = date(2026, 4, 1)
