@@ -267,18 +267,34 @@ _config.kill_flag_path.unlink(missing_ok=True)   # NEW: 起動時に kill.flag �
 
 ### シグナル処理チェック（`_process_signals()` 追加）
 
-`_process_signals()` の先頭に kill.flag チェックを追加する（4行）。
+kill.flag チェックを **2箇所** に追加する。
 
-`self._config` は `EngineConfig` dataclass（`target_date` などを持つ実行設定）であり、`kill_flag_path` は持たない。`Settings` シングルトンは `run_session()` 内で既に `from kabusys.config import settings as _config`（line 219）として利用されているパターンと同じく、メソッド先頭でインポートして参照する。
+1. **メソッド先頭**（シグナル読み込み前）— 発注ループに入る前に即時停止
+2. **for ループ内の先頭**（既存の `_stop_event.is_set()` チェックの直後）— 発注ループ実行中に kill.flag が書き込まれた場合にも停止
+
+1箇所のみ（メソッド先頭）だと、ループ実行中に MonitoringEngine が kill.flag を書いても当該セッション内では検出されない。
 
 ```python
 def _process_signals(self) -> None:
     from kabusys.config import settings as _settings   # kill.flag パス取得
+    # 1. メソッド先頭チェック
     if _settings.kill_flag_path.exists():
         logger.warning("kill.flag を検出 — kill_switch を発動します")
         self.kill_switch()
         return
-    # 以下、既存のシグナル処理（変更なし）
+
+    signals = self._read_signals()
+    # ...（既存コード）
+
+    for sig in signals:
+        if self._stop_event.is_set():
+            break
+        # 2. ループ内チェック（発注ループ実行中の kill.flag 検出）
+        if _settings.kill_flag_path.exists():
+            logger.warning("kill.flag を検出（ループ内）— kill_switch を発動します")
+            self.kill_switch()
+            return
+        # 以下、既存のシグナル処理（変更なし）
 ```
 
 ---
@@ -331,8 +347,9 @@ def kill_flag_path(self) -> Path:
 | `AlertManager.notify()` | LINE API 非 2xx レスポンス → False 返却・例外非伝播 |
 | `AlertManager.notify()` | 同一 level・異なる category → クールダウン非干渉（両方送信） |
 | `MonitoringEngine.run_once()` | kill_switch/alert_manager が呼ばれること（mock） |
-| `ExecutionEngine._process_signals()` | kill.flag あり → kill_switch() 発動・シグナル処理スキップ |
+| `ExecutionEngine._process_signals()` | kill.flag あり（メソッド先頭）→ kill_switch() 発動・シグナル処理スキップ |
 | `ExecutionEngine._process_signals()` | kill.flag なし → 通常処理 |
+| `ExecutionEngine._process_signals()` | kill.flag がループ途中で出現 → kill_switch() 発動・残シグナルスキップ |
 | `ExecutionEngine.run_session()` | 起動時に kill.flag が存在する場合は削除される |
 
 `requests.post` は `unittest.mock.patch` でモックする。
