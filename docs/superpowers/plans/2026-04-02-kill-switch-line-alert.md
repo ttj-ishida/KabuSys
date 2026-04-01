@@ -927,13 +927,17 @@ Expected: FAIL（`AttributeError: settings` など）
 
 `src/kabusys/execution/execution_engine.py` を次の箇所で編集する。
 
-**変更 1: モジュール先頭に settings をモジュールレベルでインポート追加**
+**変更 1: モジュール先頭に settings をモジュールレベルでインポート追加【必須・最初に行うこと】**
 
-ファイル先頭（既存 import 群の末尾）に追加:
+`execution_engine.py` のモジュール先頭（既存 import 群の末尾、`from kabusys.execution.risk_manager import ...` 等の後）に追加:
 
 ```python
 from kabusys.config import settings
 ```
+
+このモジュールレベルの `settings` 名が存在しないと:
+- 変更 2〜4 で参照する `settings.kill_flag_path` が `NameError` になる
+- テストが `patch("kabusys.execution.execution_engine.settings")` で `AttributeError` になる
 
 **重要:** `run_session()` 内には既存の `from kabusys.config import settings as _config`（line 219）が存在し、`_active_pid_file = ... _config.pid_file_path` として使われている。このローカルインポートは**削除しないこと**。モジュールレベルの `settings` と共存させる（両方とも同じシングルトンを参照する）。
 
