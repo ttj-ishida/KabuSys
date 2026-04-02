@@ -175,6 +175,10 @@ class Settings:
         return Path(os.environ.get("KILL_FLAG_PATH", "data/kill.flag")).expanduser()
 
     @property
+    def kill_flag_clear_on_start(self) -> bool:
+        return os.environ.get("KILL_FLAG_CLEAR_ON_START", "0") == "1"
+
+    @property
     def cpu_threshold_pct(self) -> float:
         return float(os.environ.get("CPU_THRESHOLD_PCT", "90.0"))
 

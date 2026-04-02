@@ -299,15 +299,14 @@ class TestKillFlagPolling:
         repo = OrderRepository(sqlite_conn)
         assert len(repo.list_active()) < 3
 
-    def test_run_session_clears_kill_flag_on_startup(self, sqlite_conn, duckdb_conn, tmp_path):
-        """起動時に kill.flag が存在する場合は削除される"""
+    def test_run_session_clears_kill_flag_when_clear_on_start_enabled(self, sqlite_conn, duckdb_conn, tmp_path):
+        """KILL_FLAG_CLEAR_ON_START=1 の場合、起動時に kill.flag を削除して続行する"""
         flag_path = tmp_path / "kill.flag"
         flag_path.write_text("old flag")
         pid_file = tmp_path / "execution.pid"
 
         broker = MockBrokerClient()
         engine = _make_engine(broker, sqlite_conn, duckdb_conn)
-        # _pid_file を設定することで run_session() 内の _active_pid_file が tmp_path 配下になる
         engine._pid_file = pid_file
 
         with patch("kabusys.execution.execution_engine.settings") as mock_settings, \
@@ -315,6 +314,7 @@ class TestKillFlagPolling:
              patch.object(engine, "_process_signals"), \
              patch.object(engine, "_drain_push_queue"):
             mock_settings.kill_flag_path = flag_path
+            mock_settings.kill_flag_clear_on_start = True
             engine._stop_event.set()  # 即座に停止
             try:
                 engine.run_session()
@@ -322,3 +322,25 @@ class TestKillFlagPolling:
                 pass
 
         assert not flag_path.exists()
+
+    def test_run_session_refuses_to_start_when_kill_flag_exists(self, sqlite_conn, duckdb_conn, tmp_path):
+        """kill.flag が存在し KILL_FLAG_CLEAR_ON_START=0 (デフォルト) の場合、起動を拒否する"""
+        flag_path = tmp_path / "kill.flag"
+        flag_path.write_text("operator placed")
+        pid_file = tmp_path / "execution.pid"
+
+        broker = MockBrokerClient()
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._pid_file = pid_file
+
+        with patch("kabusys.execution.execution_engine.settings") as mock_settings, \
+             patch.object(engine, "_websocket_worker"), \
+             patch.object(engine, "_process_signals"), \
+             patch.object(engine, "_drain_push_queue"):
+            mock_settings.kill_flag_path = flag_path
+            mock_settings.kill_flag_clear_on_start = False
+            with pytest.raises(SystemExit):
+                engine.run_session()
+
+        # kill.flag は削除されていない
+        assert flag_path.exists()

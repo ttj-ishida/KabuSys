@@ -233,7 +233,16 @@ class ExecutionEngine:
         _active_pid_file = self._pid_file if self._pid_file is not None else _config.pid_file_path
         _active_pid_file.parent.mkdir(parents=True, exist_ok=True)
         _active_pid_file.write_text(str(os.getpid()))
-        settings.kill_flag_path.unlink(missing_ok=True)  # NEW: clear kill.flag on startup
+        if settings.kill_flag_path.exists():
+            if settings.kill_flag_clear_on_start:
+                logger.warning(
+                    "kill.flag が存在しますが KILL_FLAG_CLEAR_ON_START=1 のためクリアして起動します: %s",
+                    settings.kill_flag_path,
+                )
+                settings.kill_flag_path.unlink()
+            else:
+                logger.critical("kill.flag が存在するため起動を拒否します: %s", settings.kill_flag_path)
+                raise SystemExit(1)
 
         try:
             # WebSocket スレッド起動
