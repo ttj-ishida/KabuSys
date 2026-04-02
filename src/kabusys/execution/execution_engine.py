@@ -19,6 +19,7 @@ from kabusys.execution.broker_api import BrokerAPIProtocol, OrderSentPendingErro
 # DuplicateOrderError は _process_signals() (Task 7) で使用
 from kabusys.execution.order_manager import DuplicateOrderError, OrderManager
 from kabusys.execution.order_repository import OrderRepository
+from kabusys.config import settings
 from kabusys.execution.reconciler import Reconciler
 from kabusys.execution.risk_manager import RiskManager, RiskRejectReason
 
@@ -60,12 +61,24 @@ class ExecutionEngine:
         """今日のシグナルを読み込み、Gate 1/2 を通して発注する。"""
         from kabusys.execution.broker_api import OrderRequest
 
+        # 1. メソッド先頭チェック
+        if settings.kill_flag_path.exists():
+            logger.warning("kill.flag を検出 — kill_switch を発動します")
+            self.kill_switch()
+            return
+
         signals = self._read_signals()
         logger.info("シグナル処理開始: %d 件", len(signals))
 
         for sig in signals:
             if self._stop_event.is_set():
                 break
+
+            # 2. ループ内チェック（発注ループ実行中の kill.flag 検出）
+            if settings.kill_flag_path.exists():
+                logger.warning("kill.flag を検出（ループ内）— kill_switch を発動します")
+                self.kill_switch()
+                return
 
             code: str = sig["code"]
             side: str = sig["side"]
@@ -220,6 +233,7 @@ class ExecutionEngine:
         _active_pid_file = self._pid_file if self._pid_file is not None else _config.pid_file_path
         _active_pid_file.parent.mkdir(parents=True, exist_ok=True)
         _active_pid_file.write_text(str(os.getpid()))
+        settings.kill_flag_path.unlink(missing_ok=True)  # NEW: clear kill.flag on startup
 
         try:
             # WebSocket スレッド起動
