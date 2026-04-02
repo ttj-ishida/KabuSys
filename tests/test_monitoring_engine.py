@@ -413,3 +413,76 @@ def test_monitoring_engine_exception_does_not_stop_other_monitors():
 
     trade_mon.check_once.assert_called_once()
     risk_mon.check_once.assert_called_once()
+
+
+# ─── MonitoringEngine + KillSwitch / AlertManager ────────────────────────────
+
+from kabusys.monitoring.kill_switch import KillSwitch
+from kabusys.monitoring.alert_manager import AlertManager
+
+
+def test_monitoring_engine_calls_kill_switch_when_all_results_available():
+    """全 Monitor が成功した場合 KillSwitch.evaluate() が呼ばれる"""
+    sys_mon = MagicMock()
+    trade_mon = MagicMock()
+    risk_mon = MagicMock()
+    kill_switch = MagicMock(spec=KillSwitch)
+    kill_switch.evaluate.return_value = None
+
+    engine = MonitoringEngine(sys_mon, trade_mon, risk_mon, kill_switch=kill_switch)
+    engine.run_once()
+
+    kill_switch.evaluate.assert_called_once_with(
+        sys_mon.check_once.return_value,
+        trade_mon.check_once.return_value,
+        risk_mon.check_once.return_value,
+    )
+
+
+def test_monitoring_engine_skips_kill_switch_when_monitor_fails():
+    """Monitor が例外を投げた場合 KillSwitch.evaluate() は呼ばれない"""
+    sys_mon = MagicMock()
+    sys_mon.check_once.side_effect = RuntimeError("boom")
+    trade_mon = MagicMock()
+    risk_mon = MagicMock()
+    kill_switch = MagicMock(spec=KillSwitch)
+
+    engine = MonitoringEngine(sys_mon, trade_mon, risk_mon, kill_switch=kill_switch)
+    engine.run_once()
+
+    kill_switch.evaluate.assert_not_called()
+
+
+def test_monitoring_engine_notifies_alert_manager_on_kill_switch_trigger():
+    """KillSwitch が reason を返した場合 AlertManager.notify() が CRITICAL で呼ばれる"""
+    sys_mon = MagicMock()
+    trade_mon = MagicMock()
+    risk_mon = MagicMock()
+    kill_switch = MagicMock(spec=KillSwitch)
+    kill_switch.evaluate.return_value = "DRAWDOWN_ALERT: DD 12.3%"
+    alert_manager = MagicMock(spec=AlertManager)
+
+    engine = MonitoringEngine(
+        sys_mon, trade_mon, risk_mon,
+        kill_switch=kill_switch,
+        alert_manager=alert_manager,
+    )
+    engine.run_once()
+
+    alert_manager.notify.assert_any_call(
+        "Kill Switch 発動: DRAWDOWN_ALERT: DD 12.3%", "CRITICAL", category="KILL_SWITCH"
+    )
+
+
+def test_monitoring_engine_without_kill_switch_still_works():
+    """kill_switch=None でも run_once() が正常動作する（既存テストの互換性確認）"""
+    sys_mon = MagicMock()
+    trade_mon = MagicMock()
+    risk_mon = MagicMock()
+
+    engine = MonitoringEngine(sys_mon, trade_mon, risk_mon)
+    engine.run_once()
+
+    sys_mon.check_once.assert_called_once()
+    trade_mon.check_once.assert_called_once()
+    risk_mon.check_once.assert_called_once()
