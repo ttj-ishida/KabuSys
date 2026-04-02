@@ -458,6 +458,13 @@ def test_monitoring_engine_notifies_alert_manager_on_kill_switch_trigger():
     sys_mon = MagicMock()
     trade_mon = MagicMock()
     risk_mon = MagicMock()
+    # Prevent individual alert conditions from triggering (only test kill-switch path)
+    sys_mon.check_once.return_value.process_ok = True
+    sys_mon.check_once.return_value.data_freshness_ok = True
+    trade_mon.check_once.return_value.stale_orders = []
+    trade_mon.check_once.return_value.anomaly_fills = []
+    risk_mon.check_once.return_value.drawdown_alert = False
+    risk_mon.check_once.return_value.position_limit_alert = False
     kill_switch = MagicMock(spec=KillSwitch)
     kill_switch.evaluate.return_value = "DRAWDOWN_ALERT: DD 12.3%"
     alert_manager = MagicMock(spec=AlertManager)

@@ -73,10 +73,8 @@ class MonitoringEngine:
                     f"約定異常価格 {len(trade_result.anomaly_fills)} 件", "WARNING", category="PRICE_ANOMALY"
                 )
             if risk_result and risk_result.drawdown_alert:
-                dd_pct = risk_result.drawdown_pct
-                dd_str = f"{dd_pct * 100:.1f}" if isinstance(dd_pct, float) else str(dd_pct)
                 self._alert_manager.notify(
-                    f"DD {dd_str}% 超過", "CRITICAL", category="DRAWDOWN"
+                    f"DD {risk_result.drawdown_pct * 100:.1f}% 超過", "CRITICAL", category="DRAWDOWN"
                 )
             if risk_result and risk_result.position_limit_alert:
                 self._alert_manager.notify(
