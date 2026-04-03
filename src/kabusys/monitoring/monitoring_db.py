@@ -200,12 +200,13 @@ class MonitoringDB:
             try:
                 row = self._conn.execute(
                     """
-                    SELECT MAX(logged_at) FROM risk_logs
+                    SELECT logged_at FROM risk_logs
                     WHERE event_type = ?
                       AND (
                             (detail IS NULL AND ? IS NULL)
                             OR detail = ?
                           )
+                    ORDER BY logged_at DESC LIMIT 1
                     """,
                     (event_type, detail, detail),
                 ).fetchone()
