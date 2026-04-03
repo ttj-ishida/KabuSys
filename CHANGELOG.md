@@ -1,83 +1,94 @@
-# Changelog
+# CHANGELOG
 
-すべての重要な変更はこのファイルに記録します。
-このプロジェクトは Keep a Changelog の規約に従います。
-なお日付はリリース日を表します。
+すべての変更は [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) の形式に従います。  
+このプロジェクトのバージョニングは semver を使用します。
 
 ## [Unreleased]
-- 今後の変更・計画をここに記述します。
 
 ## [0.1.0] - 2026-04-03
-初回リリース。日本株自動売買システム「KabuSys」の基盤機能を実装・公開。
+初回リリース。日本株自動売買システム "KabuSys" のコアライブラリを公開。
 
 ### Added
-- パッケージのエントリポイントと公開APIを追加
-  - src/kabusys/__init__.py: __version__ = "0.1.0", __all__ = ["data", "strategy", "execution", "monitoring"]。
+- パッケージ初期化
+  - src/kabusys/__init__.py にてバージョン（0.1.0）および公開モジュールを定義。
 
-- 環境変数・設定管理
-  - src/kabusys/config.py:
-    - .env / .env.local の自動読み込み機能（プロジェクトルートを .git または pyproject.toml から検出）。
-    - 読み込み優先順位: OS 環境変数 > .env.local > .env。
-    - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動ロード無効化対応。
-    - .env 解析で export 形式、クォート・エスケープ、インラインコメント等に対応するパーサ実装。
-    - 既存 OS 環境変数を保護する protected パラメータの導入（.env 上書き制御）。
-    - Settings クラスを提供し、J-Quants / kabuAPI / LINE / DB / 監視設定等の環境変数取得（バリデーション含む）。
+- 環境設定 / .env ローダー
+  - src/kabusys/config.py
+    - プロジェクトルートを .git または pyproject.toml を基準に探索して .env / .env.local を自動読み込み（環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD で無効化可能）。
+    - .env 行パーサを実装（`export KEY=val`、シングル/ダブルクォート内のエスケープ、インラインコメントの扱いなどに対応）。
+    - 読み込み時の override/protected 制御をサポートし、OS 環境変数の保護を実現。
+    - Settings クラスを提供し、J-Quants / kabuステーション / LINE / DB / 監視 / システム設定を環境変数から取得するプロパティを実装。
+    - KABUSYS_ENV と LOG_LEVEL の入力検証（許容値外は ValueError）。
+    - ファイルパス系設定は Path オブジェクトで返す（expanduser 対応）。
+    - 監視用フラグや閾値（CPU/MEM/DISK 等）の型変換とデフォルト値を提供。
 
-- AI（NLP）関連
-  - src/kabusys/ai/news_nlp.py:
-    - raw_news と news_symbols から銘柄ごとのニュースを集約し、OpenAI（gpt-4o-mini）へバッチ送信して銘柄別センチメント（ai_score）を計算。
-    - JST ベースのニュース収集ウィンドウ計算（前日 15:00 JST ～ 当日 08:30 JST）を calc_news_window で実装。
-    - バッチ処理（最大 20 銘柄／コール）、記事数・文字数制限、レスポンス検証、±1.0 クリップ、部分成功時の DB 上書き戦略を実装。
-    - リトライ（429/ネットワーク/タイムアウト/5xx）と指数バックオフ実装。
-    - テスト用に _call_openai_api の差し替えが可能（unittest.mock.patch を想定）。
+- AI モジュール（ニュース NLP / レジーム判定）
+  - src/kabusys/ai/news_nlp.py
+    - raw_news と news_symbols を取りまとめて銘柄ごとにニュースを集約し、OpenAI (gpt-4o-mini) の JSON Mode にバッチ送信してセンチメント（-1.0〜1.0）を算出。
+    - タイムウィンドウは JST 基準で前日 15:00 ～ 当日 08:30（UTC で前日 06:00 ～ 23:30）を使用。calc_news_window 関数を提供。
+    - 1 銘柄あたり最大記事数 / 最大文字数でトリム（_MAX_ARTICLES_PER_STOCK/_MAX_CHARS_PER_STOCK）。
+    - バッチサイズ制御（1 API コールあたり最大 20 銘柄）。
+    - API 呼び出し失敗（429、ネットワーク断、タイムアウト、5xx）に対する指数バックオフリトライ実装。その他のエラーはスキップして継続するフェイルセーフ挙動。
+    - レスポンスの厳密なバリデーション（JSON 抽出・results キー・各要素の code/score 検証、スコアの数値化と ±1.0 クリップ）。不正応答はスキップして他銘柄を保護。
+    - DuckDB への書き込みは idempotent（対象コードを先に DELETE → INSERT）で、部分失敗時に他コードの既存スコアを消さない実装（executemany の空リスト扱いへの対応あり）。
+    - テスト容易性のため _call_openai_api を分離し patch で差し替え可能。
 
-  - src/kabusys/ai/regime_detector.py:
-    - ETF 1321 の 200 日 MA 乖離（重み 70%）とマクロセンチメント（重み 30%）を合成して日次の市場レジーム（bull/neutral/bear）を判定・保存。
-    - マクロニュース抽出のためのキーワードリスト、LLM 呼び出し（gpt-4o-mini）、JSON 出力パース、リトライ・フォールバック（API 失敗時 macro_sentiment=0.0）を実装。
-    - DuckDB を用いた冪等な market_regime テーブルへの書き込み（BEGIN / DELETE / INSERT / COMMIT）。
-    - ルックアヘッドバイアス防止のため、target_date 未満データのみを使用する設計。
+  - src/kabusys/ai/regime_detector.py
+    - ETF 1321（日経225 連動 ETF）の 200 日移動平均乖離（重み 70%）とマクロニュース LLM センチメント（重み 30%）を合成して日次の市場レジーム（bull / neutral / bear）を判定。
+    - MA の計算は target_date 未満のデータのみを使用し、ルックアヘッドバイアスを排除。
+    - マクロ記事はニュース NLP と同様に記事抽出を行い、OpenAI に JSON 出力を要求して macro_sentiment を取得。記事がない場合は LLM 呼び出しを行わず macro_sentiment=0.0。
+    - LLM 呼び出しはリトライ / backoff を実装し、最終的に失敗した場合は macro_sentiment=0.0 でフェイルセーフ。
+    - スコア合成後に market_regime テーブルへ冪等的に（BEGIN/DELETE/INSERT/COMMIT）書き込み。エラー発生時は ROLLBACK を試みて上位へ例外を伝搬。
+    - 各所にログ出力を実装（WARN/INFO）。
 
-- データプラットフォーム（DuckDB ベース）
-  - src/kabusys/data/calendar_management.py:
-    - JPX カレンダー管理ロジック（market_calendar テーブル）を実装。
-    - is_trading_day / next_trading_day / prev_trading_day / get_trading_days / is_sq_day 等の営業日判定ユーティリティを提供。
-    - DB 未取得時の曜日ベースフォールバック、最大探索日数ガード、バックフィルや健全性チェックを実装。
-    - calendar_update_job により J-Quants からの差分取得→保存フローを実装（バックフィル考慮）。
+- Research（ファクター計算・特徴量探索）
+  - src/kabusys/research/factor_research.py
+    - calc_momentum: 1M/3M/6M リターン、200 日 MA 乖離（ma200_dev）を計算。データ不足時は None を返す。
+    - calc_volatility: 20 日 ATR（true range を正しく扱う）、相対 ATR（atr_pct）、20 日平均売買代金、出来高変化率を計算。必要行数未満は None を返す。
+    - calc_value: raw_financials から target_date 以前の最新財務データを取得し PER/ROE を計算。EPS が 0 または欠損時は PER を None にする。
+    - いずれも DuckDB（prices_daily / raw_financials）を利用、外部 API にはアクセスしない設計。
 
-  - src/kabusys/data/pipeline.py / etl.py:
-    - ETLResult（dataclass）を公開（src/kabusys/data/etl.py で再エクスポート）。
-    - ETL の差分取得・保存・品質チェックのための基盤（差分計算、backfill、品質問題の集約、エラー情報の保持）を実装。
-    - DuckDB のテーブル存在確認、最大日付取得等のユーティリティを実装。
+  - src/kabusys/research/feature_exploration.py
+    - calc_forward_returns: 指定基準日から各ホライズン（デフォルト [1,5,21]）の将来リターンを計算。horizons の入力検証を実施。
+    - calc_ic: ファクター値と将来リターンの Spearman ランク相関（IC）を計算。有効レコード 3 件未満は None。
+    - rank: 同順位は平均ランクとするランク付けを実装（丸め誤差対策で round を使用）。
+    - factor_summary: count/mean/std/min/max/median を計算する統計サマリー機能。
+    - 外部ライブラリに依存せず標準ライブラリのみで実装。
 
-- リサーチ（ファクター・特徴探索）
-  - src/kabusys/research/factor_research.py:
-    - Momentum（1M/3M/6M リターン、200 日 MA 乖離）、Volatility（20 日 ATR）、Value（PER, ROE）等のファクター計算関数を実装。
-    - DuckDB 上の SQL ウィンドウ関数を活用した効率的な計算を採用。結果は (date, code) をキーにした dict リストで返却。
-    - データ不足時の None 戻りなど堅牢性を考慮。
+- Data（ETL・カレンダー管理・ユーティリティ）
+  - src/kabusys/data/calendar_management.py
+    - JPX カレンダー管理（market_calendar テーブル）を実装。is_trading_day / next_trading_day / prev_trading_day / get_trading_days / is_sq_day を提供。
+    - DB にカレンダーがない場合は曜日（平日=営業日）でフォールバックする一貫した挙動を提供。
+    - calendar_update_job: J-Quants API から差分取得して market_calendar を更新する夜間バッチ（バックフィル、健全性チェック、保存は jq.save_market_calendar を利用して冪等保存）。
+    - 探索の最大上限や過剰な未来日付に対する保護ロジックを実装。
 
-  - src/kabusys/research/feature_exploration.py:
-    - 将来リターン計算（calc_forward_returns）、IC（calc_ic）計算（Spearman の ρ に基づくランク相関）、ランク変換、ファクター統計要約（factor_summary）を実装。
-    - pandas 等に依存しない純 Python 実装。ties の取り扱い（平均ランク）や小数丸め対策を実装。
+  - src/kabusys/data/pipeline.py / etl.py
+    - ETLResult データクラス（pipeline.ETLResult を data.etl で再エクスポート）。
+    - ETL の設計方針や DB 差分取得、バックフィル、品質チェック（quality モジュール連携）に基づく実装方針を定義。
+    - ETLResult は処理結果の集約、品質問題の集計、辞書変換ユーティリティ（to_dict）を提供。
+    - DuckDB のテーブル存在チェックや最大日付取得用ユーティリティを実装（互換性考慮）。
 
-- テスト・運用支援
-  - 各種モジュールにおいて外部 API 呼び出しを差し替え可能にするフック（主に _call_openai_api）を用意し、単体テストを容易化。
+- モジュール公開の整理
+  - ai、research、data パッケージの __init__.py による主要関数・ユーティリティの再エクスポートを整備（例: kabusys.ai.score_news / score_regime、kabusys.research.* 等）。
 
 ### Changed
-- （初版）設計方針ドキュメント的コメントを豊富に実装内に含め、各関数の前提・フォールバック・例外ポリシーを明示。
+- （初回リリースのため該当なし）
 
 ### Fixed
-- N/A（初回リリースのためバグ修正履歴はなし。ただしコード中に多くのフォールトトレランス実装を含む: API 例外時のフォールバック、JSON パースの救済処理、DuckDB executemany の空リスト回避など）。
+- （初回リリースのため該当なし）
+
+### Removed
+- （初回リリースのため該当なし）
 
 ### Security
-- 機密情報（OpenAI API キー等）を必須にするが、Settings 経由で環境変数管理を強調。自動ロードは環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD により無効化可能。
-- .env の過度な上書きを防ぐため OS 環境変数を protected として扱う設計。
+- OpenAI API キーは引数経由または環境変数 OPENAI_API_KEY を参照。キー未設定時は明示的に ValueError を送出して誤動作を防止。
 
-### Known limitations / Notes
-- OpenAI のレスポンスに依存する部分は外部 API の状況によりスコアが得られない場合がある。多くの箇所で失敗時に 0.0 を返す設計（フェイルセーフ）を採用しているため、API 連携障害時はスコアリングがスキップされるがシステムは致命的に停止しない。
-- 日付・時間は明示的に UTC naive datetime / date を扱う箇所がある（news ウィンドウは UTC 変換ロジックを内部で扱う）。ルックアヘッドバイアスを避けるため、内部で datetime.today()/date.today() を参照しない実装方針を採用した箇所が存在する。
-- DuckDB のバージョン差分（executemany の空リストやリストバインドの扱い）に配慮した実装を行っているが、実行環境の DuckDB バージョンに依存する可能性がある。
-- 現時点で Strategy / Execution / Monitoring の具体的な発注ロジックや監視エンドポイントの実装は含まれておらず、データ基盤・リサーチ・AI スコアリング周りが中心。
+### Notes / Implementation details / フェイルセーフ
+- ルックアヘッドバイアスを避けるため、全モジュールで datetime.today() / date.today() を直接基準に用いない設計。関数は target_date を引数として扱う。
+- OpenAI 呼び出しは JSON Mode を利用し、レスポンスの厳密なパースを行う。パース失敗や API エラー発生時は最終的に安全なデフォルト（例: macro_sentiment=0.0、スコア取得スキップ）で処理継続。
+- DuckDB への書き込みは可能な限り冪等に実装（DELETE → INSERT の順）し、部分失敗が既存データを破壊しない工夫を行っている。
+- ロギングを多用して異常検知を容易にし、ROLLBACK に失敗した場合のログ出力など冗長性のあるエラーハンドリングを実装。
 
 ---
 
-作業ログや将来の変更（例: 0.2.0 の予定機能、セキュリティ改善、モデル切替時の互換性）については Unreleased セクションに記載していきます。必要であれば本 CHANGELOG を英語版に翻訳したり、各コミット・PR に紐付けた詳細な変更履歴に展開することも可能です。
+作成した CHANGELOG はコードベースの公開された実装仕様に基づいて推測した内容を含みます。実際のリリースノートに含める場合は、デプロイ日・責任者・追加で伝えたい運用上の注意点などを追記してください。
