@@ -198,26 +198,31 @@ class MonitoringDB:
 
         if dedup_minutes is not None:
             try:
-                row = self._conn.execute(
-                    """
-                    SELECT logged_at FROM risk_logs
-                    WHERE event_type = ?
-                      AND (
-                            (detail IS NULL AND ? IS NULL)
-                            OR detail = ?
-                          )
-                    ORDER BY logged_at DESC LIMIT 1
-                    """,
-                    (event_type, detail, detail),
-                ).fetchone()
-                last_ts = row[0] if row else None
-                if last_ts is not None:
-                    last_ts = last_ts.replace("Z", "+00:00")
-                    last_dt = datetime.fromisoformat(last_ts)
-                    if last_dt.tzinfo is None:
-                        last_dt = last_dt.replace(tzinfo=timezone.utc)
-                    if now_dt - last_dt < timedelta(minutes=dedup_minutes):
-                        return False
+                cutoff_ts = (now_dt - timedelta(minutes=dedup_minutes)).isoformat()
+                if detail is None:
+                    row = self._conn.execute(
+                        """
+                        SELECT 1 FROM risk_logs
+                        WHERE event_type = ?
+                          AND detail IS NULL
+                          AND logged_at >= ?
+                        LIMIT 1
+                        """,
+                        (event_type, cutoff_ts),
+                    ).fetchone()
+                else:
+                    row = self._conn.execute(
+                        """
+                        SELECT 1 FROM risk_logs
+                        WHERE event_type = ?
+                          AND detail = ?
+                          AND logged_at >= ?
+                        LIMIT 1
+                        """,
+                        (event_type, detail, cutoff_ts),
+                    ).fetchone()
+                if row:
+                    return False
             except (sqlite3.Error, ValueError, TypeError):
                 pass  # フェイルオープン: SELECT 失敗時は INSERT を実行
 

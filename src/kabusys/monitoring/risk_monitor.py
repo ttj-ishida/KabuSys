@@ -90,6 +90,7 @@ class RiskMonitor:
                 metric_name="drawdown_pct",
                 metric_value=drawdown_pct,
                 threshold=self._dd_threshold,
+                logged_at=now,
                 dedup_minutes=30,
             )
 
@@ -99,6 +100,7 @@ class RiskMonitor:
                 metric_name="position_count",
                 metric_value=float(position_count),
                 threshold=float(self._max_positions),
+                logged_at=now,
                 dedup_minutes=30,
             )
 
