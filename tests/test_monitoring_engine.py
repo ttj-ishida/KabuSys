@@ -633,3 +633,64 @@ class TestDashboardPeakValue:
         )
         row = db.get_dashboard()
         assert row["peak_value"] == 1_100_000.0
+
+
+# ─── Issue #142: RiskMonitor peak_value DB 永続化 ─────────────────────────────
+
+class TestRiskMonitorPeakValuePersistence:
+    """RiskMonitor が _peak_value を dashboard DB に読み書きするテスト。"""
+
+    def test_peak_value_persisted_on_new_high(self, mon_conn):
+        """新高値で check_once() した後、DB の peak_value が更新される。"""
+        _setup_dashboard(mon_conn, portfolio_value=1_000_000)
+        monitor = RiskMonitor(mon_conn, dd_threshold=0.10)
+        monitor.check_once()  # peak = 1,000,000 → DB に保存されるはず
+
+        db = MonitoringDB(mon_conn)
+        row = db.get_dashboard()
+        assert row["peak_value"] == 1_000_000
+
+        # 新高値
+        _setup_dashboard(mon_conn, portfolio_value=1_200_000)
+        monitor.check_once()
+
+        row = db.get_dashboard()
+        assert row["peak_value"] == 1_200_000
+
+    def test_peak_value_restored_on_restart(self, mon_conn):
+        """再起動（新インスタンス）後に check_once() を呼ぶと DB から peak_value が復元される。"""
+        db = MonitoringDB(mon_conn)
+        # peak_value=1_500_000 を DB にセット
+        db.upsert_dashboard(
+            portfolio_value=1_200_000,
+            cash=500_000,
+            drawdown_pct=0.0,
+            open_order_count=0,
+            position_count=0,
+            peak_value=1_500_000,
+        )
+
+        # 新インスタンスで check_once() → DB から peak_value を復元
+        new_monitor = RiskMonitor(mon_conn, dd_threshold=0.10)
+        new_monitor.check_once()
+
+        assert new_monitor._peak_value == 1_500_000
+
+    def test_drawdown_correct_after_restart(self, mon_conn):
+        """DB に peak_value=2_000_000 をセット後、ポートフォリオ 1_800_000 に下落した場合、
+        drawdown=10% が正しく計算される。"""
+        db = MonitoringDB(mon_conn)
+        db.upsert_dashboard(
+            portfolio_value=1_800_000,
+            cash=500_000,
+            drawdown_pct=0.0,
+            open_order_count=0,
+            position_count=0,
+            peak_value=2_000_000,
+        )
+
+        monitor = RiskMonitor(mon_conn, dd_threshold=0.05)
+        result = monitor.check_once()
+
+        assert result.drawdown_pct == pytest.approx(0.10)
+        assert result.drawdown_alert is True
