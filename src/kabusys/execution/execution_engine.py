@@ -228,21 +228,23 @@ class ExecutionEngine:
             except Exception:
                 logger.exception("Reconciliation 実行中に予期せぬ例外。セッションは続行します。")
 
-        # PID ファイルへの書き出し（None の場合は config.pid_file_path を使用）
-        from kabusys.config import settings as _config
-        _active_pid_file = self._pid_file if self._pid_file is not None else _config.pid_file_path
-        _active_pid_file.parent.mkdir(parents=True, exist_ok=True)
-        _active_pid_file.write_text(str(os.getpid()))
+        # kill.flag 検査（PID 書き込みより先に実施して残留を防ぐ）
         if settings.kill_flag_path.exists():
             if settings.kill_flag_clear_on_start:
                 logger.warning(
                     "kill.flag が存在しますが KILL_FLAG_CLEAR_ON_START=1 のためクリアして起動します: %s",
                     settings.kill_flag_path,
                 )
-                settings.kill_flag_path.unlink()
+                settings.kill_flag_path.unlink(missing_ok=True)
             else:
                 logger.critical("kill.flag が存在するため起動を拒否します: %s", settings.kill_flag_path)
                 raise SystemExit(1)
+
+        # PID ファイルへの書き出し（None の場合は config.pid_file_path を使用）
+        from kabusys.config import settings as _config
+        _active_pid_file = self._pid_file if self._pid_file is not None else _config.pid_file_path
+        _active_pid_file.parent.mkdir(parents=True, exist_ok=True)
+        _active_pid_file.write_text(str(os.getpid()))
 
         try:
             # WebSocket スレッド起動

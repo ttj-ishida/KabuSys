@@ -344,3 +344,5 @@ class TestKillFlagPolling:
 
         # kill.flag は削除されていない
         assert flag_path.exists()
+        # PID ファイルは書き込まれていない（検査が PID 書き込みより先のため）
+        assert not pid_file.exists()
