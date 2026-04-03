@@ -91,6 +91,7 @@ class RiskMonitor:
                 metric_name="drawdown_pct",
                 metric_value=drawdown_pct,
                 threshold=self._dd_threshold,
+                dedup_minutes=30,
             )
 
         if position_limit_alert:
@@ -99,6 +100,7 @@ class RiskMonitor:
                 metric_name="position_count",
                 metric_value=float(position_count),
                 threshold=float(self._max_positions),
+                dedup_minutes=30,
             )
 
         return RiskCheckResult(

@@ -50,6 +50,7 @@ class TradeMonitor:
                     metric_value=age.total_seconds() / 60,
                     threshold=float(self._stale_minutes),
                     detail=order.client_order_id,
+                    dedup_minutes=30,
                 )
 
             # 約定異常価格チェック（成行は除外）
@@ -67,6 +68,7 @@ class TradeMonitor:
                         metric_value=deviation,
                         threshold=self._price_anomaly_pct,
                         detail=order.client_order_id,
+                        dedup_minutes=30,
                     )
 
         return TradeCheckResult(
