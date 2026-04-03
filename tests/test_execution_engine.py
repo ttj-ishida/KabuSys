@@ -5,7 +5,7 @@ import queue
 import sqlite3
 import threading
 from datetime import date, time
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import duckdb
 import pytest
@@ -223,3 +223,126 @@ class TestPushDrainAndKillSwitch:
         current_value = broker.get_available_cash()  # ポジションなし
         engine._check_gate3_and_maybe_kill(current_value)
         assert engine._stop_event.is_set()
+
+
+class TestKillFlagPolling:
+    """kill.flag ポーリング動作のテスト"""
+
+    def test_process_signals_skips_on_kill_flag_at_method_head(self, sqlite_conn, duckdb_conn, tmp_path):
+        """kill.flag がメソッド先頭で検出 → kill_switch() 発動・シグナル処理スキップ"""
+        flag_path = tmp_path / "kill.flag"
+        flag_path.write_text("DRAWDOWN_ALERT: test")
+
+        broker = MockBrokerClient()
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        # シグナルを1件挿入
+        _insert_signal(duckdb_conn, "9999")
+        _insert_target(duckdb_conn, "9999", qty=100, price=1000.0)
+
+        with patch("kabusys.execution.execution_engine.settings") as mock_settings:
+            mock_settings.kill_flag_path = flag_path
+            engine._process_signals()
+
+        # kill_switch が発動 → _stop_event がセットされている
+        assert engine._stop_event.is_set()
+        # 発注は行われていない
+        from kabusys.execution.order_repository import OrderRepository
+        repo = OrderRepository(sqlite_conn)
+        assert repo.list_active() == []
+
+    def test_process_signals_proceeds_without_kill_flag(self, sqlite_conn, duckdb_conn, tmp_path):
+        """kill.flag なし → 通常処理（シグナルが発注される）"""
+        flag_path = tmp_path / "kill.flag"  # 作成しない
+
+        broker = MockBrokerClient()
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        _insert_signal(duckdb_conn, "1111")
+        _insert_target(duckdb_conn, "1111", qty=100, price=1500.0)
+
+        with patch("kabusys.execution.execution_engine.settings") as mock_settings:
+            mock_settings.kill_flag_path = flag_path
+            engine._process_signals()
+
+        assert not engine._stop_event.is_set()
+
+    def test_process_signals_detects_kill_flag_mid_loop(self, sqlite_conn, duckdb_conn, tmp_path):
+        """kill.flag がループ途中で出現 → kill_switch() 発動・残シグナルスキップ"""
+        flag_path = tmp_path / "kill.flag"
+
+        broker = MockBrokerClient()
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        # 複数シグナルを挿入
+        for code in ["2001", "2002", "2003"]:
+            _insert_signal(duckdb_conn, code)
+            _insert_target(duckdb_conn, code, qty=100, price=1000.0)
+
+        # risk_manager.check_signal() の side_effect を使って2回目の呼び出し後に flag を書き込む
+        original_check_signal = engine._risk_manager.check_signal
+        call_count = 0
+
+        def write_flag_on_second_signal(signal_id, code, order_value, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                flag_path.write_text("DRAWDOWN_ALERT: mid-loop")
+            return original_check_signal(signal_id, code, order_value, **kwargs)
+
+        engine._risk_manager.check_signal = write_flag_on_second_signal
+
+        with patch("kabusys.execution.execution_engine.settings") as mock_settings:
+            mock_settings.kill_flag_path = flag_path
+            engine._process_signals()
+
+        assert engine._stop_event.is_set()
+        # ループ途中で停止したため、全3シグナルのうち一部は未処理
+        from kabusys.execution.order_repository import OrderRepository
+        repo = OrderRepository(sqlite_conn)
+        assert len(repo.list_active()) < 3
+
+    def test_run_session_clears_kill_flag_when_clear_on_start_enabled(self, sqlite_conn, duckdb_conn, tmp_path):
+        """KILL_FLAG_CLEAR_ON_START=1 の場合、起動時に kill.flag を削除して続行する"""
+        flag_path = tmp_path / "kill.flag"
+        flag_path.write_text("old flag")
+        pid_file = tmp_path / "execution.pid"
+
+        broker = MockBrokerClient()
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._pid_file = pid_file
+
+        with patch("kabusys.execution.execution_engine.settings") as mock_settings, \
+             patch.object(engine, "_websocket_worker"), \
+             patch.object(engine, "_process_signals"), \
+             patch.object(engine, "_drain_push_queue"):
+            mock_settings.kill_flag_path = flag_path
+            mock_settings.kill_flag_clear_on_start = True
+            engine._stop_event.set()  # 即座に停止
+            try:
+                engine.run_session()
+            except Exception:
+                pass
+
+        assert not flag_path.exists()
+
+    def test_run_session_refuses_to_start_when_kill_flag_exists(self, sqlite_conn, duckdb_conn, tmp_path):
+        """kill.flag が存在し KILL_FLAG_CLEAR_ON_START=0 (デフォルト) の場合、起動を拒否する"""
+        flag_path = tmp_path / "kill.flag"
+        flag_path.write_text("operator placed")
+        pid_file = tmp_path / "execution.pid"
+
+        broker = MockBrokerClient()
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._pid_file = pid_file
+
+        with patch("kabusys.execution.execution_engine.settings") as mock_settings, \
+             patch.object(engine, "_websocket_worker"), \
+             patch.object(engine, "_process_signals"), \
+             patch.object(engine, "_drain_push_queue"):
+            mock_settings.kill_flag_path = flag_path
+            mock_settings.kill_flag_clear_on_start = False
+            with pytest.raises(SystemExit):
+                engine.run_session()
+
+        # kill.flag は削除されていない
+        assert flag_path.exists()
+        # PID ファイルは書き込まれていない（検査が PID 書き込みより先のため）
+        assert not pid_file.exists()
