@@ -697,3 +697,49 @@ class TestRiskMonitorPeakValuePersistence:
 
         assert result.drawdown_pct == pytest.approx(0.10)
         assert result.drawdown_alert is True
+
+
+# ─── Issue #141: TradeMonitor / RiskMonitor dedup_minutes 適用 ────────────────
+
+class TestMonitorDedup:
+    """TradeMonitor / RiskMonitor が dedup_minutes=30 を渡すことを確認するテスト。"""
+
+    def test_risk_monitor_dedup_suppresses_repeated_alert(self, mon_conn):
+        """同一 drawdown 条件で check_once() を 2 回呼んでも risk_logs は 1 件。"""
+        # peak = 1,000,000 を設定
+        _setup_dashboard(mon_conn, portfolio_value=1_000_000)
+        monitor = RiskMonitor(mon_conn, dd_threshold=0.10)
+        monitor.check_once()  # peak を確定させる
+
+        # portfolio を 15% 下落させて DRAWDOWN_ALERT を発生させる
+        _setup_dashboard(mon_conn, portfolio_value=850_000)
+
+        # 1 回目と 2 回目を同じ now（30 分以内）で呼ぶ
+        now = datetime.now(timezone.utc)
+        monitor.check_once(now=now)
+        monitor.check_once(now=now + timedelta(minutes=10))
+
+        rows = mon_conn.execute(
+            "SELECT COUNT(*) FROM risk_logs WHERE event_type='DRAWDOWN_ALERT'"
+        ).fetchone()
+        assert rows[0] == 1
+
+    def test_trade_monitor_dedup_suppresses_stale_order(self, mon_conn):
+        """同一の滞留注文で check_once() を 2 回呼んでも risk_logs は 1 件。"""
+        now = datetime(2026, 4, 1, 9, 31, 0, tzinfo=timezone.utc)
+        order = _make_order(
+            state=OrderState.OrderAccepted,
+            created_at=datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc),
+        )
+        repo = MagicMock()
+        repo.list_active.return_value = [order]
+        monitor = TradeMonitor(mon_conn, repo, stale_minutes=30)
+
+        # 同じ stale order を 30 分以内に 2 回チェック
+        monitor.check_once(now=now)
+        monitor.check_once(now=now + timedelta(minutes=10))
+
+        rows = mon_conn.execute(
+            "SELECT COUNT(*) FROM risk_logs WHERE event_type='STALE_ORDER'"
+        ).fetchone()
+        assert rows[0] == 1
