@@ -80,12 +80,10 @@ def init_monitoring_db(conn: sqlite3.Connection) -> None:
     conn.commit()
 
     # 既存 DB に peak_value カラムがない場合のマイグレーション
-    try:
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(dashboard)")}
+    if "peak_value" not in existing_cols:
         conn.execute("ALTER TABLE dashboard ADD COLUMN peak_value REAL")
         conn.commit()
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" not in str(e):
-            raise
 
 
 class MonitoringDB:
@@ -204,17 +202,22 @@ class MonitoringDB:
                     """
                     SELECT MAX(logged_at) FROM risk_logs
                     WHERE event_type = ?
-                      AND detail IS ?
+                      AND (
+                            (detail IS NULL AND ? IS NULL)
+                            OR detail = ?
+                          )
                     """,
-                    (event_type, detail),
+                    (event_type, detail, detail),
                 ).fetchone()
                 last_ts = row[0] if row else None
                 if last_ts is not None:
                     last_ts = last_ts.replace("Z", "+00:00")
                     last_dt = datetime.fromisoformat(last_ts)
+                    if last_dt.tzinfo is None:
+                        last_dt = last_dt.replace(tzinfo=timezone.utc)
                     if now_dt - last_dt < timedelta(minutes=dedup_minutes):
                         return False
-            except (sqlite3.Error, ValueError):
+            except (sqlite3.Error, ValueError, TypeError):
                 pass  # フェイルオープン: SELECT 失敗時は INSERT を実行
 
         self._conn.execute(
