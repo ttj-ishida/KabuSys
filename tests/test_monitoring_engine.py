@@ -619,3 +619,17 @@ class TestDashboardPeakValue:
         row = db.get_dashboard()
         assert row["peak_value"] == 1_200_000  # 保護されていること
         assert row["portfolio_value"] == 900_000  # 他フィールドは更新
+
+    def test_peak_value_persisted_on_new_high(self, mon_conn):
+        """新しい高値で upsert_dashboard() を呼ぶと peak_value が更新される。"""
+        db = MonitoringDB(mon_conn)
+        db.upsert_dashboard(
+            portfolio_value=1_000_000, cash=500_000, drawdown_pct=0.0,
+            open_order_count=0, position_count=0, peak_value=1_000_000.0,
+        )
+        db.upsert_dashboard(
+            portfolio_value=1_100_000, cash=500_000, drawdown_pct=0.0,
+            open_order_count=0, position_count=0, peak_value=1_100_000.0,
+        )
+        row = db.get_dashboard()
+        assert row["peak_value"] == 1_100_000.0
