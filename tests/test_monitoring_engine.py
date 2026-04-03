@@ -493,3 +493,75 @@ def test_monitoring_engine_without_kill_switch_still_works():
     sys_mon.check_once.assert_called_once()
     trade_mon.check_once.assert_called_once()
     risk_mon.check_once.assert_called_once()
+
+
+# ─── Issue #141: log_risk_event デデュープ ────────────────────────────────────
+
+class TestLogRiskEventDedup:
+    """log_risk_event() の dedup_minutes 引数のテスト。"""
+
+    def test_dedup_skips_within_window(self, mon_conn):
+        """同一 (event_type, detail=None) を 30 分以内に再呼び出し → 2件目はスキップ。"""
+        db = MonitoringDB(mon_conn)
+        now = datetime.now(timezone.utc)
+
+        r1 = db.log_risk_event(
+            "DRAWDOWN_ALERT", "drawdown_pct", 0.15, 0.10,
+            logged_at=now, dedup_minutes=30,
+        )
+        r2 = db.log_risk_event(
+            "DRAWDOWN_ALERT", "drawdown_pct", 0.16, 0.10,
+            logged_at=now + timedelta(minutes=10), dedup_minutes=30,
+        )
+
+        assert r1 is True
+        assert r2 is False
+        rows = mon_conn.execute("SELECT * FROM risk_logs").fetchall()
+        assert len(rows) == 1
+
+    def test_dedup_records_after_window(self, mon_conn):
+        """直前レコードが 31 分前なら記録される。"""
+        db = MonitoringDB(mon_conn)
+        past = datetime.now(timezone.utc) - timedelta(minutes=31)
+        now = datetime.now(timezone.utc)
+
+        db.log_risk_event(
+            "DRAWDOWN_ALERT", "drawdown_pct", 0.15, 0.10,
+            logged_at=past, dedup_minutes=30,
+        )
+        r2 = db.log_risk_event(
+            "DRAWDOWN_ALERT", "drawdown_pct", 0.16, 0.10,
+            logged_at=now, dedup_minutes=30,
+        )
+
+        assert r2 is True
+        rows = mon_conn.execute("SELECT * FROM risk_logs").fetchall()
+        assert len(rows) == 2
+
+    def test_no_dedup_when_none(self, mon_conn):
+        """`dedup_minutes=None`（デフォルト）では毎回記録される。"""
+        db = MonitoringDB(mon_conn)
+        now = datetime.now(timezone.utc)
+
+        db.log_risk_event("DRAWDOWN_ALERT", "drawdown_pct", 0.15, 0.10, logged_at=now)
+        db.log_risk_event("DRAWDOWN_ALERT", "drawdown_pct", 0.16, 0.10, logged_at=now)
+
+        rows = mon_conn.execute("SELECT * FROM risk_logs").fetchall()
+        assert len(rows) == 2
+
+    def test_dedup_different_detail_records_both(self, mon_conn):
+        """`detail` が異なれば別イベントとして記録される。"""
+        db = MonitoringDB(mon_conn)
+        now = datetime.now(timezone.utc)
+
+        db.log_risk_event(
+            "STALE_ORDER", "order_age_minutes", 35.0, 30.0,
+            detail="order-001", logged_at=now, dedup_minutes=30,
+        )
+        db.log_risk_event(
+            "STALE_ORDER", "order_age_minutes", 35.0, 30.0,
+            detail="order-002", logged_at=now, dedup_minutes=30,
+        )
+
+        rows = mon_conn.execute("SELECT * FROM risk_logs").fetchall()
+        assert len(rows) == 2

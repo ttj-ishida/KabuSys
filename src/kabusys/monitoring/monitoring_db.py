@@ -173,12 +173,42 @@ class MonitoringDB:
         threshold: float,
         detail: str | None = None,
         logged_at: datetime | None = None,
-    ) -> None:
+        dedup_minutes: int | None = None,
+    ) -> bool:
         """リスクイベントを risk_logs テーブルに追記する。
 
-        detail: JSON 文字列等の追加情報（NULL 可）
+        dedup_minutes が指定されている場合、同一 (event_type, detail) ペアが
+        直近 dedup_minutes 分以内に記録済みであれば INSERT をスキップして False を返す。
+        スキップ判定 SELECT が失敗した場合はフェイルオープン（INSERT を実行）。
+
+        Returns:
+            True: INSERT 実行 / False: スキップ
         """
-        ts = logged_at.isoformat() if logged_at else self._now()
+        from datetime import timedelta
+        now_dt = logged_at or datetime.now(timezone.utc)
+        ts = now_dt.isoformat()
+
+        if dedup_minutes is not None:
+            try:
+                row = self._conn.execute(
+                    """
+                    SELECT MAX(logged_at) FROM risk_logs
+                    WHERE event_type = ?
+                      AND (
+                            (detail IS NULL AND ? IS NULL)
+                            OR detail = ?
+                          )
+                    """,
+                    (event_type, detail, detail),
+                ).fetchone()
+                last_ts = row[0] if row else None
+                if last_ts is not None:
+                    last_dt = datetime.fromisoformat(last_ts)
+                    if now_dt - last_dt < timedelta(minutes=dedup_minutes):
+                        return False
+            except Exception:
+                pass  # フェイルオープン: SELECT 失敗時は INSERT を実行
+
         self._conn.execute(
             """
             INSERT INTO risk_logs (logged_at, event_type, metric_name, metric_value, threshold, detail)
@@ -187,6 +217,7 @@ class MonitoringDB:
             (ts, event_type, metric_name, metric_value, threshold, detail),
         )
         self._conn.commit()
+        return True
 
     def upsert_dashboard(
         self,
