@@ -69,7 +69,7 @@ WHERE event_type = ?
       )
 ```
 
-最新 `logged_at` が `now - dedup_minutes` より新しければスキップ。
+`MAX(logged_at)` の戻り値（TEXT）は `datetime.fromisoformat()` で `datetime` オブジェクトに変換し、`now - timedelta(minutes=dedup_minutes)` と Python 側で比較する。SQLite の TEXT 辞書順比較には依存しない。最新 `logged_at` が `now - dedup_minutes` より新しければスキップ。
 
 戻り値: `True`（INSERT 実行）/ `False`（スキップ）
 
@@ -92,14 +92,16 @@ CREATE TABLE IF NOT EXISTS dashboard (
 
 #### 2.2 マイグレーション
 
-`init_monitoring_db()` で既存テーブルへのカラム追加を冪等に実行する:
+`init_monitoring_db()` で既存テーブルへのカラム追加を冪等に実行する。
+`"duplicate column name"` 以外の `OperationalError` は再 raise して問題を隠蔽しない:
 
 ```python
 try:
     conn.execute("ALTER TABLE dashboard ADD COLUMN peak_value REAL")
     conn.commit()
-except sqlite3.OperationalError:
-    pass  # カラムが既存の場合は無視
+except sqlite3.OperationalError as e:
+    if "duplicate column name" not in str(e):
+        raise
 ```
 
 #### 2.3 `upsert_dashboard()` 更新
@@ -116,14 +118,26 @@ def upsert_dashboard(
 ) -> None:
 ```
 
-`peak_value=None` の場合は既存値を上書きしない（`COALESCE` で保護）:
+`peak_value=None` の場合は既存値を上書きしない。
+`INSERT OR REPLACE` は既存行を DELETE してから INSERT するため `COALESCE` のサブクエリが常に NULL を返す問題がある。
+代わりに `INSERT ... ON CONFLICT DO UPDATE SET`（SQLite 3.24+）を使用する:
 
 ```sql
-INSERT OR REPLACE INTO dashboard
+INSERT INTO dashboard
     (id, updated_at, portfolio_value, cash, drawdown_pct, open_order_count, position_count, peak_value)
 VALUES
-    (1, ?, ?, ?, ?, ?, ?, COALESCE(?, (SELECT peak_value FROM dashboard WHERE id=1)))
+    (1, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+    updated_at       = excluded.updated_at,
+    portfolio_value  = excluded.portfolio_value,
+    cash             = excluded.cash,
+    drawdown_pct     = excluded.drawdown_pct,
+    open_order_count = excluded.open_order_count,
+    position_count   = excluded.position_count,
+    peak_value       = COALESCE(excluded.peak_value, dashboard.peak_value)
 ```
+
+`peak_value=None`（Python `None` → SQLite `NULL`）を渡した場合、`COALESCE(NULL, dashboard.peak_value)` により既存値が保護される。
 
 #### 2.4 `get_dashboard()` 更新
 
@@ -133,7 +147,9 @@ VALUES
 
 #### 3.1 起動時の読み込み
 
-`check_once()` で `_peak_value is None` の場合、DB から値を復元する:
+`check_once()` で `_peak_value is None` の場合、DB から値を復元する（`__init__` ではなく `check_once()` 初回呼び出し時に復元する）。
+`dashboard` が `None`（テーブルが空）の場合は既存の早期 return が先に発動するため、このブロックには到達しない。
+`dashboard.get("peak_value")` で取得し（`init_monitoring_db()` 実行済みが前提）、`None` ならフォールバックとして `portfolio_value` を使用:
 
 ```python
 if self._peak_value is None:
@@ -146,12 +162,20 @@ if self._peak_value is None:
 
 #### 3.2 更新時の永続化
 
-`_peak_value` が更新された場合（初期化時・新高値更新時）に `upsert_dashboard()` で DB へ書き込む:
+`_peak_value` が更新された場合（初期化時・新高値更新時）のみ `upsert_dashboard()` を呼んで DB へ書き込む。
+呼び出し側（`check_once()`）は既に `get_dashboard()` から最新の他フィールドを取得済みなので、それらをそのまま渡す:
 
 ```python
 if self._peak_value is None or portfolio_value > self._peak_value:
     self._peak_value = portfolio_value
-    self._db.upsert_dashboard(..., peak_value=self._peak_value)
+    self._db.upsert_dashboard(
+        portfolio_value=portfolio_value,
+        cash=dashboard["cash"],
+        drawdown_pct=drawdown_pct,
+        open_order_count=dashboard["open_order_count"],
+        position_count=position_count,
+        peak_value=self._peak_value,
+    )
 ```
 
 ### 4. TradeMonitor / RiskMonitor: dedup_minutes の適用
@@ -181,7 +205,7 @@ if self._peak_value is None or portfolio_value > self._peak_value:
 | テスト名 | 検証内容 |
 |---|---|
 | `test_log_risk_event_dedup_skips_within_window` | 同一 (event_type, detail) を 30 分以内に再呼び出し → スキップ（DB に 1 件のみ） |
-| `test_log_risk_event_dedup_records_after_window` | 30 分超過後は記録される |
+| `test_log_risk_event_dedup_records_after_window` | `logged_at` に 31 分前の過去時刻を渡した既存レコードがある状態で再呼び出し → 記録される |
 | `test_log_risk_event_no_dedup_when_none` | `dedup_minutes=None`（デフォルト）では毎回記録 |
 | `test_log_risk_event_dedup_different_detail` | `detail` が異なれば別イベントとして記録 |
 | `test_risk_monitor_dedup_suppresses_repeated_alert` | `RiskMonitor.check_once()` を連続呼び出しすると risk_log は 1 件のみ |
@@ -192,9 +216,11 @@ if self._peak_value is None or portfolio_value > self._peak_value:
 | テスト名 | 検証内容 |
 |---|---|
 | `test_peak_value_persisted_on_new_high` | 新高値更新時に dashboard.peak_value が更新される |
-| `test_peak_value_restored_on_restart` | `RiskMonitor` を再生成後も peak_value が DB から復元される |
+| `test_peak_value_restored_on_restart` | `RiskMonitor` を再生成し `check_once()` を1回呼んだ後に `_peak_value` が DB から復元される |
 | `test_drawdown_correct_after_restart` | 再起動後もドローダウン計算が正確 |
 | `test_migration_adds_peak_value_column` | 既存 DB（peak_value カラムなし）に `init_monitoring_db()` を実行してもエラーなし |
+
+**注:** 既存の `_setup_dashboard()` テストヘルパーは `peak_value` 引数なしで呼んでおり、新シグネチャはデフォルト `None` のため後方互換性あり・変更不要。
 
 ---
 
