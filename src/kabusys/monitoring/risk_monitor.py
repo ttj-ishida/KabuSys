@@ -74,16 +74,15 @@ class RiskMonitor:
         position_count = row[0]
         position_limit_alert = position_count > self._max_positions
 
-        # peak_value が更新された（または初回で DB に未記録）場合に永続化
-        if peak_updated or first_init:
-            self._db.upsert_dashboard(
-                portfolio_value=portfolio_value,
-                cash=dashboard["cash"],
-                drawdown_pct=drawdown_pct,
-                open_order_count=dashboard["open_order_count"],
-                position_count=position_count,
-                peak_value=self._peak_value,
-            )
+        # drawdown_pct / position_count を常に永続化。peak_value は更新時のみ書き込む
+        self._db.upsert_dashboard(
+            portfolio_value=portfolio_value,
+            cash=dashboard["cash"],
+            drawdown_pct=drawdown_pct,
+            open_order_count=dashboard["open_order_count"],
+            position_count=position_count,
+            peak_value=self._peak_value if (peak_updated or first_init) else None,
+        )
 
         if drawdown_alert:
             self._db.log_risk_event(

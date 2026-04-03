@@ -63,6 +63,8 @@ def init_monitoring_db(conn: sqlite3.Connection) -> None:
             ON risk_logs (logged_at);
         CREATE INDEX IF NOT EXISTS idx_risk_logs_event_type
             ON risk_logs (event_type);
+        CREATE INDEX IF NOT EXISTS idx_risk_logs_event_detail_time
+            ON risk_logs (event_type, detail, logged_at);
 
         CREATE TABLE IF NOT EXISTS dashboard (
             id               INTEGER PRIMARY KEY CHECK (id = 1),
@@ -202,19 +204,17 @@ class MonitoringDB:
                     """
                     SELECT MAX(logged_at) FROM risk_logs
                     WHERE event_type = ?
-                      AND (
-                            (detail IS NULL AND ? IS NULL)
-                            OR detail = ?
-                          )
+                      AND detail IS ?
                     """,
-                    (event_type, detail, detail),
+                    (event_type, detail),
                 ).fetchone()
                 last_ts = row[0] if row else None
                 if last_ts is not None:
+                    last_ts = last_ts.replace("Z", "+00:00")
                     last_dt = datetime.fromisoformat(last_ts)
                     if now_dt - last_dt < timedelta(minutes=dedup_minutes):
                         return False
-            except Exception:
+            except (sqlite3.Error, ValueError):
                 pass  # フェイルオープン: SELECT 失敗時は INSERT を実行
 
         self._conn.execute(
