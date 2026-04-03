@@ -651,6 +651,7 @@ class TestRiskMonitorPeakValuePersistence:
         assert row["peak_value"] == 1_000_000
 
         # 新高値
+        # Call without peak_value — upsert_dashboard uses COALESCE to preserve existing peak_value
         _setup_dashboard(mon_conn, portfolio_value=1_200_000)
         monitor.check_once()
 
@@ -672,9 +673,11 @@ class TestRiskMonitorPeakValuePersistence:
 
         # 新インスタンスで check_once() → DB から peak_value を復元
         new_monitor = RiskMonitor(mon_conn, dd_threshold=0.10)
-        new_monitor.check_once()
+        result = new_monitor.check_once()
 
-        assert new_monitor._peak_value == 1_500_000
+        # Assert observable behavior: drawdown_pct reflects the restored peak_value
+        # (portfolio=1_200_000, peak=1_500_000 → drawdown = 20%)
+        assert result.drawdown_pct == pytest.approx(0.20)
 
     def test_drawdown_correct_after_restart(self, mon_conn):
         """DB に peak_value=2_000_000 をセット後、ポートフォリオ 1_800_000 に下落した場合、
