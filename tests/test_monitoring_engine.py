@@ -565,3 +565,57 @@ class TestLogRiskEventDedup:
 
         rows = mon_conn.execute("SELECT * FROM risk_logs").fetchall()
         assert len(rows) == 2
+
+
+# ─── Issue #142: dashboard peak_value カラム ──────────────────────────────────
+
+class TestDashboardPeakValue:
+    """dashboard テーブルの peak_value カラム追加テスト。"""
+
+    def test_migration_adds_peak_value_column(self):
+        """既存 DB（peak_value カラムなし）に init_monitoring_db() を再実行してもエラーなし。"""
+        conn = sqlite3.connect(":memory:")
+        # peak_value なしで旧スキーマを作成
+        conn.execute("""
+            CREATE TABLE dashboard (
+                id               INTEGER PRIMARY KEY CHECK (id = 1),
+                updated_at       TEXT    NOT NULL,
+                portfolio_value  REAL    NOT NULL,
+                cash             REAL    NOT NULL,
+                drawdown_pct     REAL    NOT NULL,
+                open_order_count INTEGER NOT NULL,
+                position_count   INTEGER NOT NULL
+            )
+        """)
+        conn.commit()
+        # init_monitoring_db を再実行 → エラーなし
+        init_monitoring_db(conn)
+        # peak_value カラムが存在することを確認
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(dashboard)").fetchall()]
+        assert "peak_value" in cols
+
+    def test_upsert_dashboard_sets_peak_value(self, mon_conn):
+        """peak_value を指定すると dashboard に保存される。"""
+        db = MonitoringDB(mon_conn)
+        db.upsert_dashboard(
+            portfolio_value=1_000_000, cash=500_000, drawdown_pct=0.0,
+            open_order_count=0, position_count=0, peak_value=1_200_000,
+        )
+        row = db.get_dashboard()
+        assert row["peak_value"] == 1_200_000
+
+    def test_upsert_dashboard_preserves_peak_value_when_none(self, mon_conn):
+        """peak_value=None で呼ぶと既存の peak_value が保護される。"""
+        db = MonitoringDB(mon_conn)
+        db.upsert_dashboard(
+            portfolio_value=1_000_000, cash=500_000, drawdown_pct=0.0,
+            open_order_count=0, position_count=0, peak_value=1_200_000,
+        )
+        # peak_value=None（デフォルト）で再呼び出し
+        db.upsert_dashboard(
+            portfolio_value=900_000, cash=400_000, drawdown_pct=0.1,
+            open_order_count=0, position_count=0,
+        )
+        row = db.get_dashboard()
+        assert row["peak_value"] == 1_200_000  # 保護されていること
+        assert row["portfolio_value"] == 900_000  # 他フィールドは更新

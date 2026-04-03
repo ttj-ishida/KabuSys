@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 def init_monitoring_db(conn: sqlite3.Connection) -> None:
@@ -65,16 +65,25 @@ def init_monitoring_db(conn: sqlite3.Connection) -> None:
             ON risk_logs (event_type);
 
         CREATE TABLE IF NOT EXISTS dashboard (
-            id                INTEGER PRIMARY KEY CHECK (id = 1),
-            updated_at        TEXT    NOT NULL,
-            portfolio_value   REAL    NOT NULL,
-            cash              REAL    NOT NULL,
-            drawdown_pct      REAL    NOT NULL,
-            open_order_count  INTEGER NOT NULL,
-            position_count    INTEGER NOT NULL
+            id               INTEGER PRIMARY KEY CHECK (id = 1),
+            updated_at       TEXT    NOT NULL,
+            portfolio_value  REAL    NOT NULL,
+            cash             REAL    NOT NULL,
+            drawdown_pct     REAL    NOT NULL,
+            open_order_count INTEGER NOT NULL,
+            position_count   INTEGER NOT NULL,
+            peak_value       REAL
         );
     """)
     conn.commit()
+
+    # 既存 DB に peak_value カラムがない場合のマイグレーション
+    try:
+        conn.execute("ALTER TABLE dashboard ADD COLUMN peak_value REAL")
+        conn.commit()
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e):
+            raise
 
 
 class MonitoringDB:
@@ -184,7 +193,6 @@ class MonitoringDB:
         Returns:
             True: INSERT 実行 / False: スキップ
         """
-        from datetime import timedelta
         now_dt = logged_at or datetime.now(timezone.utc)
         ts = now_dt.isoformat()
 
@@ -227,20 +235,31 @@ class MonitoringDB:
         open_order_count: int,
         position_count: int,
         updated_at: datetime | None = None,
+        peak_value: float | None = None,
     ) -> None:
         """ダッシュボード集計を更新する（常に id=1 の1行のみ保持）。
 
-        id=1 を明示的にバインドすること（DEFAULT に頼らない）。
-        CHECK (id = 1) 制約により DB レベルでも id=1 以外は拒否される。
+        peak_value=None の場合、既存の peak_value を上書きしない。
+        INSERT ... ON CONFLICT DO UPDATE SET + COALESCE を使用することで、
+        INSERT OR REPLACE の DELETE→INSERT 問題を回避する。
         """
         ts = updated_at.isoformat() if updated_at else self._now()
         self._conn.execute(
             """
-            INSERT OR REPLACE INTO dashboard
-                (id, updated_at, portfolio_value, cash, drawdown_pct, open_order_count, position_count)
-            VALUES (1, ?, ?, ?, ?, ?, ?)
+            INSERT INTO dashboard
+                (id, updated_at, portfolio_value, cash, drawdown_pct,
+                 open_order_count, position_count, peak_value)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                updated_at       = excluded.updated_at,
+                portfolio_value  = excluded.portfolio_value,
+                cash             = excluded.cash,
+                drawdown_pct     = excluded.drawdown_pct,
+                open_order_count = excluded.open_order_count,
+                position_count   = excluded.position_count,
+                peak_value       = COALESCE(excluded.peak_value, dashboard.peak_value)
             """,
-            (ts, portfolio_value, cash, drawdown_pct, open_order_count, position_count),
+            (ts, portfolio_value, cash, drawdown_pct, open_order_count, position_count, peak_value),
         )
         self._conn.commit()
 
