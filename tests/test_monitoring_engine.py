@@ -699,6 +699,109 @@ class TestRiskMonitorPeakValuePersistence:
         assert result.drawdown_alert is True
 
 
+# ─── Issue #41: MonitoringEngine alert notify paths ──────────────────────────
+
+class TestMonitoringEngineAlerts:
+    """MonitoringEngine.run_once() の個別アラート notify パスのテスト (Issue #41)。"""
+
+    def _make_engine(self, sys_ok=True, freshness_ok=True, stale_orders=None,
+                     anomaly_fills=None, drawdown_alert=False, position_limit_alert=False):
+        """テスト用 MonitoringEngine を構築する。各フラグで結果を制御できる。"""
+        sys_mon = MagicMock()
+        sys_mon.check_once.return_value.process_ok = sys_ok
+        sys_mon.check_once.return_value.data_freshness_ok = freshness_ok
+
+        trade_mon = MagicMock()
+        trade_mon.check_once.return_value.stale_orders = stale_orders if stale_orders is not None else []
+        trade_mon.check_once.return_value.anomaly_fills = anomaly_fills if anomaly_fills is not None else []
+
+        risk_mon = MagicMock()
+        risk_mon.check_once.return_value.drawdown_alert = drawdown_alert
+        risk_mon.check_once.return_value.position_limit_alert = position_limit_alert
+        risk_mon.check_once.return_value.drawdown_pct = 0.15 if drawdown_alert else 0.0
+        risk_mon.check_once.return_value.position_count = 11 if position_limit_alert else 0
+
+        alert_manager = MagicMock()
+
+        engine = MonitoringEngine(
+            sys_mon, trade_mon, risk_mon,
+            alert_manager=alert_manager,
+        )
+        return engine, alert_manager
+
+    def test_alert_process_down(self):
+        """process_ok=False → notify が category='PROCESS' で呼ばれる。"""
+        engine, alert_manager = self._make_engine(sys_ok=False)
+        engine.run_once()
+        assert alert_manager.notify.called
+        categories = [
+            call.kwargs.get("category")
+            for call in alert_manager.notify.call_args_list
+        ]
+        assert "PROCESS" in categories
+
+    def test_alert_stale_order(self):
+        """stale_orders が非空 → notify が category='STALE_ORDER' で呼ばれる。"""
+        engine, alert_manager = self._make_engine(stale_orders=["order-001"])
+        engine.run_once()
+        assert alert_manager.notify.called
+        categories = [
+            call.kwargs.get("category")
+            for call in alert_manager.notify.call_args_list
+        ]
+        assert "STALE_ORDER" in categories
+
+    def test_alert_price_anomaly(self):
+        """anomaly_fills が非空 → notify が category='PRICE_ANOMALY' で呼ばれる。"""
+        engine, alert_manager = self._make_engine(anomaly_fills=["order-002"])
+        engine.run_once()
+        assert alert_manager.notify.called
+        categories = [
+            call.kwargs.get("category")
+            for call in alert_manager.notify.call_args_list
+        ]
+        assert "PRICE_ANOMALY" in categories
+
+    def test_alert_drawdown(self):
+        """drawdown_alert=True → notify が category='DRAWDOWN' で呼ばれる。"""
+        engine, alert_manager = self._make_engine(drawdown_alert=True)
+        engine.run_once()
+        assert alert_manager.notify.called
+        categories = [
+            call.kwargs.get("category")
+            for call in alert_manager.notify.call_args_list
+        ]
+        assert "DRAWDOWN" in categories
+
+    def test_alert_position_limit(self):
+        """position_limit_alert=True → notify が category='POSITION_LIMIT' で呼ばれる。"""
+        engine, alert_manager = self._make_engine(position_limit_alert=True)
+        engine.run_once()
+        assert alert_manager.notify.called
+        categories = [
+            call.kwargs.get("category")
+            for call in alert_manager.notify.call_args_list
+        ]
+        assert "POSITION_LIMIT" in categories
+
+    def test_alert_data_freshness(self):
+        """data_freshness_ok=False → notify が category='DATA_FRESHNESS' で呼ばれる。"""
+        engine, alert_manager = self._make_engine(freshness_ok=False)
+        engine.run_once()
+        assert alert_manager.notify.called
+        categories = [
+            call.kwargs.get("category")
+            for call in alert_manager.notify.call_args_list
+        ]
+        assert "DATA_FRESHNESS" in categories
+
+    def test_no_alert_when_all_ok(self):
+        """すべてのモニター結果が正常 → alert_manager.notify は一度も呼ばれない。"""
+        engine, alert_manager = self._make_engine()
+        engine.run_once()
+        alert_manager.notify.assert_not_called()
+
+
 # ─── Issue #141: TradeMonitor / RiskMonitor dedup_minutes 適用 ────────────────
 
 class TestMonitorDedup:
