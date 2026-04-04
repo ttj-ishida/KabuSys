@@ -493,3 +493,253 @@ def test_monitoring_engine_without_kill_switch_still_works():
     sys_mon.check_once.assert_called_once()
     trade_mon.check_once.assert_called_once()
     risk_mon.check_once.assert_called_once()
+
+
+# ─── Issue #141: log_risk_event デデュープ ────────────────────────────────────
+
+class TestLogRiskEventDedup:
+    """log_risk_event() の dedup_minutes 引数のテスト。"""
+
+    def test_dedup_skips_within_window(self, mon_conn):
+        """同一 (event_type, detail=None) を 30 分以内に再呼び出し → 2件目はスキップ。"""
+        db = MonitoringDB(mon_conn)
+        now = datetime.now(timezone.utc)
+
+        r1 = db.log_risk_event(
+            "DRAWDOWN_ALERT", "drawdown_pct", 0.15, 0.10,
+            logged_at=now, dedup_minutes=30,
+        )
+        r2 = db.log_risk_event(
+            "DRAWDOWN_ALERT", "drawdown_pct", 0.16, 0.10,
+            logged_at=now + timedelta(minutes=10), dedup_minutes=30,
+        )
+
+        assert r1 is True
+        assert r2 is False
+        rows = mon_conn.execute("SELECT * FROM risk_logs").fetchall()
+        assert len(rows) == 1
+
+    def test_dedup_records_after_window(self, mon_conn):
+        """直前レコードが 31 分前なら記録される。"""
+        db = MonitoringDB(mon_conn)
+        past = datetime.now(timezone.utc) - timedelta(minutes=31)
+        now = datetime.now(timezone.utc)
+
+        db.log_risk_event(
+            "DRAWDOWN_ALERT", "drawdown_pct", 0.15, 0.10,
+            logged_at=past, dedup_minutes=30,
+        )
+        r2 = db.log_risk_event(
+            "DRAWDOWN_ALERT", "drawdown_pct", 0.16, 0.10,
+            logged_at=now, dedup_minutes=30,
+        )
+
+        assert r2 is True
+        rows = mon_conn.execute("SELECT * FROM risk_logs").fetchall()
+        assert len(rows) == 2
+
+    def test_no_dedup_when_none(self, mon_conn):
+        """`dedup_minutes=None`（デフォルト）では毎回記録される。"""
+        db = MonitoringDB(mon_conn)
+        now = datetime.now(timezone.utc)
+
+        db.log_risk_event("DRAWDOWN_ALERT", "drawdown_pct", 0.15, 0.10, logged_at=now)
+        db.log_risk_event("DRAWDOWN_ALERT", "drawdown_pct", 0.16, 0.10, logged_at=now)
+
+        rows = mon_conn.execute("SELECT * FROM risk_logs").fetchall()
+        assert len(rows) == 2
+
+    def test_dedup_different_detail_records_both(self, mon_conn):
+        """`detail` が異なれば別イベントとして記録される。"""
+        db = MonitoringDB(mon_conn)
+        now = datetime.now(timezone.utc)
+
+        db.log_risk_event(
+            "STALE_ORDER", "order_age_minutes", 35.0, 30.0,
+            detail="order-001", logged_at=now, dedup_minutes=30,
+        )
+        db.log_risk_event(
+            "STALE_ORDER", "order_age_minutes", 35.0, 30.0,
+            detail="order-002", logged_at=now, dedup_minutes=30,
+        )
+
+        rows = mon_conn.execute("SELECT * FROM risk_logs").fetchall()
+        assert len(rows) == 2
+
+
+# ─── Issue #142: dashboard peak_value カラム ──────────────────────────────────
+
+class TestDashboardPeakValue:
+    """dashboard テーブルの peak_value カラム追加テスト。"""
+
+    def test_migration_adds_peak_value_column(self):
+        """既存 DB（peak_value カラムなし）に init_monitoring_db() を再実行してもエラーなし。"""
+        conn = sqlite3.connect(":memory:")
+        # peak_value なしで旧スキーマを作成
+        conn.execute("""
+            CREATE TABLE dashboard (
+                id               INTEGER PRIMARY KEY CHECK (id = 1),
+                updated_at       TEXT    NOT NULL,
+                portfolio_value  REAL    NOT NULL,
+                cash             REAL    NOT NULL,
+                drawdown_pct     REAL    NOT NULL,
+                open_order_count INTEGER NOT NULL,
+                position_count   INTEGER NOT NULL
+            )
+        """)
+        conn.commit()
+        # init_monitoring_db を再実行 → エラーなし
+        init_monitoring_db(conn)
+        # peak_value カラムが存在することを確認
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(dashboard)").fetchall()]
+        assert "peak_value" in cols
+
+    def test_upsert_dashboard_sets_peak_value(self, mon_conn):
+        """peak_value を指定すると dashboard に保存される。"""
+        db = MonitoringDB(mon_conn)
+        db.upsert_dashboard(
+            portfolio_value=1_000_000, cash=500_000, drawdown_pct=0.0,
+            open_order_count=0, position_count=0, peak_value=1_200_000,
+        )
+        row = db.get_dashboard()
+        assert row["peak_value"] == 1_200_000
+
+    def test_upsert_dashboard_preserves_peak_value_when_none(self, mon_conn):
+        """peak_value=None で呼ぶと既存の peak_value が保護される。"""
+        db = MonitoringDB(mon_conn)
+        db.upsert_dashboard(
+            portfolio_value=1_000_000, cash=500_000, drawdown_pct=0.0,
+            open_order_count=0, position_count=0, peak_value=1_200_000,
+        )
+        # peak_value=None（デフォルト）で再呼び出し
+        db.upsert_dashboard(
+            portfolio_value=900_000, cash=400_000, drawdown_pct=0.1,
+            open_order_count=0, position_count=0,
+        )
+        row = db.get_dashboard()
+        assert row["peak_value"] == 1_200_000  # 保護されていること
+        assert row["portfolio_value"] == 900_000  # 他フィールドは更新
+
+    def test_peak_value_persisted_on_new_high(self, mon_conn):
+        """新しい高値で upsert_dashboard() を呼ぶと peak_value が更新される。"""
+        db = MonitoringDB(mon_conn)
+        db.upsert_dashboard(
+            portfolio_value=1_000_000, cash=500_000, drawdown_pct=0.0,
+            open_order_count=0, position_count=0, peak_value=1_000_000.0,
+        )
+        db.upsert_dashboard(
+            portfolio_value=1_100_000, cash=500_000, drawdown_pct=0.0,
+            open_order_count=0, position_count=0, peak_value=1_100_000.0,
+        )
+        row = db.get_dashboard()
+        assert row["peak_value"] == 1_100_000.0
+
+
+# ─── Issue #142: RiskMonitor peak_value DB 永続化 ─────────────────────────────
+
+class TestRiskMonitorPeakValuePersistence:
+    """RiskMonitor が _peak_value を dashboard DB に読み書きするテスト。"""
+
+    def test_peak_value_persisted_on_new_high(self, mon_conn):
+        """新高値で check_once() した後、DB の peak_value が更新される。"""
+        _setup_dashboard(mon_conn, portfolio_value=1_000_000)
+        monitor = RiskMonitor(mon_conn, dd_threshold=0.10)
+        monitor.check_once()  # peak = 1,000,000 → DB に保存されるはず
+
+        db = MonitoringDB(mon_conn)
+        row = db.get_dashboard()
+        assert row["peak_value"] == 1_000_000
+
+        # 新高値
+        # Call without peak_value — upsert_dashboard uses COALESCE to preserve existing peak_value
+        _setup_dashboard(mon_conn, portfolio_value=1_200_000)
+        monitor.check_once()
+
+        row = db.get_dashboard()
+        assert row["peak_value"] == 1_200_000
+
+    def test_peak_value_restored_on_restart(self, mon_conn):
+        """再起動（新インスタンス）後に check_once() を呼ぶと DB から peak_value が復元される。"""
+        db = MonitoringDB(mon_conn)
+        # peak_value=1_500_000 を DB にセット
+        db.upsert_dashboard(
+            portfolio_value=1_200_000,
+            cash=500_000,
+            drawdown_pct=0.0,
+            open_order_count=0,
+            position_count=0,
+            peak_value=1_500_000,
+        )
+
+        # 新インスタンスで check_once() → DB から peak_value を復元
+        new_monitor = RiskMonitor(mon_conn, dd_threshold=0.10)
+        result = new_monitor.check_once()
+
+        # Assert observable behavior: drawdown_pct reflects the restored peak_value
+        # (portfolio=1_200_000, peak=1_500_000 → drawdown = 20%)
+        assert result.drawdown_pct == pytest.approx(0.20)
+
+    def test_drawdown_correct_after_restart(self, mon_conn):
+        """DB に peak_value=2_000_000 をセット後、ポートフォリオ 1_800_000 に下落した場合、
+        drawdown=10% が正しく計算される。"""
+        db = MonitoringDB(mon_conn)
+        db.upsert_dashboard(
+            portfolio_value=1_800_000,
+            cash=500_000,
+            drawdown_pct=0.0,
+            open_order_count=0,
+            position_count=0,
+            peak_value=2_000_000,
+        )
+
+        monitor = RiskMonitor(mon_conn, dd_threshold=0.05)
+        result = monitor.check_once()
+
+        assert result.drawdown_pct == pytest.approx(0.10)
+        assert result.drawdown_alert is True
+
+
+# ─── Issue #141: TradeMonitor / RiskMonitor dedup_minutes 適用 ────────────────
+
+class TestMonitorDedup:
+    """TradeMonitor / RiskMonitor が dedup_minutes=30 を渡すことを確認するテスト。"""
+
+    def test_risk_monitor_dedup_suppresses_repeated_alert(self, mon_conn):
+        """同一 drawdown 条件で check_once() を 2 回呼んでも risk_logs は 1 件。"""
+        # peak = 1,000,000 を設定
+        _setup_dashboard(mon_conn, portfolio_value=1_000_000)
+        monitor = RiskMonitor(mon_conn, dd_threshold=0.10)
+        monitor.check_once()  # peak を確定させる
+
+        # portfolio を 15% 下落させて DRAWDOWN_ALERT を発生させる
+        _setup_dashboard(mon_conn, portfolio_value=850_000)
+
+        # 1 回目と 2 回目を同じ now（30 分以内）で呼ぶ
+        now = datetime.now(timezone.utc)
+        monitor.check_once(now=now)
+        monitor.check_once(now=now + timedelta(minutes=10))
+
+        rows = mon_conn.execute(
+            "SELECT COUNT(*) FROM risk_logs WHERE event_type='DRAWDOWN_ALERT'"
+        ).fetchone()
+        assert rows[0] == 1
+
+    def test_trade_monitor_dedup_suppresses_stale_order(self, mon_conn):
+        """同一の滞留注文で check_once() を 2 回呼んでも risk_logs は 1 件。"""
+        now = datetime(2026, 4, 1, 9, 31, 0, tzinfo=timezone.utc)
+        order = _make_order(
+            state=OrderState.OrderAccepted,
+            created_at=datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc),
+        )
+        repo = MagicMock()
+        repo.list_active.return_value = [order]
+        monitor = TradeMonitor(mon_conn, repo, stale_minutes=30)
+
+        # 同じ stale order を 30 分以内に 2 回チェック
+        monitor.check_once(now=now)
+        monitor.check_once(now=now + timedelta(minutes=10))
+
+        rows = mon_conn.execute(
+            "SELECT COUNT(*) FROM risk_logs WHERE event_type='STALE_ORDER'"
+        ).fetchone()
+        assert rows[0] == 1

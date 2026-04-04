@@ -46,8 +46,18 @@ class RiskMonitor:
 
         portfolio_value = dashboard["portfolio_value"]
 
-        # ハイウォーターマーク更新
-        if self._peak_value is None or portfolio_value > self._peak_value:
+        # 起動時: _peak_value が未設定なら DB から復元
+        first_init = False
+        if self._peak_value is None:
+            if dashboard.get("peak_value") is not None:
+                self._peak_value = dashboard["peak_value"]
+            else:
+                self._peak_value = portfolio_value
+                first_init = True  # DB に peak_value がなかった → 書き込みが必要
+
+        # ハイウォーターマーク更新（新高値なら DB に永続化）
+        peak_updated = portfolio_value > self._peak_value
+        if peak_updated:
             self._peak_value = portfolio_value
 
         drawdown_pct = (
@@ -64,12 +74,24 @@ class RiskMonitor:
         position_count = row[0]
         position_limit_alert = position_count > self._max_positions
 
+        # drawdown_pct / position_count を常に永続化。peak_value は更新時のみ書き込む
+        self._db.upsert_dashboard(
+            portfolio_value=portfolio_value,
+            cash=dashboard["cash"],
+            drawdown_pct=drawdown_pct,
+            open_order_count=dashboard["open_order_count"],
+            position_count=position_count,
+            peak_value=self._peak_value if (peak_updated or first_init) else None,
+        )
+
         if drawdown_alert:
             self._db.log_risk_event(
                 event_type="DRAWDOWN_ALERT",
                 metric_name="drawdown_pct",
                 metric_value=drawdown_pct,
                 threshold=self._dd_threshold,
+                logged_at=now,
+                dedup_minutes=30,
             )
 
         if position_limit_alert:
@@ -78,6 +100,8 @@ class RiskMonitor:
                 metric_name="position_count",
                 metric_value=float(position_count),
                 threshold=float(self._max_positions),
+                logged_at=now,
+                dedup_minutes=30,
             )
 
         return RiskCheckResult(
