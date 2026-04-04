@@ -704,6 +704,20 @@ class TestRiskMonitorPeakValuePersistence:
 class TestMonitoringEngineAlerts:
     """MonitoringEngine.run_once() の個別アラート notify パスのテスト (Issue #41)。"""
 
+    @staticmethod
+    def _get_category(c):
+        """notify() 呼び出しから category を取得する（位置引数・キーワード引数両対応）。"""
+        if "category" in c.kwargs:
+            return c.kwargs["category"]
+        return c.args[2] if len(c.args) > 2 else None
+
+    @staticmethod
+    def _get_level(c):
+        """notify() 呼び出しから level を取得する（位置引数・キーワード引数両対応）。"""
+        if "level" in c.kwargs:
+            return c.kwargs["level"]
+        return c.args[1] if len(c.args) > 1 else None
+
     def _make_engine(self, sys_ok=True, freshness_ok=True, stale_orders=None,
                      anomaly_fills=None, drawdown_alert=False, position_limit_alert=False):
         """テスト用 MonitoringEngine を構築する。各フラグで結果を制御できる。"""
@@ -730,70 +744,76 @@ class TestMonitoringEngineAlerts:
         return engine, alert_manager
 
     def test_alert_process_down(self):
-        """process_ok=False → notify が category='PROCESS' で呼ばれる。"""
+        """process_ok=False → notify が category='PROCESS', level='CRITICAL' で呼ばれる。"""
         engine, alert_manager = self._make_engine(sys_ok=False)
         engine.run_once()
-        assert alert_manager.notify.called
-        categories = [
-            call.kwargs.get("category")
-            for call in alert_manager.notify.call_args_list
-        ]
+        categories = [self._get_category(c) for c in alert_manager.notify.call_args_list]
         assert "PROCESS" in categories
+        levels = [
+            self._get_level(c) for c in alert_manager.notify.call_args_list
+            if self._get_category(c) == "PROCESS"
+        ]
+        assert levels == ["CRITICAL"]
 
     def test_alert_stale_order(self):
-        """stale_orders が非空 → notify が category='STALE_ORDER' で呼ばれる。"""
+        """stale_orders が非空 → notify が category='STALE_ORDER', level='WARNING' で呼ばれる。"""
         engine, alert_manager = self._make_engine(stale_orders=["order-001"])
         engine.run_once()
-        assert alert_manager.notify.called
-        categories = [
-            call.kwargs.get("category")
-            for call in alert_manager.notify.call_args_list
-        ]
+        categories = [self._get_category(c) for c in alert_manager.notify.call_args_list]
         assert "STALE_ORDER" in categories
+        levels = [
+            self._get_level(c) for c in alert_manager.notify.call_args_list
+            if self._get_category(c) == "STALE_ORDER"
+        ]
+        assert levels == ["WARNING"]
 
     def test_alert_price_anomaly(self):
-        """anomaly_fills が非空 → notify が category='PRICE_ANOMALY' で呼ばれる。"""
+        """anomaly_fills が非空 → notify が category='PRICE_ANOMALY', level='WARNING' で呼ばれる。"""
         engine, alert_manager = self._make_engine(anomaly_fills=["order-002"])
         engine.run_once()
-        assert alert_manager.notify.called
-        categories = [
-            call.kwargs.get("category")
-            for call in alert_manager.notify.call_args_list
-        ]
+        categories = [self._get_category(c) for c in alert_manager.notify.call_args_list]
         assert "PRICE_ANOMALY" in categories
+        levels = [
+            self._get_level(c) for c in alert_manager.notify.call_args_list
+            if self._get_category(c) == "PRICE_ANOMALY"
+        ]
+        assert levels == ["WARNING"]
 
     def test_alert_drawdown(self):
-        """drawdown_alert=True → notify が category='DRAWDOWN' で呼ばれる。"""
+        """drawdown_alert=True → notify が category='DRAWDOWN', level='CRITICAL' で呼ばれる。"""
         engine, alert_manager = self._make_engine(drawdown_alert=True)
         engine.run_once()
-        assert alert_manager.notify.called
-        categories = [
-            call.kwargs.get("category")
-            for call in alert_manager.notify.call_args_list
-        ]
+        categories = [self._get_category(c) for c in alert_manager.notify.call_args_list]
         assert "DRAWDOWN" in categories
+        levels = [
+            self._get_level(c) for c in alert_manager.notify.call_args_list
+            if self._get_category(c) == "DRAWDOWN"
+        ]
+        assert levels == ["CRITICAL"]
 
     def test_alert_position_limit(self):
-        """position_limit_alert=True → notify が category='POSITION_LIMIT' で呼ばれる。"""
+        """position_limit_alert=True → notify が category='POSITION_LIMIT', level='WARNING' で呼ばれる。"""
         engine, alert_manager = self._make_engine(position_limit_alert=True)
         engine.run_once()
-        assert alert_manager.notify.called
-        categories = [
-            call.kwargs.get("category")
-            for call in alert_manager.notify.call_args_list
-        ]
+        categories = [self._get_category(c) for c in alert_manager.notify.call_args_list]
         assert "POSITION_LIMIT" in categories
+        levels = [
+            self._get_level(c) for c in alert_manager.notify.call_args_list
+            if self._get_category(c) == "POSITION_LIMIT"
+        ]
+        assert levels == ["WARNING"]
 
     def test_alert_data_freshness(self):
-        """data_freshness_ok=False → notify が category='DATA_FRESHNESS' で呼ばれる。"""
+        """data_freshness_ok=False → notify が category='DATA_FRESHNESS', level='WARNING' で呼ばれる。"""
         engine, alert_manager = self._make_engine(freshness_ok=False)
         engine.run_once()
-        assert alert_manager.notify.called
-        categories = [
-            call.kwargs.get("category")
-            for call in alert_manager.notify.call_args_list
-        ]
+        categories = [self._get_category(c) for c in alert_manager.notify.call_args_list]
         assert "DATA_FRESHNESS" in categories
+        levels = [
+            self._get_level(c) for c in alert_manager.notify.call_args_list
+            if self._get_category(c) == "DATA_FRESHNESS"
+        ]
+        assert levels == ["WARNING"]
 
     def test_no_alert_when_all_ok(self):
         """すべてのモニター結果が正常 → alert_manager.notify は一度も呼ばれない。"""
