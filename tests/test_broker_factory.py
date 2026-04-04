@@ -37,3 +37,57 @@ class TestPaperSqlitePath:
         custom = str(tmp_path / "custom.db")
         monkeypatch.setenv("PAPER_TRADING_SQLITE_PATH", custom)
         assert str(Settings().paper_sqlite_path) == custom
+
+
+from kabusys.execution.broker_factory import BrokerClientFactory
+from kabusys.execution.mock_client import MockBrokerClient
+
+
+class TestBrokerClientFactory:
+    def test_paper_mode_returns_mock(self, monkeypatch):
+        monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+        monkeypatch.delenv("PAPER_FILL_MODE", raising=False)
+        broker = BrokerClientFactory.create(Settings())
+        assert isinstance(broker, MockBrokerClient)
+
+    def test_dev_mode_returns_mock(self, monkeypatch):
+        monkeypatch.setenv("KABUSYS_ENV", "development")
+        broker = BrokerClientFactory.create(Settings())
+        assert isinstance(broker, MockBrokerClient)
+
+    def test_fill_mode_applied(self, monkeypatch):
+        monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+        monkeypatch.setenv("PAPER_FILL_MODE", "partial")
+        broker = BrokerClientFactory.create(Settings())
+        assert isinstance(broker, MockBrokerClient)
+        assert broker.fill_mode == "partial"
+
+    def test_fill_mode_default_instant(self, monkeypatch):
+        monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+        monkeypatch.delenv("PAPER_FILL_MODE", raising=False)
+        broker = BrokerClientFactory.create(Settings())
+        assert broker.fill_mode == "instant"
+
+    def test_live_mode_raises_not_implemented(self, monkeypatch):
+        monkeypatch.setenv("KABUSYS_ENV", "live")
+        with pytest.raises(NotImplementedError):
+            BrokerClientFactory.create(Settings())
+
+    def test_fill_mode_never_applied(self, monkeypatch):
+        monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+        monkeypatch.setenv("PAPER_FILL_MODE", "never")
+        broker = BrokerClientFactory.create(Settings())
+        assert broker.fill_mode == "never"
+
+    def test_fill_mode_reject_applied(self, monkeypatch):
+        monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+        monkeypatch.setenv("PAPER_FILL_MODE", "reject")
+        broker = BrokerClientFactory.create(Settings())
+        assert broker.fill_mode == "reject"
+
+    def test_unknown_env_raises_at_settings_level(self, monkeypatch):
+        # 無効な KABUSYS_ENV は Settings.env プロパティが ValueError を投げる
+        # BrokerClientFactory.create() に到達する前に失敗する
+        monkeypatch.setenv("KABUSYS_ENV", "unknown_env")
+        with pytest.raises(ValueError):
+            BrokerClientFactory.create(Settings())
