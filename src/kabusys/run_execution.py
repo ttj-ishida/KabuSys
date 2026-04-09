@@ -42,39 +42,43 @@ def main() -> None:
     init_monitoring_db(sqlite_conn)
     duckdb_conn = duckdb.connect(str(settings.duckdb_path))
 
-    # 3. ブローカークライアント
-    broker = BrokerClientFactory.create(settings)
+    try:
+        # 3. ブローカークライアント
+        broker = BrokerClientFactory.create(settings)
 
-    # 4. 依存コンポーネント組み立て
-    repo = OrderRepository(sqlite_conn)
-    order_manager = OrderManager(broker, repo)
-    risk_manager = RiskManager(
-        broker=broker,
-        repo=repo,
-        config=RiskConfig(
-            max_position_pct=0.20,
-            max_utilization=0.80,
-            rate_limit_per_sec=5,
-            circuit_breaker_errors=10,
-            circuit_breaker_window_sec=60,
-            max_drawdown=0.20,
-            initial_portfolio_value=broker.get_available_cash(),
-        ),
-    )
-    reconciler = Reconciler(broker=broker, repo=repo, order_manager=order_manager)
+        # 4. 依存コンポーネント組み立て
+        repo = OrderRepository(sqlite_conn)
+        order_manager = OrderManager(broker, repo)
+        risk_manager = RiskManager(
+            broker=broker,
+            repo=repo,
+            config=RiskConfig(
+                max_position_pct=0.20,
+                max_utilization=0.80,
+                rate_limit_per_sec=5,
+                circuit_breaker_errors=10,
+                circuit_breaker_window_sec=60,
+                max_drawdown=0.20,
+                initial_portfolio_value=broker.get_available_cash(),
+            ),
+        )
+        reconciler = Reconciler(broker=broker, repo=repo, order_manager=order_manager)
 
-    # 5. ExecutionEngine 起動
-    engine = ExecutionEngine(
-        broker=broker,
-        repo=repo,
-        risk_manager=risk_manager,
-        order_manager=order_manager,
-        duckdb_conn=duckdb_conn,
-        config=EngineConfig(target_date=date.today()),
-        reconciler=reconciler,
-        pid_file=settings.pid_file_path,
-    )
-    engine.run_session()
+        # 5. ExecutionEngine 起動
+        engine = ExecutionEngine(
+            broker=broker,
+            repo=repo,
+            risk_manager=risk_manager,
+            order_manager=order_manager,
+            duckdb_conn=duckdb_conn,
+            config=EngineConfig(target_date=date.today()),
+            reconciler=reconciler,
+            pid_file=settings.pid_file_path,
+        )
+        engine.run_session()
+    finally:
+        sqlite_conn.close()
+        duckdb_conn.close()
 
 
 if __name__ == "__main__":
