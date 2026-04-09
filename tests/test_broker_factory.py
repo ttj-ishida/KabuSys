@@ -85,8 +85,8 @@ class TestBrokerClientFactory:
         assert broker.fill_mode == "reject"
 
     def test_unknown_env_raises_at_settings_level(self, monkeypatch):
-        # 無効な KABUSYS_ENV は Settings.env プロパティが ValueError を投げる
-        # BrokerClientFactory.create() に到達する前に失敗する
+        # 無効な KABUSYS_ENV は is_paper/is_dev/is_live の評価を経て
+        # Factory 内の settings.env 明示評価で ValueError を投げる
         monkeypatch.setenv("KABUSYS_ENV", "unknown_env")
         with pytest.raises(ValueError):
             BrokerClientFactory.create(Settings())

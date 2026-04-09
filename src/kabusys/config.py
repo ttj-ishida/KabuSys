@@ -173,7 +173,7 @@ class Settings:
         有効値: "instant" | "partial" | "never" | "reject"
         """
         _valid = frozenset({"instant", "partial", "never", "reject"})
-        mode = os.environ.get("PAPER_FILL_MODE", "instant")
+        mode = os.environ.get("PAPER_FILL_MODE", "instant").strip().lower()
         if mode not in _valid:
             raise ValueError(
                 f"PAPER_FILL_MODE の値が不正です: '{mode}'. "

@@ -20,11 +20,14 @@ class BrokerClientFactory:
 
         - is_paper or is_dev → MockBrokerClient(fill_mode=settings.paper_fill_mode)
         - is_live            → NotImplementedError（将来実装）
-        ※ それ以外の環境は Settings.env プロパティが ValueError を raise するため到達不可。
+        - それ以外           → ValueError（settings.env の評価で確定）
         """
         if settings.is_paper or settings.is_dev:
             return create_broker_api(mock=True, fill_mode=settings.paper_fill_mode)
-        raise NotImplementedError(
-            "Live broker client (KabuStationClient) は未実装です。"
-            "KABUSYS_ENV=paper_trading または development を使用してください。"
-        )
+        if settings.is_live:
+            raise NotImplementedError(
+                "Live broker client (KabuStationClient) は未実装です。"
+                "KABUSYS_ENV=paper_trading または development を使用してください。"
+            )
+        env = settings.env  # 明示評価（未知の env ならここで ValueError）
+        raise ValueError(f"未知の KABUSYS_ENV: {env!r}")
