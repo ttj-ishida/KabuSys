@@ -262,7 +262,7 @@ python -m pytest tests/test_broker_factory.py::TestBrokerClientFactory -v
 
 Expected: 6 passed
 
-- [ ] **Step 5: 全テスト（13件）が通ることを確認**
+- [ ] **Step 5: 全テスト（15件）が通ることを確認**
 
 ```bash
 python -m pytest tests/test_broker_factory.py -v
