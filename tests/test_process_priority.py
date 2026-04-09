@@ -86,3 +86,7 @@ class TestSetCpuAffinity:
              caplog.at_level(logging.WARNING, logger="kabusys.utils.process_priority"):
             set_cpu_affinity(2)  # 例外を投げないこと
         assert "権限不足" in caplog.text
+
+    def test_zero_cpu_count_raises(self):
+        with pytest.raises(ValueError):
+            set_cpu_affinity(0)

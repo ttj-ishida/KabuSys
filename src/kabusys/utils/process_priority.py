@@ -15,15 +15,15 @@ logger = logging.getLogger(__name__)
 _VALID_LEVELS = frozenset({"high", "normal", "low"})
 
 _WINDOWS_PRIORITY = {
-    "high":   psutil.HIGH_PRIORITY_CLASS,
+    "high": psutil.HIGH_PRIORITY_CLASS,
     "normal": psutil.NORMAL_PRIORITY_CLASS,
-    "low":    psutil.IDLE_PRIORITY_CLASS,
+    "low": psutil.IDLE_PRIORITY_CLASS,
 }
 
 _LINUX_NICE = {
-    "high":   -10,
-    "normal":  0,
-    "low":     10,
+    "high": -10,
+    "normal": 0,
+    "low": 10,
 }
 
 
@@ -59,15 +59,28 @@ def set_cpu_affinity(cpu_count: int | None = None) -> None:
 
     Args:
         cpu_count: 使用するコア数。None の場合は設定しない（全コア使用）。
+                   利用可能なコア数より大きい場合は全コアを使用する。
+
+    Raises:
+        ValueError: cpu_count が 1 未満の場合
     """
     if cpu_count is None:
         return
+    if cpu_count < 1:
+        raise ValueError(f"cpu_count は 1 以上である必要があります: {cpu_count!r}")
     try:
         p = psutil.Process()
         available = list(range(psutil.cpu_count() or 1))
-        p.cpu_affinity(available[:cpu_count])
+        pinned = available[:cpu_count]
+        if cpu_count > len(available):
+            logger.debug(
+                "cpu_count=%d が利用可能なコア数 %d を超えています。全コアを使用します。",
+                cpu_count,
+                len(available),
+            )
+        p.cpu_affinity(pinned)
         logger.debug(
-            "CPU affinity を %r に設定しました (PID=%d)", available[:cpu_count], p.pid
+            "CPU affinity を %r に設定しました (PID=%d)", pinned, p.pid
         )
     except psutil.AccessDenied:
         logger.warning(
