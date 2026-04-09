@@ -27,13 +27,16 @@ class TestPaperFillMode:
         with pytest.raises(ValueError):
             Settings().paper_fill_mode
 
+    def test_strip_and_lower(self, monkeypatch):
+        monkeypatch.setenv("PAPER_FILL_MODE", "  PARTial  ")
+        assert Settings().paper_fill_mode == "partial"
+
 
 class TestPaperSqlitePath:
     def test_default_path(self, monkeypatch):
         monkeypatch.delenv("PAPER_TRADING_SQLITE_PATH", raising=False)
-        path = Settings().paper_sqlite_path
-        assert path.name == "paper_trading.db"
-        assert "data" in str(path)
+        from pathlib import Path
+        assert Settings().paper_sqlite_path == Path("data/paper_trading.db").expanduser()
 
     def test_override(self, monkeypatch, tmp_path):
         custom = str(tmp_path / "custom.db")
