@@ -23,7 +23,10 @@
 2. **Backtest (ヒストリカル・シミュレーション)**
    - 過去数年分（Bull/Bearの両相場を含む期間）のデータに取引ロジックを流し込み、スリッページや売買手数料を考慮した詳細なパフォーマンス測定を実施。
 3. **Forward Test (ペーパー取引 / シミュレーション実行)**
-   - バックテストで合格したロジックを、本番と**全く同じExecution System**のまま「注文照会API等を用いた模擬環境」または「1株単位の超少額」でリアルタイム稼働させる。
+   - バックテストで合格したロジックを、本番と**全く同じExecution System**のまま `MockBrokerClient` を使ってリアルタイム稼働させる。
+   - 環境変数 `KABUSYS_ENV=paper_trading` で Paper Trading モードに切り替わり、`BrokerClientFactory` が自動的に `MockBrokerClient` を選択する。
+   - データは `data/paper_trading.db` に保存され、本番 DB（`data/monitoring.db`）とは完全分離される。
+   - `PAPER_FILL_MODE` 環境変数で約定シミュレーション方式を制御（`instant` / `partial` / `never` / `reject`、デフォルト: `instant`）。
    - ここで、APIの速度や、リアルタイムの気配値更新特有の遅延（レイテンシ）の影響を評価。
 4. **Production (本番稼働)**
    - Forward Testで想定通りの乖離率に収まり、システム安定性が確認された場合のみ、通常のロット（資金）を投下して本番運用を開始。

@@ -115,9 +115,10 @@ kabuステーション REST API へのアクセスは `src/kabusys/execution/` �
 
 ```
 src/kabusys/execution/
-├── broker_api.py    ← BrokerAPIProtocol（Protocol）+ データモデル + ファクトリ関数
-├── kabu_client.py   ← KabuStationClient（実API実装）
-└── mock_client.py   ← MockBrokerClient（テスト・開発用）
+├── broker_api.py      ← BrokerAPIProtocol（Protocol）+ データモデル + create_broker_api()
+├── broker_factory.py  ← BrokerClientFactory（Settings に応じてクライアントを生成）
+├── kabu_client.py     ← KabuStationClient（実API実装）
+└── mock_client.py     ← MockBrokerClient（Paper Trading・テスト・開発用）
 ```
 
 ### Protocol インターフェース（`BrokerAPIProtocol`）
@@ -160,6 +161,16 @@ broker API の `OrderStatus.status`（GET /orders レスポンス）から Order
 
 ### 差し替え方法
 
+**推奨: `BrokerClientFactory` を使用（Phase 8〜）**
+
+```python
+# KABUSYS_ENV に応じて自動選択（paper_trading / development → MockBrokerClient）
+from kabusys.execution.broker_factory import BrokerClientFactory
+broker = BrokerClientFactory.create(settings)
+```
+
+**直接指定（テスト・開発時）**
+
 ```python
 # 開発・テスト時
 api = create_broker_api(mock=True)
@@ -167,6 +178,14 @@ api = create_broker_api(mock=True)
 # 本番時
 api = create_broker_api(mock=False, api_password="...", base_url="http://localhost:18080/kabusapi")
 ```
+
+**Paper Trading 関連環境変数**
+
+| 環境変数 | デフォルト | 説明 |
+|---|---|---|
+| `KABUSYS_ENV` | `development` | `paper_trading` で Paper Trading モード |
+| `PAPER_FILL_MODE` | `instant` | MockBrokerClient の約定方式（instant/partial/never/reject） |
+| `PAPER_TRADING_SQLITE_PATH` | `data/paper_trading.db` | Paper Trading 専用 SQLite DB のパス |
 
 ### 注意事項
 

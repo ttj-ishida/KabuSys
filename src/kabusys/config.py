@@ -165,6 +165,32 @@ class Settings:
     def sqlite_path(self) -> Path:
         return Path(os.environ.get("SQLITE_PATH", "data/monitoring.db")).expanduser()
 
+    @property
+    def paper_fill_mode(self) -> str:
+        """Paper Trading 時の MockBrokerClient fill_mode。
+
+        環境変数 PAPER_FILL_MODE で設定（デフォルト: "instant"）。
+        有効値: "instant" | "partial" | "never" | "reject"
+        """
+        _valid = frozenset({"instant", "partial", "never", "reject"})
+        mode = os.environ.get("PAPER_FILL_MODE", "instant").strip().lower()
+        if mode not in _valid:
+            raise ValueError(
+                f"PAPER_FILL_MODE の値が不正です: '{mode}'. "
+                f"有効な値: {sorted(_valid)}"
+            )
+        return mode
+
+    @property
+    def paper_sqlite_path(self) -> Path:
+        """Paper Trading 用 SQLite DB のパス。
+
+        環境変数 PAPER_TRADING_SQLITE_PATH で上書き可能（デフォルト: data/paper_trading.db）。
+        """
+        return Path(
+            os.environ.get("PAPER_TRADING_SQLITE_PATH", "data/paper_trading.db")
+        ).expanduser()
+
     # --- 監視設定 ---
     @property
     def pid_file_path(self) -> Path:
