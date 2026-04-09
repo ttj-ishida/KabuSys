@@ -1,90 +1,105 @@
 # Changelog
 
-すべての注目すべき変更はこのファイルに記録します。  
-このプロジェクトは Keep a Changelog の慣習に従います。  
-
-※日付と内容は、提供されたコードベースの内容から推測して作成しています。
+すべての重要な変更点をこのファイルに記録します。  
+フォーマットは「Keep a Changelog」に準拠し、安定したリリースごとに履歴を残します。
 
 ## [Unreleased]
 
-（無し）
-
-## [0.1.0] - 2026-04-09
-
-初回リリース。以下の主要機能と設計方針を実装・提供します。
-
-### 追加 (Added)
-- パッケージ基盤
-  - パッケージ初期化モジュールを追加（kabusys.__init__）。
-  - 公開サブパッケージとして data, research, ai, その他（strategy, execution, monitoring を想定）をエクスポート。
-
-- 環境設定 / 設定管理（kabusys.config）
-  - .env ファイルおよび環境変数からの設定読み込み機能を実装。
-  - 自動ロードの優先順位: OS 環境変数 > .env.local > .env。KABUSYS_DISABLE_AUTO_ENV_LOAD による自動ロード無効化対応。
-  - .env パーサ実装（export プレフィックス、シングル/ダブルクォート、エスケープ、行末コメントの扱いに対応）。
-  - Settings クラスを提供し、J-Quants / kabuAPI / LINE / DB パス / 監視閾値 / 実行環境（development/paper_trading/live）などのプロパティを公開。
-  - PAPER_FILL_MODE / KABUSYS_ENV / LOG_LEVEL などの値検証と分かりやすいエラーメッセージを実装。
-  - OS 環境変数を「protected」として .env 上書きから守る実装。
-
-- ニュース NLP（kabusys.ai.news_nlp）
-  - raw_news と news_symbols から記事を集約し、OpenAI（gpt-4o-mini）の JSON Mode を使って銘柄単位のセンチメント（ai_score）を算出し ai_scores テーブルへ書き込む score_news を実装。
-  - タイムウィンドウ（前日 15:00 JST ～ 当日 08:30 JST）計算ユーティリティ calc_news_window を提供。
-  - API 呼び出しのバッチ処理（最大 20 銘柄/チャンク）、1 銘柄あたりの記事数上限・文字数トリム、レスポンス検証ロジックを実装。
-  - 429 / ネットワーク断 / タイムアウト / 5xx に対する指数バックオフによるリトライ実装。
-  - JSON パースの堅牢化（周辺テキスト混入への対応）、スコアクリップ（±1.0）、部分失敗時に既存スコアを保護する DB 書き込みロジック（DELETE → INSERT）を採用。
-  - テスト容易性のため OpenAI 呼び出し箇所は差し替え可能（関数単位で patch 可能）。
-
-- 市場レジーム判定（kabusys.ai.regime_detector）
-  - ETF 1321（日経225連動型）の 200 日移動平均乖離（重み 70%）とマクロ経済ニュースの LLM センチメント（重み 30%）を合成して日次の market_regime を計算・保存する score_regime を実装。
-  - MA200 計算でルックアヘッドを防ぐため target_date 未満のデータのみを使用する実装。
-  - マクロキーワードで raw_news をフィルタして LLM を呼び出すロジック、API エラー時のフォールバック macro_sentiment=0.0、リトライ・バックオフ処理を実装。
-  - 冪等な DB 書き込み（BEGIN / DELETE / INSERT / COMMIT）を採用。
-
-- データプラットフォーム（kabusys.data）
-  - ETL 用データクラス ETLResult（pipeline モジュール）を公開（kabusys.data.etl による再エクスポート）。
-  - ETL パイプライン（kabusys.data.pipeline）の基本骨子を実装（差分取得、保存、品質チェックの設計方針を定義）。
-  - カレンダー管理モジュール（kabusys.data.calendar_management）を実装:
-    - market_calendar テーブルの夜間更新ジョブ calendar_update_job（J-Quants から差分取得、バックフィル、健全性チェック）。
-    - is_trading_day / next_trading_day / prev_trading_day / get_trading_days / is_sq_day といった営業日判定ユーティリティ。
-    - DB にカレンダー情報がない場合の曜日ベースフォールバックを一貫して適用。
-    - 検索範囲制限（無限ループ防止）や date 型のみを扱うことで timezone 混入を防止する設計。
-
-- リサーチ（kabusys.research）
-  - ファクター計算モジュール（kabusys.research.factor_research）を実装:
-    - calc_momentum: 1M/3M/6M リターン、ma200 乖離（ma200_dev）を計算。データ不足時の None ハンドリング。
-    - calc_volatility: 20 日 ATR（atr_20）、相対 ATR（atr_pct）、20 日平均売買代金（avg_turnover）、出来高比（volume_ratio）を計算。
-    - calc_value: raw_financials から最新財務を取得し PER / ROE を計算（EPS が無効な場合は None）。
-  - 特徴量探索モジュール（kabusys.research.feature_exploration）を実装:
-    - calc_forward_returns: 指定ホライズンの将来リターン計算（複数ホライズン対応、入力検証あり）。
-    - calc_ic: スピアマン（ランク）による IC 計算（ランクの tie 処理は平均ランク）。
-    - rank / factor_summary: ランク変換と統計サマリの実装。
-  - 研究用ユーティリティ群をリパッケージして公開。
-
-### 変更 (Changed)
-- （初リリースのため過去からの変更なし）
-
-### 修正 (Fixed)
-- （初リリースのため過去からの修正なし）
-
-### 非推奨 (Deprecated)
-- なし
-
-### 削除 (Removed)
-- なし
-
-### セキュリティ (Security)
-- OpenAI API キー管理について:
-  - score_news / score_regime は api_key 引数または環境変数 OPENAI_API_KEY のいずれかを必須とし、未設定時に ValueError を投げて明示。
-- .env 自動ロードは KABUSYS_DISABLE_AUTO_ENV_LOAD により無効化でき、運用上のリスクを軽減可能。
-- OS 環境変数は .env から保護される（上書き不可）実装。
-
-### 設計上の注意・方針
-- ルックアヘッドバイアス防止: datetime.today() や date.today() に依存する処理を避け、関数引数の target_date を基準に処理を行うことを徹底。
-- DuckDB を主要な分析 DB として使用（関数は DuckDB 接続を受け取る設計）。
-- DB 書き込みは冪等性を考慮（部分失敗時に既存データを過度に消さない戦略）。
-- OpenAI 呼び出し箇所はテストで差し替え可能（ユニットテスト容易性）。
-- API 呼び出しの堅牢化（リトライ・バックオフ・5xx の扱い・タイムアウト）とレスポンス検証を重視。
+- 現時点で未リリースの変更はありません。
 
 ---
 
-今後のリリースでは、戦略（strategy）、実行（execution）、監視（monitoring）周りの具体的な発注ロジック／ランタイム監視機能の実装、運用向けの CLI / サービス化、より詳細な品質チェックやデータ補完ロジックの追加などが想定されます。
+## [0.1.0] - 2026-04-09
+
+初回公開リリース。
+
+### Added
+- 全体
+  - パッケージ kubusys の初期実装を追加。モジュール群を統合した自動売買／リサーチ基盤の骨格を提供。
+  - __version__ を 0.1.0 に設定。
+
+- 環境設定 (src/kabusys/config.py)
+  - .env / .env.local ファイルまたは OS 環境変数から設定を自動読み込みする仕組みを実装（プロジェクトルート検出: .git または pyproject.toml）。
+  - 読み込み優先順位: OS 環境変数 > .env.local > .env。KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で自動ロードを無効化可能。
+  - .env パーサを実装（export 形式、クォート/エスケープ、インラインコメントの取り扱いに対応）。
+  - 環境変数必須チェック用の _require() を実装。
+  - 各種設定プロパティを追加:
+    - JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD 等の必須値取得。
+    - KABUSYS_ENV（development/paper_trading/live）と LOG_LEVEL のバリデーション。
+    - DBパス（DUCKDB_PATH, SQLITE_PATH, PAPER_TRADING_SQLITE_PATH）や監視設定（PID_FILE_PATH, KILL_FLAG_PATH 等）、リソース閾値（CPU/MEM/DISK）など。
+    - PAPER_FILL_MODE の値検証（instant/partial/never/reject）。
+  - 環境変数による保護機構（読み込み時に OS 環境変数を protected として上書きを防止）。
+
+- ポートフォリオ構築 (src/kabusys/portfolio/)
+  - portfolio_builder:
+    - select_candidates: BUY シグナルのスコア降順ソート（同点時は signal_rank 昇順）による候補選定を追加。
+    - calc_equal_weights: 等金額配分の重み計算を追加。
+    - calc_score_weights: スコア比率に基づく重み化。全銘柄のスコアが 0 の場合は等金額配分へフォールバックし警告を出力。
+  - risk_adjustment:
+    - apply_sector_cap: セクター集中制限ロジック（既存保有のセクター時価比率が閾値を超える場合に新規候補を除外）。"unknown" セクターは上限チェック対象外。
+    - calc_regime_multiplier: 市場レジームに応じた投下資金乗数（bull/neutral/bear をマッピング、未知レジームは 1.0 でフォールバック）。
+  - position_sizing:
+    - calc_position_sizes: 株数計算（allocation_method: "risk_based" / "equal" / "score" をサポート）、単元株（lot_size）で丸め、max_position_pct や max_utilization による上限、cost_buffer を考慮した aggregate キャップとスケーリングの実装。
+    - aggregate スケールダウン時に lot_size 単位で残差を再分配するアルゴリズムを実装。
+
+- リサーチ／ファクター計算 (src/kabusys/research/)
+  - factor_research:
+    - calc_momentum: 1M/3M/6M リターン、200日移動平均乖離を DuckDB を用いて計算。
+    - calc_volatility: 20日 ATR、相対 ATR、20日平均売買代金、出来高比率を計算（true_range の NULL 伝播を正しく扱う）。
+    - calc_value: raw_financials から最新の財務データを参照して PER/ROE を計算（EPS が 0/欠損のときは None）。
+    - DuckDB を用いた SQL ベース実装で、prices_daily/raw_financials テーブルのみ参照（外部 API 不使用）。
+  - feature_exploration:
+    - calc_forward_returns: 任意ホライズンの将来リターンを一括クエリで取得（horizons の検証あり）。
+    - calc_ic: ファクターと将来リターンのスピアマンランク相関（IC）を計算（None/欠損/非有限値を除外、十分なレコード数がなければ None）。
+    - rank: 同順位は平均ランクで扱うランク関数（浮動小数点の丸め対策あり）。
+    - factor_summary: count/mean/std/min/max/median を計算する統計サマリ実装。
+
+- AI（ニュース NLP / レジーム判定） (src/kabusys/ai/)
+  - news_nlp:
+    - score_news: raw_news を銘柄ごとに集約し、OpenAI（gpt-4o-mini）でセンチメント評価して ai_scores テーブルへ書き込み。バッチ処理（最大 20 銘柄/コール）、トークン肥大化対策（記事数・文字数トリム）、リトライ（429/ネットワーク/5xx）、レスポンス検証、±1.0 でクリップ、部分失敗時に既存スコアを保護する差分 DELETE→INSERT ロジック等を実装。
+    - calc_news_window: JST ベースのニュース収集ウィンドウ計算（look-ahead バイアス回避のため datetime.today() を参照しない）。
+    - テスト用に _call_openai_api を差し替え可能な設計。
+  - regime_detector:
+    - score_regime: ETF 1321 の MA200 乖離（70%）とマクロニュース LLM センチメント（30%）を合成して日次で market_regime テーブルへ冪等書き込み。マクロ抽出はキーワードベース、API 失敗時は macro_sentiment=0.0 でフォールバック。
+    - 内部実装は news_nlp の補助関数 calc_news_window を利用するが、OpenAI 呼び出しは独立実装としてモジュール結合を最小化。
+    - レジーム合成ロジックと閾値に基づくラベル付け（bull/neutral/bear）を実装。
+
+- 監視ログ永続化 (src/kabusys/monitoring/monitoring_db.py)
+  - init_monitoring_db: SQLite 用の監視テーブル群（system_status, trade_logs, positions, risk_logs など）とインデックスを冪等に作成する初期化関数を追加。
+
+- パッケージエクスポート
+  - 各モジュールから主要な関数をパッケージレベルでエクスポート（kabusys.portfolio, kabusys.research, kabusys.ai など）。
+
+### Changed
+- 設計上の注意点やフェイルセーフの追加
+  - ルックアヘッドバイアス回避: ニュース／レジーム関連処理で datetime.today()/date.today() を参照しない設計を徹底。
+  - OpenAI API 呼び出しでのエラー種別に応じたリトライ方針と指数バックオフを実装。
+  - DuckDB executemany に関する互換性考慮（空リストの処理を回避）。
+
+### Fixed
+- レスポンスパース耐性の強化
+  - news_nlp の JSON Mode 応答で前後に余計なテキストが含まれる場合に最外の {} を抽出して復元する処理を追加（実用的エラー回復）。
+- データ不足時の安全なフォールバック
+  - regime_detector の MA200 計算や各種ファクター計算で過少データ時に中立値を使い WARNING を出すようにし、誤判定や例外発生を防止。
+
+### Security
+- 現時点でセキュリティ修正はありません。
+  - 注意: OpenAI API キーは環境変数（OPENAI_API_KEY）または明示的引数で与える設計。キー管理はユーザー側で行ってください。
+
+### Notes / Migration
+- 環境変数:
+  - 自動ロードを無効化するには KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください（テスト時に便利）。
+  - 必須の機密情報（例: JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, OPENAI_API_KEY）は _require() により未設定時に ValueError を投げます。
+- DuckDB / SQLite:
+  - research/ai モジュールは DuckDB 接続、monitoring は sqlite3.Connection を直接受け取る API です。呼び出し側で接続を用意してください。
+- テストフック:
+  - OpenAI 呼び出しの関数（ニュースとレジーム検出共に _call_openai_api）を unittest.mock.patch で差し替えてテスト可能。
+
+---
+
+今後の予定（例）
+- 銘柄ごとの単元株サイズをマスタから取得して個別 lot_size をサポートする拡張。
+- PBR や 配当利回りなどバリューファクターの追加。
+- ai モジュールのレスポンス検証・フォールバックロジックのさらなる堅牢化。
+
+（以上）
