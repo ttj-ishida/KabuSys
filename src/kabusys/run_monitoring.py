@@ -60,10 +60,16 @@ def main() -> None:
     logger.info("監視ループ開始（ポーリング間隔: %d 秒）", poll_interval)
     try:
         while True:
-            monitor.check_once()
+            try:
+                monitor.check_once()
+            except Exception:
+                logger.exception("check_once() で予期しないエラーが発生しました。次のポーリングまで待機します。")
             time.sleep(poll_interval)
     except KeyboardInterrupt:
         logger.info("監視ループを終了します。")
+    finally:
+        sqlite_conn.close()
+        duckdb_conn.close()
 
 
 if __name__ == "__main__":
