@@ -17,13 +17,14 @@ from kabusys.execution.order_manager import OrderManager
 from kabusys.execution.order_record import OrderState
 from kabusys.execution.order_repository import OrderRepository, init_orders_db
 from kabusys.execution.risk_manager import RiskConfig, RiskManager
+from kabusys.monitoring.monitoring_db import MonitoringDB, init_monitoring_db
 
 
 TARGET_DATE = date(2026, 3, 29)
 
 
 
-def _make_engine(broker, sqlite_conn, duckdb_conn, *, config=None) -> ExecutionEngine:
+def _make_engine(broker, sqlite_conn, duckdb_conn, *, config=None, monitoring_db=None) -> ExecutionEngine:
     repo = OrderRepository(sqlite_conn)
     risk_config = RiskConfig(initial_portfolio_value=10_000_000.0)
     rm = RiskManager(broker=broker, repo=repo, config=risk_config)
@@ -36,6 +37,7 @@ def _make_engine(broker, sqlite_conn, duckdb_conn, *, config=None) -> ExecutionE
         order_manager=order_manager,
         duckdb_conn=duckdb_conn,
         config=cfg,
+        monitoring_db=monitoring_db,
     )
 
 
@@ -151,6 +153,46 @@ class TestProcessSignals:
         engine._stop_event.set()  # ループ停止のため
         # ← _process_signals を明示的に呼んだ場合との比較
         assert len(engine._repo.list_active()) == 0
+
+    def test_latency_ms_recorded_in_monitoring_db(self, sqlite_conn, duckdb_conn, monitoring_conn):
+        """send_order() 後に monitoring_db.trade_logs.latency_ms が記録される"""
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        mdb = MonitoringDB(monitoring_conn)
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn, monitoring_db=mdb)
+        engine._process_signals()
+        monitoring_conn.row_factory = sqlite3.Row
+        row = monitoring_conn.execute(
+            "SELECT latency_ms FROM trade_logs WHERE event_type = 'Sent'"
+        ).fetchone()
+        assert row is not None
+        assert row["latency_ms"] is not None
+        assert row["latency_ms"] >= 0.0
+
+    def test_latency_ms_recorded_for_pending_order(self, sqlite_conn, duckdb_conn, monitoring_conn):
+        """fill_mode=never (OrderSentPendingError) でも latency_ms が記録される"""
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        mdb = MonitoringDB(monitoring_conn)
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn, monitoring_db=mdb)
+        engine._process_signals()
+        monitoring_conn.row_factory = sqlite3.Row
+        row = monitoring_conn.execute(
+            "SELECT latency_ms FROM trade_logs WHERE event_type = 'Sent'"
+        ).fetchone()
+        assert row is not None
+        assert row["latency_ms"] is not None
+        assert row["latency_ms"] >= 0.0
+
+    def test_no_monitoring_db_does_not_raise(self, sqlite_conn, duckdb_conn):
+        """monitoring_db=None のとき例外なく動作する（後方互換）"""
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)  # monitoring_db 省略
+        engine._process_signals()  # 例外が出ないこと
 
 
 class TestPushDrainAndKillSwitch:
