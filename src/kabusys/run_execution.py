@@ -20,7 +20,7 @@ from kabusys.execution.order_repository import OrderRepository
 from kabusys.execution.reconciler import Reconciler
 from kabusys.execution.risk_manager import RiskConfig, RiskManager
 from kabusys.monitoring.monitoring_db import init_monitoring_db
-from kabusys.utils.process_priority import set_cpu_affinity, set_process_priority
+from kabusys.utils.process_priority import set_process_priority
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,6 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     # 1. プロセス優先度を High に設定（最初に実行）
     set_process_priority("high")
-    set_cpu_affinity()  # デフォルト: 全コア使用
 
     settings = Settings()
     logger.info("起動環境: KABUSYS_ENV=%s", settings.env)

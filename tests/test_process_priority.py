@@ -61,7 +61,16 @@ class TestSetProcessPriority:
              patch("kabusys.utils.process_priority.psutil.Process", return_value=mock_proc), \
              caplog.at_level(logging.WARNING, logger="kabusys.utils.process_priority"):
             set_process_priority("high")  # 例外を投げないこと
-        assert "権限不足" in caplog.text
+        assert "AccessDenied" in caplog.text
+
+    def test_attribute_error_logs_warning(self, caplog):
+        mock_proc = MagicMock()
+        mock_proc.nice.side_effect = AttributeError("nice not supported")
+        with patch("kabusys.utils.process_priority.platform.system", return_value="Linux"), \
+             patch("kabusys.utils.process_priority.psutil.Process", return_value=mock_proc), \
+             caplog.at_level(logging.WARNING, logger="kabusys.utils.process_priority"):
+            set_process_priority("high")  # 例外を投げないこと
+        assert "AttributeError" in caplog.text
 
     def test_unsupported_os_logs_warning(self, caplog):
         mock_proc = MagicMock()
@@ -102,6 +111,7 @@ class TestSetCpuAffinity:
              caplog.at_level(logging.WARNING, logger="kabusys.utils.process_priority"):
             set_cpu_affinity(2)  # 例外を投げないこと
         assert "AccessDenied" in caplog.text
+        assert "CPU affinity" in caplog.text
 
     def test_attribute_error_logs_warning(self, caplog):
         mock_proc = MagicMock()

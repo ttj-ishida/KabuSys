@@ -58,10 +58,11 @@ def set_process_priority(level: str) -> None:
             )
             return
         logger.debug("プロセス優先度を %r に設定しました (PID=%d)", level, p.pid)
-    except psutil.AccessDenied:
+    except (psutil.AccessDenied, AttributeError, NotImplementedError) as e:
         logger.warning(
-            "プロセス優先度の設定に失敗しました（権限不足）。"
-            "管理者権限で実行するか、優先度設定をスキップします。"
+            "プロセス優先度の設定に失敗しました（%s: %s）。スキップします。",
+            type(e).__name__,
+            e,
         )
 
 
@@ -95,6 +96,7 @@ def set_cpu_affinity(cpu_count: int | None = None) -> None:
         )
     except (psutil.AccessDenied, AttributeError, NotImplementedError) as e:
         logger.warning(
-            "CPU affinity の設定に失敗しました（%s）。スキップします。",
+            "CPU affinity の設定に失敗しました（%s: %s）。スキップします。",
             type(e).__name__,
+            e,
         )

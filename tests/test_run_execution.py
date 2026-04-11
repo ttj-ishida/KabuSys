@@ -13,7 +13,6 @@ def _run_main(is_paper: bool = False):
     mock_engine = MagicMock()
 
     with patch("kabusys.run_execution.set_process_priority") as mock_priority, \
-         patch("kabusys.run_execution.set_cpu_affinity"), \
          patch("kabusys.run_execution.Settings") as mock_settings_cls, \
          patch("kabusys.run_execution.sqlite3.connect") as mock_sqlite, \
          patch("kabusys.run_execution.init_monitoring_db"), \
