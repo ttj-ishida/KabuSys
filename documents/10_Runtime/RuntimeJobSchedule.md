@@ -266,12 +266,16 @@
 
 Execution環境を保護する。
 
-  プロセス             優先度
-  -------------------- --------
-  execution_service    High
-  monitoring_service   High
-  strategy_service     Normal
-  ai_service           Low
+  プロセス             優先度     起動方法
+  -------------------- -------- -----------------------------------
+  execution_service    High     python -m kabusys.run_execution
+  monitoring_service   High     python -m kabusys.run_monitoring
+  strategy_service     Normal   ライブラリ（夜間バッチから呼び出し）
+  ai_service           Low      ライブラリ（夜間バッチから呼び出し）
+
+各起動スクリプトは `src/kabusys/utils/process_priority.set_process_priority("high")` を
+先頭で呼び出し、OS優先度を設定してからエンジンを初期化する。
+Windows では管理者権限推奨（権限不足時は WARNING ログで続行）。
 
 ------------------------------------------------------------------------
 

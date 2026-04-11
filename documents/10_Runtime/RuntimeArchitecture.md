@@ -172,12 +172,19 @@ monitoring_service は常時稼働する。
 
 執行プロセスを最優先とする。
 
-  プロセス             優先度
-  -------------------- --------
-  execution_service    High
-  monitoring_service   High
-  strategy_service     Normal
-  ai_service           Low
+  プロセス             優先度     起動スクリプト
+  -------------------- -------- ----------------------------
+  execution_service    High     src/kabusys/run_execution.py
+  monitoring_service   High     src/kabusys/run_monitoring.py
+  strategy_service     Normal   ライブラリ呼び出し（スタンドアロン起動なし）
+  ai_service           Low      ライブラリ呼び出し（スタンドアロン起動なし）
+
+**実装:** `src/kabusys/utils/process_priority.py`
+
+- `set_process_priority(level)` — Windows: `psutil.HIGH/NORMAL/IDLE_PRIORITY_CLASS`、Linux/Darwin/FreeBSD: `psutil.Process().nice(-10/0/10)`、未対応OS は WARNING でスキップ
+- `set_cpu_affinity(cpu_count)` — 最初の N コアに固定（`None` で全コア使用）
+- 権限不足（`psutil.AccessDenied`）および未対応プラットフォーム（`AttributeError`/`NotImplementedError`）は WARNING ログで続行（プロセスを落とさない）
+- 詳細仕様: `docs/superpowers/specs/2026-04-09-execution-priority-control.md`（Issue #43）
 
 ------------------------------------------------------------------------
 

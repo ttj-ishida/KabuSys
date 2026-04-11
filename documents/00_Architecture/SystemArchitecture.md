@@ -71,7 +71,7 @@ Broker (kabuステーションAPI)
 
 ### 3.1 単一Windowsノードでの安全設計（フェイルセーフ）
 1. **プロセスレベルの分離**: 執行系（Execution）と分析・計算系（Data/AI/Strategy）は同じPythonスクリプトに乗せず、完全に別のOSプロセスとして独立稼働させる。
-2. **優先度制御 (Priority)**: 執行系プロセスとkabuステーションプロセスにOSの「高優先度」を割り当て、AIタスク等の負荷スパイク時にも発注と損切りが必ず通るようにする。
+2. **優先度制御 (Priority)**: 執行系プロセスとkabuステーションプロセスにOSの「高優先度」を割り当て、AIタスク等の負荷スパイク時にも発注と損切りが必ず通るようにする。実装は `src/kabusys/utils/process_priority.py`（`set_process_priority()` / `set_cpu_affinity()`）が担い、各起動スクリプト（`run_execution.py`, `run_monitoring.py`）の先頭で呼び出す。Windows では `psutil.HIGH_PRIORITY_CLASS`、Linux/Darwin/FreeBSD では `psutil.Process().nice(-10)` を使用してプラットフォーム差分を吸収する（Issue #43）。
 3. **時間的隔離 (Scheduling)**: AI分析や全銘柄の特徴量計算は相場が開いていない夜間帯（15:00〜翌8:30）のバッチ処理ジョブとして完了させ、ザラ場中（9:00〜15:00）には極力重い計算を走らせない。
 
 ---
