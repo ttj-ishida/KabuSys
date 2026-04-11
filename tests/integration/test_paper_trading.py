@@ -133,3 +133,67 @@ class TestOrderSuccessRate:
         orders = engine._repo.list_active()
         assert len(orders) == 1
         assert orders[0].state == OrderState.OrderSent
+
+
+class TestSignalAccuracy:
+    """シグナル精度: BUY/SELL シグナルが正しく注文に変換されることを検証"""
+
+    def test_buy_signal_creates_buy_order(self, orders_conn, duckdb_conn):
+        """BUY シグナル → side='buy' の注文が作成される"""
+        _sig(duckdb_conn, "1234", side="buy")
+        _tgt(duckdb_conn, "1234")
+        duckdb_conn.commit()
+        engine = _engine(orders_conn, duckdb_conn, fill_mode="instant")
+        engine._process_signals()
+        orders = engine._repo.list_active()
+        assert len(orders) >= 1
+        assert any(o.side == "buy" for o in orders)
+
+    def test_sell_signal_creates_sell_order(self, orders_conn, duckdb_conn):
+        """SELL シグナル → side='sell' の注文が作成される"""
+        _sig(duckdb_conn, "1234", side="sell")
+        _tgt(duckdb_conn, "1234")
+        duckdb_conn.commit()
+        engine = _engine(orders_conn, duckdb_conn, fill_mode="instant")
+        engine._process_signals()
+        orders = engine._repo.list_active()
+        assert len(orders) >= 1
+        assert any(o.side == "sell" for o in orders)
+
+    def test_risk_rejection_blocks_order_creation(self, orders_conn, duckdb_conn):
+        """余力不足（cash=1.0）→ リスクゲートが BUY を拒否し注文レコードが作られない"""
+        _sig(duckdb_conn, "1234", side="buy")
+        _tgt(duckdb_conn, "1234")
+        duckdb_conn.commit()
+        engine = _engine(orders_conn, duckdb_conn, cash=1.0)
+        engine._process_signals()
+        orders = engine._repo.list_active()
+        assert orders == []
+
+
+class TestApiLatency:
+    """API レイテンシ: 発注の遅延が許容範囲内に収まることを検証"""
+
+    def test_send_order_latency_recorded(self, orders_conn, duckdb_conn, mon_conn):
+        """_process_signals() 後に trade_logs の Sent イベントに latency_ms が記録される"""
+        _sig(duckdb_conn, "1234")
+        _tgt(duckdb_conn, "1234")
+        duckdb_conn.commit()
+        engine = _engine(orders_conn, duckdb_conn, fill_mode="instant", mon_conn=mon_conn)
+        engine._process_signals()
+        row = mon_conn.execute(
+            "SELECT latency_ms FROM trade_logs WHERE event_type = 'Sent'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] is not None
+
+    def test_send_order_latency_under_500ms(self):
+        """MockBrokerClient.send_order() の呼び出しが 500ms 未満で完了する"""
+        from kabusys.execution.broker_api import OrderRequest
+
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        req = OrderRequest(code="1234", side="buy", qty=100, order_type="market")
+        start = time.perf_counter()
+        broker.send_order(req)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        assert elapsed_ms < 500
