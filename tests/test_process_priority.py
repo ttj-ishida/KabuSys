@@ -63,6 +63,22 @@ class TestSetProcessPriority:
             set_process_priority("high")  # 例外を投げないこと
         assert "権限不足" in caplog.text
 
+    def test_unsupported_os_logs_warning(self, caplog):
+        mock_proc = MagicMock()
+        with patch("kabusys.utils.process_priority.platform.system", return_value="OpenBSD"), \
+             patch("kabusys.utils.process_priority.psutil.Process", return_value=mock_proc), \
+             caplog.at_level(logging.WARNING, logger="kabusys.utils.process_priority"):
+            set_process_priority("high")  # 例外を投げないこと
+        assert "未対応" in caplog.text
+        mock_proc.nice.assert_not_called()
+
+    def test_darwin_uses_nice(self):
+        mock_proc = MagicMock()
+        with patch("kabusys.utils.process_priority.platform.system", return_value="Darwin"), \
+             patch("kabusys.utils.process_priority.psutil.Process", return_value=mock_proc):
+            set_process_priority("high")
+            mock_proc.nice.assert_called_once_with(-10)
+
 
 class TestSetCpuAffinity:
     def test_pins_to_first_n_cores(self):
@@ -85,7 +101,25 @@ class TestSetCpuAffinity:
              patch("kabusys.utils.process_priority.psutil.cpu_count", return_value=4), \
              caplog.at_level(logging.WARNING, logger="kabusys.utils.process_priority"):
             set_cpu_affinity(2)  # 例外を投げないこと
-        assert "権限不足" in caplog.text
+        assert "AccessDenied" in caplog.text
+
+    def test_attribute_error_logs_warning(self, caplog):
+        mock_proc = MagicMock()
+        mock_proc.cpu_affinity.side_effect = AttributeError("cpu_affinity not supported")
+        with patch("kabusys.utils.process_priority.psutil.Process", return_value=mock_proc), \
+             patch("kabusys.utils.process_priority.psutil.cpu_count", return_value=4), \
+             caplog.at_level(logging.WARNING, logger="kabusys.utils.process_priority"):
+            set_cpu_affinity(2)  # 例外を投げないこと
+        assert "AttributeError" in caplog.text
+
+    def test_not_implemented_error_logs_warning(self, caplog):
+        mock_proc = MagicMock()
+        mock_proc.cpu_affinity.side_effect = NotImplementedError("not supported on this OS")
+        with patch("kabusys.utils.process_priority.psutil.Process", return_value=mock_proc), \
+             patch("kabusys.utils.process_priority.psutil.cpu_count", return_value=4), \
+             caplog.at_level(logging.WARNING, logger="kabusys.utils.process_priority"):
+            set_cpu_affinity(2)  # 例外を投げないこと
+        assert "NotImplementedError" in caplog.text
 
     def test_zero_cpu_count_raises(self):
         with pytest.raises(ValueError):

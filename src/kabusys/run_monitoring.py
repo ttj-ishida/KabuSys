@@ -18,25 +18,33 @@ from kabusys.monitoring.monitoring_db import init_monitoring_db
 from kabusys.monitoring.system_monitor import SystemMonitor
 from kabusys.utils.process_priority import set_process_priority
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _DEFAULT_POLL_INTERVAL = 60  # 秒
 
 
 def _get_poll_interval() -> int:
-    """MONITOR_POLL_INTERVAL 環境変数からポーリング間隔を取得する（デフォルト: 60秒）。"""
+    """MONITOR_POLL_INTERVAL 環境変数からポーリング間隔を取得する（デフォルト: 60秒）。
+
+    0 以下の値はデフォルトにフォールバックする（time.sleep に渡すと ValueError が発生するため）。
+    """
+    raw = os.environ.get("MONITOR_POLL_INTERVAL", str(_DEFAULT_POLL_INTERVAL))
     try:
-        return int(os.environ.get("MONITOR_POLL_INTERVAL", _DEFAULT_POLL_INTERVAL))
+        val = int(raw)
+        if val < 1:
+            raise ValueError("non-positive")
+        return val
     except ValueError:
         logger.warning(
-            "MONITOR_POLL_INTERVAL の値が不正です。デフォルト %d 秒を使用します。",
+            "MONITOR_POLL_INTERVAL の値が不正です（%r）。デフォルト %d 秒を使用します。",
+            raw,
             _DEFAULT_POLL_INTERVAL,
         )
         return _DEFAULT_POLL_INTERVAL
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO)
     # 1. プロセス優先度を High に設定（最初に実行）
     set_process_priority("high")
 

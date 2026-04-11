@@ -22,11 +22,11 @@ from kabusys.execution.risk_manager import RiskConfig, RiskManager
 from kabusys.monitoring.monitoring_db import init_monitoring_db
 from kabusys.utils.process_priority import set_cpu_affinity, set_process_priority
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO)
     # 1. プロセス優先度を High に設定（最初に実行）
     set_process_priority("high")
     set_cpu_affinity()  # デフォルト: 全コア使用
@@ -39,7 +39,7 @@ def main() -> None:
         settings.paper_sqlite_path if settings.is_paper else settings.sqlite_path
     )
     sqlite_conn = sqlite3.connect(str(sqlite_path))
-    init_monitoring_db(sqlite_conn)
+    init_monitoring_db(sqlite_conn)  # 監視テーブルが存在することを保証（冪等）
     duckdb_conn = duckdb.connect(str(settings.duckdb_path))
 
     try:

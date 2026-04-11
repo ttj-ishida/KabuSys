@@ -66,3 +66,17 @@ class TestGetPollInterval:
             result = _get_poll_interval()
         assert result == 60
         assert "不正" in caplog.text
+
+    def test_zero_uses_default(self, monkeypatch, caplog):
+        monkeypatch.setenv("MONITOR_POLL_INTERVAL", "0")
+        with caplog.at_level(logging.WARNING, logger="kabusys.run_monitoring"):
+            result = _get_poll_interval()
+        assert result == 60
+        assert "不正" in caplog.text
+
+    def test_negative_uses_default(self, monkeypatch, caplog):
+        monkeypatch.setenv("MONITOR_POLL_INTERVAL", "-10")
+        with caplog.at_level(logging.WARNING, logger="kabusys.run_monitoring"):
+            result = _get_poll_interval()
+        assert result == 60
+        assert "不正" in caplog.text

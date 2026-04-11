@@ -14,17 +14,22 @@ logger = logging.getLogger(__name__)
 
 _VALID_LEVELS = frozenset({"high", "normal", "low"})
 
+# psutil の HIGH_PRIORITY_CLASS 等は Windows 専用定数
 _WINDOWS_PRIORITY = {
     "high": psutil.HIGH_PRIORITY_CLASS,
     "normal": psutil.NORMAL_PRIORITY_CLASS,
     "low": psutil.IDLE_PRIORITY_CLASS,
 }
 
+# POSIX 系 OS の nice 値
 _LINUX_NICE = {
     "high": -10,
     "normal": 0,
     "low": 10,
 }
+
+# nice() が使える POSIX 系 OS
+_SUPPORTED_POSIX = frozenset({"Linux", "Darwin", "FreeBSD"})
 
 
 def set_process_priority(level: str) -> None:
@@ -42,10 +47,16 @@ def set_process_priority(level: str) -> None:
         )
     try:
         p = psutil.Process()
-        if platform.system() == "Windows":
+        sysname = platform.system()
+        if sysname == "Windows":
             p.nice(_WINDOWS_PRIORITY[level])
-        else:
+        elif sysname in _SUPPORTED_POSIX:
             p.nice(_LINUX_NICE[level])
+        else:
+            logger.warning(
+                "未対応 OS (%s) のため優先度設定をスキップします。", sysname
+            )
+            return
         logger.debug("プロセス優先度を %r に設定しました (PID=%d)", level, p.pid)
     except psutil.AccessDenied:
         logger.warning(
@@ -82,7 +93,8 @@ def set_cpu_affinity(cpu_count: int | None = None) -> None:
         logger.debug(
             "CPU affinity を %r に設定しました (PID=%d)", pinned, p.pid
         )
-    except psutil.AccessDenied:
+    except (psutil.AccessDenied, AttributeError, NotImplementedError) as e:
         logger.warning(
-            "CPU affinity の設定に失敗しました（権限不足）。スキップします。"
+            "CPU affinity の設定に失敗しました（%s）。スキップします。",
+            type(e).__name__,
         )
