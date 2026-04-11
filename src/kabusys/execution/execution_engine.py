@@ -126,38 +126,29 @@ class ExecutionEngine:
                 continue
 
             t0 = _time_module.perf_counter()
+            latency_ms: float | None = None
             try:
                 self._order_manager.send_order(record.client_order_id)
                 latency_ms = (_time_module.perf_counter() - t0) * 1000
                 self._risk_manager.record_api_success()
-                if self._monitoring_db is not None:
-                    updated = self._repo.get(record.client_order_id)
-                    self._monitoring_db.log_trade_event(
-                        "Sent", record.client_order_id, record.code, record.side,
-                        record.qty, record.price,
-                        updated.filled_qty if updated else 0,
-                        updated.state.value if updated else "",
-                        latency_ms=latency_ms,
-                    )
                 logger.info("発注成功: signal_id=%s, client_order_id=%s", signal_id, record.client_order_id)
             except OrderSentPendingError:
-                # broker_order_id は永続化済み。push drain で約定を待つ。
-                # ブローカーが受理済み（APIレベル成功）なので CB 成功カウントする
                 latency_ms = (_time_module.perf_counter() - t0) * 1000
                 self._risk_manager.record_api_success()
-                if self._monitoring_db is not None:
-                    updated = self._repo.get(record.client_order_id)
-                    self._monitoring_db.log_trade_event(
-                        "Sent", record.client_order_id, record.code, record.side,
-                        record.qty, record.price,
-                        updated.filled_qty if updated else 0,
-                        updated.state.value if updated else "",
-                        latency_ms=latency_ms,
-                    )
                 logger.info("発注保留（pending）: signal_id=%s", signal_id)
             except Exception as exc:
                 self._risk_manager.record_api_error()
                 logger.error("発注失敗: signal_id=%s: %s", signal_id, exc)
+
+            if latency_ms is not None and self._monitoring_db is not None:
+                updated = self._repo.get(record.client_order_id)
+                self._monitoring_db.log_trade_event(
+                    "Sent", record.client_order_id, record.code, record.side,
+                    record.qty, record.price,
+                    updated.filled_qty if updated else 0,
+                    updated.state.value if updated else "",
+                    latency_ms=latency_ms,
+                )
 
     def _drain_push_queue(self) -> None:
         """_push_queue を全件処理する（sync_order + Gate 3 チェック）。"""
