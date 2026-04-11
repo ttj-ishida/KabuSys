@@ -142,30 +142,27 @@ class TestSignalAccuracy:
         """BUY シグナル → side='buy' の注文が作成される"""
         _sig(duckdb_conn, "1234", side="buy")
         _tgt(duckdb_conn, "1234")
-        duckdb_conn.commit()
         engine = _engine(orders_conn, duckdb_conn, fill_mode="instant")
         engine._process_signals()
         orders = engine._repo.list_active()
-        assert len(orders) >= 1
-        assert any(o.side == "buy" for o in orders)
+        assert len(orders) == 1
+        assert orders[0].side == "buy"
 
     def test_sell_signal_creates_sell_order(self, orders_conn, duckdb_conn):
         """SELL シグナル → side='sell' の注文が作成される"""
         _sig(duckdb_conn, "1234", side="sell")
         _tgt(duckdb_conn, "1234")
-        duckdb_conn.commit()
         engine = _engine(orders_conn, duckdb_conn, fill_mode="instant")
         engine._process_signals()
         orders = engine._repo.list_active()
-        assert len(orders) >= 1
-        assert any(o.side == "sell" for o in orders)
+        assert len(orders) == 1
+        assert orders[0].side == "sell"
 
     def test_risk_rejection_blocks_order_creation(self, orders_conn, duckdb_conn):
-        """余力不足（cash=1.0）→ リスクゲートが BUY を拒否し注文レコードが作られない"""
+        """余力不足（cash=0.0）→ リスクゲートが BUY を拒否し注文レコードが作られない"""
         _sig(duckdb_conn, "1234", side="buy")
         _tgt(duckdb_conn, "1234")
-        duckdb_conn.commit()
-        engine = _engine(orders_conn, duckdb_conn, cash=1.0)
+        engine = _engine(orders_conn, duckdb_conn, cash=0.0)
         engine._process_signals()
         orders = engine._repo.list_active()
         assert orders == []
@@ -178,7 +175,6 @@ class TestApiLatency:
         """_process_signals() 後に trade_logs の Sent イベントに latency_ms が記録される"""
         _sig(duckdb_conn, "1234")
         _tgt(duckdb_conn, "1234")
-        duckdb_conn.commit()
         engine = _engine(orders_conn, duckdb_conn, fill_mode="instant", mon_conn=mon_conn)
         engine._process_signals()
         row = mon_conn.execute(
