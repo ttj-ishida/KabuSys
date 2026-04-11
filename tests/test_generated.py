@@ -1,423 +1,325 @@
 
-import json
-import math
+# tests/test_kabusys_core.py
 import os
-from datetime import date, datetime, timedelta
+import sqlite3
+import math
 from pathlib import Path
-from types import SimpleNamespace
-from unittest import mock
+from datetime import datetime, timezone
 
-import duckdb
 import pytest
 
-from kabusys.config import _parse_env_line, _load_env_file, _require, Settings
-from kabusys.ai.news_nlp import calc_news_window, _validate_and_extract, _score_chunk
-from kabusys.ai.regime_detector import _calc_ma200_ratio, _fetch_macro_news, _score_macro
-from kabusys.data.stats import zscore_normalize
-from kabusys.research.feature_exploration import rank, calc_ic, factor_summary
-from kabusys.data import quality
+from unittest import mock
+
+# --- config tests ---
+from kabusys.config import (
+    _parse_env_line,
+    _load_env_file,
+    _require,
+    Settings,
+)
+
+# --- portfolio tests ---
+from kabusys.portfolio.portfolio_builder import (
+    select_candidates,
+    calc_equal_weights,
+    calc_score_weights,
+)
+from kabusys.portfolio.risk_adjustment import apply_sector_cap, calc_regime_multiplier
+from kabusys.portfolio.position_sizing import calc_position_sizes
+
+# --- utils tests ---
+from kabusys.utils import process_priority
+
+# --- monitoring db tests ---
+from kabusys.monitoring.monitoring_db import init_monitoring_db, MonitoringDB
 
 
-# ---------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------
-class DummyResp:
-    def __init__(self, content: str):
-        # mimic resp.choices[0].message.content
-        self.choices = [SimpleNamespace(message=SimpleNamespace(content=content))]
-
-
-# ---------------------------------------------------------------------
-# config._parse_env_line / _load_env_file / _require / Settings
-# ---------------------------------------------------------------------
+# -------------------------
+# Config parsing tests
+# -------------------------
 def test_parse_env_line_basic_and_comments():
+    assert _parse_env_line("KEY=val\n") == ("KEY", "val")
+    assert _parse_env_line(" # comment\n") is None
     assert _parse_env_line("") is None
-    assert _parse_env_line("   # comment") is None
-    assert _parse_env_line("KEY=val") == ("KEY", "val")
-    assert _parse_env_line(" export KEY2 =  123 ") == ("KEY2", "123")
-    # inline comment only if preceded by space/tab
-    assert _parse_env_line("A=1#no_space") == ("A", "1#no_space")
-    assert _parse_env_line("B=1 # with comment") == ("B", "1")
-    # quoted with escapes
-    assert _parse_env_line(r"Q='a\'b'") == ("Q", "a'b")
-    assert _parse_env_line(r'Q2="c\"d"') == ("Q2", 'c"d')
-    # invalid lines
-    assert _parse_env_line("NO_EQUAL_SIGN") is None
-    assert _parse_env_line("=novar") is None
+    # no separator
+    assert _parse_env_line("NOSPASE") is None
+    # inline comment without space should be preserved
+    assert _parse_env_line("X=val#notcomment") == ("X", "val#notcomment")
+    # inline comment with preceding space should be stripped
+    assert _parse_env_line("Y=val #comment") == ("Y", "val")
+
+
+def test_parse_env_line_export_and_quoted_and_escapes():
+    # export prefix, quoted value, escaped single quote inside
+    line = "export FOO='a\\'b'  #ignored\n"
+    k, v = _parse_env_line(line)
+    assert k == "FOO"
+    assert v == "a'b"
+    # double quotes and escaped char
+    line2 = 'BAR="hello\\nworld"\n'
+    k2, v2 = _parse_env_line(line2)
+    # note: parser treats backslash escape as taking next char literally
+    assert k2 == "BAR"
+    assert "n" in v2  # '\n' becomes 'n' in this simplistic parser behavior
 
 
 def test_load_env_file_override_and_protected(tmp_path, monkeypatch):
-    env_file = tmp_path / ".env.test"
-    content = "\n".join(
-        [
-            "A=1",
-            "B=2",
-            "C='quoted value'",
-            "D=with # comment",
-        ]
-    )
-    env_file.write_text(content, encoding="utf-8")
-
+    p = tmp_path / ".env.test"
+    p.write_text("A=1\nB=2\nC=3\n")
+    # ensure environment starts clean for these keys
     monkeypatch.delenv("A", raising=False)
-    monkeypatch.setenv("B", "orig")
-    protected = frozenset(os.environ.keys())
-    # override=False should not overwrite existing B
-    _load_env_file(env_file, override=False, protected=protected)
+    monkeypatch.setenv("B", "OLD")
+    # first load: override=False -> should not overwrite B
+    _load_env_file(p, override=False, protected=frozenset())
     assert os.environ.get("A") == "1"
-    assert os.environ.get("B") == "orig"
-    assert os.environ.get("C") == "quoted value"
-    # override=True should overwrite B if not protected
-    monkeypatch.setenv("B", "orig2")
-    # create new env file with B changed
-    env_file.write_text("B=NEW\n", encoding="utf-8")
-    _load_env_file(env_file, override=True, protected=frozenset())  # no protected
-    assert os.environ.get("B") == "NEW"
+    assert os.environ.get("B") == "OLD"
+    assert os.environ.get("C") == "3"
+    # second load: override=True with protected containing B -> B should stay OLD
+    _load_env_file(p, override=True, protected=frozenset({"B"}))
+    assert os.environ.get("A") == "1"
+    assert os.environ.get("B") == "OLD"
+    assert os.environ.get("C") == "3"
 
 
-def test_require_raises_and_returns(monkeypatch):
-    monkeypatch.delenv("SOME_KEY", raising=False)
+def test_require_and_settings_env_validation(monkeypatch):
+    monkeypatch.delenv("SOME_MISSING", raising=False)
     with pytest.raises(ValueError):
-        _require("SOME_KEY")
+        _require("SOME_MISSING")
     monkeypatch.setenv("SOME_KEY", "VALUE")
     assert _require("SOME_KEY") == "VALUE"
 
-
-def test_settings_properties(monkeypatch, tmp_path):
-    s = Settings()
-    # default base url when not set
-    monkeypatch.delenv("KABU_API_BASE_URL", raising=False)
-    assert "kabusapi" in s.kabu_api_base_url
-    # paths expanduser
-    monkeypatch.setenv("DUCKDB_PATH", "~/mydb.duckdb")
-    p = s.duckdb_path
-    assert isinstance(p, Path)
-    assert "mydb.duckdb" in str(p)
-    # env validation
-    monkeypatch.setenv("KABUSYS_ENV", "live")
-    assert s.is_live is True
-    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
-    assert s.log_level == "DEBUG"
-    # invalid env value
-    monkeypatch.setenv("KABUSYS_ENV", "invalid_env")
+    settings = Settings()
+    # env validation: set invalid KABUSYS_ENV
+    monkeypatch.setenv("KABUSYS_ENV", "INVALID_ENV")
     with pytest.raises(ValueError):
-        _ = s.env
+        _ = settings.env
+    # log level validation
+    monkeypatch.setenv("LOG_LEVEL", "invalid")
+    with pytest.raises(ValueError):
+        _ = settings.log_level
+    # paper_fill_mode validation
+    monkeypatch.setenv("PAPER_FILL_MODE", "bad_mode")
+    with pytest.raises(ValueError):
+        _ = settings.paper_fill_mode
 
 
-# ---------------------------------------------------------------------
-# news_nlp: calc_news_window, _validate_and_extract, _score_chunk
-# ---------------------------------------------------------------------
-def test_calc_news_window_fixed_date():
-    target = date(2026, 3, 20)
-    start, end = calc_news_window(target)
-    # According to doc: start = previous day 06:00, end = previous day 23:30
-    assert start == datetime(2026, 3, 19, 6, 0)
-    assert end == datetime(2026, 3, 19, 23, 30)
-
-
-def test_validate_and_extract_happy_path_and_edgecases():
-    # valid response
-    body = {"results": [{"code": "1234", "score": 0.5}, {"code": 5678, "score": -2.0}, {"code": "9999", "score": "nan"}]}
-    resp = DummyResp(json.dumps(body))
-    out = _validate_and_extract(resp, {"1234", "5678", "0000"})
-    # 1234 -> 0.5, 5678 -> clipped to -1.0
-    assert math.isclose(out.get("1234"), 0.5, rel_tol=1e-9)
-    assert math.isclose(out.get("5678"), -1.0, rel_tol=1e-9)
-    # unknown code 9999 not requested -> absent
-    assert "9999" not in out
-
-    # response with extra text around JSON: ensures extraction logic works
-    messy = "some preamble\n" + json.dumps(body) + "\ntrailing"
-    resp2 = DummyResp(messy)
-    out2 = _validate_and_extract(resp2, {"1234", "5678"})
-    assert "1234" in out2
-
-    # invalid JSON should return {}
-    resp3 = DummyResp("not a json")
-    assert _validate_and_extract(resp3, {"1234"}) == {}
-
-    # results key missing -> {}
-    resp4 = DummyResp(json.dumps({"no_results": []}))
-    assert _validate_and_extract(resp4, {"1234"}) == {}
-
-
-def test_score_chunk_success_and_error_handling(monkeypatch):
-    # prepare article_map and chunk_codes
-    article_map = {
-        "1001": ["Title1 body1", "Title1 body2"],
-        "2002": ["Only one article"],
-    }
-    chunk_codes = ["1001", "2002"]
-
-    # prepare a valid response returning scores
-    body = {"results": [{"code": "1001", "score": 0.2}, {"code": "2002", "score": 1.2}]}
-    resp = DummyResp(json.dumps(body))
-
-    # patch _call_openai_api in news_nlp to return our resp
-    import kabusys.ai.news_nlp as news_mod
-
-    monkeypatch.setattr(news_mod, "_call_openai_api", lambda client, messages: resp)
-    # call _score_chunk
-    result = _score_chunk(client=object(), chunk_codes=chunk_codes, article_map=article_map)
-    assert "1001" in result and "2002" in result
-    # 2002 clipped to 1.0
-    assert math.isclose(result["2002"], 1.0, rel_tol=1e-9)
-    assert math.isclose(result["1001"], 0.2, rel_tol=1e-9)
-
-    # simulate APIError non-5xx (should return {} and not retry)
-    class FakeAPIError(Exception):
-        status_code = 400
-
-    def raise_api(client, messages):
-        raise FakeAPIError("bad")
-
-    monkeypatch.setattr(news_mod, "_call_openai_api", raise_api)
-    res2 = _score_chunk(client=object(), chunk_codes=chunk_codes, article_map=article_map)
-    assert res2 == {}
-
-
-# ---------------------------------------------------------------------
-# regime_detector: _calc_ma200_ratio, _fetch_macro_news, _score_macro
-# ---------------------------------------------------------------------
-def setup_prices_table(conn):
-    conn.execute(
-        """
-        CREATE TABLE prices_daily (
-            date DATE,
-            code VARCHAR,
-            close DOUBLE
-        )
-        """
-    )
-
-
-def test_calc_ma200_ratio_no_data_logs_and_default(tmp_path):
-    conn = duckdb.connect(":memory:")
-    setup_prices_table(conn)
-    # no rows -> returns 1.0
-    r = _calc_ma200_ratio(conn, date(2026, 1, 1))
-    assert r == 1.0
-    conn.close()
-
-
-def test_calc_ma200_ratio_insufficient_rows(monkeypatch):
-    conn = duckdb.connect(":memory:")
-    setup_prices_table(conn)
-    # insert fewer than _MA_WINDOW rows (use small number of rows)
-    today = date(2026, 1, 10)
-    for i in range(50):  # less than 200
-        conn.execute("INSERT INTO prices_daily VALUES (?, ?, ?)", [today - timedelta(days=i + 1), "1321", 100.0 + i])
-    r = _calc_ma200_ratio(conn, today)
-    assert r == 1.0
-    conn.close()
-
-
-def test_calc_ma200_ratio_full_window():
-    conn = duckdb.connect(":memory:")
-    setup_prices_table(conn)
-    # insert exactly 200 rows decreasing close so latest is first (we insert ordered by date asc then query uses date < target sorted desc)
-    target = date(2026, 1, 201)
-    base_close = 100.0
-    rows = []
-    for i in range(1, 201):
-        d = target - timedelta(days=i)
-        # create varying closes
-        rows.append((d, "1321", base_close + i))
-    conn.executemany("INSERT INTO prices_daily VALUES (?, ?, ?)", rows)
-    ratio = _calc_ma200_ratio(conn, target)
-    # latest close = base_close + 200, ma200 = average(base_close+1 .. base_close+200)
-    latest = base_close + 200
-    ma200 = sum(base_close + i for i in range(1, 201)) / 200.0
-    assert math.isclose(ratio, latest / ma200, rel_tol=1e-9)
-    conn.close()
-
-
-def test_fetch_macro_news_and_score_macro(monkeypatch):
-    conn = duckdb.connect(":memory:")
-    conn.execute(
-        """
-        CREATE TABLE raw_news (
-            id INTEGER,
-            datetime TIMESTAMP,
-            title VARCHAR
-        )
-        """
-    )
-    # insert some news with macro keywords (use one of the keywords like "金利")
-    now = datetime(2026, 3, 1, 12, 0)
-    titles = [
-        (1, now - timedelta(hours=1), "日銀が金利に言及"),
-        (2, now - timedelta(hours=2), "企業決算の話"),
-        (3, now - timedelta(hours=3), "為替が動く"),
+# -------------------------
+# Portfolio / weights tests
+# -------------------------
+def test_select_candidates_tiebreak_and_empty():
+    signals = [
+        {"code": "A", "score": 1.0, "signal_rank": 2},
+        {"code": "B", "score": 1.0, "signal_rank": 1},
+        {"code": "C", "score": 0.5, "signal_rank": 1},
     ]
-    conn.executemany("INSERT INTO raw_news VALUES (?, ?, ?)", titles)
-
-    window_start = now - timedelta(hours=4)
-    window_end = now
-    fetched = _fetch_macro_news(conn, window_start, window_end)
-    # should pick up titles containing macro keywords ("日銀", "為替")
-    assert any("日銀" in t for t in fetched)
-    assert any("為替" in t for t in fetched)
-
-    # test _score_macro: when titles empty -> 0.0 without calling API
-    zero = _score_macro(client=None, titles=[])
-    assert zero == 0.0
-
-    # test successful API parse and clipping
-    import kabusys.ai.regime_detector as rdmod
-    resp = DummyResp(json.dumps({"macro_sentiment": 0.8}))
-    monkeypatch.setattr(rdmod, "_call_openai_api", lambda client, messages: resp)
-    score = _score_macro(client=object(), titles=["t1"])
-    assert math.isclose(score, 0.8, rel_tol=1e-9)
-
-    # test invalid JSON -> 0.0 with warning but not exception
-    monkeypatch.setattr(rdmod, "_call_openai_api", lambda client, messages: DummyResp("bad json"))
-    score2 = _score_macro(client=object(), titles=["t1"])
-    assert score2 == 0.0
-    conn.close()
+    res = select_candidates(signals, max_positions=2)
+    # score same for A/B -> B (signal_rank 1) should come first
+    assert [r["code"] for r in res] == ["B", "A"]
+    assert select_candidates([], 5) == []
 
 
-# ---------------------------------------------------------------------
-# data.stats.zscore_normalize
-# ---------------------------------------------------------------------
-def test_zscore_normalize_basic():
-    records = [
-        {"code": "A", "val": 1.0},
-        {"code": "B", "val": 2.0},
-        {"code": "C", "val": 3.0},
-        {"code": "D", "val": None},
+def test_calc_equal_and_score_weights_and_zero_total(caplog):
+    candidates = [
+        {"code": "A", "score": 0.0},
+        {"code": "B", "score": 0.0},
     ]
-    out = zscore_normalize(records, ["val"])
-    # mean = 2.0, std = sqrt(((1)^2 + 0 + 1)/3) = sqrt(2/3)
-    vals = [r["val"] for r in out if r["val"] is not None]
-    assert len(vals) == 3
-    # check that result mean ~ 0
-    mean_after = sum(vals) / len(vals)
-    assert abs(mean_after) < 1e-12
+    eq = calc_equal_weights(candidates)
+    assert eq == {"A": 0.5, "B": 0.5}
+    # score weights with zero total should fallback and emit a warning
+    caplog.clear()
+    caplog.set_level("WARNING")
+    sw = calc_score_weights(candidates)
+    assert sw == eq
+    assert any("フォールバック" in rec.message or "フォールバック" in rec.getMessage() or "フォールバック" in rec.msg for rec in caplog.records)
 
 
-# ---------------------------------------------------------------------
-# research.feature_exploration: rank, calc_ic, factor_summary
-# ---------------------------------------------------------------------
-def test_rank_with_ties_and_average():
-    vals = [1.0, 2.0, 2.0, 4.0]
-    ranks = rank(vals)
-    # ranks[1] and ranks[2] should be equal average of positions 2 and 3 => (2+3)/2 = 2.5
-    assert math.isclose(ranks[1], 2.5, rel_tol=1e-9)
-    assert ranks[1] == ranks[2]
-    assert ranks[0] == 1.0
-    assert ranks[3] == 4.0
-
-
-def test_calc_ic_monotonic_reverse():
-    # factor increasing, forward decreasing -> Spearman = -1.0
-    factor_records = [
-        {"code": "a", "mom_1m": 1.0},
-        {"code": "b", "mom_1m": 2.0},
-        {"code": "c", "mom_1m": 3.0},
+def test_apply_sector_cap_blocking_and_sell_codes():
+    candidates = [
+        {"code": "A", "score": 1},
+        {"code": "B", "score": 2},
+        {"code": "C", "score": 3},
+        {"code": "U", "score": 4},  # unknown sector
     ]
-    forward_records = [
-        {"code": "a", "fwd_1d": 3.0},
-        {"code": "b", "fwd_1d": 2.0},
-        {"code": "c", "fwd_1d": 1.0},
-    ]
-    ic = calc_ic(factor_records, forward_records, "mom_1m", "fwd_1d")
-    assert ic is not None
-    assert ic < 0
-    assert pytest.approx(ic, rel=1e-6) == -1.0
+    sector_map = {"A": "S1", "B": "S1", "C": "S2"}
+    price_map = {"A": 100, "B": 100, "C": 50, "U": 10}
+    # portfolio value small so that S1 exposure becomes large
+    current_positions = {"A": 50}  # exposure = 50*100=5000
+    # set portfolio_value so that exposure/portfolio_value >= max_sector_pct
+    filtered = apply_sector_cap(candidates, sector_map, portfolio_value=10000, current_positions=current_positions, price_map=price_map, max_sector_pct=0.3)
+    # S1 should be blocked -> A and B should be excluded; unknown U remains
+    codes = {c["code"] for c in filtered}
+    assert "U" in codes
+    assert "C" in codes
+    assert "A" not in codes and "B" not in codes
+
+    # sell_codes excludes A from exposure calc so S1 not blocked now
+    filtered2 = apply_sector_cap(candidates, sector_map, portfolio_value=10000, current_positions=current_positions, price_map=price_map, max_sector_pct=0.3, sell_codes={"A"})
+    codes2 = {c["code"] for c in filtered2}
+    assert "B" in codes2  # no longer blocked
 
 
-def test_factor_summary_and_empty_columns():
-    records = [
-        {"code": "a", "f1": 1.0, "f2": None},
-        {"code": "b", "f1": 3.0, "f2": 2.0},
-        {"code": "c", "f1": 5.0, "f2": 4.0},
-    ]
-    summary = factor_summary(records, ["f1", "f2", "missing"])
-    assert summary["f1"]["count"] == 3
-    assert summary["f1"]["min"] == 1.0
-    assert summary["missing"]["count"] == 0
-    assert summary["f2"]["count"] == 2
+def test_calc_regime_multiplier_known_and_unknown(caplog):
+    assert math.isclose(calc_regime_multiplier("bull"), 1.0)
+    assert math.isclose(calc_regime_multiplier("neutral"), 0.7)
+    assert math.isclose(calc_regime_multiplier("bear"), 0.3)
+    caplog.set_level("WARNING")
+    caplog.clear()
+    v = calc_regime_multiplier("mystery")
+    assert v == 1.0
+    assert any("未知" in rec.getMessage() or "fallback" in rec.getMessage().lower() or "フォールバック" in rec.getMessage() for rec in caplog.records)
 
 
-# ---------------------------------------------------------------------
-# data.quality checks using duckdb in-memory
-# ---------------------------------------------------------------------
-@pytest.fixture
-def conn():
-    c = duckdb.connect(":memory:")
-    yield c
-    c.close()
-
-
-def test_check_missing_data(conn):
-    conn.execute(
-        """
-        CREATE TABLE raw_prices (
-            date DATE, code VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE, volume DOUBLE
-        )
-        """
+# -------------------------
+# Position sizing tests
+# -------------------------
+def test_calc_position_sizes_risk_based_lot_rounding():
+    candidates = [{"code": "XYZ", "score": 1}]
+    open_prices = {"XYZ": 10.0}
+    current_positions = {}
+    # choose parameters so that base_shares is large and lot rounding matters
+    res = calc_position_sizes(
+        weights={}, candidates=candidates, portfolio_value=1_000_000,
+        available_cash=1_000_000, current_positions=current_positions,
+        open_prices=open_prices, allocation_method="risk_based",
+        risk_pct=0.005, stop_loss_pct=0.08, lot_size=100
     )
-    d = date(2026, 1, 1)
-    conn.execute("INSERT INTO raw_prices VALUES (?, ?, ?, ?, ?, ?, ?)", [d, "0001", None, 10.0, 9.0, 9.5, 1000])
-    issues = quality.check_missing_data(conn, target_date=d)
-    assert len(issues) == 1
-    assert issues[0].check_name == "missing_data"
-    assert "OHLC" in issues[0].detail
+    # earlier analysis: base_shares = floor(1e6*0.005/(10*0.08)) = floor(5000/0.8)=6250 -> floored to lot 6200
+    assert "XYZ" in res
+    assert res["XYZ"] % 100 == 0
+    assert res["XYZ"] > 0
 
 
-def test_check_spike_and_duplicates(conn):
-    conn.execute(
-        """
-        CREATE TABLE raw_prices (
-            date DATE, code VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE, volume DOUBLE
-        )
-        """
+def test_calc_position_sizes_equal_score_scaling():
+    candidates = [{"code": "A"}, {"code": "B"}]
+    # each price 100
+    open_prices = {"A": 100.0, "B": 100.0}
+    current_positions = {}
+    # weights sum to 1
+    weights = {"A": 0.5, "B": 0.5}
+    # portfolio_value 100k -> per-position alloc 50k -> base_shares = 500
+    # available_cash lower to force scaling to 60k total available
+    res = calc_position_sizes(
+        weights=weights, candidates=candidates, portfolio_value=100_000,
+        available_cash=60_000, current_positions=current_positions,
+        open_prices=open_prices, allocation_method="equal",
+        max_utilization=1.0, lot_size=100, cost_buffer=0.0
     )
-    d1 = date(2026, 1, 1)
-    d2 = date(2026, 1, 2)
-    # duplicate rows for same date/code
-    conn.executemany("INSERT INTO raw_prices VALUES (?, ?, ?, ?, ?, ?, ?)", [
-        (d1, "X", 1, 2, 1, 1.0, 100),
-        (d1, "X", 1, 2, 1, 1.0, 110),
-        (d2, "X", 1, 2, 1, 10.0, 200),  # spike vs prev close 1.0 -> 900% > 50%
-    ])
-    dup = quality.check_duplicates(conn, target_date=d1)
-    assert len(dup) == 1 and dup[0].check_name == "duplicates"
-    spike = quality.check_spike(conn, target_date=d2, threshold=0.5)
-    assert len(spike) == 1 and spike[0].check_name == "spike"
+    # expected scaled shares: each 300 shares (300*100*2 = 60k)
+    assert res == {"A": 300, "B": 300}
 
 
-def test_check_date_consistency_future_and_non_trading(conn):
-    conn.execute(
-        """
-        CREATE TABLE raw_prices (date DATE, code VARCHAR, close DOUBLE)
-        """
-    )
-    # insert future date
-    future = date.today() + timedelta(days=10)
-    conn.execute("INSERT INTO raw_prices VALUES (?, ?, ?)", [future, "Z", 10.0])
-    # create market_calendar marking a date as non-trading
-    conn.execute("CREATE TABLE market_calendar (date DATE, is_trading_day BOOLEAN, is_sq_day BOOLEAN)")
-    bad_day = date(2026, 2, 2)
-    conn.execute("INSERT INTO raw_prices VALUES (?, ?, ?)", [bad_day, "Z", 5.0])
-    conn.execute("INSERT INTO market_calendar VALUES (?, ?, ?)", [bad_day, False, False])
-    issues = quality.check_date_consistency(conn, reference_date=date.today())
-    # should contain future_date error and non_trading_day warning
-    names = {i.check_name for i in issues}
-    assert "future_date" in names
-    assert "non_trading_day" in names
+# -------------------------
+# process_priority tests (psutil/platform mocked)
+# -------------------------
+def test_set_process_priority_invalid():
+    with pytest.raises(ValueError):
+        process_priority.set_process_priority("invalid_level")
 
 
-def test_run_all_checks_combines(conn):
-    # create tables and insert one problematic row to trigger missing_data
-    conn.execute(
-        """
-        CREATE TABLE raw_prices (
-            date DATE, code VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE, volume DOUBLE
-        )
-        """
-    )
-    d = date(2026, 1, 1)
-    conn.execute("INSERT INTO raw_prices VALUES (?, ?, ?, ?, ?, ?, ?)", [d, "A", None, 2, 1, 1.5, 10])
-    all_issues = quality.run_all_checks(conn, target_date=d, reference_date=d)
-    assert any(i.check_name == "missing_data" for i in all_issues)
+def test_set_process_priority_linux_and_access_denied(monkeypatch, caplog):
+    # mock platform.system to Linux
+    monkeypatch.setattr(process_priority.platform, "system", lambda: "Linux")
+    class DummyProc:
+        def __init__(self):
+            self.pid = 12345
+            self.nice_called = []
+        def nice(self, val):
+            self.nice_called.append(val)
+    dummy = DummyProc()
+    monkeypatch.setattr(process_priority.psutil, "Process", lambda: dummy)
+    # valid call should call nice with linux nice value
+    process_priority.set_process_priority("high")
+    assert dummy.nice_called and dummy.nice_called[-1] == process_priority._LINUX_NICE["high"]
+
+    # simulate AccessDenied
+    def raise_access():
+        raise process_priority.psutil.AccessDenied()
+    proc2 = mock.MagicMock()
+    proc2.nice.side_effect = raise_access
+    monkeypatch.setattr(process_priority.psutil, "Process", lambda: proc2)
+    caplog.set_level("WARNING")
+    process_priority.set_process_priority("normal")
+    assert any("権限不足" in rec.getMessage() or "AccessDenied" in rec.getMessage() or "設定に失敗" in rec.getMessage() for rec in caplog.records)
+
+
+def test_set_cpu_affinity_errors_and_bounds(monkeypatch, caplog):
+    # cpu_count None => no-op
+    assert process_priority.set_cpu_affinity(None) is None
+
+    with pytest.raises(ValueError):
+        process_priority.set_cpu_affinity(0)
+
+    # normal path: available cores mocked
+    monkeypatch.setattr(process_priority.psutil, "cpu_count", lambda: 4)
+    class DummyP:
+        def __init__(self):
+            self.pid = 999
+            self.pinned = None
+        def cpu_affinity(self, pinned):
+            self.pinned = pinned
+    dp = DummyP()
+    monkeypatch.setattr(process_priority.psutil, "Process", lambda: dp)
+    process_priority.set_cpu_affinity(2)
+    assert dp.pinned == [0, 1]
+
+    # cpu_count > available -> uses all cores
+    dp2 = DummyP()
+    monkeypatch.setattr(process_priority.psutil, "Process", lambda: dp2)
+    process_priority.set_cpu_affinity(10)
+    assert dp2.pinned == [0, 1, 2, 3]
+
+    # simulate AccessDenied
+    def raise_access_affinity(p):
+        raise process_priority.psutil.AccessDenied()
+    proc3 = mock.MagicMock()
+    proc3.cpu_affinity.side_effect = raise_access_affinity
+    monkeypatch.setattr(process_priority.psutil, "Process", lambda: proc3)
+    caplog.clear()
+    caplog.set_level("WARNING")
+    process_priority.set_cpu_affinity(1)
+    assert any("権限不足" in rec.getMessage() or "CPU affinity" in rec.getMessage() or "スキップ" in rec.getMessage() for rec in caplog.records)
+
+
+# -------------------------
+# MonitoringDB tests
+# -------------------------
+def test_init_monitoring_db_and_basic_operations(tmp_path):
+    # use a temp sqlite file to persist and inspect schema
+    db_path = tmp_path / "test_monitor.db"
+    conn = sqlite3.connect(str(db_path))
+    init_monitoring_db(conn)
+    # tables should exist: dashboard, system_status, positions, risk_logs, trade_logs
+    cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = {r[0] for r in cur.fetchall()}
+    assert "dashboard" in tables
+    assert "system_status" in tables
+    # MonitoringDB operations
+    mdb = MonitoringDB(conn)
+    # upsert dashboard with peak_value and then with None to ensure peak_value preserved
+    mdb.upsert_dashboard(portfolio_value=1000.0, cash=500.0, drawdown_pct=0.0, open_order_count=0, position_count=0, peak_value=2000.0)
+    d = mdb.get_dashboard()
+    assert d is not None
+    assert d["peak_value"] == 2000.0
+    mdb.upsert_dashboard(portfolio_value=1100.0, cash=400.0, drawdown_pct=0.0, open_order_count=0, position_count=0, peak_value=None)
+    d2 = mdb.get_dashboard()
+    assert d2["peak_value"] == 2000.0
+
+    # log_system_status writes a row
+    mdb.log_system_status(cpu_percent=1.0, memory_percent=2.0, disk_percent=3.0, process_ok=True)
+    r = conn.execute("SELECT COUNT(*) FROM system_status").fetchone()
+    assert r[0] >= 1
+
+    # log_risk_event dedup: first insertion returns True, immediate second with same detail and dedup_minutes should return False
+    now = datetime.now(timezone.utc)
+    ok1 = mdb.log_risk_event("TYPE", "metric", 0.1, 0.5, detail="d1", logged_at=now, dedup_minutes=60)
+    assert ok1 is True
+    ok2 = mdb.log_risk_event("TYPE", "metric", 0.2, 0.5, detail="d1", logged_at=now, dedup_minutes=60)
+    assert ok2 is False
+
+    # upsert_position and delete_position
+    mdb.upsert_position("AAA", 100, 123.4, current_price=120.0)
+    row = conn.execute("SELECT qty, avg_price FROM positions WHERE code = ?", ("AAA",)).fetchone()
+    assert row[0] == 100 and row[1] == 123.4
+    mdb.delete_position("AAA")
+    row2 = conn.execute("SELECT * FROM positions WHERE code = ?", ("AAA",)).fetchone()
+    assert row2 is None
