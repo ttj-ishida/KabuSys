@@ -10,7 +10,6 @@ import sqlite3
 import time
 from datetime import date
 
-import duckdb
 import pytest
 
 from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine
@@ -35,24 +34,9 @@ def orders_conn():
 
 @pytest.fixture
 def mon_conn():
-    """監視用 SQLite in-memory DB（row_factory 設定済み）"""
+    """監視用 SQLite in-memory DB"""
     conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
     init_monitoring_db(conn)
-    yield conn
-    conn.close()
-
-
-@pytest.fixture
-def signals_conn():
-    """シグナル + ポートフォリオターゲット用 DuckDB in-memory"""
-    conn = duckdb.connect(":memory:")
-    conn.execute(
-        "CREATE TABLE signals (date DATE, code VARCHAR, side VARCHAR, score FLOAT, signal_rank INTEGER)"
-    )
-    conn.execute(
-        "CREATE TABLE portfolio_targets (date DATE, code VARCHAR, target_size INTEGER, entry_price FLOAT)"
-    )
     yield conn
     conn.close()
 
@@ -66,7 +50,7 @@ def _tgt(conn, code: str, qty: int = 100, price: float = 1500.0):
 
 
 def _engine(
-    orders_conn, signals_conn, fill_mode="instant", cash=5_000_000.0, mon_conn=None
+    orders_conn, duckdb_conn, fill_mode="instant", cash=5_000_000.0, mon_conn=None
 ) -> ExecutionEngine:
     broker = MockBrokerClient(available_cash=cash, fill_mode=fill_mode)
     repo = OrderRepository(orders_conn)
@@ -78,7 +62,7 @@ def _engine(
         repo=repo,
         risk_manager=rm,
         order_manager=om,
-        duckdb_conn=signals_conn,
+        duckdb_conn=duckdb_conn,
         config=EngineConfig(target_date=TARGET_DATE),
         monitoring_db=mdb,
     )
@@ -87,19 +71,19 @@ def _engine(
 class TestSystemStability:
     """システム安定性: 複数サイクル実行してもクラッシュしないことを検証"""
 
-    def test_multiple_polling_cycles_no_crash(self, orders_conn, signals_conn):
+    def test_multiple_polling_cycles_no_crash(self, orders_conn, duckdb_conn):
         """3サイクル連続して _process_signals() が例外なく完走する"""
-        _sig(signals_conn, "1234")
-        _tgt(signals_conn, "1234")
-        engine = _engine(orders_conn, signals_conn, fill_mode="instant")
+        _sig(duckdb_conn, "1234")
+        _tgt(duckdb_conn, "1234")
+        engine = _engine(orders_conn, duckdb_conn, fill_mode="instant")
         for _ in range(3):
             engine._process_signals()  # AssertionError / Exception が出ないこと
 
-    def test_trade_logs_written_per_cycle(self, orders_conn, signals_conn, mon_conn):
+    def test_trade_logs_written_per_cycle(self, orders_conn, duckdb_conn, mon_conn):
         """シグナル処理後に monitoring_db.trade_logs へ 'Sent' イベントが記録される"""
-        _sig(signals_conn, "1234")
-        _tgt(signals_conn, "1234")
-        engine = _engine(orders_conn, signals_conn, fill_mode="instant", mon_conn=mon_conn)
+        _sig(duckdb_conn, "1234")
+        _tgt(duckdb_conn, "1234")
+        engine = _engine(orders_conn, duckdb_conn, fill_mode="instant", mon_conn=mon_conn)
         engine._process_signals()
         count = mon_conn.execute(
             "SELECT COUNT(*) FROM trade_logs WHERE event_type = 'Sent'"
@@ -110,41 +94,41 @@ class TestSystemStability:
 class TestOrderSuccessRate:
     """注文成功率: 各 fill_mode で期待する注文状態になることを検証"""
 
-    def test_instant_mode_order_accepted(self, orders_conn, signals_conn):
+    def test_instant_mode_order_accepted(self, orders_conn, duckdb_conn):
         """fill_mode=instant → _process_signals() 後は OrderAccepted 状態になる
         (sync_order() を呼ぶと Filled になるが、_process_signals() 単体では OrderAccepted)"""
-        _sig(signals_conn, "1234")
-        _tgt(signals_conn, "1234", qty=100)
-        engine = _engine(orders_conn, signals_conn, fill_mode="instant")
+        _sig(duckdb_conn, "1234")
+        _tgt(duckdb_conn, "1234", qty=100)
+        engine = _engine(orders_conn, duckdb_conn, fill_mode="instant")
         engine._process_signals()
         orders = engine._repo.list_active()
         assert len(orders) == 1
         assert orders[0].state == OrderState.OrderAccepted
 
-    def test_reject_mode_no_active_orders(self, orders_conn, signals_conn):
+    def test_reject_mode_no_active_orders(self, orders_conn, duckdb_conn):
         """fill_mode=reject → Rejected 注文は list_active() に含まれない"""
-        _sig(signals_conn, "1234")
-        _tgt(signals_conn, "1234", qty=100)
-        engine = _engine(orders_conn, signals_conn, fill_mode="reject")
+        _sig(duckdb_conn, "1234")
+        _tgt(duckdb_conn, "1234", qty=100)
+        engine = _engine(orders_conn, duckdb_conn, fill_mode="reject")
         engine._process_signals()
         assert len(engine._repo.list_active()) == 0
 
-    def test_partial_mode_order_accepted(self, orders_conn, signals_conn):
+    def test_partial_mode_order_accepted(self, orders_conn, duckdb_conn):
         """fill_mode=partial → _process_signals() 後は OrderAccepted 状態になる
         (broker 側で partial fill されているが、sync_order() を呼ぶまで DB の filled_qty は 0)"""
-        _sig(signals_conn, "1234")
-        _tgt(signals_conn, "1234", qty=100)
-        engine = _engine(orders_conn, signals_conn, fill_mode="partial")
+        _sig(duckdb_conn, "1234")
+        _tgt(duckdb_conn, "1234", qty=100)
+        engine = _engine(orders_conn, duckdb_conn, fill_mode="partial")
         engine._process_signals()
         orders = engine._repo.list_active()
         assert len(orders) == 1
         assert orders[0].state == OrderState.OrderAccepted
 
-    def test_never_mode_order_stays_sent(self, orders_conn, signals_conn):
+    def test_never_mode_order_stays_sent(self, orders_conn, duckdb_conn):
         """fill_mode=never → 注文が OrderSent 状態のまま残る"""
-        _sig(signals_conn, "1234")
-        _tgt(signals_conn, "1234", qty=100)
-        engine = _engine(orders_conn, signals_conn, fill_mode="never")
+        _sig(duckdb_conn, "1234")
+        _tgt(duckdb_conn, "1234", qty=100)
+        engine = _engine(orders_conn, duckdb_conn, fill_mode="never")
         engine._process_signals()
         orders = engine._repo.list_active()
         assert len(orders) == 1
