@@ -141,14 +141,17 @@ class ExecutionEngine:
                 logger.error("発注失敗: signal_id=%s: %s", signal_id, exc)
 
             if latency_ms is not None and self._monitoring_db is not None:
-                updated = self._repo.get(record.client_order_id)
-                self._monitoring_db.log_trade_event(
-                    "Sent", record.client_order_id, record.code, record.side,
-                    record.qty, record.price,
-                    updated.filled_qty if updated else 0,
-                    updated.state.value if updated else "",
-                    latency_ms=latency_ms,
-                )
+                try:
+                    updated = self._repo.get(record.client_order_id)
+                    self._monitoring_db.log_trade_event(
+                        "Sent", record.client_order_id, record.code, record.side,
+                        record.qty, record.price,
+                        updated.filled_qty if updated else 0,
+                        updated.state.value if updated else "",
+                        latency_ms=latency_ms,
+                    )
+                except Exception as _mon_exc:
+                    logger.warning("監視DB書き込み失敗（発注フローは継続）: %s", _mon_exc)
 
     def _drain_push_queue(self) -> None:
         """_push_queue を全件処理する（sync_order + Gate 3 チェック）。"""
