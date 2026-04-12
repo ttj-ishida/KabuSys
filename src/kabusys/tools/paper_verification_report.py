@@ -11,8 +11,10 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sqlite3
+from pathlib import Path
 from typing import Optional
 
 
@@ -30,8 +32,7 @@ def _p95(values: list[float]) -> Optional[float]:
     if not values:
         return None
     sorted_vals = sorted(values)
-    idx = int(len(sorted_vals) * 0.95)
-    idx = min(idx, len(sorted_vals) - 1)
+    idx = max(math.ceil(len(sorted_vals) * 0.95) - 1, 0)
     return sorted_vals[idx]
 
 
@@ -227,6 +228,12 @@ def generate_report(
     if to_date:
         to_dt = f"{to_date}T23:59:59.999999+00:00"
 
+    # DB 存在チェック
+    if not Path(db_path).exists():
+        print(f"エラー: DB ファイルが見つかりません: {db_path}")
+        print("PAPER_TRADING_SQLITE_PATH 環境変数または --db オプションで正しいパスを指定してください。")
+        return
+
     # DB 接続
     conn = sqlite3.connect(db_path)
     try:
@@ -268,6 +275,9 @@ def generate_report(
     elif uptime_pct < THRESHOLD_UPTIME_PCT:
         failures.append(f"稼働率: {uptime_pct:.1f}% < {THRESHOLD_UPTIME_PCT}%")
 
+    if orders["created_count"] == 0:
+        failures.append("注文データなし（対象期間に Created イベントが存在しない）")
+
     fill_rate_pct = orders["fill_rate_pct"]
     if fill_rate_pct is not None and fill_rate_pct < THRESHOLD_FILL_RATE_PCT:
         failures.append(f"注文成功率: {fill_rate_pct:.1f}% < {THRESHOLD_FILL_RATE_PCT}%")
@@ -307,7 +317,7 @@ def generate_report(
     print("[APIレイテンシ]")
     print(f"  平均レイテンシ:    {_fmt_float(latency['avg_ms'], 1, ' ms')}")
     print(f"  最大レイテンシ:    {_fmt_float(latency['max_ms'], 1, ' ms')}")
-    print(f"  P95レイテンシ:     {_fmt_float(p95_ms, 1, ' ms')}  (Python側で statistics.quantiles() を使用)")
+    print(f"  P95レイテンシ:     {_fmt_float(p95_ms, 1, ' ms')}")
     print()
     print(f"判定: {verdict}")
     print("========================================")
