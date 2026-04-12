@@ -36,7 +36,6 @@ def _p95(values: list[float]) -> Optional[float]:
 
 
 def _build_date_filter(
-    table_alias: str,
     ts_col: str,
     from_dt: Optional[str],
     to_dt: Optional[str],
@@ -45,10 +44,10 @@ def _build_date_filter(
     clauses: list[str] = []
     params: list[str] = []
     if from_dt:
-        clauses.append(f"{table_alias}.{ts_col} >= ?")
+        clauses.append(f"{ts_col} >= ?")
         params.append(from_dt)
     if to_dt:
-        clauses.append(f"{table_alias}.{ts_col} <= ?")
+        clauses.append(f"{ts_col} <= ?")
         params.append(to_dt)
     if clauses:
         return " AND ".join(clauses), params
@@ -61,7 +60,7 @@ def _query_system_stability(
     to_dt: Optional[str],
 ) -> dict:
     """system_status テーブルからシステム安定性指標を取得する。"""
-    where, params = _build_date_filter("", "recorded_at", from_dt, to_dt)
+    where, params = _build_date_filter("recorded_at", from_dt, to_dt)
     where_clause = f"WHERE {where}" if where else ""
 
     row = conn.execute(
@@ -95,7 +94,7 @@ def _query_order_stats(
     to_dt: Optional[str],
 ) -> dict:
     """trade_logs テーブルから注文成功率・送信率指標を取得する。"""
-    where, params = _build_date_filter("", "logged_at", from_dt, to_dt)
+    where, params = _build_date_filter("logged_at", from_dt, to_dt)
     where_clause = f"WHERE {where}" if where else ""
 
     row = conn.execute(
@@ -141,7 +140,7 @@ def _query_risk_rejections(
     to_dt: Optional[str],
 ) -> int:
     """risk_logs テーブルからリスク却下数を取得する。"""
-    where, params = _build_date_filter("", "logged_at", from_dt, to_dt)
+    where, params = _build_date_filter("logged_at", from_dt, to_dt)
     where_clause = f"WHERE {where}" if where else ""
 
     row = conn.execute(
@@ -157,7 +156,7 @@ def _query_latency(
     to_dt: Optional[str],
 ) -> dict:
     """trade_logs テーブルからレイテンシ指標を取得する。"""
-    where_parts, params = _build_date_filter("", "logged_at", from_dt, to_dt)
+    where_parts, params = _build_date_filter("logged_at", from_dt, to_dt)
     # latency_ms IS NOT NULL の条件を追加
     latency_condition = "latency_ms IS NOT NULL"
     if where_parts:
@@ -226,7 +225,7 @@ def generate_report(
     if from_date:
         from_dt = f"{from_date}T00:00:00+00:00"
     if to_date:
-        to_dt = f"{to_date}T23:59:59+00:00"
+        to_dt = f"{to_date}T23:59:59.999999+00:00"
 
     # DB 接続
     conn = sqlite3.connect(db_path)
