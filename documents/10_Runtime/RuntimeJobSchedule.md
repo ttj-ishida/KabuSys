@@ -250,15 +250,23 @@
 
 # 7. Windows Task Scheduler 設定
 
-  時刻    ジョブ
-  ------- ----------------------------
-  15:30   data_update_job
-  16:00   feature_generation_job
-  18:00   ai_analysis_job
-  20:00   strategy_signal_job
-  21:00   portfolio_construction_job
-  08:30   execution_start
-  09:00   monitoring_start
+登録スクリプト: `scripts/setup_task_scheduler.ps1`
+
+  時刻    タスク名                       実行スクリプト
+  ------- ------------------------------ -----------------------------------------------
+  15:30   KabuSys_DataUpdate             scripts\run_data_update.py
+  16:00   KabuSys_FeatureGen             scripts\run_feature_gen.py
+  18:00   KabuSys_AiAnalysis             scripts\run_ai_analysis.py
+  20:00   KabuSys_StrategySignal         scripts\run_strategy_signal.py
+  21:00   KabuSys_PortfolioConstruction  scripts\run_portfolio_construction.py
+  08:30   KabuSys_ExecutionStart         scripts\start_system.py --component execution
+  09:00   KabuSys_MonitoringStart        scripts\start_system.py --component monitoring
+
+登録コマンド（プロジェクトルートで実行）:
+
+    powershell -File scripts\setup_task_scheduler.ps1
+
+既存ジョブは `-Force` で上書き登録される。
 
 ------------------------------------------------------------------------
 
@@ -266,16 +274,39 @@
 
 Execution環境を保護する。
 
-  プロセス             優先度     起動方法
-  -------------------- -------- -----------------------------------
-  execution_service    High     python -m kabusys.run_execution
-  monitoring_service   High     python -m kabusys.run_monitoring
+  プロセス             優先度     起動スクリプト
+  -------------------- -------- -------------------------------------------
+  execution_service    High     scripts\start_system.py --component execution
+  monitoring_service   High     scripts\start_system.py --component monitoring
   strategy_service     Normal   ライブラリ（夜間バッチから呼び出し）
   ai_service           Low      ライブラリ（夜間バッチから呼び出し）
 
 各起動スクリプトは `src/kabusys/utils/process_priority.set_process_priority("high")` を
 先頭で呼び出し、OS優先度を設定してからエンジンを初期化する。
 Windows では管理者権限推奨（権限不足時は WARNING ログで続行）。
+
+------------------------------------------------------------------------
+
+# 8.1 停止・制御スクリプト
+
+  スクリプト                     用途
+  ------------------------------ ----------------------------------------------------
+  scripts\start_system.py        execution / monitoring プロセスを起動（PIDファイル書き込み）
+  scripts\stop_system.py         グレースフル停止（10秒タイムアウト後に強制終了）
+  scripts\rebuild_features.py    prices_daily のデータ確認後に特徴量を再計算
+  scripts\reset_signals.py       signal_queue をクリア（未処理シグナルを削除）
+
+停止フラグファイル: `data/stop_requested.flag`
+
+- `stop_system.py` が作成し、`start_system.py` が次回起動時にクリアする。
+- `run_execution.py` と `run_monitoring.py` はメインループでこのフラグを監視してグレースフルに終了する。
+
+PIDファイル:
+
+  プロセス           PIDファイル
+  ------------------ ----------------------
+  execution_service  data/execution.pid
+  monitoring_service data/monitoring.pid
 
 ------------------------------------------------------------------------
 

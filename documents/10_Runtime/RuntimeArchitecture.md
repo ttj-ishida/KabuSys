@@ -154,17 +154,19 @@ monitoring_service は常時稼働する。
 
 # 8. スケジューラ
 
-ジョブ管理には Windows Task Scheduler を使用する。
+ジョブ管理には Windows Task Scheduler を使用する。登録スクリプト: `scripts/setup_task_scheduler.ps1`
 
-  時刻           ジョブ
-  -------------- ---------------------
-  15:30          data_update_job
-  16:00          feature_job
-  18:00          ai_analysis_job
-  20:00          strategy_signal_job
-  21:00          portfolio_job
-  08:30          execution_start
-  09:00〜15:30   execution_monitor
+  時刻    タスク名                       実行スクリプト
+  ------- ------------------------------ -----------------------------------------------
+  15:30   KabuSys_DataUpdate             scripts\run_data_update.py
+  16:00   KabuSys_FeatureGen             scripts\run_feature_gen.py
+  18:00   KabuSys_AiAnalysis             scripts\run_ai_analysis.py
+  20:00   KabuSys_StrategySignal         scripts\run_strategy_signal.py
+  21:00   KabuSys_PortfolioConstruction  scripts\run_portfolio_construction.py
+  08:30   KabuSys_ExecutionStart         scripts\start_system.py --component execution
+  09:00   KabuSys_MonitoringStart        scripts\start_system.py --component monitoring
+
+詳細: `documents/10_Runtime/RuntimeJobSchedule.md`（セクション7）
 
 ------------------------------------------------------------------------
 
@@ -173,11 +175,11 @@ monitoring_service は常時稼働する。
 執行プロセスを最優先とする。
 
   プロセス             優先度     起動スクリプト
-  -------------------- -------- ----------------------------
-  execution_service    High     src/kabusys/run_execution.py
-  monitoring_service   High     src/kabusys/run_monitoring.py
-  strategy_service     Normal   ライブラリ呼び出し（スタンドアロン起動なし）
-  ai_service           Low      ライブラリ呼び出し（スタンドアロン起動なし）
+  -------------------- -------- -------------------------------------------
+  execution_service    High     scripts\start_system.py --component execution
+  monitoring_service   High     scripts\start_system.py --component monitoring
+  strategy_service     Normal   ライブラリ呼び出し（夜間バッチから呼び出し）
+  ai_service           Low      ライブラリ呼び出し（夜間バッチから呼び出し）
 
 **実装:** `src/kabusys/utils/process_priority.py`
 
