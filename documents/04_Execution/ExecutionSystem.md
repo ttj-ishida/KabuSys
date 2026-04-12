@@ -101,7 +101,9 @@ class Reconciler:
 **ExecutionEngine への注入例**:
 ```python
 reconciler = Reconciler(broker=broker, repo=repo, order_manager=order_manager)
-engine = ExecutionEngine(..., reconciler=reconciler)
+# monitoring_db は Paper Trading 時にレイテンシ記録のため注入（省略可、None でスキップ）
+monitoring_db = MonitoringDB(sqlite_conn) if settings.is_paper else None
+engine = ExecutionEngine(..., reconciler=reconciler, monitoring_db=monitoring_db)
 ```
 
 ---

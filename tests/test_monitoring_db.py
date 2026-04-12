@@ -91,6 +91,61 @@ class TestLogTradeEvent:
         ).fetchone()
         assert row[0] == 0.0
 
+    def test_latency_ms_stored_and_retrieved(self, mdb, monitoring_conn):
+        """latency_ms が正しく格納・取得できる"""
+        mdb.log_trade_event(
+            event_type="Sent",
+            client_order_id="order-lat",
+            code="1234",
+            side="buy",
+            qty=100,
+            price=1500.0,
+            state="sent",
+            latency_ms=42.5,
+        )
+        row = monitoring_conn.execute(
+            "SELECT latency_ms FROM trade_logs WHERE client_order_id = 'order-lat'"
+        ).fetchone()
+        assert row["latency_ms"] == pytest.approx(42.5)
+
+    def test_latency_ms_defaults_to_none(self, mdb, monitoring_conn):
+        """latency_ms 省略時は NULL が格納される"""
+        mdb.log_trade_event(
+            event_type="Created",
+            client_order_id="order-nolat",
+            code="5678",
+            side="buy",
+            qty=50,
+            price=1000.0,
+            state="created",
+        )
+        row = monitoring_conn.execute(
+            "SELECT latency_ms FROM trade_logs WHERE client_order_id = 'order-nolat'"
+        ).fetchone()
+        assert row["latency_ms"] is None
+
+    def test_migration_adds_latency_ms_column(self):
+        """init_monitoring_db() が latency_ms カラムを trade_logs に追加する"""
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(":memory:")
+        init_monitoring_db(conn)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_logs)")}
+        assert "latency_ms" in cols
+        conn.close()
+
+    def test_migration_is_idempotent(self):
+        """init_monitoring_db() を2回呼んでも latency_ms カラムが1つだけ"""
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(":memory:")
+        init_monitoring_db(conn)
+        init_monitoring_db(conn)  # 2回目
+        count = sum(
+            1 for row in conn.execute("PRAGMA table_info(trade_logs)")
+            if row[1] == "latency_ms"
+        )
+        assert count == 1
+        conn.close()
+
 
 class TestUpsertPosition:
 

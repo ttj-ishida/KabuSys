@@ -85,6 +85,12 @@ def init_monitoring_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE dashboard ADD COLUMN peak_value REAL")
         conn.commit()
 
+    # 既存 DB に latency_ms カラムがない場合のマイグレーション
+    existing_trade_cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_logs)")}
+    if "latency_ms" not in existing_trade_cols:
+        conn.execute("ALTER TABLE trade_logs ADD COLUMN latency_ms REAL")
+        conn.commit()
+
 
 class MonitoringDB:
     """監視ログ DB の読み書きクラス。ビジネスロジックを持たない。
@@ -133,6 +139,7 @@ class MonitoringDB:
         filled_qty: int = 0,
         state: str = "",
         logged_at: datetime | None = None,
+        latency_ms: float | None = None,
     ) -> None:
         """発注イベントを trade_logs テーブルに追記する。
 
@@ -143,10 +150,10 @@ class MonitoringDB:
         self._conn.execute(
             """
             INSERT INTO trade_logs
-                (logged_at, event_type, client_order_id, code, side, qty, price, filled_qty, state)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (logged_at, event_type, client_order_id, code, side, qty, price, filled_qty, state, latency_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (ts, event_type, client_order_id, code, side, qty, price, filled_qty, state),
+            (ts, event_type, client_order_id, code, side, qty, price, filled_qty, state, latency_ms),
         )
         self._conn.commit()
 

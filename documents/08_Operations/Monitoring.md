@@ -267,7 +267,7 @@ Windows 1台での稼働を前提とし、オーバーヘッドの少ない構�
 ```python
 MonitoringDB(conn)
   .log_system_status(cpu_percent, memory_percent, disk_percent, process_ok, recorded_at=None)
-  .log_trade_event(event_type, client_order_id, code, side, qty, price, filled_qty=0, state="", logged_at=None)
+  .log_trade_event(event_type, client_order_id, code, side, qty, price, filled_qty=0, state="", logged_at=None, latency_ms=None)
   .upsert_position(code, qty, avg_price, current_price=None, updated_at=None)
   .delete_position(code)
   .log_risk_event(event_type, metric_name, metric_value, threshold, detail=None, logged_at=None)
@@ -396,6 +396,35 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 **依存ライブラリ:** `psutil`（SystemMonitor）、`streamlit`（ダッシュボード UI）— `requirements.txt` に追加すること。
 
 > **注:** `cpu_threshold_pct` / `memory_threshold_pct` / `disk_threshold_pct` は、現フェーズでは収集・記録のみを行い、`SystemMonitor` 内では使用しない。将来の Slack アラート実装（Issue #39）で閾値判定に利用する予定。
+
+---
+
+### Paper Trading 検証レポート（Phase 8 実装、Issue #44）
+
+`src/kabusys/tools/paper_verification_report.py` に実装。実稼働後の `paper_trading.db` を集計し、ゴーライブ判断に必要な指標をコンソールへ出力する。
+
+**起動方法:**
+
+```bash
+python -m kabusys.tools.paper_verification_report
+# 期間指定
+python -m kabusys.tools.paper_verification_report --from 2026-04-01 --to 2026-04-11
+```
+
+環境変数 `PAPER_TRADING_SQLITE_PATH` が未設定の場合は `data/paper_trading.db` をデフォルトとして使用する。
+
+**出力指標とゴーライブ合格基準:**
+
+| 指標 | データソース | 合格基準 |
+|---|---|---|
+| 稼働率 | `system_status.process_ok`（SUM/COUNT） | ≥ 99% |
+| 注文成功率（Filled/Created） | `trade_logs.event_type` | ≥ 90% |
+| 送信率（Sent/Created） | `trade_logs.event_type` | ≥ 95% |
+| P95 APIレイテンシ | `trade_logs.latency_ms`（Python側計算） | ≤ 200 ms |
+
+**`latency_ms` カラム（Issue #44 追加）:**
+
+`trade_logs` テーブルには `latency_ms REAL` カラムが追加されている（`init_monitoring_db()` による PRAGMA マイグレーションで既存 DB にも自動追加）。`ExecutionEngine` が `send_order()` 前後を `time.perf_counter()` で計測し、`MonitoringDB.log_trade_event()` の `latency_ms` 引数として記録する。
 
 ## Phase 2 (将来拡張)
 
