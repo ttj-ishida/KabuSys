@@ -1,116 +1,117 @@
-CHANGELOG
-=========
+Keep a Changelog
+=================
 
-この CHANGELOG は "Keep a Changelog" のフォーマットに準拠します。  
-セマンティックバージョニングを意識して変更内容を記録します。
+すべての重要な変更点をこのファイルに記載します。  
+フォーマットは「Keep a Changelog」準拠です。
+
+フォーマット:
+- 追加 (Added)
+- 変更 (Changed)
+- 修正 (Fixed)
+- 破壊的変更 (Removed / Deprecated) — 該当があれば記載
 
 [Unreleased]
 ------------
 
-- なし
+- 今後の改善メモ（コード中の TODO / 注意点に基づく）
+  - position_sizing: 価格欠損時のフォールバック（前日終値や取得原価）を用いる拡張を検討中。
+  - 将来的な拡張として銘柄別単元（lot_size）のサポートを検討中（現在は全銘柄共通単元を仮定）。
+  - DuckDB に対する executemany の制約に関する扱いやエラーハンドリングの追加検討。
+  - ニュース NLP の API 呼び出し部分について、より詳細な部分失敗時の部分リトライ/ロールバック戦略の整備を検討中。
 
-[0.1.0] - 2026-04-12
---------------------
-
-初回リリース — KabuSys の基礎機能を一通り実装しました。以下はコードベースから推測してまとめた主要な追加点・注意点です。
+0.1.0 - 2026-04-12
+------------------
 
 Added
-- 基本パッケージ
-  - kabusys パッケージ（__version__ = 0.1.0）。
-  - パッケージ公開時に利用するモジュール群を整理し、主要 API を __all__ でエクスポート。
+- 基本設定と環境変数ロード機能を追加（kabusys.config.Settings）
+  - プロジェクトルート自動検出（.git / pyproject.toml）に基づく .env / .env.local の自動読み込み機能。
+  - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動読み込み無効化。
+  - .env の堅牢なパーサー実装（export 形式、クォート文字列、インラインコメントの扱い、保護キー対応）。
+  - 各種設定プロパティ（DB パス、PID/KILL フラグパス、しきい値、環境判定、PAPER_FILL_MODE の検証等）。
 
-- 設定・環境変数管理 (kabusys.config)
-  - .env / .env.local の自動読み込み機能を実装（プロジェクトルートは .git または pyproject.toml を基準に探索）。
-  - KABUSYS_DISABLE_AUTO_ENV_LOAD=1 により自動ロードを無効化可能。
-  - .env パースは export 形式、クォート、エスケープ、インラインコメント等に対応。
-  - Settings クラスで各種設定値をプロパティとして提供（DB パス、API トークン、監視閾値、環境種別など）。
-  - 必須環境変数が未設定の場合は ValueError を送出するヘルパーを実装。
-
-- 実行系スクリプト
+- 実行用エントリポイントを追加
   - run_execution.py
-    - ExecutionEngine 起動用エントリポイント。
-    - KABUSYS_ENV=paper_trading 時は paper_trading 用の専用 SQLite DB を使用して本番 DB と完全に分離。
-    - BrokerClientFactory によるブローカークライアント切り替え。
-    - OrderRepository, OrderManager, RiskManager, Reconciler を組み立てて Engine を実行。
-    - 起動時にプロセス優先度を "high" に設定する仕組みを導入。
+    - ExecutionEngine の起動スクリプト。
+    - KABUSYS_ENV=paper_trading の場合は paper_sqlite_path を用いた完全分離された paper trading DB を使用し、MockBrokerClient を採用する設計に対応（BrokerClientFactory）。
+    - 実行前にプロセス優先度を設定（utils.process_priority.set_process_priority）。
+    - ExecutionEngine, OrderRepository, OrderManager, RiskManager, Reconciler 等の組み立てと起動処理を実装。
+    - RiskManager に対するデフォルト設定（max_position_pct, max_utilization, rate_limit_per_sec, circuit_breaker 等）を定義し、初期ポートフォリオ値に broker.get_available_cash() を利用。
+
   - run_monitoring.py
     - SystemMonitor のポーリングループ起動スクリプト。
     - MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒、無効値はデフォルトにフォールバック）。
-    - 監視は本番 sqlite_path を使用する（KABUSYS_ENV に依存しない設計）。
-    - 起動時にプロセス優先度を "high" に設定。
+    - 監視は環境に関係なく本番 sqlite_path を参照して監視テーブルを初期化（init_monitoring_db）。
+    - duckdb との接続確立とクリーンアップ。
 
-- 監視関連
-  - monitoring_db の初期化呼び出しを実行前に行い、監視用テーブルの存在を保証（冪等）。
+- モニタリング DB 初期化ユーティリティ（init_monitoring_db）を使用する運用フローを導入。
+  - 監視テーブルの存在保証（冪等な初期化を行う設計）。
 
-- ポートフォリオ構築関連 (kabusys.portfolio)
-  - portfolio_builder: 候補選定（score / signal_rank に基づくソート）、等重み・スコア重みの重み付け関数を提供。
-  - position_sizing: 発注株数計算ロジック（risk_based / equal / score）を実装。lot_size（単元）丸め、aggregate cap によるスケールダウンや端数配分ロジックを含む。
-  - risk_adjustment: セクターキャップ適用（既存保有を考慮して候補を除外）と市場レジームに応じた投下資金乗数（bull/neutral/bear）を実装。
+- ポートフォリオ構築ライブラリ（kabusys.portfolio）
+  - portfolio_builder:
+    - select_candidates: BUY シグナルのスコア降順選定（同点は signal_rank でタイブレーク）。
+    - calc_equal_weights / calc_score_weights（全銘柄のスコアが 0 の場合は等金額にフォールバック）。
+  - position_sizing:
+    - calc_position_sizes: risk_based / equal / score の allocation_method に対応した株数決定ロジック実装。
+    - 単元株（lot_size）への丸め、per-position および aggregate のキャップ処理、cost_buffer を考慮したスケーリングロジックを実装。
+    - aggregate cap 超過時のスケールダウンと残差に基づく追加配分ロジックを実装（再現性確保のため安定ソートを使用）。
+  - risk_adjustment:
+    - apply_sector_cap: 既存保有のセクター暴露を計算し、max_sector_pct を超えるセクターの新規候補を除外するフィルタを実装（"unknown" セクターは除外対象外）。
+    - calc_regime_multiplier: market regime（bull/neutral/bear）に応じた投下資金乗数を返すユーティリティ（未知のレジームは警告出力して 1.0 にフォールバック）。
 
-- リサーチ / ファクター計算 (kabusys.research)
-  - factor_research: モメンタム / ボラティリティ / バリュー系ファクターを DuckDB（prices_daily, raw_financials 等）から計算する関数群を実装。
-    - mom_1m/3m/6m、MA200乖離、ATR20、avg_turnover、volume_ratio、PER/ROE 等。
-    - SQL ウィンドウ関数を多用し、欠損・データ不足時は None を返す安全設計。
-  - feature_exploration: 将来リターン計算、Spearman ランク相関（IC）計算、ファクター統計サマリ、ランク付け関数を実装。
-    - 外部依存ライブラリに依存せず標準ライブラリのみで実装。
+- リサーチ / ファクター計算（kabusys.research）
+  - factor_research:
+    - calc_momentum: 1M/3M/6M リターン、MA200 乖離率を DuckDB 上で計算。
+    - calc_volatility: 20日 ATR、相対 ATR、20日平均売買代金、出来高比率を計算（欠損ハンドリングを明示）。
+    - calc_value: raw_financials からの最新財務データと株価を組み合わせて PER / ROE を計算。
+  - feature_exploration:
+    - calc_forward_returns: 指定ホライズン（デフォルト: 1,5,21 営業日）の将来リターンを一括取得。
+    - calc_ic: スピアマンのランク相関による Information Coefficient を実装（None 値や有効レコード不足のハンドリング）。
+    - factor_summary / rank: 基本統計量、ランク付けユーティリティを実装。
+  - DuckDB 接続を受け取り SQL と標準ライブラリのみで完結する実装方針。
 
-- AI ニュース NLP (kabusys.ai.news_nlp)
-  - OpenAI API（gpt-4o-mini + JSON Mode）を使って raw_news を銘柄ごとに集約しセンチメント（-1.0〜1.0）をスコアリングして ai_scores テーブルへ書き込む機能を実装。
-  - バッチ（最大 20 銘柄/コール）、トークン肥大対策（記事数上限 / 文字数上限）、レスポンス検証、スコアクリッピング（±1.0）、リトライ（429/ネットワーク/5xx に対する指数バックオフ）を実装。
-  - OPENAI_API_KEY の未設定時は ValueError を発生させる明示的チェックを実装。
-  - ニュース対象ウィンドウは JST 基準で前日 15:00 〜 当日 08:30（UTC に変換）を採用し、ルックアヘッドバイアスを避ける設計。
+- ニュース NLP（kabusys.ai.news_nlp）
+  - raw_news から銘柄ごとに記事を集約し、OpenAI（gpt-4o-mini）を用いてセンチメント（-1.0〜1.0）を算出して ai_scores テーブルへ格納するワークフローを実装。
+  - バッチ処理（最大 _BATCH_SIZE=20）・1銘柄あたりの記事/文字数トリム、429/タイムアウト/5xx に対する指数バックオフリトライ、レスポンスの厳密な JSON バリデーション、スコアの ±1.0 クリッピングを実装。
+  - calc_news_window: 対象ニュースウィンドウ（前日 15:00 JST ～ 当日 08:30 JST 相当の UTC 範囲）算出ユーティリティを追加。
+  - API キーの解決（引数優先、未設定時は環境変数 OPENAI_API_KEY を参照）と未設定時の例外処理。
 
-- ユーティリティ (kabusys.utils)
-  - process_priority: psutil を用いて Windows / POSIX（Linux, Darwin, FreeBSD）でプロセス優先度（high/normal/low）と CPU affinity を設定するユーティリティを実装。サポート外 OS や権限不足時は警告でスキップ。
+- ユーティリティ（kabusys.utils）
+  - process_priority:
+    - set_process_priority(level): Windows / POSIX を吸収したプロセス優先度設定。権限不足や未対応 OS の場合は警告を出力してスキップ。
+    - set_cpu_affinity(cpu_count): 指定数コアにピン留めする機能（引数検証、権限不足時の警告）。
+  - これにより run_* スクリプトで起動直後に優先度を高く設定する一貫した動作を提供。
 
-- ツール
+- 運用ツール
   - tools/paper_verification_report.py
-    - Paper Trading 用の検証レポート生成 CLI を実装（--from/--to/--db オプション）。
-    - 稼働率、注文成功率、送信率、P95 レイテンシ等を計算し PASS/FAIL を判定する基準を実装。
-    - デフォルト DB は data/paper_trading.db。PAPER_TRADING_SQLITE_PATH で上書き可能。
-
-- データストア
-  - DuckDB（データ分析向け）と SQLite（モニタリング / 発注履歴）を併用する構成を採用。デフォルトパスは data/kabusys.duckdb / data/monitoring.db / data/paper_trading.db。
-
-Fixed
-- MONITOR_POLL_INTERVAL が無効（非整数や 0 以下）の場合にデフォルト（60 秒）へフォールバックするログ出力を追加（time.sleep に不正値が渡らないように保護）。
+    - Paper Trading の検証レポートを SQLite（paper_trading.db）から生成する CLI スクリプトを追加。
+    - 指標: 稼働率、注文成功率（Filled/Created）、送信率（Sent/Created）、リスク却下数、API レイテンシ（avg, max, P95）。閾値と Pass/Fail 判定ロジックを定義。
+    - 日付フィルタ (--from / --to) と --db オプションを提供。
+    - P95 計算ユーティリティ、データ欠損時の N/A 表示を実装。
 
 Changed
-- なし（初回リリース）
+- プロジェクト構成（初期リリース）として、各モジュールを明確に分離して公開。
+  - データ処理（DuckDB）、実行エンジン、監視、ポートフォリオ構築、リサーチ、AI ニューススコアリング、ユーティリティ、運用ツールの各レイヤーを分離。
 
-Removed
-- なし
+Fixed
+- 監視・実行フローに対するリソースクリーンアップ（sqlite / duckdb 接続の close）を確実に行うように実装。
 
-Breaking Changes
-- なし（初回リリース）
+Notes / Known limitations
+- price fallback: apply_sector_cap 内の price が 0.0 の場合、エクスポージャーが過小見積りされる可能性がある旨の TODO コメントあり。将来的にフォールバック価格の導入を検討。
+- lot_size: 現時点では全銘柄共通の lot_size を仮定。銘柄別単元対応は未実装。
+- DuckDB executemany: コメントにある通り、DuckDB のバージョン依存の挙動に注意が必要。
+- ニュース NLP の API 実行は外部サービス依存のため、API キー・レート制限・課金に注意。
 
-Notes / Migration / Usage
-- 環境変数
-  - 必須: JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD 等は Settings のプロパティで必要に応じて参照され、未設定時は ValueError になるのでデプロイ前に .env を準備してください。
-  - 自動 .env 読み込みはデフォルトで有効。テスト等で無効化する場合は KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください。
-  - PAPER_FILL_MODE の有効値は instant / partial / never / reject。
-  - MONITOR_POLL_INTERVAL: 監視ポーリング間隔（秒）。整数値を指定、1 未満や非整数の場合は 60 秒にフォールバック。
+その他
+- パッケージバージョン: __version__ = "0.1.0"
 
-- Paper Trading
-  - paper_trading 環境は sqlite を分離しているため、本番データと混ざらない構成になっています（PAPER_TRADING_SQLITE_PATH で変更可）。
+参考
+- 環境変数の主要なもの:
+  - KABUSYS_ENV (development | paper_trading | live)
+  - SQLITE_PATH / DUCKDB_PATH / PAPER_TRADING_SQLITE_PATH
+  - MONITOR_POLL_INTERVAL
+  - OPENAI_API_KEY
+  - PAPER_FILL_MODE
+  - PID_FILE_PATH / KILL_FLAG_PATH
+  - LOG_LEVEL
 
-- OpenAI
-  - news_nlp.score_news は OPENAI_API_KEY（または api_key 引数）が必須。API レート制限やネットワーク障害は内部リトライで保護されるが、API キーの管理・コストに注意してください。
-
-Known Issues / TODOs
-- apply_sector_cap:
-  - price_map に欠損（0.0）があるとエクスポージャーが過少評価され、ブロックが外れる可能性がある。将来的に前日終値や取得原価でのフォールバックを検討する旨の TODO コメントあり。
-- position_sizing:
-  - lot_size は現在グローバル固定（デフォルト 100）。将来的には銘柄別 lot_map に拡張する旨の TODO コメントあり。
-- ai/news_nlp:
-  - DuckDB の executemany 周り（空パラメータ扱い）や部分失敗時のスコア保護など細かい実装上の注意がコメントに存在。大量データ処理時のメモリ・レイテンシに注意。
-- research モジュール:
-  - P95 等パーセンタイル計算や大規模銘柄数での全値フェッチはメモリ消費の懸念あり（現状は単純実装）。
-- process_priority:
-  - OS 標準での権限やプラットフォーム依存のため、失敗時は警告を出すだけで動作を継続する仕様。
-
-Acknowledgements
-- DuckDB を分析用に採用し、psutil をプロセス制御に利用。
-- OpenAI をニュースセンチメントに利用（利用には別途 API キーが必要）。
-
-以上が、本リポジトリの初回リリース（0.1.0）の主な内容です。今後のリリースでは上記 Known Issues の改善や拡張（銘柄別 lot_size、価格フォールバック、より効率的なパーセンタイル計算など）を予定しています。
+もし CHANGELOG に特定のコミット日や PR 番号を付与したい場合や、リリースノート文言（日本語のトーンや詳細度）を変更したい場合は指示してください。
