@@ -207,11 +207,11 @@ def clear_stop_flag() -> None:
 
 1. Create stop flag (`utils.request_stop()`)
 2. For each PID file (`execution.pid`, `monitoring.pid`):
-   - Read PID
+   - Read PID; if PID file is missing → log "PID ファイルが見つかりません。スキップします。" and continue (this is the normal case when only one component was started, e.g., `start_system.py --component execution` was used and `monitoring.pid` does not exist)
    - If PID found and process running: wait up to 10 seconds (poll every 0.5s) for graceful exit
    - If still running after timeout: `psutil.Process(pid).kill()` and log "強制終了しました"
    - Log "グレースフル終了" or "強制終了"
-3. After both processes confirmed dead (or not running): delete PID files
+3. After both PID files processed (regardless of whether files were found): delete any PID files that exist
 4. Do NOT delete stop flag (cleared by `start_system.py` on next startup)
 
 ### `scripts/rebuild_features.py`
@@ -240,9 +240,22 @@ Each script configures logging, loads settings, connects to DuckDB, calls the do
 | `run_feature_gen.py` | `kabusys.strategy.feature_engineering` | `build_features(conn, target_date)` |
 | `run_ai_analysis.py` | `kabusys.ai.news_nlp`, `kabusys.ai.regime_detector` | `score_news(conn, target_date)` then `score_regime(conn, target_date)` |
 | `run_strategy_signal.py` | `kabusys.strategy.signal_generator` | `generate_signals(conn, target_date)` |
-| `run_portfolio_construction.py` | `kabusys.portfolio.portfolio_builder` | `select_candidates(conn)` then `calc_score_weights(...)` |
+| `run_portfolio_construction.py` | `kabusys.portfolio.portfolio_builder` | fetch signals from DuckDB → `select_candidates(buy_signals)` → `calc_score_weights(candidates)` |
 
 > **Implementation note:** Exact function signatures must be verified by reading the source at implementation time. If a function does not accept `target_date` as a parameter, use `date.today()` directly inside the script. If the function does not yet exist as a single callable, create a thin wrapper function in the respective module.
+
+**`run_portfolio_construction.py` detail:** `select_candidates` and `calc_score_weights` operate in-memory on Python lists; they do NOT accept a DuckDB connection. The script must first query DuckDB to retrieve today's buy signals, then pass them as a `list[dict]` to these functions:
+```python
+from kabusys.portfolio.portfolio_builder import select_candidates, calc_score_weights
+
+# 1. Fetch signals from DuckDB
+rows = conn.execute("SELECT * FROM signal_queue WHERE date = CURRENT_DATE AND side = 'buy'").fetchall()
+buy_signals = [dict(zip([d[0] for d in conn.description], row)) for row in rows]
+
+# 2. Portfolio construction (in-memory)
+candidates = select_candidates(buy_signals)
+weights = calc_score_weights(candidates)
+```
 
 **`run_ai_analysis.py` detail:** Must call both AI functions sequentially:
 ```python
@@ -260,9 +273,11 @@ Parameters block at top:
 ```powershell
 param(
     [string]$PythonPath = "python",
-    [string]$WorkDir = (Get-Location).Path
+    [string]$WorkDir = (Resolve-Path "$PSScriptRoot\..").Path
 )
 ```
+
+`$PSScriptRoot` resolves to the `scripts/` directory (where the `.ps1` file lives), so `"$PSScriptRoot\.."` resolves to the project root. This is safe whether the script is run from Task Scheduler or the command line. If the operator needs to override the project root, they pass `-WorkDir C:\path\to\KabuSys`.
 
 Registers exactly 7 jobs (matching `documents/10_Runtime/RuntimeJobSchedule.md` section 7) using `Register-ScheduledTask -Force`:
 
@@ -306,6 +321,9 @@ while thread.is_alive():
         engine.stop()
         break
     thread.join(timeout=1.0)
+# thread.join(timeout=1.0) exits when: (a) stop flag triggered and engine.stop() called,
+# OR (b) engine.run_session() finished naturally (e.g., market session ended at 15:30).
+# Both cases are handled correctly — no additional logic needed.
 thread.join(timeout=30.0)
 ```
 
