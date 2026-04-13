@@ -30,15 +30,15 @@ STOP_FLAG_PATH = _PROJECT_ROOT / "data" / "stop_requested.flag"
 def read_pid(path: Path) -> int | None:
     """PID ファイルを読み込む。ファイルが存在しないか不正な場合は None を返す。"""
     try:
-        return int(path.read_text().strip())
-    except (FileNotFoundError, ValueError):
+        return int(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
         return None
 
 
 def write_pid(path: Path, pid: int) -> None:
     """PID をファイルに書き込む。親ディレクトリが存在しない場合は作成する。"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(str(pid))
+    path.write_text(str(pid), encoding="utf-8")
 
 
 def delete_pid(path: Path) -> None:
