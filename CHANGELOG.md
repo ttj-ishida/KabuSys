@@ -1,79 +1,102 @@
-# Changelog
+# CHANGELOG
 
-すべての重要な変更はこのファイルに記載します。  
-フォーマットは「Keep a Changelog」に準拠し、セマンティックバージョニングを採用します。
+本ドキュメントは Keep a Changelog のフォーマットに準拠しています。  
+この変更履歴は提供されたコードベースから推測して作成しています（実装上の意図や内部仕様を元にまとめた要約）。
 
-現在のバージョン: 0.1.0
+全般:
+- 初回リリース相当の機能群を実装。自動売買システムのコア（設定管理、監視、実行、ポートフォリオ構成、リサーチ、ニュースNLP、ユーティリティ、検証ツールなど）を含む。
 
-## [Unreleased]
+[0.1.0] - 2026-04-13
+Added
+- 基本パッケージ情報
+  - kabusys.__version__ を "0.1.0" に設定。
 
-（なし）
+- 環境設定 / 設定管理（kabusys.config）
+  - .env / .env.local の自動ロード機能を実装。プロジェクトルートの検出は .git または pyproject.toml を利用。
+  - .env パーサーの実装（コメント、export 形式、クォート／エスケープ対応、インラインコメント処理）。
+  - 環境変数の保護（既存 OS 環境変数を上書きしない／上書き時の保護一覧）。
+  - Settings クラスを実装し、J-Quants / kabuAPI / LINE / DB パス / 監視閾値 / PID/KILL フラグ 等のプロパティを提供。
+  - 設定値のバリデーション（KABUSYS_ENV, LOG_LEVEL, PAPER_FILL_MODE 等で不正値検出時に例外を発生）。
 
-## [0.1.0] - 2026-04-13
+- 実行系起動スクリプト（run_execution.py）
+  - ExecutionEngine 起動エントリポイントを実装。
+  - プロセス優先度を high に設定（起動直後）。
+  - 環境に応じた DB 切替: paper_trading 環境では paper 用 SQLite（デフォルト data/paper_trading.db）を使用して本番 DB と分離。
+  - DuckDB 接続の準備。
+  - BrokerClientFactory によるブローカークライアント生成（paper_trading 時はモックを想定）。
+  - OrderRepository / OrderManager / RiskManager / Reconciler を組み合わせて ExecutionEngine を起動。
+  - RiskManager のデフォルト設定（max_position_pct, max_utilization, rate_limit_per_sec, circuit_breaker_errors/window, max_drawdown 等）を実装。
+  - 起動時に監視テーブルを冪等に初期化（init_monitoring_db を利用）。
 
-初回リリース。自動売買システム KabuSys のコア機能群を実装しました。主な追加点は以下のとおりです。
+- 監視系起動スクリプト（run_monitoring.py）
+  - SystemMonitor のポーリングループ起動エントリポイントを実装。
+  - MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒）。不正値（0 以下や非整数）は警告してデフォルトへフォールバック。
+  - Monitoring は KABUSYS_ENV にかかわらず本番 sqlite_path を使用する設計（監視 DB の分離ポリシー）。
+  - 起動時にプロセス優先度を high に設定。
 
-### Added
-- 実行エンジン／起動スクリプト
-  - run_execution.py: ExecutionEngine を起動するエントリポイントを追加。プロセス優先度を高く設定し、BrokerClientFactory によるブローカークライアント生成、OrderRepository / OrderManager / RiskManager / Reconciler の組み立てを行いセッションを実行する。
-  - Paper Trading モード（KABUSYS_ENV=paper_trading）に対応。paper_trading 用の専用 SQLite DB（デフォルト: data/paper_trading.db）を使用して本番 DB と完全分離。PAPER_FILL_MODE でモック約定挙動を制御。
+- 監視 DB 初期化ユーティリティ
+  - init_monitoring_db 呼び出しにより監視用テーブルが存在することを保証（冪等）。
 
-- 監視（Monitoring）
-  - run_monitoring.py: SystemMonitor のポーリングループ起動スクリプトを追加。MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒）。監視は環境にかかわらず本番 sqlite_path を使用する設計。
-  - 監視 DB 初期化ユーティリティ呼び出し（init_monitoring_db）。
+- ユーティリティ（kabusys.utils.process_priority）
+  - set_process_priority(level) を実装（Windows / POSIX を吸収）。
+  - set_cpu_affinity(cpu_count) を実装（指定コア数にプロセスをピン留め）。
+  - 権限不足や未対応 OS の場合は警告ログを出して失敗をサイレントに処理。
 
-- 設定管理
-  - config.py: .env/.env.local 自動ロード機能を実装（プロジェクトルートは .git または pyproject.toml を探索して特定）。環境変数のパース機能を強化し、export プレフィックスやクォート・インラインコメントを正しく処理。重要な設定値は Settings クラス（プロパティで遅延評価）として提供。
-  - 環境変数で制御される各種設定を提供（J-Quants / kabuAPI / LINE / DB パス / 監視閾値 / PID ファイル / KABUSYS_ENV 等）。
+- ポートフォリオ構築（kabusys.portfolio）
+  - portfolio_builder: select_candidates（スコア降順、タイブレーク）、calc_equal_weights、calc_score_weights（全スコア 0 の場合は等金額にフォールバック）を実装。
+  - risk_adjustment: apply_sector_cap（セクター集中制限、売却予定銘柄除外、"unknown" セクターは適用除外）、calc_regime_multiplier（bull/neutral/bear マッピング、未知レジームは警告して 1.0 にフォールバック）を実装。
+  - position_sizing: calc_position_sizes（risk_based / equal / score の割当方式、単元株丸め、per-stock 上限・aggregate キャップ、scale-down ロジック、cost_buffer を考慮した保守見積り）を実装。
+  - 上記関数群は純粋関数化されており、DB 参照は行わない（メモリ演算）。
 
-- ポートフォリオ構築（純粋関数群）
-  - portfolio.portfolio_builder: 候補選定（select_candidates）、等分配（calc_equal_weights）、スコア加重（calc_score_weights）を実装。
-  - portfolio.position_sizing: position sizing ロジックを実装。risk_based / equal / score の配分方式をサポートし、lot_size（単元株）で丸め、aggregate cap によるスケールダウンや cost_buffer を考慮した調整を行う。
-  - portfolio.risk_adjustment: apply_sector_cap によるセクター集中制限、calc_regime_multiplier によるレジームに応じた投下資金乗数を実装。
+- リサーチ / ファクター計算（kabusys.research）
+  - factor_research: calc_momentum（1M/3M/6M リターン、MA200乖離）、calc_volatility（ATR20・相対ATR・出来高指標）、calc_value（PER / ROE 計算。raw_financials から最新財務を取得）を実装。DuckDB を用いた SQL ベース実装。
+  - feature_exploration: calc_forward_returns（複数ホライズン対応、入力検証あり）、calc_ic（スピアマンランク相関）、rank（同順位は平均ランク）、factor_summary（count/mean/std/min/max/median）を実装。
+  - research パッケージ __init__ で主要関数と zscore_normalize を公開。
 
-- 研究（Research）モジュール
-  - research.factor_research: Momentum / Volatility / Value ファクター計算を DuckDB 経由で実装。prices_daily / raw_financials テーブルを参照し、mom_1m/3m/6m、MA200 乖離、ATR20、20日平均売買代金、PER/ROE 等を計算。
-  - research.feature_exploration: 将来リターンの計算（calc_forward_returns）、IC（calc_ic）・ランク変換（rank）、ファクター統計サマリー（factor_summary）を実装。外部ライブラリに依存せず標準ライブラリのみで実装。
+- ニュース NLP（kabusys.ai.news_nlp）
+  - raw_news を OpenAI（gpt-4o-mini）でセンチメントスコア化し ai_scores に保存する処理（score_news）を実装。
+  - ニュース収集ウィンドウ（前日 15:00 JST ～ 当日 08:30 JST）を計算する calc_news_window。
+  - バッチ処理（最大 20 コード/コール）、1 銘柄につき最大記事数・文字数でトリム、スコアは ±1.0 にクリップ。
+  - API リトライ（429 / ネットワーク / 5xx / タイムアウト）用の指数バックオフ、最大リトライ回数を実装方向で考慮。
+  - OpenAI API キー未設定時は ValueError を送出。
+  - API レスポンス検証・部分更新（失敗時も既存スコアを保護するため書き込み対象コードで DELETE→INSERT の実装方針）。
 
-- AI ニュース NLP（OpenAI 連携）
-  - ai.news_nlp: raw_news を集約して OpenAI（gpt-4o-mini）へバッチ送信し、銘柄ごとのセンチメントスコアを ai_scores テーブルへ書き込む機能を実装。バッチサイズ、文字数上限、記事数上限、スコアの ±1.0 クリップ、429/ネットワーク/5xx に対する指数バックオフリトライなどのフェイルセーフを備える。
-  - calc_news_window により対象ニュースの UTC 時刻窓計算を実装（JST ベースのウインドウを UTC に変換）。
+- ツール（kabusys.tools.paper_verification_report）
+  - Paper Trading 用検証レポート生成スクリプトを実装。コマンドライン引数 --from/--to/--db に対応。
+  - 指標抽出: system_status（稼働率 / ポーリング数 / エラー数）、trade_logs（Created/filled/sent 件数、成功率/送信率）、risk_logs（リスク却下数）、レイテンシ（avg/max/P95）を取得。
+  - 判定閾値（稼働率 99%、注文成功率 90%、送信率 95%、P95 レイテンシ 200ms）を定義し、PASS/FAIL を出力。
+  - DB がない場合のエラーメッセージ、SQL 実行失敗時の耐性（OperationalError を捕捉してデフォルト値を出す）を実装。
 
-- ユーティリティ
-  - utils.process_priority: プラットフォーム差分を吸収するプロセス優先度・CPU affinity 設定ユーティリティを追加。Windows / POSIX(Linux/ Darwin/FreeBSD) に対応し、権限不足等の失敗は警告でスキップする。
-  - utils.__init__ を追加してパッケージ化。
+Changed
+- ロギング初期化
+  - 起動スクリプト（run_execution, run_monitoring）で logging.basicConfig(level=logging.INFO) を設定し、デフォルトのログレベルを INFO に統一。
 
-- ツール
-  - tools.paper_verification_report: Paper Trading の検証レポート生成スクリプトを追加。稼働率、注文成功率、送信率、P95 レイテンシ等を集計・判定し標準出力へ整形出力する。閾値はソース内定数で定義（稼働率 99%、成立率 90% 等）。コマンドライン引数で期間指定／DB パス指定が可能。
+- DB 初期化の取り扱い
+  - 監視テーブルの初期化は冪等（init_monitoring_db を起動ルーチン内で呼び出す）として、起動時のテーブル未作成エラーを回避。
 
-- パッケージメタ情報
-  - __init__.py にバージョン（0.1.0）とパッケージ公開 API（__all__）を追加。
+Fixed
+- 環境値の堅牢性向上
+  - MONITOR_POLL_INTERVAL のパースで非整数／0 以下の値を検知してデフォルトにフォールバックし、time.sleep に渡す不正値による例外を回避。
+  - PAPER_FILL_MODE の許容値チェックを追加し、不正値時に直ちに例外（早期検出）。
+  - .env パースでクォート内のバックスラッシュエスケープとインラインコメント処理を正しく扱うように改善。
 
-- DB 接続
-  - DuckDB と SQLite の併用を前提に各コンポーネントで接続を受け渡す設計を採用。monitoring DB 初期化の冪等性を保証する init_monitoring_db 呼び出しを配置。
+Security
+- 環境変数の自動ロードを無効化するフラグ（KABUSYS_DISABLE_AUTO_ENV_LOAD）を用意し、テストやセキュリティ用途で自動ロードを抑止可能。
 
-### Changed
-- （初回リリースのため該当なし）
+Notes / Other
+- DuckDB と SQLite を併用する設計:
+  - DuckDB はリサーチ / ニュース NLP 等の列志向の分析処理向けに使用。
+  - SQLite は監視 / 注文履歴などの運用向けログ保存に使用。paper_trading 環境では別 SQLite を利用することで本番データと分離。
+- 日付取り扱い:
+  - ニュース NLP と検証レポートはタイムゾーン・UTC 表現を明示的に扱い、ルックアヘッドバイアスを避けるために datetime.today()/date.today() の直接参照を避ける実装方針が明示されている箇所あり。
+- 外部 API:
+  - OpenAI（gpt-4o-mini）利用箇所は API キー必須。API 呼び出し失敗はリトライや部分スキップでフェイルセーフに処理する設計。
 
-### Fixed
-- （初回リリースのため該当なし）
+Deprecated
+- なし（初回リリース相当のため古い API は存在しない想定）。
 
-### Security
-- OpenAI API キーは引数または環境変数 OPENAI_API_KEY から取得し、未設定時は明示的に ValueError を送出することで誤動作を防止。
+Removed
+- なし。
 
-### Notes / Implementation details
-- .env 自動読み込みは KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で無効化可能。プロジェクトルートが特定できない場合は自動ロードをスキップする。
-- Settings クラスのプロパティは入力検証を行い、不正な値は ValueError を送出する（例: KABUSYS_ENV, LOG_LEVEL, PAPER_FILL_MODE）。
-- position sizing の aggregate cap 処理では lot_size 単位でのスケールダウンと端数処理を行い、残余キャッシュを用いて端数を優先度順に割り当てる。
-- research モジュールは DuckDB のウィンドウ関数を多用しており、計算は SQL 側で効率的に行う設計。
-- AI スコアリングはレスポンスの JSON バリデーションを行い、部分失敗時でも既存データ保護のため書き込みは対象コードで絞って置換（DELETE→INSERT）する方針。
-
-今後の予定（例）
-- 単体テスト・統合テストの追加
-- エラーハンドリング/監視アラートの強化（LINE 通知など）
-- ブローカークライアントの具体実装差分（kabu-station 向け実装）の拡張
-- 銘柄ごとの lot_size マスタ化や手数料推定ロジックの改善
-
----
-
-（注）本 CHANGELOG は提供されたソースコードの内容から実装意図を推測して作成しています。実際の変更履歴やリリースノート作成方針に合わせて適宜編集してください。
+補足
+- この CHANGELOG は与えられたソースコードの構造・コメント・仕様記述から推測して作成しています。実際のリリースノート作成時にはコミット履歴や PR 差分、変更理由（Why）などを確認して、より正確な内容（責任者、既知の制約、移行手順など）を追記してください。
