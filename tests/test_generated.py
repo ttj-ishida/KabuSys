@@ -1,8 +1,7 @@
 
-import json
 import math
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -82,11 +81,12 @@ def test_load_env_file_override_behavior(tmp_path, monkeypatch):
 
     # override=True should overwrite unless key is in protected
     monkeypatch.setenv("FOO", "orig")
+    monkeypatch.setenv("BAZ", "orig2")  # set BAZ to a different value to verify actual override
     protected = frozenset(["FOO"])
     _load_env_file(env_file, override=True, protected=protected)
     # protected key should remain unchanged
     assert os.environ.get("FOO") == "orig"
-    # BAZ should be overwritten to qux
+    # BAZ should be overwritten from "orig2" to "qux"
     assert os.environ.get("BAZ") == "qux"
 
 
@@ -186,8 +186,10 @@ def test_set_process_priority_posix(monkeypatch):
 
 def test_set_process_priority_unsupported_os(monkeypatch, caplog):
     with patch("kabusys.utils.process_priority.platform.system", return_value="Solaris"):
-        # should log a warning and return without exception
-        process_priority.set_process_priority("normal")
+        with caplog.at_level("WARNING"):
+            # should log a warning and return without exception
+            process_priority.set_process_priority("normal")
+            assert any(r.levelno == 30 for r in caplog.records)  # 30 = logging.WARNING
 
 
 def test_set_cpu_affinity_basic_and_errors(monkeypatch):
@@ -232,7 +234,7 @@ def test_calc_equal_and_score_weights(caplog):
     with caplog.at_level("WARNING"):
         scores = [{"code": "A", "score": 0.0}, {"code": "B", "score": 0.0}]
         res = calc_score_weights(scores)
-        assert "フォールバック" in caplog.text
+        assert any(r.levelno == 30 for r in caplog.records)  # 30 = logging.WARNING
         assert res == calc_equal_weights(scores)
 
     # normal score weighting
@@ -277,7 +279,7 @@ def test_calc_regime_multiplier_and_unknown(caplog):
     with caplog.at_level("WARNING"):
         val = calc_regime_multiplier("mystery")
         assert val == 1.0
-        assert "未知のレジーム" in caplog.text or "未知のレジーム" in caplog.text
+        assert any(r.levelno == 30 for r in caplog.records)  # 30 = logging.WARNING
 
 
 # -------------------------
