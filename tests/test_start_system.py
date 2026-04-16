@@ -64,7 +64,7 @@ def test_start_component_execution_only(tmp_path):
         _run_start(["--component", "execution"])
 
     assert len(launched) == 1
-    assert "run_execution.py" in str(launched[0])
+    assert "kabusys.run_execution" in str(launched[0])
 
 
 def test_start_all_launches_both(tmp_path):

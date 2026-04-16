@@ -111,12 +111,14 @@ def test_portfolio_construction_writes_signal_queue():
         mock_cursor,   # signals query
         price_cursor,  # prices query
         pos_cursor,    # positions query
+        MagicMock(),   # BEGIN
         MagicMock(),   # DELETE portfolio_targets
         MagicMock(),   # INSERT portfolio_targets (7203)
         MagicMock(),   # INSERT portfolio_targets (6758)
         MagicMock(),   # DELETE signal_queue
         MagicMock(),   # INSERT signal_queue (7203)
         MagicMock(),   # INSERT signal_queue (6758)
+        MagicMock(),   # COMMIT
     ]
 
     with patch("run_portfolio_construction.Settings") as mock_settings, \

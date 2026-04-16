@@ -33,12 +33,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_RUN_EXECUTION = _PROJECT_ROOT / "src" / "kabusys" / "run_execution.py"
-_RUN_MONITORING = _PROJECT_ROOT / "src" / "kabusys" / "run_monitoring.py"
+_SRC_DIR = _PROJECT_ROOT / "src"
+_MODULE_EXECUTION = "kabusys.run_execution"
+_MODULE_MONITORING = "kabusys.run_monitoring"
 
 
-def _launch(script: Path, pid_path: Path) -> bool:
-    """スクリプトを subprocess で起動し、PID をファイルに書き込む。
+def _launch(module: str, pid_path: Path) -> bool:
+    """モジュールを -m オプションで subprocess 起動し、PID をファイルに書き込む。
+
+    ファイルパス直指定ではなく ``python -m <module>`` で起動することで、
+    sys.path[0] が src/ に設定され kabusys パッケージの import が正常に通る。
 
     Returns:
         True: 起動した。False: 既に起動中だったためスキップした。
@@ -46,18 +50,18 @@ def _launch(script: Path, pid_path: Path) -> bool:
     existing_pid = read_pid(pid_path)
     if existing_pid is not None and is_process_running(existing_pid):
         logger.warning(
-            "既に起動中です (PID=%d, script=%s)。起動をスキップします。",
+            "既に起動中です (PID=%d, module=%s)。起動をスキップします。",
             existing_pid,
-            script.name,
+            module,
         )
         return False
 
     proc = subprocess.Popen(
-        [sys.executable, str(script)],
-        cwd=str(_PROJECT_ROOT),
+        [sys.executable, "-m", module],
+        cwd=str(_SRC_DIR),
     )
     write_pid(pid_path, proc.pid)
-    logger.info("%s を起動しました (PID=%d)", script.name, proc.pid)
+    logger.info("%s を起動しました (PID=%d)", module, proc.pid)
     return True
 
 
@@ -76,11 +80,11 @@ def main() -> None:
 
     launched = 0
     if args.component in ("execution", "all"):
-        if _launch(_RUN_EXECUTION, EXECUTION_PID_PATH):
+        if _launch(_MODULE_EXECUTION, EXECUTION_PID_PATH):
             launched += 1
 
     if args.component in ("monitoring", "all"):
-        if _launch(_RUN_MONITORING, MONITORING_PID_PATH):
+        if _launch(_MODULE_MONITORING, MONITORING_PID_PATH):
             launched += 1
 
     if launched == 0:

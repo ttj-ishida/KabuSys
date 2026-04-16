@@ -85,7 +85,7 @@ def main() -> None:
             """,
             codes,
         )
-        open_prices = {r[0]: float(r[1]) for r in price_cur.fetchall() if r[1]}
+        open_prices = {r[0]: float(r[1]) for r in price_cur.fetchall() if r[1] is not None}
 
         # 4. 現在のポジション取得
         pos_cur = conn.execute(
@@ -105,7 +105,7 @@ def main() -> None:
         )
 
         # 6. portfolio_targets / signal_queue をトランザクション内で更新
-        conn.begin()
+        conn.execute("BEGIN")
         try:
             conn.execute(
                 "DELETE FROM portfolio_targets WHERE date = ?", [target_date]
@@ -135,9 +135,9 @@ def main() -> None:
                 )
                 inserted += 1
 
-            conn.commit()
+            conn.execute("COMMIT")
         except Exception:
-            conn.rollback()
+            conn.execute("ROLLBACK")
             raise
 
         logger.info(
