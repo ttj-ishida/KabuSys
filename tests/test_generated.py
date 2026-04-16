@@ -1,11 +1,15 @@
 
 import json
 import math
+import os
 from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
+
+# .env / .env.local の自動ロードを無効化してからインポートする
+os.environ["KABUSYS_DISABLE_AUTO_ENV_LOAD"] = "1"
 
 from kabusys.config import _parse_env_line, _load_env_file, Settings
 from kabusys.tools.paper_verification_report import (
@@ -23,7 +27,7 @@ from kabusys.portfolio.portfolio_builder import (
 from kabusys.portfolio.risk_adjustment import apply_sector_cap, calc_regime_multiplier
 from kabusys.portfolio.position_sizing import calc_position_sizes
 from kabusys.ai.news_nlp import calc_news_window
-from kabusys.feature_exploration import rank, calc_ic, factor_summary
+from kabusys.research.feature_exploration import rank, calc_ic, factor_summary
 
 
 # -------------------------
@@ -66,25 +70,24 @@ def test_load_env_file_override_behavior(tmp_path, monkeypatch):
     env_file.write_text(
         "\n# comment\nFOO=bar\nBAZ=qux\n"
     )
-    # ensure environment is clean for keys
+    # ensure environment is clean for keys (monkeypatch tracks initial state for teardown)
     monkeypatch.delenv("FOO", raising=False)
     monkeypatch.delenv("BAZ", raising=False)
 
     # override=False: only set missing keys
-    _load_env_file = __import__("kabusys.config", fromlist=["_load_env_file"])._load_env_file
     _load_env_file(env_file, override=False, protected=frozenset())
 
-    assert "FOO" in __import__("os").environ and __import__("os").environ["FOO"] == "bar"
-    assert __import__("os").environ["BAZ"] == "qux"
+    assert os.environ.get("FOO") == "bar"
+    assert os.environ.get("BAZ") == "qux"
 
     # override=True should overwrite unless key is in protected
     monkeypatch.setenv("FOO", "orig")
     protected = frozenset(["FOO"])
     _load_env_file(env_file, override=True, protected=protected)
     # protected key should remain unchanged
-    assert __import__("os").environ["FOO"] == "orig"
+    assert os.environ.get("FOO") == "orig"
     # BAZ should be overwritten to qux
-    assert __import__("os").environ["BAZ"] == "qux"
+    assert os.environ.get("BAZ") == "qux"
 
 
 # -------------------------
@@ -229,7 +232,7 @@ def test_calc_equal_and_score_weights(caplog):
     with caplog.at_level("WARNING"):
         scores = [{"code": "A", "score": 0.0}, {"code": "B", "score": 0.0}]
         res = calc_score_weights(scores)
-        assert "フォールバック" in caplog.text or "フォールバック" in caplog.text or isinstance(res, dict)
+        assert "フォールバック" in caplog.text
         assert res == calc_equal_weights(scores)
 
     # normal score weighting
@@ -288,13 +291,13 @@ def test_calc_position_sizes_equal_and_score_methods():
     available_cash = 100000.0
     current_positions = {}
     open_prices = {"AAA": 100.0, "BBB": 200.0}
-    sizes = calc_position_sizes(weights, candidates, portfolio_value, available_cash, current_positions, open_prices, allocation_method="equal", lot_size=100)
+    sizes = calc_position_sizes(weights, candidates, portfolio_value, available_cash, current_positions, open_prices, allocation_method="equal", lot_size=100, max_utilization=1.0, max_position_pct=1.0)
     # AAA: alloc=50k price=100 -> 500 shares -> lot_size 100 -> 500 ; BBB: 50k/200=250 -> 200 (floor to lot)
     assert sizes["AAA"] == 500
     assert sizes["BBB"] == 200
 
     # score mode is same as equal when weights provided
-    sizes2 = calc_position_sizes(weights, candidates, portfolio_value, available_cash, current_positions, open_prices, allocation_method="score", lot_size=100)
+    sizes2 = calc_position_sizes(weights, candidates, portfolio_value, available_cash, current_positions, open_prices, allocation_method="score", lot_size=100, max_utilization=1.0, max_position_pct=1.0)
     assert sizes2 == sizes
 
 
