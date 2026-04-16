@@ -55,20 +55,33 @@ Runbook）** を定義する。
 
 時間
 
-    08:30
+    08:30 （Task Scheduler が自動実行）
 
-手順
+Task Schedulerが実行するコマンド:
 
-    1. execution_service 起動
-    2. 自動リコンシリエーション実行（起動時に自動）
+    python scripts\start_system.py --component execution
+
+手動起動が必要な場合:
+
+    python scripts\start_system.py
+
+手順（自動実行の内容）:
+
+    1. 停止フラグ（data/stop_requested.flag）をクリア
+    2. execution_service 起動（data/execution.pid に PID 書き込み）
+    3. 自動リコンシリエーション実行（起動時に自動）
        - OrderSent 注文をブローカーと突合・同期
        - ポジション差分をログに記録（差分があれば手動確認）
-    3. API接続確認
-    4. Signal Queue 読み込み
-    5. Monitoring 起動
+    4. API接続確認
+    5. Signal Queue 読み込み
+    6. monitoring_service 起動（09:00 に別タスクで自動実行）
 
 > リコンシリエーション結果はログに出力される。
 > `orders_no_status > 0` または `position_discrepancies > 0` の場合は手動確認を行うこと。
+
+手動停止（緊急時）:
+
+    python scripts\stop_system.py
 
 ------------------------------------------------------------------------
 
@@ -154,12 +167,15 @@ Runbook）** を定義する。
 
 障害例
 
-  障害              対応
-  ----------------- ----------
-  API接続失敗       再接続
-  注文失敗          リトライ
-  PC停止            再起動
-  SignalQueue破損   再生成
+  障害                対応                                            コマンド
+  ------------------- ----------------------------------------------- ---------------------------------------------------
+  API接続失敗         再接続                                          —
+  注文失敗            リトライ                                        —
+  PC停止              再起動後 Task Scheduler が自動起動              —
+  SignalQueue破損     signal_queue をクリアして再生成                 python scripts\reset_signals.py
+  特徴量データ破損    prices_daily 確認後に特徴量を再計算             python scripts\rebuild_features.py
+  プロセス停止        停止フラグ経由でグレースフル停止                python scripts\stop_system.py
+  手動再起動          停止後に起動                                    python scripts\stop_system.py && python scripts\start_system.py
 
 参照
 

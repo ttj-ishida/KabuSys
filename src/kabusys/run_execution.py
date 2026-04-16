@@ -8,11 +8,17 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
 from datetime import date
+from pathlib import Path
 
 import duckdb
 
 from kabusys.config import Settings
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_STOP_FLAG = _PROJECT_ROOT / "data" / "stop_requested.flag"
+_EXECUTION_PID = _PROJECT_ROOT / "data" / "execution.pid"
 from kabusys.execution.broker_factory import BrokerClientFactory
 from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine
 from kabusys.execution.order_manager import OrderManager
@@ -72,9 +78,22 @@ def main() -> None:
             duckdb_conn=duckdb_conn,
             config=EngineConfig(target_date=date.today()),
             reconciler=reconciler,
-            pid_file=settings.pid_file_path,
+            pid_file=_EXECUTION_PID,
         )
-        engine.run_session()
+        # 停止フラグが既に立っている場合は起動せず終了
+        if _STOP_FLAG.exists():
+            logger.info("停止フラグを検知。エンジンを起動しません。")
+            return
+
+        thread = threading.Thread(target=engine.run_session, daemon=True)
+        thread.start()
+        while thread.is_alive():
+            if _STOP_FLAG.exists():
+                logger.info("停止フラグを検知。エンジンを停止します。")
+                engine.stop()
+                break
+            thread.join(timeout=1.0)
+        thread.join(timeout=30.0)
     finally:
         sqlite_conn.close()
         duckdb_conn.close()

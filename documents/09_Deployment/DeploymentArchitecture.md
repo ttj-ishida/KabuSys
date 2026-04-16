@@ -260,16 +260,39 @@ OS
 
 # 9. 自動起動
 
-Windows起動時に以下を起動する。
+Windows Task Scheduler により以下を自動実行する。
 
--   データ更新ジョブ
--   シグナル生成ジョブ
--   Execution Engine
--   Monitoring System
+  時刻    内容
+  ------- -----------------------------------
+  15:30   market data ingestion
+  16:00   feature generation
+  18:00   AI analysis (news + regime)
+  20:00   strategy signal generation
+  21:00   portfolio construction
+  08:30   execution_service 起動
+  09:00   monitoring_service 起動
 
-方法
+**初期セットアップ（初回のみ）:**
 
-    Windows Task Scheduler
+    powershell -File scripts\setup_task_scheduler.ps1
+
+**手動起動・停止:**
+
+  操作          コマンド
+  ------------- -----------------------------------------------
+  全体起動      python scripts\start_system.py
+  全体停止      python scripts\stop_system.py
+  実行系のみ起動  python scripts\start_system.py --component execution
+  監視系のみ起動  python scripts\start_system.py --component monitoring
+
+**保守スクリプト:**
+
+  スクリプト                     用途
+  ------------------------------ ----------------------------------------
+  scripts\rebuild_features.py    特徴量を手動再計算（データ確認付き）
+  scripts\reset_signals.py       signal_queue をクリア
+
+詳細: `documents/10_Runtime/RuntimeJobSchedule.md`
 
 ------------------------------------------------------------------------
 
