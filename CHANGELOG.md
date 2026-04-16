@@ -1,111 +1,76 @@
-# CHANGELOG
+Keep a Changelog — 変更履歴
+========================
 
-すべての注目すべき変更を記録します。  
-フォーマットは「Keep a Changelog」に準拠しています。
+すべての重要な変更はこのファイルに記録します。  
+フォーマットは「Keep a Changelog」に準拠します。
 
-## [Unreleased]
+Unreleased
+----------
 
-## [0.1.0] - 2026-04-16
-初期リリース。システム監視、Execution エンジン起動、ポートフォリオ構築、リサーチ、ニュースNLP 等の主要機能を追加。
+Added
+- 起動スクリプトを追加/整理
+  - run_monitoring.py: SystemMonitor のポーリングループ起動スクリプトを実装。MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒）。停止はプロジェクト直下の data/stop_requested.flag により行う。監視は環境（KABUSYS_ENV）にかかわらず本番の sqlite_path を使用。
+  - run_execution.py: ExecutionEngine 起動スクリプトを実装。KABUSYS_ENV=paper_trading の場合は専用の paper_trading DB を使い MockBrokerClient を利用可能。停止フラグ / PID 管理とスレッド実行・シャットダウン監視を備える。
+- 設定管理強化（kabusys.config）
+  - .env / .env.local を自動ロード（プロジェクトルート検出: .git または pyproject.toml）。自動ロードは KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で無効化可能。
+  - .env パーサを実装（export 形式・クォート・インラインコメント等を考慮）。
+  - Settings クラスに各種設定プロパティを実装（DB パス、Paper Trading 用パス/振る舞い、監視閾値、ログレベル、env 判定等）。不正値時は明示的な例外を投げる。
+- 分散モジュール（トレード/ポートフォリオ/監視/研究/AI）
+  - portfolio: 銘柄選定（select_candidates）、等配分/スコア配分（calc_equal_weights / calc_score_weights）、ポジションサイズ算出（calc_position_sizes）、セクター制限およびレジーム乗数（apply_sector_cap / calc_regime_multiplier）を実装。単元株（lot_size）やコストバッファ、aggregate cap のスケーリングロジックを含む。
+  - research: ファクター計算（calc_momentum, calc_volatility, calc_value）、将来リターン計算（calc_forward_returns）、IC（calc_ic）、ファクター統計要約（factor_summary）を実装。DuckDB 接続を受けて prices_daily / raw_financials 等のテーブルを参照する設計。
+  - ai/news_nlp.py: raw_news を OpenAI（gpt-4o-mini）へバッチ送信して銘柄ごとのセンチメント（ai_scores）を算出・格納する処理を設計。時間ウィンドウ、トークン肥大化対策、リトライ（指数バックオフ）、レスポンス検証、スコアクリップ（±1.0）などを考慮。
+  - tools/paper_verification_report.py: Paper Trading 検証レポート生成ツールを追加。稼働率、注文成功率、送信率、P95 レイテンシ等の集計・判定ロジックと CLI（--from/--to/--db）を提供。閾値と判定基準を定義。
+- utils/process_priority.py: プラットフォーム差分を吸収するプロセス優先度設定ユーティリティを実装（Windows / POSIX 対応）。CPU アフィニティ設定関数も提供。権限不足等のケースはログ警告でスキップ。
+- DB 初期化ヘルパ: 監視用 DB テーブルが存在することを保証する init_monitoring_db 呼び出しを起動時に行う（冪等）。
+- パッケージ化: パッケージルートの __version__ を 0.1.0 として設定。各モジュールの __all__ エクスポートを整理。
 
-### Added
-- 基本パッケージ情報
-  - パッケージバージョンを src/kabusys/__init__.py にて 0.1.0 として定義。
+Changed
+- 監視/実行起動時にプロセス優先度を "high" に設定する呼び出しを追加（set_process_priority を利用）。
 
-- 起動スクリプト
-  - run_monitoring.py
-    - SystemMonitor 用のポーリングループ起動スクリプトを追加。
-    - 環境変数 MONITOR_POLL_INTERVAL によりポーリング間隔を上書き可能（デフォルト 60 秒）。
-    - 起動時にプロセス優先度を設定（utils.process_priority.set_process_priority を使用）。
-    - 停止フラグファイル (data/stop_requested.flag) を監視して安全にループ終了。
-    - 監視は KABUSYS_ENV にかかわらず本番 sqlite_path を使用して接続。
+Fixed
+- （設計上のフェイルセーフ）DB や API 呼び出しでの OperationalError / API エラーを起動ループやレポート生成で適切に捕捉して処理継続するように改善（monitoring の check_once() 例外捕捉、paper_verification_report の各クエリ例外ハンドリングなど）。
 
-  - run_execution.py
-    - ExecutionEngine 起動スクリプトを追加。
-    - KABUSYS_ENV=paper_trading の場合は paper_trading 用の SQLite DB（data/paper_trading.db）を使用し、本番 DB と分離。
-    - BrokerClientFactory を利用してブローカークライアントを生成。
-    - OrderRepository、OrderManager、RiskManager、Reconciler 等の組み立ておよび ExecutionEngine の起動を行う。
-    - スレッドで engine を起動し、停止フラグ検知で安全停止を行う。PID ファイルパスをサポート。
-    - 起動時にプロセス優先度を設定。
+Notes / Usage
+- 環境変数の主なデフォルト
+  - SQLITE_PATH: data/monitoring.db
+  - DUCKDB_PATH: data/kabusys.duckdb
+  - PAPER_TRADING_SQLITE_PATH: data/paper_trading.db
+  - MONITOR_POLL_INTERVAL: 60 (秒)
+  - PID_FILE_PATH / KILL_FLAG_PATH 等は Settings 経由で取得可能
+- Paper Trading: KABUSYS_ENV=paper_trading 時は実取引 API ではなく MockBroker を使い DB を分離する想定（data/paper_trading.db）。
+- .env パースは export 形式、クォート、エスケープ、インラインコメントを扱えるため、柔軟な環境設定が可能。
+- AI ニューススコアリングは OpenAI API キー（OPENAI_API_KEY）が必須。バッチ処理・部分書き換えを採用し、部分失敗時の既存データ保護を意図。
 
-- 設定管理
-  - src/kabusys/config.py を新規追加
-    - .env / .env.local の自動ロード機能（プロジェクトルートの検出基準: .git または pyproject.toml）。
-    - KABUSYS_DISABLE_AUTO_ENV_LOAD により自動ロードを無効化可能。
-    - .env パースの堅牢化（export プレフィックス、シングル/ダブルクォート、インラインコメント等に対応）。
-    - 環境変数の必須チェックを行う _require() を提供。
-    - 多数の設定プロパティを追加（J-Quants トークン、kabu API、LINE API、duckdb/sqlite パス、paper_trading 用 DB パス、PID/KILL フラグパス、しきい値、環境種別検証、ログレベル検証等）。
-    - PAPER_FILL_MODE の入力検証を追加（instant/partial/never/reject のみ許容）。
+[0.1.0] - 2026-04-16
+--------------------
+Added
+- 初回リリース相当。上記「Unreleased: Added」に記載した主要機能を実装・公開:
+  - 起動スクリプト: run_execution, run_monitoring
+  - 設定管理: .env 自動読み込み & Settings クラス
+  - ポートフォリオ構築: 候補選定、重み算出、ポジションサイズ計算、リスク調整
+  - リサーチ: ファクター計算（Momentum / Volatility / Value）、特徴量探索ツール（forward returns, IC, summary）
+  - AI ニューススコアリング設計（OpenAI バッチスコアリング）
+  - ユーティリティ: process priority / cpu affinity 設定
+  - ツール: Paper Trading 検証レポート生成スクリプト
+  - DB 周り: DuckDB + SQLite を想定したクエリ実装と初期化ヘルパ
 
-- 監視 / モニタリング関連
-  - monitoring_db 初期化を起動スクリプトで行うことで監視テーブルの整合性を保障（init_monitoring_db を使用）。
+Changed
+- 初版のため該当なし
 
-- ユーティリティ
-  - utils/process_priority.py を追加
-    - Windows と POSIX 系を抽象化してプロセス優先度（high/normal/low）を設定する set_process_priority を提供。
-    - CPU affinity を最初の N コアに固定する set_cpu_affinity を提供。
-    - 権限不足や未対応プラットフォーム時に安全にスキップするロバスト実装。
+Fixed
+- 初版のため該当なし
 
-- ツール
-  - tools/paper_verification_report.py を追加
-    - Paper Trading 用 SQLite データを解析し検証レポートを標準出力に出力する CLI ツール。
-    - 稼働率、注文成功率（fill rate）、送信率、P95 レイテンシ、リスク却下数等を集計し PASS/FAIL 判定を行う。
-    - 日付範囲フィルタ（--from/--to）と --db オプションをサポート。
-    - P95 の計算、DB 存在チェック、テーブル欠損時のフォールバックを実装。
+Deprecated
+- なし
 
-- ポートフォリオ構築（純関数群）
-  - src/kabusys/portfolio/
-    - portfolio_builder.py
-      - select_candidates: BUY シグナルをスコア降順で選別するユーティリティ。
-      - calc_equal_weights / calc_score_weights: 等配分・スコア加重でウェイト計算。
-      - スコア合計が 0 の場合等金額配分へフォールバック。
-    - risk_adjustment.py
-      - apply_sector_cap: セクター集中上限をチェックし、上限超過セクターの新規候補を除外。
-      - calc_regime_multiplier: market レジーム（bull/neutral/bear）に応じた投下資金乗数を返す。
-    - position_sizing.py
-      - calc_position_sizes: 重み・候補・ポートフォリオ状態を元に各銘柄の発注株数を計算（risk_based / equal / score）。
-      - 単元株（lot_size）丸め、per-stock 上限、aggregate cap とコストバッファを考慮したスケーリング、残余の再配分アルゴリズムを実装。
+Security
+- OpenAI API キーや各種秘密値は環境変数から参照する設計。.env の自動ロードはテスト用途等で明示的に無効化可能（KABUSYS_DISABLE_AUTO_ENV_LOAD）。
 
-- リサーチ / ファクター計算
-  - src/kabusys/research/
-    - factor_research.py
-      - calc_momentum: 1M/3M/6M リターン、MA200 乖離率の計算（DuckDB 経由、prices_daily を参照）。
-      - calc_volatility: ATR20、相対 ATR、20日平均売買代金、出来高比率等を計算。
-      - calc_value: raw_financials から PER/ROE を計算（最新報告日までのデータを結合）。
-      - 各関数は不足データの場合に None を返す等、堅牢化。
-    - feature_exploration.py
-      - calc_forward_returns: target_date から指定ホライズン先の将来リターンを計算（デフォルト horizons=[1,5,21]）。
-      - calc_ic: ファクター値と将来リターンのスピアマンランク相関（IC）を計算。十分な有効レコードがない場合は None。
-      - factor_summary / rank: 基本統計量およびランク付けユーティリティ。
-    - research パッケージ初期化で zscore_normalize を re-export。
+Acknowledgements / TODO
+- 各モジュール内に将来改善を示す TODO コメントあり（例: price フォールバック、銘柄別 lot_size マスタ、AI レスポンスのより厳格なバリデーションなど）。
+- 実運用前に以下を確認推奨:
+  - 実ブローカ接続時のリスク設定と rate limit の最適化
+  - 権限のない環境でのプロセス優先度設定失敗に対する運用手順
+  - DuckDB / SQLite のファイルローテーション・バックアップ方針
 
-- AI / ニュース NLP（基盤実装）
-  - src/kabusys/ai/news_nlp.py を追加（部分実装）
-    - raw_news テーブルから記事を集約し、OpenAI API (gpt-4o-mini) を用いて銘柄ごとのセンチメント（-1.0〜1.0）を算出し ai_scores テーブルへ書き込む設計。
-    - バッチサイズ、トークン肥大対策（記事数・文字数トリム）、レスポンスバリデーション、スコアクリップ、リトライ（指数バックオフ）等の方針と定数を定義。
-    - calc_news_window: target_date に対するニュース収集ウィンドウ（JST→UTC 変換）を実装。
-    - score_news の API キー解決とウィンドウ計算まで実装（ファイル末尾で未完の可能性あり）。
-
-### Changed
-- 起動時の挙動
-  - run_monitoring.py / run_execution.py で起動直後にプロセス優先度を "high" に設定するように変更（リソース確保を優先）。
-- .env 読み込み順序
-  - OS 環境 > .env.local > .env の優先順で読み込む仕様を導入。既存 OS 環境変数は保護される（protected set）。
-- DuckDB / SQLite のパスにデフォルト値を設定（data ディレクトリ内のファイルを使用）。
-
-### Fixed
-- .env のパースにおける多くのケースを修正・堅牢化
-  - export プレフィックス対応、クォート内でのバックスラッシュエスケープ、インラインコメントの扱いを改善。
-  - 無効行のスキップ、読み込み失敗時の警告出力を追加。
-
-### Potential breaking changes / 注意点
-- run_monitoring は KABUSYS_ENV にかかわらず「本番」sqlite_path を使用する動作になっています。テスト環境や paper_trading 環境で監視を分離したい場合は設定の見直しが必要です。
-- set_process_priority / set_cpu_affinity はプラットフォーム依存の権限により失敗する可能性があり、失敗時はログ警告の上スキップされます。運用環境での権限（root / 管理者）や psutil の利用可能性を確認してください。
-- ai/news_nlp.py は設計・リトライ等のロジックを含むものの、ファイル末尾が途中で切れている可能性があるため、実運用前に完全実装とテストが必要です。
-
-### Notes
-- 全体的に「DB は読み取り/書き込みの場所を明確に分離」「リサーチ（DuckDB）と実取引（SQLite/ブローカー）は分離」「環境変数の堅牢な管理」を設計方針として実装しています。
-- 各モジュールは外部 API 呼び出しを最小化し、DuckDB / SQLite のローカルデータを用いて再現可能な計算を行うように設計されています。
-
----
-この CHANGELOG はソースコードから推測して作成しています。運用上の正確なリリースノートやリスクの判断は実際の差分・コミット履歴およびテスト結果を参照して補完してください。
+以上。必要であれば各リリースノートをより詳細に分割（監視・実行・研究・AI・ポートフォリオ）して出力できます。どのレベルの粒度がよいか指定してください。
