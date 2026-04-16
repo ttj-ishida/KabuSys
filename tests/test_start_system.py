@@ -17,7 +17,24 @@ def _run_start(args: list[str] | None = None):
         return start_system.main()
 
 
-def test_start_clears_existing_stop_flag(tmp_path):
+def test_start_stop_flag_without_clear_flag_exits_1(tmp_path):
+    """停止フラグが存在し --clear-stop-flag を指定しない場合はエラー終了する。"""
+    flag = tmp_path / "stop.flag"
+    flag.touch()
+
+    with patch("start_system.STOP_FLAG_PATH", flag), \
+         patch("start_system.EXECUTION_PID_PATH", tmp_path / "exec.pid"), \
+         patch("start_system.MONITORING_PID_PATH", tmp_path / "mon.pid"):
+        with pytest.raises(SystemExit) as exc:
+            _run_start()
+        assert exc.value.code == 1
+
+    # フラグは削除されていないこと
+    assert flag.exists()
+
+
+def test_start_clear_stop_flag_clears_and_starts(tmp_path):
+    """--clear-stop-flag を指定すると停止フラグをクリアして起動する。"""
     flag = tmp_path / "stop.flag"
     flag.touch()
 
@@ -28,7 +45,7 @@ def test_start_clears_existing_stop_flag(tmp_path):
          patch("start_system.subprocess.Popen") as mock_popen, \
          patch("start_system.write_pid"):
         mock_popen.return_value.pid = 1234
-        _run_start()
+        _run_start(["--clear-stop-flag"])
 
     assert not flag.exists()
 

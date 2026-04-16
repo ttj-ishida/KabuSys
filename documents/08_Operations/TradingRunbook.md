@@ -224,6 +224,12 @@ python scripts\stop_system.py
 停止フラグ（`data/stop_requested.flag`）を作成し、Execution / Monitoring がグレースフルに終了する（最大 10 秒）。  
 10 秒以内に終了しない場合は強制終了（`psutil.Process(pid).kill()`）される。
 
+再起動する際は停止フラグが残っているため、`--clear-stop-flag` を明示指定する必要がある。
+
+```cmd
+python scripts\start_system.py --clear-stop-flag
+```
+
 ### 8.3 発動後の確認
 
 ```

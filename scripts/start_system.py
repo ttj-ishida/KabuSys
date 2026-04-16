@@ -6,6 +6,9 @@
     python scripts/start_system.py --component execution
     python scripts/start_system.py --component monitoring
     python scripts/start_system.py --component all      # 両方（明示的）
+
+    # 停止フラグが残っている場合に明示的にクリアして起動する
+    python scripts/start_system.py --clear-stop-flag
 """
 from __future__ import annotations
 
@@ -73,10 +76,25 @@ def main() -> None:
         default="all",
         help="起動するコンポーネント (デフォルト: all)",
     )
+    parser.add_argument(
+        "--clear-stop-flag",
+        action="store_true",
+        help="停止フラグが残っている場合に明示的にクリアして起動する（Kill Switch 発動後の復旧用）",
+    )
     args = parser.parse_args()
 
-    # 停止フラグをクリア（前回停止時のフラグが残っている場合）
-    clear_stop_flag(STOP_FLAG_PATH)
+    # 停止フラグの確認
+    if STOP_FLAG_PATH.exists():
+        if args.clear_stop_flag:
+            logger.info("--clear-stop-flag が指定されたため停止フラグをクリアします。")
+            clear_stop_flag(STOP_FLAG_PATH)
+        else:
+            logger.error(
+                "停止フラグが存在します (%s)。"
+                "意図的に再起動する場合は --clear-stop-flag を指定してください。",
+                STOP_FLAG_PATH,
+            )
+            sys.exit(1)
 
     launched = 0
     if args.component in ("execution", "all"):

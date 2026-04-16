@@ -268,7 +268,7 @@ python scripts\stop_system.py
 
 ### 前提
 
-Kill Switch 発動後は `data/stop_requested.flag` が存在するため、`start_system.py` 実行時に自動クリアされる。
+Kill Switch 発動後は `data/stop_requested.flag` が存在する。`start_system.py` はデフォルトでこのフラグを検知するとエラー終了する。意図的に再起動する場合は `--clear-stop-flag` を明示指定する。
 
 ### 復旧手順
 
@@ -291,8 +291,8 @@ Kill Switch 発動後は `data/stop_requested.flag` が存在するため、`sta
    └─ そのまま終業（停止フラグは残したまま）
    └─ 翌朝の TradingRunbook.md §3 Pre-Market Checklist から再開
 
-5. 当日中に再開する場合
-   python scripts\start_system.py --component execution
+5. 当日中に再開する場合（--clear-stop-flag を明示指定）
+   python scripts\start_system.py --clear-stop-flag --component execution
    └─ Signal Queue に pending シグナルが残っていれば発注再開
    └─ リコンシリエーション自動実行を確認
 ```
