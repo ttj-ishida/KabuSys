@@ -81,3 +81,68 @@ def test_run_strategy_signal_calls_generate_signals():
         run_strategy_signal.main()
 
     mock_fn.assert_called_once()
+
+
+# ---------- run_portfolio_construction ----------
+
+def test_portfolio_construction_writes_signal_queue():
+    import run_portfolio_construction
+
+    mock_conn = MagicMock()
+    # signals テーブルから 2件のBUYシグナルを返す
+    mock_cursor = MagicMock()
+    mock_cursor.fetchall.return_value = [
+        ("7203", "buy", 0.8, 1),
+        ("6758", "buy", 0.6, 2),
+    ]
+    mock_cursor.description = [
+        ("code",), ("side",), ("score",), ("signal_rank",)
+    ]
+    # prices_daily クエリ
+    price_cursor = MagicMock()
+    price_cursor.fetchall.return_value = [("7203", 2500.0), ("6758", 5000.0)]
+    price_cursor.description = [("code",), ("close",)]
+    # positions クエリ
+    pos_cursor = MagicMock()
+    pos_cursor.fetchall.return_value = []
+    pos_cursor.description = [("code",), ("size",)]
+
+    mock_conn.execute.side_effect = [
+        mock_cursor,   # signals query
+        price_cursor,  # prices query
+        pos_cursor,    # positions query
+        MagicMock(),   # DELETE portfolio_targets
+        MagicMock(),   # INSERT portfolio_targets (7203)
+        MagicMock(),   # INSERT portfolio_targets (6758)
+        MagicMock(),   # DELETE signal_queue
+        MagicMock(),   # INSERT signal_queue (7203)
+        MagicMock(),   # INSERT signal_queue (6758)
+    ]
+
+    with patch("run_portfolio_construction.Settings") as mock_settings, \
+         patch("run_portfolio_construction.duckdb.connect", return_value=mock_conn):
+        mock_settings.return_value.duckdb_path = Path("/fake.duckdb")
+        run_portfolio_construction.main()
+
+    # signal_queue への INSERT が呼ばれたことを確認
+    insert_calls = [
+        str(c) for c in mock_conn.execute.call_args_list
+        if "signal_queue" in str(c) and "INSERT" in str(c)
+    ]
+    assert len(insert_calls) >= 1
+
+
+def test_portfolio_construction_no_signals_exits_0():
+    """シグナルが 0 件のとき正常終了する（signal_queue は空のまま）。"""
+    import run_portfolio_construction
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchall.return_value = []
+    mock_cursor.description = [("code",), ("side",), ("score",), ("signal_rank",)]
+    mock_conn.execute.return_value = mock_cursor
+
+    with patch("run_portfolio_construction.Settings") as mock_settings, \
+         patch("run_portfolio_construction.duckdb.connect", return_value=mock_conn):
+        mock_settings.return_value.duckdb_path = Path("/fake.duckdb")
+        run_portfolio_construction.main()  # SystemExit が起きないこと
