@@ -40,26 +40,26 @@
 
 | テーブル | DB | 用途 |
 |---------|-----|-----|
-| `prices_daily` | DuckDB (`data/market.duckdb`) | 日次株価データ |
+| `prices_daily` | DuckDB (`data/kabusys.duckdb`) | 日次株価データ |
 | `features` | DuckDB | 特徴量データ |
 | `signals` | DuckDB | 売買シグナル |
 | `signal_queue` | DuckDB | 発注待ちキュー |
 | `positions` | DuckDB | 現在のポジション |
 | `portfolio_targets` | DuckDB | ポートフォリオ目標配分 |
 | `portfolio_performance` | DuckDB | 日次損益・DD |
-| `orders` | SQLite (`data/trading.db`) | 注文履歴・約定記録 |
-| 監視ログ | SQLite (`data/trading.db`) | システムイベントログ |
+| `orders` | SQLite (`data/monitoring.db`) | 注文履歴・約定記録 |
+| 監視ログ | SQLite (`data/monitoring.db`) | システムイベントログ |
 
 CLI 例:
 
 ```cmd
 :: DuckDB テーブルを確認する場合
-duckdb data\market.duckdb "SELECT * FROM positions ORDER BY code"
+duckdb data\kabusys.duckdb "SELECT * FROM positions ORDER BY code"
 ```
 
 ```cmd
 :: SQLite（orders）を確認する場合
-sqlite3 data\trading.db "SELECT * FROM orders ORDER BY created_at DESC LIMIT 20"
+sqlite3 data\monitoring.db "SELECT * FROM orders ORDER BY created_at DESC LIMIT 20"
 ```
 
 ---
@@ -240,14 +240,14 @@ python scripts\stop_system.py
    └─ 銘柄・数量・平均取得単価を記録
 
 3. DB の positions テーブルを確認（DuckDB）
-   duckdb data\market.duckdb "SELECT * FROM positions ORDER BY code"
+   duckdb data\kabusys.duckdb "SELECT * FROM positions ORDER BY code"
 
 4. 差分の原因特定
    ├─ 約定処理の漏れ → orders テーブル（SQLite）を確認
    └─ 手動取引による差分 → 手動で DB を修正
 
 5. positions テーブルを修正前にバックアップ
-   copy data\market.duckdb data\backup\market_YYYYMMDD.duckdb
+   copy data\kabusys.duckdb data\backup\kabusys_YYYYMMDD.duckdb
 
 6. positions テーブルを修正
    └─ DuckDB CLI または Python スクリプトで直接更新

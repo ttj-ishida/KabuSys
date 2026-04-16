@@ -198,7 +198,7 @@ python scripts\stop_system.py
 **手動でポジション更新を確認する場合（DuckDB）:**
 
 ```cmd
-duckdb data\market.duckdb "SELECT * FROM positions ORDER BY code"
+duckdb data\kabusys.duckdb "SELECT * FROM positions ORDER BY code"
 ```
 
 > 15:00 以降に `start_system.py` を実行しても、kabuステーション API が注文受付外のため発注は行われない。
