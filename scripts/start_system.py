@@ -49,7 +49,7 @@ def _launch(module: str, pid_path: Path) -> bool:
     """
     existing_pid = read_pid(pid_path)
     if existing_pid is not None and is_process_running(existing_pid):
-        logger.warning(
+        logger.info(
             "既に起動中です (PID=%d, module=%s)。起動をスキップします。",
             existing_pid,
             module,

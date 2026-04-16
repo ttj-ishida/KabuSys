@@ -127,6 +127,9 @@ def main() -> None:
                 if shares <= 0:
                     continue
                 price = open_prices.get(code)
+                if price is None:
+                    logger.warning("価格不明のため銘柄 %s をスキップします。", code)
+                    continue
                 conn.execute(
                     """INSERT INTO signal_queue
                        (signal_id, date, code, side, size, order_type, price, status)

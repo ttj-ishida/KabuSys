@@ -7,18 +7,11 @@ run_execution.py / run_monitoring.py は直接 _STOP_FLAG パスを使うため
 """
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
-try:
-    import psutil
-except ImportError:
-    print(
-        "ERROR: psutil がインストールされていません。"
-        "pip install psutil を実行してください。",
-        file=sys.stderr,
-    )
-    sys.exit(1)
+logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -47,7 +40,18 @@ def delete_pid(path: Path) -> None:
 
 
 def is_process_running(pid: int) -> bool:
-    """指定された PID のプロセスが生存しているかを返す。"""
+    """指定された PID のプロセスが生存しているかを返す。
+
+    psutil が未インストールの場合は False を返し、警告ログを出力する。
+    """
+    try:
+        import psutil  # noqa: PLC0415
+    except ImportError:
+        logger.warning(
+            "psutil がインストールされていません。is_process_running は常に False を返します。"
+            " pip install psutil を実行してください。"
+        )
+        return False
     return psutil.pid_exists(pid)
 
 

@@ -81,7 +81,6 @@ def main() -> None:
         # 停止フラグが既に立っている場合は起動せず終了
         if _STOP_FLAG.exists():
             logger.info("停止フラグを検知。エンジンを起動しません。")
-            engine.stop()
             return
 
         thread = threading.Thread(target=engine.run_session, daemon=True)
