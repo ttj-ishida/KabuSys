@@ -31,14 +31,19 @@ def main() -> None:
     api_key = getattr(settings, "openai_api_key", None)
 
     try:
-        n_news = score_news(conn, target_date, api_key=api_key)
-        logger.info("score_news 完了: %d 件スコア (date=%s)", n_news, target_date)
+        try:
+            n_news = score_news(conn, target_date, api_key=api_key)
+            logger.info("score_news 完了: %d 件スコア (date=%s)", n_news, target_date)
+        except Exception:
+            logger.exception("score_news が失敗しました")
+            sys.exit(1)
 
-        n_regime = score_regime(conn, target_date, api_key=api_key)
-        logger.info("score_regime 完了: %d 件 (date=%s)", n_regime, target_date)
-    except Exception:
-        logger.exception("AI 分析が失敗しました")
-        sys.exit(1)
+        try:
+            n_regime = score_regime(conn, target_date, api_key=api_key)
+            logger.info("score_regime 完了: %d 件 (date=%s)", n_regime, target_date)
+        except Exception:
+            logger.exception("score_regime が失敗しました")
+            sys.exit(1)
     finally:
         conn.close()
 

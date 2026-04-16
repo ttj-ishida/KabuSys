@@ -16,7 +16,9 @@ import duckdb
 
 from kabusys.config import Settings
 
-_STOP_FLAG = Path(__file__).resolve().parents[2] / "data" / "stop_requested.flag"
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_STOP_FLAG = _PROJECT_ROOT / "data" / "stop_requested.flag"
+_EXECUTION_PID = _PROJECT_ROOT / "data" / "execution.pid"
 from kabusys.execution.broker_factory import BrokerClientFactory
 from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine
 from kabusys.execution.order_manager import OrderManager
@@ -76,7 +78,7 @@ def main() -> None:
             duckdb_conn=duckdb_conn,
             config=EngineConfig(target_date=date.today()),
             reconciler=reconciler,
-            pid_file=settings.pid_file_path,
+            pid_file=_EXECUTION_PID,
         )
         # 停止フラグが既に立っている場合は起動せず終了
         if _STOP_FLAG.exists():
