@@ -2,223 +2,288 @@
 
 ## 1. 目的
 
-本ドキュメントは、日本株自動売買システムの **日次運用手順（Trading
-Runbook）** を定義する。
+本ドキュメントは、日本株自動売買システムの **日次運用手順（Trading Runbook）** を定義する。
 
 目的:
 
--   日々の運用作業の標準化
--   障害時の対応手順の明確化
--   手動確認ポイントの整理
--   安定した自動売買運用
+- 日々の運用作業の標準化
+- 手動確認ポイントの整理
+- アラート発生時の対応フローの明確化
+- 安定した自動売買運用
 
 対象環境:
 
--   Single Windows PC
--   Python 自動売買システム
--   kabuステーションAPI
--   J‑Quants データ
+- Single Windows PC（KabuSys 稼働ノード）
+- Python 自動売買システム
+- kabuステーション API
+- J-Quants データ
 
-------------------------------------------------------------------------
+---
 
-# 2. 日次運用フロー
+## 2. 日次運用タイムライン
 
-    08:00  システム確認
-    08:30  Execution 起動
-    09:00  Market Open
-    09:00‑15:30  取引監視
-    15:30  Market Close
-    16:00  Night Batch 確認
-    21:00  Portfolio生成確認
+```
+07:50  PC・kabuステーション起動確認
+08:00  Pre-Market Checklist（手動確認）
+08:30  Execution 起動（Task Scheduler 自動）
+09:00  Monitoring 起動（Task Scheduler 自動） / 前場オープン
+09:00-11:30  前場取引監視
+11:30-12:30  昼休み（注文受付停止）
+12:30-15:00  後場取引監視
+15:00  市場クローズ（現物株）/ Market Close 確認
+15:30  data_update バッチ（Task Scheduler 自動）
+16:00  feature_gen バッチ（Task Scheduler 自動）
+18:00  ai_analysis バッチ（Task Scheduler 自動）
+20:00  strategy_signal バッチ（Task Scheduler 自動）
+21:00  portfolio_construction バッチ（Task Scheduler 自動）
+21:30  夜間バッチ結果確認（手動）
+```
 
-------------------------------------------------------------------------
+---
 
-# 3. 朝のチェック（Pre‑Market Checklist）
+## 3. Pre-Market Checklist（08:00）
 
-時間
+市場オープン前に以下を確認する。
 
-    08:00
+| 項目 | 確認内容 | 確認方法 |
+|------|---------|---------|
+| PC 状態 | Windows 稼働・スリープ解除済み | 目視 |
+| kabuステーション | 起動・ログイン済み | 画面確認 |
+| API 接続 | kabuステーション API 応答あり | kabuステーション 画面の接続状態 |
+| J-Quants データ | 前日分データが DuckDB に入っていること | `data_update` バッチのログ確認 |
+| Signal Queue | 本日の `pending` シグナルが存在すること | SQLite / DuckDB 確認 |
+| ポジション | DB のポジションと証券口座が一致していること | kabuステーション ポジション画面と比較 |
+| 停止フラグ | `data/stop_requested.flag` が存在しないこと | エクスプローラーで確認 |
+| Task Scheduler | KabuSys_* タスクが `Ready` 状態であること | タスクスケジューラ画面 |
 
-確認項目
+**ポジション確認コマンド（手動実行）:**
 
-  項目           確認内容
-  -------------- ----------------------
-  PC状態         Windows稼働
-  API接続        kabuステーション接続
-  データ更新     前日データ更新
-  Signal Queue   本日のシグナル存在
-  ポジション     証券口座と一致
+```powershell
+Get-ScheduledTask -TaskName "KabuSys_*" | Select-Object TaskName, State
+```
 
-------------------------------------------------------------------------
+問題があれば Execution 起動前に解消すること。
 
-# 4. Execution 起動
+---
 
-時間
+## 4. Execution 起動（08:30）
 
-    08:30 （Task Scheduler が自動実行）
+Task Scheduler が自動実行する。手動起動が必要な場合は以下を使用する。
 
-Task Schedulerが実行するコマンド:
+**手動起動:**
 
-    python scripts\start_system.py --component execution
+```cmd
+cd C:\path\to\KabuSys
+python scripts\start_system.py --component execution
+```
 
-手動起動が必要な場合:
+**両コンポーネント一括起動:**
 
-    python scripts\start_system.py
+```cmd
+python scripts\start_system.py
+```
 
-手順（自動実行の内容）:
+**起動確認:**
 
-    1. 停止フラグ（data/stop_requested.flag）をクリア
-    2. execution_service 起動（data/execution.pid に PID 書き込み）
-    3. 自動リコンシリエーション実行（起動時に自動）
-       - OrderSent 注文をブローカーと突合・同期
-       - ポジション差分をログに記録（差分があれば手動確認）
-    4. API接続確認
-    5. Signal Queue 読み込み
-    6. monitoring_service 起動（09:00 に別タスクで自動実行）
+```cmd
+# PID ファイルが作成されていることを確認
+type data\execution.pid
+```
 
-> リコンシリエーション結果はログに出力される。
-> `orders_no_status > 0` または `position_discrepancies > 0` の場合は手動確認を行うこと。
+起動時の自動処理（`run_execution.py` 内）:
 
-手動停止（緊急時）:
+1. 停止フラグ（`data/stop_requested.flag`）が存在しない場合のみ起動
+2. 自動リコンシリエーション実行
+   - `OrderSent` 状態の注文をブローカーと突合・同期
+   - ポジション差分をログに記録
+3. Signal Queue の `pending` シグナルを読み込み発注開始
 
-    python scripts\stop_system.py
+> `orders_no_status > 0` または `position_discrepancies > 0` がログに出た場合は手動確認を実施すること。  
+> 詳細: `FailureRecovery.md` §5「PC 再起動後のリコンシリエーション」
 
-------------------------------------------------------------------------
+**手動停止（緊急時）:**
 
-# 5. 市場中（Trading Hours）
+```cmd
+python scripts\stop_system.py
+```
 
-時間
+---
 
-    09:00〜15:30
+## 5. 市場中の監視（前場 09:00-11:30 / 後場 12:30-15:00）
 
-システム処理
+> **TSE 現物株の取引時間**: 前場 09:00-11:30、後場 12:30-15:00。昼休み（11:30-12:30）は注文受付停止。15:00 以降は API での新規発注不可。
 
--   シグナル取得
--   発注
--   約定確認
--   ポジション更新
+### 5.1 システム処理（自動）
 
-監視項目
+- シグナル取得・発注（前場・後場）
+- 約定確認・ポジション更新
+- リスクチェック（ドローダウン監視）
+- Kill Switch 判定（DD 上限超過 / API 断絶）
 
-  項目            内容
-  --------------- --------------
-  注文エラー      rejected注文
-  API接続         接続状態
-  ドローダウン    DD監視
-  Execution稼働   プロセス生存
+### 5.2 監視項目
 
-------------------------------------------------------------------------
+| 項目 | 監視内容 | 判断基準 |
+|------|---------|---------|
+| 注文エラー | `rejected` 注文の有無 | 3 件以上連続で手動確認 |
+| API 接続 | kabuステーション 接続状態 | 5 分以上切断で手動対応 |
+| ドローダウン | 日次 DD | 10% 超過で Kill Switch 検討 |
+| Execution プロセス | PID ファイル存在確認 | `data/execution.pid` が消えたら再起動 |
+| Monitoring プロセス | PID ファイル存在確認 | `data/monitoring.pid` が消えたら再起動 |
 
-# 6. アラート対応
+### 5.3 ログ確認
 
-アラート例
+ログは標準出力（Task Scheduler 経由では Windows イベントログ）に出力される。  
+`logging.basicConfig` で `%(asctime)s %(levelname)s %(message)s` 形式。
 
-    Execution Error
-    API Disconnect
-    Max Drawdown
-    Signal Queue Error
+主要なログキーワード:
 
-対応
+| キーワード | 意味 |
+|-----------|------|
+| `停止フラグを検知` | グレースフル停止が開始された |
+| `Kill Switch` | 緊急停止が発動された |
+| `position_discrepancies` | ポジション不整合が検出された |
+| `orders_no_status` | 状態不明の注文がある（リコンシリエーション要） |
+| `CIRCUIT_BREAKER_OPEN` | サーキットブレーカが発動 |
+| `ERROR` / `CRITICAL` | 即時確認が必要 |
 
-    1. ログ確認
-    2. 状態確認
-    3. 必要ならKill Switch
+---
 
-------------------------------------------------------------------------
+## 6. アラート対応フロー
 
-# 7. Market Close 処理
+### 6.1 アラートの種類と優先度
 
-時間
+| アラート | 優先度 | 初動対応 |
+|---------|--------|---------|
+| Max Drawdown 超過 | 🔴 最高 | 即時 Kill Switch → 手動確認 |
+| API 接続断 | 🔴 最高 | kabuステーション 再起動 → 再接続確認 |
+| Execution プロセス停止 | 🔴 高 | `start_system.py --component execution` |
+| `rejected` 注文多発 | 🟡 中 | 注文ログ確認 → 原因特定 |
+| Night Batch 失敗 | 🟡 中 | ログ確認 → 手動再実行 |
+| Signal Queue 空 | 🟡 中 | `portfolio_construction` バッチ再実行 |
+| Monitoring プロセス停止 | 🟢 低 | `start_system.py --component monitoring` |
 
-    15:30
+### 6.2 共通対応フロー
 
-処理
+```
+1. ログ確認
+   └─ ERROR / CRITICAL メッセージを特定
 
--   ポジション更新
--   日次損益計算
--   ログ保存
+2. 状態確認
+   ├─ PID ファイル確認（data/*.pid）
+   ├─ 停止フラグ確認（data/stop_requested.flag）
+   └─ DB 整合性（signal_queue, positions）
 
-更新テーブル
+3. 判断
+   ├─ 軽微 → ログに記録して継続監視
+   ├─ 中程度 → 該当コンポーネント再起動
+   └─ 重大 → Kill Switch 発動（§8 参照）
 
-    positions
-    portfolio_performance
+4. 復旧後確認
+   └─ FailureRecovery.md §11「復旧確認チェックリスト」に従う
+```
 
-------------------------------------------------------------------------
+---
 
-# 8. 夜間処理確認
+## 7. Market Close 確認（15:00）
 
-時間
+市場クローズ後に以下を確認する。
 
-    16:00〜21:00
+| 項目 | 確認内容 |
+|------|---------|
+| 未約定注文 | `signal_queue` に `pending` が残っていないか |
+| ポジション更新 | `positions` テーブルが最新状態か |
+| 日次損益 | `portfolio_performance` テーブルに本日分が記録されているか |
+| Execution 停止 | 取引時間外は不要なので `stop_system.py` で停止しても良い |
 
-確認項目
+**手動でポジション更新を確認する場合（DuckDB）:**
 
-  Job                      内容
-  ------------------------ --------------------
-  data_update              市場データ更新
-  feature_generation       特徴量生成
-  ai_analysis              AIスコア
-  strategy_signal          売買シグナル
-  portfolio_construction   ポートフォリオ生成
+```cmd
+duckdb data\kabusys.duckdb "SELECT * FROM positions ORDER BY code"
+```
 
-------------------------------------------------------------------------
+> 15:00 以降に `start_system.py` を実行しても、kabuステーション API が注文受付外のため発注は行われない。
 
-# 9. 障害時対応
+---
 
-障害例
+## 8. 緊急停止（Kill Switch）
 
-  障害                対応                                            コマンド
-  ------------------- ----------------------------------------------- ---------------------------------------------------
-  API接続失敗         再接続                                          —
-  注文失敗            リトライ                                        —
-  PC停止              再起動後 Task Scheduler が自動起動              —
-  SignalQueue破損     signal_queue をクリアして再生成                 python scripts\reset_signals.py
-  特徴量データ破損    prices_daily 確認後に特徴量を再計算             python scripts\rebuild_features.py
-  プロセス停止        停止フラグ経由でグレースフル停止                python scripts\stop_system.py
-  手動再起動          停止後に起動                                    python scripts\stop_system.py && python scripts\start_system.py
+### 8.1 自動発動条件
 
-参照
+ExecutionEngine が以下を検知した場合に自動発動:
 
-    FailureRecovery.md
+- 最大ドローダウン（`max_drawdown`）超過
+- API 接続断（`circuit_breaker` 発動）
+- `circuit_breaker_errors` 件以上の連続エラー
 
-------------------------------------------------------------------------
+### 8.2 手動発動
 
-# 10. 緊急停止（Kill Switch）
+```cmd
+python scripts\stop_system.py
+```
 
-条件
+停止フラグ（`data/stop_requested.flag`）を作成し、Execution / Monitoring がグレースフルに終了する（最大 10 秒）。  
+10 秒以内に終了しない場合は強制終了（`psutil.Process(pid).kill()`）される。
 
--   最大ドローダウン超過
--   API接続断
--   Execution異常
+### 8.3 発動後の確認
 
-手順
+```
+1. ログで Kill Switch 発動の原因を確認
+2. ポジションを証券口座で直接確認（手動）
+3. 原因が解消したら FailureRecovery.md §9 に従い復旧
+4. 翌日の Runbook を通常通り実行
+```
 
-    1. Execution停止
-    2. 新規注文停止
-    3. アラート送信
-    4. 手動確認
+---
 
-------------------------------------------------------------------------
+## 9. 夜間処理確認（21:30〜）
 
-# 11. 日次レポート
+以下の Task Scheduler ジョブが正常完了したかを確認する。
 
-Market Close 後に確認
+| ジョブ名 | 実行時刻 | スクリプト | 確認内容 |
+|---------|---------|----------|---------|
+| KabuSys_DataUpdate | 15:30 | `run_data_update.py` | DuckDB に当日データが追加されているか |
+| KabuSys_FeatureGen | 16:00 | `run_feature_gen.py` | `features` テーブルが更新されているか |
+| KabuSys_AiAnalysis | 18:00 | `run_ai_analysis.py` | `news_scores`, `regime_scores` が更新されているか |
+| KabuSys_StrategySignal | 20:00 | `run_strategy_signal.py` | `signals` テーブルに本日の BUY シグナルがあるか |
+| KabuSys_PortfolioConstruction | 21:00 | `run_portfolio_construction.py` | `signal_queue` に `pending` シグナルが入っているか |
 
-内容
+**Task Scheduler の実行履歴確認（PowerShell）:**
 
--   日次リターン
--   ポジション
--   取引履歴
--   ドローダウン
+```powershell
+Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object TaskName, LastRunTime, LastTaskResult
+```
 
-------------------------------------------------------------------------
+`LastTaskResult = 0` が正常終了。それ以外はログを確認すること。
 
-# 12. まとめ
+**夜間バッチ手動再実行（異常時）:**
 
-Trading Runbook の役割
+```cmd
+# 例: portfolio_construction を手動再実行
+python scripts\run_portfolio_construction.py
+```
 
--   日次運用の標準化
--   手動チェックポイント整理
--   障害時対応手順
+---
+
+## 10. 日次レポート確認
+
+Market Close 後（または翌朝）に確認する。
+
+| 項目 | 確認方法 |
+|------|---------|
+| 日次リターン | `portfolio_performance` テーブル |
+| ポジション一覧 | `positions` テーブル |
+| 取引履歴 | `orders` テーブル（SQLite） |
+| ドローダウン | `portfolio_performance` の `drawdown` カラム |
+
+---
+
+## 11. まとめ
 
 このRunbookにより **安定した自動売買運用を実現する。**
+
+関連ドキュメント:
+
+- `FailureRecovery.md` — 障害発生時の詳細復旧手順
+- `Monitoring.md` — 監視基盤の設計
+- `documents/09_Deployment/` — デプロイメント構成
+- `documents/10_Runtime/` — ジョブスケジュール定義
