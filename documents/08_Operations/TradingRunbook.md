@@ -26,11 +26,13 @@
 07:50  PC・kabuステーション起動確認
 08:00  Pre-Market Checklist（手動確認）
 08:30  Execution 起動（Task Scheduler 自動）
-09:00  Monitoring 起動（Task Scheduler 自動） / 市場オープン
-09:00 〜 15:30  取引監視
-15:30  市場クローズ / Market Close 確認
-16:00  data_update バッチ（Task Scheduler 自動）
-16:30  feature_gen バッチ（Task Scheduler 自動）
+09:00  Monitoring 起動（Task Scheduler 自動） / 前場オープン
+09:00-11:30  前場取引監視
+11:30-12:30  昼休み（注文受付停止）
+12:30-15:00  後場取引監視
+15:00  市場クローズ（現物株）/ Market Close 確認
+15:30  data_update バッチ（Task Scheduler 自動）
+16:00  feature_gen バッチ（Task Scheduler 自動）
 18:00  ai_analysis バッチ（Task Scheduler 自動）
 20:00  strategy_signal バッチ（Task Scheduler 自動）
 21:00  portfolio_construction バッチ（Task Scheduler 自動）
@@ -56,7 +58,7 @@
 
 **ポジション確認コマンド（手動実行）:**
 
-```cmd
+```powershell
 Get-ScheduledTask -TaskName "KabuSys_*" | Select-Object TaskName, State
 ```
 
@@ -107,11 +109,13 @@ python scripts\stop_system.py
 
 ---
 
-## 5. 市場中の監視（09:00〜15:30）
+## 5. 市場中の監視（前場 09:00-11:30 / 後場 12:30-15:00）
+
+> **TSE 現物株の取引時間**: 前場 09:00-11:30、後場 12:30-15:00。昼休み（11:30-12:30）は注文受付停止。15:00 以降は API での新規発注不可。
 
 ### 5.1 システム処理（自動）
 
-- シグナル取得・発注
+- シグナル取得・発注（前場・後場）
 - 約定確認・ポジション更新
 - リスクチェック（ドローダウン監視）
 - Kill Switch 判定（DD 上限超過 / API 断絶）
@@ -138,7 +142,8 @@ python scripts\stop_system.py
 | `停止フラグを検知` | グレースフル停止が開始された |
 | `Kill Switch` | 緊急停止が発動された |
 | `position_discrepancies` | ポジション不整合が検出された |
-| `orders_no_status` | 状態不明の注文がある |
+| `orders_no_status` | 状態不明の注文がある（リコンシリエーション要） |
+| `CIRCUIT_BREAKER_OPEN` | サーキットブレーカが発動 |
 | `ERROR` / `CRITICAL` | 即時確認が必要 |
 
 ---
@@ -179,7 +184,7 @@ python scripts\stop_system.py
 
 ---
 
-## 7. Market Close 処理（15:30）
+## 7. Market Close 確認（15:00）
 
 市場クローズ後に以下を確認する。
 
@@ -190,14 +195,13 @@ python scripts\stop_system.py
 | 日次損益 | `portfolio_performance` テーブルに本日分が記録されているか |
 | Execution 停止 | 取引時間外は不要なので `stop_system.py` で停止しても良い |
 
-**手動でポジション更新を確認する場合:**
+**手動でポジション更新を確認する場合（DuckDB）:**
 
 ```cmd
-# DuckDB CLI で確認
 duckdb data\market.duckdb "SELECT * FROM positions ORDER BY code"
 ```
 
-> 15:30 以降に `start_system.py` を実行しても、kabuステーション API が注文受付外のため発注は行われない。
+> 15:00 以降に `start_system.py` を実行しても、kabuステーション API が注文受付外のため発注は行われない。
 
 ---
 
@@ -243,7 +247,7 @@ python scripts\stop_system.py
 | KabuSys_StrategySignal | 20:00 | `run_strategy_signal.py` | `signals` テーブルに本日の BUY シグナルがあるか |
 | KabuSys_PortfolioConstruction | 21:00 | `run_portfolio_construction.py` | `signal_queue` に `pending` シグナルが入っているか |
 
-**Task Scheduler の実行履歴確認:**
+**Task Scheduler の実行履歴確認（PowerShell）:**
 
 ```powershell
 Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object TaskName, LastRunTime, LastTaskResult

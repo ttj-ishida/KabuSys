@@ -30,13 +30,45 @@
 | Position Failure | DB ポジションと口座の不一致 | 🟡 高 |
 | Monitoring Failure | 監視プロセス停止 | 🟢 中 |
 
+> 優先度凡例: 🔴 最高（即時対応）/ 🟡 高（当日中に対応）/ 🟢 中（翌日以降でも可）
+
 ---
 
-## 3. 緊急停止（Kill Switch）
+## 3. DB テーブルマッピング
+
+復旧作業で参照・更新するテーブルと DB の対応表。
+
+| テーブル | DB | 用途 |
+|---------|-----|-----|
+| `prices_daily` | DuckDB (`data/market.duckdb`) | 日次株価データ |
+| `features` | DuckDB | 特徴量データ |
+| `signals` | DuckDB | 売買シグナル |
+| `signal_queue` | DuckDB | 発注待ちキュー |
+| `positions` | DuckDB | 現在のポジション |
+| `portfolio_targets` | DuckDB | ポートフォリオ目標配分 |
+| `portfolio_performance` | DuckDB | 日次損益・DD |
+| `orders` | SQLite (`data/trading.db`) | 注文履歴・約定記録 |
+| 監視ログ | SQLite (`data/trading.db`) | システムイベントログ |
+
+CLI 例:
+
+```cmd
+:: DuckDB テーブルを確認する場合
+duckdb data\market.duckdb "SELECT * FROM positions ORDER BY code"
+```
+
+```cmd
+:: SQLite（orders）を確認する場合
+sqlite3 data\trading.db "SELECT * FROM orders ORDER BY created_at DESC LIMIT 20"
+```
+
+---
+
+## 4. 緊急停止（Kill Switch）
 
 重大障害時または手動で自動売買を即時停止する手順。
 
-### 3.1 自動 Kill Switch
+### 4.1 自動 Kill Switch
 
 ExecutionEngine が以下を検知した場合に自動発動:
 
@@ -50,7 +82,7 @@ ExecutionEngine が以下を検知した場合に自動発動:
 CRITICAL Kill Switch 発動 — reason=...
 ```
 
-### 3.2 手動 Kill Switch
+### 4.2 手動 Kill Switch
 
 ```cmd
 cd C:\path\to\KabuSys
@@ -61,20 +93,20 @@ python scripts\stop_system.py
 
 1. `data/stop_requested.flag` を作成
 2. Execution / Monitoring プロセスが停止フラグを検知してグレースフル終了（最大 10 秒）
-3. 10 秒以内に終了しない場合は `psutil.kill()` で強制終了
+3. 10 秒以内に終了しない場合は `psutil.Process(pid).kill()` で強制終了
 4. PID ファイル（`data/execution.pid`, `data/monitoring.pid`）を削除
 
-### 3.3 Kill Switch 発動後の確認
+### 4.3 Kill Switch 発動後の確認
 
 ```
 1. kabuステーション画面でポジション・未約定注文を直接確認
 2. ログで発動原因を特定（ERROR / CRITICAL メッセージ）
-3. 原因が解消したら §8「Kill Switch 発動後の復旧」に従う
+3. 原因が解消したら §9「Kill Switch 発動後の復旧」に従う
 ```
 
 ---
 
-## 4. API 接続障害
+## 5. API 接続障害
 
 ### 症状
 
@@ -98,7 +130,7 @@ python scripts\stop_system.py
 4. それでも接続できない場合
    └─ python scripts\stop_system.py でシステム停止
    └─ kabuステーション 障害情報を確認（公式サイト・Twitter）
-   └─ 接続回復後に §8 手順で再起動
+   └─ 接続回復後に §9「Kill Switch 発動後の復旧」の手順で再起動
 
 5. 取引時間中に接続が回復した場合
    └─ python scripts\start_system.py --component execution
@@ -107,12 +139,12 @@ python scripts\stop_system.py
 
 ---
 
-## 5. PC 再起動後のリコンシリエーション
+## 6. PC 再起動後のリコンシリエーション
 
 ### 症状
 
 - Windows 自動更新・電源障害・OS クラッシュによる予期しない再起動
-- Execution プロセスが `SIGKILL` 等で異常終了
+- Execution プロセスが異常終了
 
 ### 復旧手順
 
@@ -130,15 +162,15 @@ python scripts\stop_system.py
 4. Execution 起動（リコンシリエーション自動実行）
    python scripts\start_system.py --component execution
 
-   起動時に自動実行される処理:
-   ├─ status='sent' の注文をブローカーAPI と突合
+   起動時に自動実行される処理（冪等）:
+   ├─ status='sent' の注文をブローカー API と突合
    ├─ 約定済み → status='filled' に更新
    ├─ キャンセル済み → status='cancelled' に更新
    └─ ポジション差分をログに記録
 
 5. リコンシリエーション結果確認
-   └─ ログで orders_no_status, position_discrepancies を確認
-   └─ 差分がある場合は §9「ポジション不整合時の復旧」へ
+   └─ ログで `orders_no_status`, `position_discrepancies` を確認
+   └─ 差分がある場合は §8「ポジション不整合時の復旧」へ
 
 6. Monitoring 起動
    python scripts\start_system.py --component monitoring
@@ -146,13 +178,13 @@ python scripts\stop_system.py
 
 ### 注意事項
 
-- 市場時間内（09:00〜15:30）の再起動は特に注意
+- 市場時間内（前場 09:00-11:30 / 後場 12:30-15:00）の再起動は特に注意
 - 未発注の Signal Queue が残っている場合、起動後に即時発注が開始される
-- Signal Queue をクリアしたい場合は §6 を参照
+- Signal Queue をクリアしたい場合は §7「Signal Queue 破損時の再生成」を参照
 
 ---
 
-## 6. Signal Queue 破損時の再生成
+## 7. Signal Queue 破損時の再生成
 
 ### 症状
 
@@ -170,6 +202,7 @@ python scripts\stop_system.py
    python scripts\reset_signals.py
 
    動作: signal_queue テーブルを全削除し再作成
+   ※ 誤実行防止のため取引時間外に実施すること
 
 3. 夜間バッチを手動で再実行（順番通りに）
    python scripts\run_strategy_signal.py
@@ -184,13 +217,13 @@ python scripts\stop_system.py
 
 ### 注意事項
 
-- `reset_signals.py` は `signal_queue` テーブルを **全削除** する
-- 当日の発注済み注文（`status='sent'` / `status='filled'`）はこのテーブルには存在しない（`orders` テーブルで管理）
-- 取引時間外での実施を推奨
+- `reset_signals.py` は `signal_queue` テーブルを **全削除** する（取り消し不可）
+- 当日の発注済み注文（`status='sent'` / `status='filled'`）は `orders` テーブル（SQLite）で管理されており、このリセットの影響を受けない
+- 取引時間外での実施を強く推奨
 
 ---
 
-## 7. ポジション不整合時の復旧
+## 8. ポジション不整合時の復旧
 
 ### 症状
 
@@ -206,29 +239,32 @@ python scripts\stop_system.py
 2. kabuステーション で実際のポジションを確認
    └─ 銘柄・数量・平均取得単価を記録
 
-3. DB の positions テーブルを確認
+3. DB の positions テーブルを確認（DuckDB）
    duckdb data\market.duckdb "SELECT * FROM positions ORDER BY code"
 
 4. 差分の原因特定
-   ├─ 約定処理の漏れ → orders テーブルを確認
+   ├─ 約定処理の漏れ → orders テーブル（SQLite）を確認
    └─ 手動取引による差分 → 手動で DB を修正
 
-5. positions テーブルを修正
+5. positions テーブルを修正前にバックアップ
+   copy data\market.duckdb data\backup\market_YYYYMMDD.duckdb
+
+6. positions テーブルを修正
    └─ DuckDB CLI または Python スクリプトで直接更新
 
-6. portfolio_targets を再計算
+7. portfolio_targets を再計算
    python scripts\run_portfolio_construction.py
 
-7. Execution を再起動
+8. Execution を再起動
    python scripts\start_system.py --component execution
 
-8. リコンシリエーション結果を確認
-   └─ position_discrepancies = 0 になっていること
+9. リコンシリエーション結果を確認
+   └─ `position_discrepancies` = 0 になっていること
 ```
 
 ---
 
-## 8. Kill Switch 発動後の復旧
+## 9. Kill Switch 発動後の復旧
 
 ### 前提
 
@@ -240,9 +276,9 @@ Kill Switch 発動後は `data/stop_requested.flag` が存在するため、`sta
 1. Kill Switch 発動原因を特定
    └─ ログで CRITICAL / Kill Switch メッセージを確認
    └─ 原因を以下に分類:
-      (a) ドローダウン超過 → §8.1
-      (b) API 接続断       → §4 を先に解消
-      (c) 異常注文         → orders テーブルを確認
+      (a) ドローダウン超過 → §9.1 を参照
+      (b) API 接続断       → §5 を先に解消してから再開
+      (c) 異常注文         → orders テーブル（SQLite）を確認
 
 2. ポジション確認（kabuステーション 画面で直接確認）
    └─ 未約定注文が残っていないか
@@ -261,7 +297,7 @@ Kill Switch 発動後は `data/stop_requested.flag` が存在するため、`sta
    └─ リコンシリエーション自動実行を確認
 ```
 
-#### 8.1 ドローダウン超過後の再開判断基準
+#### 9.1 ドローダウン超過後の再開判断基準
 
 | 状態 | 対応 |
 |------|------|
@@ -272,45 +308,45 @@ Kill Switch 発動後は `data/stop_requested.flag` が存在するため、`sta
 
 ---
 
-## 9. その他の障害
+## 10. その他の障害
 
-### 9.1 注文エラー（order rejected）
+### 10.1 注文エラー（order rejected）
 
 ```
-1. orders テーブルで rejected 注文を確認
+1. orders テーブル（SQLite）で rejected 注文を確認
 2. 原因確認（資金不足・銘柄コードエラー・注文数量エラー等）
 3. signal_queue の対象シグナルを status='failed' に更新
 4. 必要に応じて手動発注
 ```
 
-### 9.2 夜間バッチ失敗
+### 10.2 夜間バッチ失敗
 
-```
-1. Task Scheduler の実行履歴で LastTaskResult を確認
-   Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo
-
-2. 失敗したスクリプトを手動再実行
-   python scripts\run_<failed_job>.py
-
-3. 依存関係に注意して順番通りに再実行
-   run_data_update.py
-   → run_feature_gen.py
-   → run_ai_analysis.py
-   → run_strategy_signal.py
-   → run_portfolio_construction.py
+```powershell
+# Task Scheduler の実行履歴を確認
+Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object TaskName, LastRunTime, LastTaskResult
 ```
 
-### 9.3 Monitoring プロセス停止
+失敗したスクリプトを手動で再実行（依存関係順）:
 
+```cmd
+python scripts\run_data_update.py
+python scripts\run_feature_gen.py
+python scripts\run_ai_analysis.py
+python scripts\run_strategy_signal.py
+python scripts\run_portfolio_construction.py
 ```
+
+### 10.3 Monitoring プロセス停止
+
+```cmd
 python scripts\start_system.py --component monitoring
 ```
 
 Monitoring は発注には関与しないため、停止中も Execution は継続動作する。
 
-### 9.4 特徴量データ破損
+### 10.4 特徴量データ破損
 
-```
+```cmd
 python scripts\rebuild_features.py
 ```
 
@@ -318,7 +354,7 @@ python scripts\rebuild_features.py
 
 ---
 
-## 10. 復旧確認チェックリスト
+## 11. 復旧確認チェックリスト
 
 復旧後は以下をすべて確認してから通常運用に戻る。
 
@@ -327,20 +363,20 @@ python scripts\rebuild_features.py
 | 停止フラグ | `data/stop_requested.flag` が存在しない | ☐ |
 | PID ファイル | `data/execution.pid` が存在・プロセス生存 | ☐ |
 | API 接続 | kabuステーション 接続状態 = 正常 | ☐ |
-| ポジション | DB と口座が一致 | ☐ |
+| ポジション | DB（DuckDB）と口座が一致 | ☐ |
 | Signal Queue | 必要なシグナルが `pending` 状態で存在 | ☐ |
 | 未処理注文 | `status='sent'` で長時間放置の注文がない | ☐ |
-| ログ | ERROR / CRITICAL メッセージが解消されている | ☐ |
+| ログ | `ERROR` / `CRITICAL` メッセージが解消されている | ☐ |
 
 ---
 
-## 11. まとめ
+## 12. まとめ
 
 Failure Recovery 設計の原則:
 
 - **Fail Safe**: 不確定時は安全側に倒す（停止 > 継続）
 - **Kill Switch**: 損失拡大を即時停止できる機構を常に維持
-- **Data Integrity**: ポジションとDB の整合性を最優先で回復
+- **Data Integrity**: ポジションと DB の整合性を最優先で回復
 - **Manual Override**: 自動化に頼らず手動確認で最終判断
 
 関連ドキュメント:
