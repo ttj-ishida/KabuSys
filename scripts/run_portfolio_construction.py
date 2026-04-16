@@ -38,12 +38,19 @@ def main() -> None:
     conn = duckdb.connect(str(settings.duckdb_path))
     target_date = date.today()
 
-    portfolio_value = float(
-        os.environ.get("PORTFOLIO_VALUE", str(_DEFAULT_PORTFOLIO_VALUE))
-    )
-    available_cash = portfolio_value * _MAX_UTILIZATION
-
     try:
+        portfolio_value_str = os.environ.get("PORTFOLIO_VALUE", str(_DEFAULT_PORTFOLIO_VALUE))
+        try:
+            portfolio_value = float(portfolio_value_str)
+        except ValueError:
+            logger.warning(
+                "PORTFOLIO_VALUE が不正な値です (%s)。デフォルト値を使用します: %s",
+                portfolio_value_str,
+                _DEFAULT_PORTFOLIO_VALUE,
+            )
+            portfolio_value = float(_DEFAULT_PORTFOLIO_VALUE)
+        available_cash = portfolio_value * _MAX_UTILIZATION
+
         # 1. 当日の BUY シグナルを取得
         cur = conn.execute(
             "SELECT code, side, score, signal_rank FROM signals WHERE date = ? AND side = 'buy'",
@@ -85,7 +92,7 @@ def main() -> None:
             """,
             codes,
         )
-        open_prices = {r[0]: float(r[1]) for r in price_cur.fetchall() if r[1] is not None}
+        close_prices = {r[0]: float(r[1]) for r in price_cur.fetchall() if r[1] is not None}
 
         # 4. 現在のポジション取得
         pos_cur = conn.execute(
@@ -101,7 +108,7 @@ def main() -> None:
             portfolio_value=portfolio_value,
             available_cash=available_cash,
             current_positions=current_positions,
-            open_prices=open_prices,
+            open_prices=close_prices,
         )
 
         # 6. portfolio_targets / signal_queue をトランザクション内で更新
@@ -126,7 +133,7 @@ def main() -> None:
             for code, shares in sizes.items():
                 if shares <= 0:
                     continue
-                price = open_prices.get(code)
+                price = close_prices.get(code)
                 if price is None:
                     logger.warning("価格不明のため銘柄 %s をスキップします。", code)
                     continue
