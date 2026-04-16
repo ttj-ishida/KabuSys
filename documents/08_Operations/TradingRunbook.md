@@ -222,14 +222,14 @@ python scripts\stop_system.py
 ```
 
 停止フラグ（`data/stop_requested.flag`）を作成し、Execution / Monitoring がグレースフルに終了する（最大 10 秒）。  
-10 秒以内に終了しない場合は強制終了（`psutil.kill()`）される。
+10 秒以内に終了しない場合は強制終了（`psutil.Process(pid).kill()`）される。
 
 ### 8.3 発動後の確認
 
 ```
 1. ログで Kill Switch 発動の原因を確認
 2. ポジションを証券口座で直接確認（手動）
-3. 原因が解消したら FailureRecovery.md §8 に従い復旧
+3. 原因が解消したら FailureRecovery.md §9 に従い復旧
 4. 翌日の Runbook を通常通り実行
 ```
 
