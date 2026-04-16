@@ -214,6 +214,10 @@ class ExecutionEngine:
             except BrokerAPIError as exc:
                 logger.warning("cancel_order API エラー（継続）: %s - %s", order.client_order_id, exc)
 
+    def stop(self) -> None:
+        """エンジンを停止する（外部停止フラグ検知時に呼ばれる）。kill_switch() の公開エイリアス。"""
+        self.kill_switch()
+
     def _websocket_worker(self) -> None:
         """WebSocket スレッド: kabu push を受信して _push_queue に投入する。"""
         def _on_message(payload: dict) -> None:

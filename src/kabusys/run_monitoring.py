@@ -10,10 +10,13 @@ import logging
 import os
 import sqlite3
 import time
+from pathlib import Path
 
 import duckdb
 
 from kabusys.config import Settings
+
+_STOP_FLAG = Path(__file__).resolve().parents[2] / "data" / "stop_requested.flag"
 from kabusys.monitoring.monitoring_db import init_monitoring_db
 from kabusys.monitoring.system_monitor import SystemMonitor
 from kabusys.utils.process_priority import set_process_priority
@@ -68,6 +71,9 @@ def main() -> None:
     logger.info("監視ループ開始（ポーリング間隔: %d 秒）", poll_interval)
     try:
         while True:
+            if _STOP_FLAG.exists():
+                logger.info("停止フラグを検知。監視ループを終了します。")
+                break
             try:
                 monitor.check_once()
             except Exception:

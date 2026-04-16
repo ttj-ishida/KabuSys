@@ -51,6 +51,23 @@ class TestRunMonitoringMain:
         mock_sqlite.assert_called_once_with(str(settings.sqlite_path))
 
 
+def test_run_monitoring_stops_on_flag(tmp_path):
+    """停止フラグが存在するとき監視ループが終了することを確認する。"""
+    import kabusys.run_monitoring as rm_mod
+
+    stop_flag = tmp_path / "stop.flag"
+    stop_flag.touch()
+
+    with patch.object(rm_mod, "_STOP_FLAG", stop_flag), \
+         patch("kabusys.run_monitoring.set_process_priority"), \
+         patch("kabusys.run_monitoring.Settings", return_value=_make_settings()), \
+         patch("kabusys.run_monitoring.sqlite3.connect"), \
+         patch("kabusys.run_monitoring.init_monitoring_db"), \
+         patch("kabusys.run_monitoring.duckdb.connect"), \
+         patch("kabusys.run_monitoring.SystemMonitor"):
+        rm_mod.main()  # フラグがあるのでループせずに終了するはず
+
+
 class TestGetPollInterval:
     def test_default(self, monkeypatch):
         monkeypatch.delenv("MONITOR_POLL_INTERVAL", raising=False)

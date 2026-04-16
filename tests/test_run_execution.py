@@ -3,6 +3,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import kabusys.run_execution as re_mod
 from kabusys.run_execution import main
 
 
@@ -53,3 +54,29 @@ class TestRunExecutionMain:
     def test_calls_run_session(self):
         _, _, mock_engine, _ = _run_main()
         mock_engine.run_session.assert_called_once()
+
+
+def test_run_execution_stops_on_flag(tmp_path):
+    """停止フラグが作成されたとき engine.stop() が呼ばれることを確認する。"""
+    stop_flag = tmp_path / "stop.flag"
+    # フラグを事前に作成（メインループがすぐに検知する）
+    stop_flag.touch()
+
+    mock_engine = MagicMock()
+    mock_engine.run_session.return_value = None  # ブロックしない
+
+    with patch.object(re_mod, "_STOP_FLAG", stop_flag), \
+         patch("kabusys.run_execution.set_process_priority"), \
+         patch("kabusys.run_execution.Settings"), \
+         patch("kabusys.run_execution.sqlite3.connect"), \
+         patch("kabusys.run_execution.init_monitoring_db"), \
+         patch("kabusys.run_execution.duckdb.connect"), \
+         patch("kabusys.run_execution.BrokerClientFactory.create"), \
+         patch("kabusys.run_execution.OrderRepository"), \
+         patch("kabusys.run_execution.OrderManager"), \
+         patch("kabusys.run_execution.RiskManager"), \
+         patch("kabusys.run_execution.Reconciler"), \
+         patch("kabusys.run_execution.ExecutionEngine", return_value=mock_engine):
+        re_mod.main()
+
+    mock_engine.stop.assert_called_once()
