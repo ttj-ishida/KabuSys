@@ -37,8 +37,12 @@ _RUN_EXECUTION = _PROJECT_ROOT / "src" / "kabusys" / "run_execution.py"
 _RUN_MONITORING = _PROJECT_ROOT / "src" / "kabusys" / "run_monitoring.py"
 
 
-def _launch(script: Path, pid_path: Path) -> None:
-    """スクリプトを subprocess で起動し、PID をファイルに書き込む。"""
+def _launch(script: Path, pid_path: Path) -> bool:
+    """スクリプトを subprocess で起動し、PID をファイルに書き込む。
+
+    Returns:
+        True: 起動した。False: 既に起動中だったためスキップした。
+    """
     existing_pid = read_pid(pid_path)
     if existing_pid is not None and is_process_running(existing_pid):
         logger.warning(
@@ -46,7 +50,7 @@ def _launch(script: Path, pid_path: Path) -> None:
             existing_pid,
             script.name,
         )
-        sys.exit(1)
+        return False
 
     proc = subprocess.Popen(
         [sys.executable, str(script)],
@@ -54,6 +58,7 @@ def _launch(script: Path, pid_path: Path) -> None:
     )
     write_pid(pid_path, proc.pid)
     logger.info("%s を起動しました (PID=%d)", script.name, proc.pid)
+    return True
 
 
 def main() -> None:
@@ -69,13 +74,20 @@ def main() -> None:
     # 停止フラグをクリア（前回停止時のフラグが残っている場合）
     clear_stop_flag(STOP_FLAG_PATH)
 
+    launched = 0
     if args.component in ("execution", "all"):
-        _launch(_RUN_EXECUTION, EXECUTION_PID_PATH)
+        if _launch(_RUN_EXECUTION, EXECUTION_PID_PATH):
+            launched += 1
 
     if args.component in ("monitoring", "all"):
-        _launch(_RUN_MONITORING, MONITORING_PID_PATH)
+        if _launch(_RUN_MONITORING, MONITORING_PID_PATH):
+            launched += 1
 
-    logger.info("起動完了 (component=%s)", args.component)
+    if launched == 0:
+        logger.warning("起動対象のコンポーネントがすべて既に起動中です。")
+        sys.exit(1)
+
+    logger.info("起動完了 (component=%s, launched=%d)", args.component, launched)
 
 
 if __name__ == "__main__":

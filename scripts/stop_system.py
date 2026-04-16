@@ -51,8 +51,8 @@ def _wait_or_kill(pid: int, label: str) -> None:
     )
     try:
         psutil.Process(pid).kill()
-    except psutil.NoSuchProcess:
-        pass  # タイムアウト判定直後に終了した場合
+    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+        logger.warning("強制終了できませんでした (PID=%d): %s", pid, e)
 
 
 def main() -> None:

@@ -60,7 +60,14 @@ def main() -> None:
 
         # 2. 銘柄選定・重み計算（メモリ内）
         candidates = select_candidates(buy_signals)
+        if not candidates:
+            logger.info("銘柄選定結果が 0 件です。signal_queue を更新しません。")
+            return
+
         weights = calc_score_weights(candidates)
+        if not weights:
+            logger.info("重み計算結果が 0 件です。signal_queue を更新しません。")
+            return
 
         # 3. 最新終値を取得（直近の prices_daily から）
         codes = [c["code"] for c in candidates]
@@ -97,34 +104,41 @@ def main() -> None:
             open_prices=open_prices,
         )
 
-        # 6. portfolio_targets を更新
-        conn.execute(
-            "DELETE FROM portfolio_targets WHERE date = ?", [target_date]
-        )
-        for code, weight in weights.items():
-            size = sizes.get(code, 0)
+        # 6. portfolio_targets / signal_queue をトランザクション内で更新
+        conn.begin()
+        try:
             conn.execute(
-                "INSERT INTO portfolio_targets (date, code, target_weight, target_size) VALUES (?,?,?,?)",
-                [target_date, code, weight, size],
+                "DELETE FROM portfolio_targets WHERE date = ?", [target_date]
             )
+            for code, weight in weights.items():
+                size = sizes.get(code, 0)
+                conn.execute(
+                    "INSERT INTO portfolio_targets (date, code, target_weight, target_size) VALUES (?,?,?,?)",
+                    [target_date, code, weight, size],
+                )
 
-        # 7. signal_queue を更新（当日の pending シグナルをクリアして再挿入）
-        conn.execute(
-            "DELETE FROM signal_queue WHERE date = ? AND status = 'pending'",
-            [target_date],
-        )
-        inserted = 0
-        for code, shares in sizes.items():
-            if shares <= 0:
-                continue
-            price = open_prices.get(code)
+            # 7. signal_queue を更新（当日の pending シグナルをクリアして再挿入）
             conn.execute(
-                """INSERT INTO signal_queue
-                   (signal_id, date, code, side, size, order_type, price, status)
-                   VALUES (?, ?, ?, 'buy', ?, 'market', ?, 'pending')""",
-                [str(uuid.uuid4()), target_date, code, shares, price],
+                "DELETE FROM signal_queue WHERE date = ? AND status = 'pending'",
+                [target_date],
             )
-            inserted += 1
+            inserted = 0
+            for code, shares in sizes.items():
+                if shares <= 0:
+                    continue
+                price = open_prices.get(code)
+                conn.execute(
+                    """INSERT INTO signal_queue
+                       (signal_id, date, code, side, size, order_type, price, status)
+                       VALUES (?, ?, ?, 'buy', ?, 'market', ?, 'pending')""",
+                    [str(uuid.uuid4()), target_date, code, shares, price],
+                )
+                inserted += 1
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
         logger.info(
             "ポートフォリオ構築完了: %d 銘柄を signal_queue に挿入 (date=%s)",
