@@ -3,6 +3,7 @@
 # 更新方法: pip-compile requirements.txt --output-file constraints.txt
 pandas==2.2.3
 numpy==1.26.4
+scikit-learn==1.4.2
 duckdb==0.10.3
 pyarrow==15.0.2
 requests==2.32.3
