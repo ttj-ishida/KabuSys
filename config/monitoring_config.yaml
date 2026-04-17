@@ -1,0 +1,12 @@
+# monitoring_config.yaml — 監視設定
+monitoring:
+  dashboard: streamlit
+
+alerts:
+  line_enabled: true
+  max_drawdown_alert: 0.10
+  execution_failure_alert: true
+
+logging:
+  level: INFO
+  database: data/monitoring.db

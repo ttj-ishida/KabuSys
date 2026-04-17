@@ -90,24 +90,50 @@ streamlit
    - pip install -r requirements.txt
    - または最低限: pip install duckdb psutil requests openai streamlit
 
-4. 環境変数設定:
-   - プロジェクトルートに `.env`（または `.env.local`）を作成できます。自動ロードはデフォルトで有効。
-   - 自動ロードを無効にする場合は環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定してください。
+4. 環境変数設定（ウィザード推奨）:
 
-5. 必須環境変数（代表例）
-   - JQUANTS_REFRESH_TOKEN: J-Quants API トークン
-   - KABU_API_PASSWORD: kabuステーション API パスワード
-   - OPENAI_API_KEY: OpenAI API キー（AI モジュール使用時）
-   - KABUSYS_ENV: 実行環境（development / paper_trading / live）
-   - その他（オプション・既定値あり）:
-     - DUCKDB_PATH (default: data/kabusys.duckdb)
-     - SQLITE_PATH (default: data/monitoring.db)
-     - PAPER_TRADING_SQLITE_PATH (default: data/paper_trading.db)
-     - PAPER_FILL_MODE: instant | partial | never | reject
-     - PID_FILE_PATH, KILL_FLAG_PATH, LOG_LEVEL, など
+   対話式ウィザードで `.env` を作成できます:
+   ```cmd
+   python -m kabusys.config_setup
+   ```
+   手動設定する場合は `.env.example` をコピーして `.env` を作成してください。
+   - プロジェクトルートに `.env`（または `.env.local`）を置くと自動ロードされます。
+   - 自動ロードを無効にする場合は `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定してください。
 
-6. データディレクトリの作成:
+5. YAML 設定ファイルの生成:
+   ```cmd
+   python scripts/generate_config.py
+   ```
+   `config/` 配下に `system_config.yaml` など 6 ファイルが生成されます（既存ファイルはスキップ）。
+
+6. 設定を検証:
+   ```cmd
+   python -m kabusys.validate_config
+   ```
+   必須環境変数の欠落・YAML ファイルの異常・`live` 環境特有の警告を検出します。
+
+7. データディレクトリの作成:
    - mkdir -p data
+
+### 実行環境（KABUSYS_ENV）の使い分け
+
+| 値 | 用途 | 発注 |
+|----|------|------|
+| `development` | ローカル開発・単体テスト | なし |
+| `paper_trading` | 仮想発注・動作検証 | MockBrokerClient を使用 |
+| `live` | 本番稼働（実際に発注） | kabuステーション API |
+
+> ⚠️ `live` に切り替える前に必ず `python -m kabusys.validate_config --strict` で設定を確認してください。
+
+### 必須環境変数
+
+| 変数名 | 説明 |
+|--------|------|
+| `JQUANTS_REFRESH_TOKEN` | J-Quants API リフレッシュトークン |
+| `KABU_API_PASSWORD` | kabuステーション API パスワード |
+| `KABUSYS_ENV` | 実行環境（development / paper_trading / live） |
+
+その他の変数とデフォルト値は `.env.example` を参照してください。
 
 ---
 

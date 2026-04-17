@@ -1,0 +1,14 @@
+# execution_config.yaml — 発注システム設定
+broker:
+  api: kabu_station
+  account_type: margin
+  retry_attempts: 3
+
+execution:
+  order_type: limit
+  slippage: 0.001
+  timeout_seconds: 10
+
+signal_queue:
+  table: signal_queue
+  polling_interval_seconds: 5
