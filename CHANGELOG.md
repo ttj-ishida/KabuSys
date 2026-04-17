@@ -1,103 +1,77 @@
-# Changelog
+KEEP A CHANGELOG
+=================
 
-すべての重要な変更を記録します。フォーマットは「Keep a Changelog」に準拠しています。
+すべての変更は https://keepachangelog.com/ja/ の慣例に準拠して記載しています。
 
-全般:
-- 日付はリリース日を示します（本変更記録はコードベースの現在状態から推測して作成しています）。
-- 各項目には該当するモジュール / ファイル名を併記しています。
+Unreleased
+----------
+注意:
+- ai/news_nlp.py が途中で切れているため（_fetch_articles 呼び出しの直後でファイルが未完の状態）、ニュース NLP 周りの完全な動作は未検証です。CI/実運用導入前に続きの実装およびテストが必要です。
 
-## [0.1.0] - 2026-04-17
+0.1.0 - 2026-04-17
+-----------------
 
-### 追加 (Added)
-- 実行スクリプトを追加・整備
-  - run_execution.py
-    - ExecutionEngine を起動するエントリポイントを追加。
-    - KABUSYS_ENV=paper_trading 時は paper_trading 専用の SQLite DB を使用し、本番 DB と分離する処理を実装。
-    - 停止フラグ（data/stop_requested.flag）検知、PID ファイル管理、スレッドでのエンジン起動・停止処理を実装。
-  - run_monitoring.py
-    - SystemMonitor のポーリングループ起動スクリプトを追加。
-    - MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒）。
-    - 停止フラグ検知による安全終了、例外捕捉によるポーリング継続ロジックを実装。
+Added
+- 基本リリース: KabuSys パッケージの初回公開。
+- 実行スクリプト
+  - run_execution.py: ExecutionEngine 起動スクリプトを追加。KABUSYS_ENV に応じて paper_trading 用 DB を分離し、BrokerClientFactory を用いたブローカー抽象を組み込む。ExecutionEngine をスレッドで起動/監視し、data/stop_requested.flag による外部停止をサポート。
+  - run_monitoring.py: SystemMonitor のポーリングループ起動スクリプトを追加。MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒）。監視処理は本番 sqlite_path を常に使用。
+- 設定/環境管理
+  - config.py: .env/.env.local の自動読み込み（OS 環境変数を保護）、export 形式・引用符・インラインコメントの取り扱い等に対応する堅牢なパーサを実装。Settings クラスを通じたプロパティアクセス（パス、閾値、環境種別、検証）。
+  - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動読み込み無効化対応。
+- データベース / 分析基盤
+  - DuckDB を利用する研究・AI モジュール向け接続サポート（duckdb_path, duckdb.connect）。
+  - 監視テーブルの初期化を行う init_monitoring_db の利用を各起動処理に組み込み（冪等）。
+- Portfolio モジュール（純粋関数群）
+  - portfolio_builder: select_candidates（スコア降順・タイブレーク）、calc_equal_weights、calc_score_weights（全スコア 0 の場合はフォールバック）。
+  - risk_adjustment: apply_sector_cap（既存ポジションからセクター暴露を算出し、上限超過セクターの新規候補を除外）、calc_regime_multiplier（regime に応じた乗数と未知レジームのログ警告）。
+  - position_sizing: calc_position_sizes（risk_based / equal / score の配分方式、単元株（lot_size）丸め、aggregate cap によるスケールダウン、cost_buffer を考慮した安全な配分ロジック）。
+- Research モジュール（DuckDB ベース）
+  - research.factor_research: calc_momentum（1/3/6 か月リターン、MA200 乖離）、calc_volatility（ATR20・20 日平均売買代金など）、calc_value（PER/ROE）。
+  - research.feature_exploration: calc_forward_returns（任意ホライズンでの将来リターン）、calc_ic（Spearman ランク相関による IC）、factor_summary（基本統計）、rank（同順位は平均ランク）。
+- Tools
+  - tools.paper_verification_report: Paper Trading 用検証レポート生成ツールを追加。稼働率/注文成功率/送信率/P95 レイテンシ等を集計し PASS/FAIL を判定。PAPER_TRADING_SQLITE_PATH の指定をサポート。
+- AI
+  - ai.news_nlp: raw_news を OpenAI（gpt-4o-mini）でセンチメントスコア化するスコアリング基盤を実装。ニュースウィンドウ算出、バッチ処理、トークン肥大化対策、再試行（指数バックオフ）、レスポンス検証、スコアクリッピング、部分更新（処理成功コードのみ置換）等の設計を導入。
+- Utilities
+  - utils.process_priority: set_process_priority（Windows/Linux の差分吸収）、set_cpu_affinity の実装。アクセス権限不足等の例外は警告ログでスキップ。
 
-- ポートフォリオ構築・ポジション管理機能を追加（pure functions）
-  - kabusys/portfolio/portfolio_builder.py
-    - 候補銘柄選定（select_candidates）、等配分・スコア加重の重み計算（calc_equal_weights / calc_score_weights）を実装。
-  - kabusys/portfolio/position_sizing.py
-    - position sizing ロジック（risk_based / equal / score）を追加。lot_size（単元）考慮、aggregate cap によるスケールダウンなどを含む。
-  - kabusys/portfolio/risk_adjustment.py
-    - セクター集中制限の適用（apply_sector_cap）、市場レジームに基づく乗数（calc_regime_multiplier）を実装。
+Changed / Improved
+- .env ローダーの改善
+  - export KEY=val 形式に対応。シングル/ダブルクォートのエスケープ処理、インラインコメント判定の改善により .env の柔軟な記述に対応。
+  - .env.local を .env の後に読み込み（override=True）してローカル上書きを許容。既存の OS 環境変数は protected として上書きされない。
+- 設定検証の強化
+  - Settings にて KABUSYS_ENV / LOG_LEVEL / PAPER_FILL_MODE の値検証を追加し、不正値は早期に例外を発生させる。
+- run_ スクリプトの堅牢化
+  - 起動直後にプロセス優先度を設定（set_process_priority("high")）し、監視処理/実行エンジンの安定性を向上。
+  - run_execution: paper_trading 環境では専用 DB に書き込むことで本番 DB と完全分離。
+  - run_monitoring: MONITOR_POLL_INTERVAL が不正な場合にデフォルトへフォールバックして警告を出力。
+- Position sizing の改善
+  - lot_size 単位での丸めや aggregate キャップ超過時のスケーリング（残余キャッシュに対する端数の優先配分）を実装。price が欠損した場合のスキップや上限チェックを強化。
+- apply_sector_cap の挙動
+  - "unknown" セクターの銘柄はセクター上限チェック対象外とし除外されないよう明示的に扱う（実運用でマスタ欠損銘柄が不利にならないよう配慮）。
+- Paper verification レポート
+  - P95 の算出、各種閾値（稼働率 / 成功率 / 送信率 / P95）と判定ロジックを導入。DB が未存在やテーブル未作成の場合でも安全に N/A を表示するフェイルセーフを実装。
 
-- リサーチ関連機能を追加（DuckDB ベースのファクター計算・探索）
-  - kabusys/research/factor_research.py
-    - Momentum / Volatility / Value ファクター計算（calc_momentum, calc_volatility, calc_value）を実装。prices_daily / raw_financials を参照。
-  - kabusys/research/feature_exploration.py
-    - 将来リターン計算（calc_forward_returns）、IC（calc_ic）、ファクター統計要約（factor_summary）、ランク変換（rank）を実装。
-  - kabusys/research/__init__.py
-    - 上記機能をパッケージとしてエクスポート。
+Fixed
+- calc_score_weights: 全銘柄のスコア合計が 0.0 の場合にゼロ除算を避け、等金額配分にフォールバックして警告ログを出力するように修正。
+- env パーサ: 空行・コメント行・不正行を正しく無視するよう修正。
+- process_priority: 未対応 OS の場合は警告を出して処理をスキップするようにし、例外による起動停止を防ぐ。
+- research.feature_exploration.calc_forward_returns: horizons の検証を追加（正の整数かつ 252 日以内）。
 
-- Paper Trading 検証ツールを追加
-  - kabusys/tools/paper_verification_report.py
-    - paper_trading DB を解析して稼働率・注文成功率・送信率・レイテンシ等の指標を算出し、PASS/FAIL 判定レポートを標準出力へ出力する CLI ツールを追加。
-    - P95 計算、期間フィルタ、閾値定義を実装。
+Security
+- 自動 .env 読み込みは KABUSYS_DISABLE_AUTO_ENV_LOAD により無効化可能。OS 環境変数はデフォルトで上書き保護（protected）されるため、運用時の意図しない置換を防止。
+- ai.news_nlp: API キーは引数または環境変数（OPENAI_API_KEY）でのみ受け付け、未設定時は ValueError を発生させる（誤った挙動の防止）。
 
-- ニュース NLP スコアリングの骨子を追加
-  - kabusys/ai/news_nlp.py（部分実装、OpenAI API 呼び出しを伴う処理フローを設計）
-    - ニュース収集ウィンドウ算出、バッチ送信方針、リトライ/バックオフ、レスポンス検証、スコアクリッピング、テーブル更新方針（部分置換）を設計。
-    - (注) ファイルは一部で切れており、細部実装は継続が必要。
-
-- 環境設定 / 起動時設定の整備
-  - kabusys/config.py
-    - .env 自動読み込み（.env / .env.local）ロジックを実装。プロジェクトルート探索は .git / pyproject.toml を基準にするため、CWD に依存しない。
-    - .env パーサーの厳密化（export の許容、クォート内エスケープ、インラインコメント処理など）。
-    - Settings クラスを導入し、各種環境変数（DB パス、Paper Trading 設定、監視閾値、PID/flag パスなど）をプロパティで提供。環境値検証（例: KABUSYS_ENV、PAPER_FILL_MODE、LOG_LEVEL）を追加。
-
-- プロセス優先度 / CPU affinity ユーティリティを追加
-  - kabusys/utils/process_priority.py
-    - set_process_priority(level)（Windows / POSIX を吸収）を実装。権限不足などは警告してスキップ。
-    - set_cpu_affinity(cpu_count) を追加（指定コア数でプロセスをピン留め）。エラーハンドリングあり。
-
-- パッケージメタ
-  - kabusys/__init__.py に __version__ = "0.1.0" を追加。
-
-### 変更 (Changed)
-- DB の利用分離
-  - 実行コードは paper_trading 環境時に専用 SQLite を使用するよう明確化（run_execution.py, Settings.paper_sqlite_path）。
-  - 監視 (monitoring) は環境にかかわらず本番 sqlite_path を使用する明示化（run_monitoring.py）。
-
-- ロギングおよび例外ハンドリング
-  - run_monitoring.py / run_execution.py で基本ログレベルを INFO に設定し、ループ内の予期しない例外を捕捉してログ出力後に待機継続する方式に変更。
-
-- ポートフォリオロジックの堅牢化
-  - position_sizing の aggregate cap 実装でコストバッファ (cost_buffer) を考慮。lot_size 単位での丸めと再配分ロジックを明示。
-  - risk_adjustment の apply_sector_cap は "unknown" セクターを除外せず最大比率制限を適用しない仕様に明確化。
-
-- リサーチ / 統計処理
-  - calc_forward_returns: horizons バリデーション（正の整数かつ <=252）を追加し、単一 SQL クエリで複数ホライズンを取得する最適化を導入。
-  - calc_ic: 有効レコード数が 3 未満の場合は None を返す仕様に変更（安定性向上）。
-  - rank: 浮動小数点丸めを導入して ties の判定安定化。
-
-### 修正 (Fixed)
-- 環境パースの不備対策
-  - .env パーサで無効行・コメント・クォート内エスケープなどの取り扱いを改善し、誤ったパースによる環境汚染を防止。
-
-- ポーリング間隔設定の安全化
-  - MONITOR_POLL_INTERVAL が 0 や負の値、非整数のときにデフォルトにフォールバックし、time.sleep での ValueError 発生を回避（run_monitoring.py）。
-
-- DB クエリの堅牢化（レポート生成）
-  - paper_verification_report: 対象テーブルが存在しない等の sqlite3.OperationalError を捕捉してフォールバック値を返すことで、DB スキーマ未作成時にもツールがクラッシュしないように修正。
-
-- psutil 呼び出しの堅牢化
-  - process_priority の優先度設定・CPU affinity 設定で AccessDenied / AttributeError / NotImplementedError を捕捉し、警告ログに落として処理を継続するように修正。
-
-### 既知の問題 / TODO
-- kabusys/ai/news_nlp.py が途中で切れており、_fetch_articles 等の内部関数や実際の OpenAI 呼び出し・DB 書き戻し処理の実装が完了していません（実装継続が必要）。
-- position_sizing 内の価格欠損（price が 0.0）の扱いについて備考コメントあり（将来的に前日終値や取得原価でのフォールバックが望ましい）。
-- 一部の設計（単元株 lot_size の銘柄別対応、stocks マスタからの情報取得等）は TODO として残っています。
-- DuckDB 側のテーブル（prices_daily / raw_financials / raw_news / news_symbols / ai_scores 等）は必要スキーマが前提。データ投入手順は別途整備が必要。
-
-### セキュリティ (Security)
+Deprecated
 - なし
 
----
+Removed
+- なし
 
-注: 本 CHANGELOG は提供されたコードベースの内容から推測して作成したものであり、実際のコミット履歴や意図した変更点と完全には一致しない可能性があります。必要であれば、各ファイル単位の差分（Git コミット）からさらに詳細なエントリを作成できます。
+Notes / 今後の作業
+- ai/news_nlp.py が途中で切れているため、_fetch_articles 実装・API 呼び出しループの最終化・テストが必要です。部分的に設計コメントや定数は存在しますが、実行可能状態にするための補完実装が残っています。
+- 単体テスト・統合テストの追加推奨（特に position sizing、risk manager、ExecutionEngine、news_nlp の外部 API 周り）。
+- 将来的な改善点として、position_sizing の銘柄別 lot_size 対応（stocks マスタからの取得）やニュース API 呼び出しのバックオフ戦略の細分化が挙げられます。
+
+以上
