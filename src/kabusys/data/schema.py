@@ -221,7 +221,7 @@ CREATE TABLE IF NOT EXISTS signal_queue (
     order_type      VARCHAR       NOT NULL CHECK (order_type IN ('market', 'limit', 'stop')),
     price           DECIMAL(18,4)          CHECK (price >= 0),
     status          VARCHAR       NOT NULL DEFAULT 'pending'
-                                  CHECK (status IN ('pending','processing','filled','cancelled','error')),
+                                  CHECK (status IN ('pending','processing','filled','cancelled','error','failed')),
     created_at      TIMESTAMP   NOT NULL DEFAULT current_timestamp,
     processed_at    TIMESTAMP
 )

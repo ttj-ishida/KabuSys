@@ -99,7 +99,7 @@ def main() -> None:
             )
             sys.exit(1)
 
-        print(f"以下の {len(targets)} 件を status='error' に更新します:")
+        print(f"以下の {len(targets)} 件を status='failed' に更新します:")
         _print_records(targets)
 
         answer = input("続行しますか？ [y/N]: ").strip().lower()
@@ -113,7 +113,7 @@ def main() -> None:
         # SELECT 後に別プロセスが status を変更済みの行は更新しない。
         # DuckDB の rowcount は信頼できないため RETURNING で実更新件数を確認する。
         updated_rows = conn.execute(
-            f"UPDATE signal_queue SET status = 'error'"
+            f"UPDATE signal_queue SET status = 'failed'"
             f" WHERE signal_id IN ({placeholders})"
             f" AND status IN ('pending', 'processing')"
             f" RETURNING signal_id",
@@ -127,7 +127,7 @@ def main() -> None:
                 len(signal_ids), updated,
             )
         logger.info(
-            "signal_queue を更新しました（%d 件を status='error' に変更）。",
+            "signal_queue を更新しました（%d 件を status='failed' に変更）。",
             updated,
         )
 
