@@ -25,6 +25,7 @@ from utils import (
     MONITORING_PID_PATH,
     STOP_FLAG_PATH,
     clear_stop_flag,
+    get_process_create_time,
     is_process_running,
     read_pid,
     write_pid,
@@ -63,7 +64,8 @@ def _launch(module: str, pid_path: Path) -> bool:
         [sys.executable, "-m", module],
         cwd=str(_SRC_DIR),
     )
-    write_pid(pid_path, proc.pid)
+    create_time = get_process_create_time(proc.pid)
+    write_pid(pid_path, proc.pid, create_time)
     logger.info("%s を起動しました (PID=%d)", module, proc.pid)
     return True
 

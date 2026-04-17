@@ -315,9 +315,21 @@ Kill Switch 発動後は `data/stop_requested.flag` が存在する。`start_sys
 ```
 1. orders テーブル（SQLite）で rejected 注文を確認
 2. 原因確認（資金不足・銘柄コードエラー・注文数量エラー等）
-3. signal_queue の対象シグナルを status='failed' に更新
+3. signal_queue の対象シグナルを status='failed' に更新（下記スクリプトを使用）
 4. 必要に応じて手動発注
 ```
+
+**signal_queue の手動ステータス更新（`mark_signal_failed.py`）:**
+
+```cmd
+:: 当日の銘柄コード 7203 のシグナルを failed に更新
+python scripts\mark_signal_failed.py --code 7203
+
+:: 日付を指定する場合
+python scripts\mark_signal_failed.py --code 7203 --date 2026-04-17
+```
+
+対象レコードを表示して `y/N` で確認を求める。対象が 0 件の場合はエラー終了する。
 
 ### 10.2 夜間バッチ失敗
 

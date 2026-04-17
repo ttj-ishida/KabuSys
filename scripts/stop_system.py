@@ -24,8 +24,9 @@ from utils import (
     MONITORING_PID_PATH,
     STOP_FLAG_PATH,
     delete_pid,
+    get_process_create_time,
     is_process_running,
-    read_pid,
+    read_pid_entry,
     request_stop,
 )
 
@@ -63,18 +64,40 @@ def main() -> None:
         (EXECUTION_PID_PATH, "execution_service"),
         (MONITORING_PID_PATH, "monitoring_service"),
     ]:
-        pid = read_pid(pid_path)
-        if pid is None:
+        entry = read_pid_entry(pid_path)
+        if entry is None:
             logger.info(
                 "%s の PID ファイルが見つかりません。スキップします。"
                 "（片方のコンポーネントのみ起動中の場合は正常）",
                 label,
             )
             continue
+        pid, stored_create_time = entry
+
         if not is_process_running(pid):
             logger.info("%s (PID=%d) は既に停止しています。", label, pid)
             delete_pid(pid_path)
             continue
+
+        # PID 再利用チェック: create_time が記録されている場合のみ照合
+        # 浮動小数点の OS/psutil バージョン差を考慮し許容誤差 1ms で比較する
+        _CREATE_TIME_TOLERANCE = 1e-3
+        if stored_create_time is not None:
+            actual_create_time = get_process_create_time(pid)
+            if actual_create_time is None:
+                logger.warning(
+                    "%s (PID=%d) の起動時刻を取得できませんでした。"
+                    "PID 再利用チェックをスキップして停止処理を続行します。",
+                    label, pid,
+                )
+            elif abs(actual_create_time - stored_create_time) > _CREATE_TIME_TOLERANCE:
+                logger.warning(
+                    "%s (PID=%d) の起動時刻が不一致です（保存: %.3f, 実際: %.3f）。"
+                    "PID が再利用された可能性があります。強制終了をスキップします。",
+                    label, pid, stored_create_time, actual_create_time,
+                )
+                delete_pid(pid_path)
+                continue
 
         _wait_or_kill(pid, label)
         delete_pid(pid_path)

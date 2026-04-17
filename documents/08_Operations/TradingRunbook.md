@@ -132,8 +132,32 @@ python scripts\stop_system.py
 
 ### 5.3 ログ確認
 
-ログは標準出力（Task Scheduler 経由では Windows イベントログ）に出力される。  
+ログは標準出力に出力される。Task Scheduler 経由で起動したジョブは `logs\<ジョブ名>.log` にリダイレクトされる（`setup_task_scheduler.ps1` で設定済み）。  
 `logging.basicConfig` で `%(asctime)s %(levelname)s %(message)s` 形式。
+
+**ログファイル一覧（`logs\` ディレクトリ）:**
+
+| ジョブ名 | ログファイル |
+|---------|------------|
+| KabuSys_ExecutionStart | `logs\KabuSys_ExecutionStart.log` |
+| KabuSys_MonitoringStart | `logs\KabuSys_MonitoringStart.log` |
+| KabuSys_DataUpdate | `logs\KabuSys_DataUpdate.log` |
+| KabuSys_FeatureGen | `logs\KabuSys_FeatureGen.log` |
+| KabuSys_AiAnalysis | `logs\KabuSys_AiAnalysis.log` |
+| KabuSys_StrategySignal | `logs\KabuSys_StrategySignal.log` |
+| KabuSys_PortfolioConstruction | `logs\KabuSys_PortfolioConstruction.log` |
+
+**ログ確認コマンド（PowerShell）:**
+
+```powershell
+# 直近50行を確認
+Get-Content logs\KabuSys_DataUpdate.log -Tail 50
+
+# ERROR / CRITICAL のみ抽出
+Select-String -Path logs\*.log -Pattern "ERROR|CRITICAL"
+```
+
+> ログは各実行ごとに **追記** される。定期的（週1回推奨）に手動でアーカイブまたは削除すること。
 
 主要なログキーワード:
 
@@ -259,7 +283,12 @@ python scripts\start_system.py --clear-stop-flag
 Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object TaskName, LastRunTime, LastTaskResult
 ```
 
-`LastTaskResult = 0` が正常終了。それ以外はログを確認すること。
+`LastTaskResult = 0` が正常終了。それ以外はログファイルを確認すること。
+
+```powershell
+# 例: AiAnalysis のエラー確認
+Get-Content logs\KabuSys_AiAnalysis.log -Tail 100 | Select-String "ERROR|CRITICAL"
+```
 
 **夜間バッチ手動再実行（異常時）:**
 
