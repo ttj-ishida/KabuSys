@@ -96,12 +96,17 @@ python scripts\stop_system.py
 3. 10 秒以内に終了しない場合は `psutil.Process(pid).kill()` で強制終了
 4. PID ファイル（`data/execution.pid`, `data/monitoring.pid`）を削除
 
+> **PID 再利用チェック**: PID ファイルには PID と起動時刻（`create_time`）が記録されている。
+> 停止時に実プロセスの `create_time` と照合し、不一致の場合は別プロセスへの誤 kill を防ぐためスキップする。
+
 ### 4.3 Kill Switch 発動後の確認
 
 ```
 1. kabuステーション画面でポジション・未約定注文を直接確認
 2. ログで発動原因を特定（ERROR / CRITICAL メッセージ）
-3. 原因が解消したら §9「Kill Switch 発動後の復旧」に従う
+3. --dry-run で DB 状態を確認（発注なし）
+   python scripts\start_system.py --dry-run
+4. 原因が解消したら §9「Kill Switch 発動後の復旧」に従う
 ```
 
 ---

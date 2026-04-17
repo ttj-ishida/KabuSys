@@ -274,23 +274,41 @@ Windows Task Scheduler により以下を自動実行する。
 
 **初期セットアップ（初回のみ）:**
 
-    powershell -File scripts\setup_task_scheduler.ps1
+```cmd
+:: 1. 環境変数設定（.env ウィザード）
+python -m kabusys.config_setup
+
+:: 2. config/*.yaml テンプレート生成
+python scripts\generate_config.py
+
+:: 3. 設定検証
+python -m kabusys.validate_config
+
+:: 4. Task Scheduler 登録
+powershell -File scripts\setup_task_scheduler.ps1
+```
 
 **手動起動・停止:**
 
-  操作          コマンド
-  ------------- -----------------------------------------------
-  全体起動      python scripts\start_system.py
-  全体停止      python scripts\stop_system.py
-  実行系のみ起動  python scripts\start_system.py --component execution
-  監視系のみ起動  python scripts\start_system.py --component monitoring
+  操作                   コマンド
+  ---------------------- -----------------------------------------------
+  全体起動               python scripts\start_system.py
+  全体停止               python scripts\stop_system.py
+  実行系のみ起動         python scripts\start_system.py --component execution
+  監視系のみ起動         python scripts\start_system.py --component monitoring
+  状態確認（発注なし）   python scripts\start_system.py --dry-run
+  停止フラグ解除＋起動   python scripts\start_system.py --clear-stop-flag
 
 **保守スクリプト:**
 
-  スクリプト                     用途
-  ------------------------------ ----------------------------------------
-  scripts\rebuild_features.py    特徴量を手動再計算（データ確認付き）
-  scripts\reset_signals.py       signal_queue をクリア
+  スクリプト                        用途
+  --------------------------------- -------------------------------------------------
+  scripts\rebuild_features.py       特徴量を手動再計算（データ確認付き）
+  scripts\reset_signals.py          signal_queue をクリア（取引時間外のみ）
+  scripts\mark_signal_failed.py     指定シグナルを status='failed' に手動更新
+  scripts\generate_config.py        config/*.yaml テンプレートを生成
+  python -m kabusys.config_setup    .env を対話式で作成・更新
+  python -m kabusys.validate_config 設定の事前検証（必須変数・YAML・live 警告）
 
 詳細: `documents/10_Runtime/RuntimeJobSchedule.md`
 

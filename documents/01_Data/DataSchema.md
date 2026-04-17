@@ -243,15 +243,23 @@ Executionへ引き渡すための冪等な発注指示キュー。
 
     pending
     processing
-    executed
+    filled
     cancelled
     error
+    failed
+
+- `pending`    : 発注待ち（初期状態）
+- `processing` : 発注処理中（ExecutionEngine がロック中）
+- `filled`     : 約定済み
+- `cancelled`  : キャンセル済み
+- `error`      : システムエラーによる失敗
+- `failed`     : 手動で失敗マーク（`mark_signal_failed.py` で設定）
 
 Executionの処理フロー:
 1. `SELECT * FROM signal_queue WHERE status = 'pending'`
 2. `UPDATE ... SET status = 'processing' WHERE signal_id = ? (Lock)`
 3. broker API へ発注
-4. `UPDATE ... SET status = 'executed'`
+4. 約定確認後 `UPDATE ... SET status = 'filled'`
 
 ------------------------------------------------------------------------
 

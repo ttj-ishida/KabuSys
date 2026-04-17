@@ -34,6 +34,7 @@
     Phase 7  Monitoring
     Phase 8  Paper Trading
     Phase 9  Live Trading
+    Phase 10 Environment Setup & Operations
 
 ------------------------------------------------------------------------
 
@@ -276,6 +277,44 @@
   7      Monitoring
   8      Paper Trading
   9      Live Trading
+
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+
+# Phase 10 --- Environment Setup & Operations
+
+目的: 初期セットアップ支援・設定管理・運用補助ツールの整備
+
+実装項目:
+
+-   対話式 `.env` 設定ウィザード（`config_setup.py`）
+-   `config/*.yaml` テンプレート自動生成（`generate_config.py`）
+-   設定事前検証 CLI（`validate_config.py`）
+-   起動前状態確認モード（`start_system.py --dry-run`）
+-   初回セットアップ手順ドキュメント整備（`README.md`, `DeploymentArchitecture.md`）
+
+作成モジュール・スクリプト
+
+    src/kabusys/
+        config_setup.py         — .env 対話式ウィザード
+        validate_config.py      — 設定検証 CLI
+    scripts/
+        generate_config.py      — config/*.yaml テンプレート生成
+    config/
+        system_config.yaml
+        data_config.yaml
+        strategy_config.yaml
+        risk_config.yaml
+        execution_config.yaml
+        monitoring_config.yaml
+
+成果物:
+
+-   `python -m kabusys.config_setup` で .env を対話式に作成・更新できる
+-   `python scripts/generate_config.py` で config/*.yaml を生成できる
+-   `python -m kabusys.validate_config` で設定不備を起動前に検出できる
+-   `python scripts/start_system.py --dry-run` で発注なしの状態確認ができる
 
 ------------------------------------------------------------------------
 
