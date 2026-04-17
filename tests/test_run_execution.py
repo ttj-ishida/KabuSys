@@ -59,13 +59,16 @@ class TestRunExecutionMain:
 
 
 def test_run_execution_stops_on_flag(tmp_path):
-    """停止フラグが作成されたとき engine.stop() が呼ばれることを確認する。"""
+    """停止フラグが事前に存在するとき、エンジンを起動せず終了することを確認する。
+
+    run_execution.main() はフラグが起動前に存在する場合、エンジンを生成した後に
+    早期リターンする実装になっており、engine.run_session() と engine.stop() は
+    いずれも呼ばれない。
+    """
     stop_flag = tmp_path / "stop.flag"
-    # フラグを事前に作成（メインループがすぐに検知する）
-    stop_flag.touch()
+    stop_flag.touch()  # フラグを事前に作成
 
     mock_engine = MagicMock()
-    mock_engine.run_session.return_value = None  # ブロックしない
 
     with (
         patch.object(re_mod, "_STOP_FLAG", stop_flag),
@@ -83,4 +86,6 @@ def test_run_execution_stops_on_flag(tmp_path):
     ):
         re_mod.main()
 
-    mock_engine.stop.assert_called_once()
+    # フラグが起動前に存在 → エンジンは起動せず早期リターン。stop() は呼ばれない
+    mock_engine.run_session.assert_not_called()
+    mock_engine.stop.assert_not_called()
