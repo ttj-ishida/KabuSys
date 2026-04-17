@@ -38,7 +38,11 @@ _TRADING_PERIODS: list[tuple[time, time]] = [
 
 
 def _is_trading_hours(now: datetime | None = None) -> bool:
-    """現在時刻が TSE 取引時間内かどうかを返す（土日は常に False）。"""
+    """現在時刻が TSE 取引時間内かどうかを返す（土日は常に False）。
+
+    Note: 日本の祝日（取引休場日）・半日立会い（大納会等）には非対応。
+    祝日は取引時間帯でも「拒否」扱いになるが、安全側に倒れるため許容している。
+    """
     if now is None:
         now = datetime.now(_JST)
     if now.weekday() >= 5:  # 土曜(5) / 日曜(6)
