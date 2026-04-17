@@ -164,11 +164,11 @@ def test_updates_on_user_yes(tmp_path, monkeypatch):
          patch("mark_signal_failed.duckdb.connect", return_value=conn_mock):
         _run(["--code", "7203", "--date", "2026-04-17"])
 
-    # UPDATE が呼ばれ、status='error' と signal_id が含まれること
+    # UPDATE が呼ばれ、status='failed' と signal_id が含まれること
     sql_calls = [(str(c.args[0]), c.args[1] if len(c.args) > 1 else [])
                  for c in conn_mock.execute.call_args_list]
     update_call = next(c for c in sql_calls if "UPDATE" in c[0])
-    assert "error" in update_call[0]
+    assert "failed" in update_call[0]
     assert "RETURNING" in update_call[0]
     assert "sig-001" in update_call[1] and "sig-002" in update_call[1]
     conn_mock.close.assert_called_once()
