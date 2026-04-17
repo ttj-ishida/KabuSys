@@ -38,15 +38,21 @@ _TRADING_PERIODS: list[tuple[time, time]] = [
 
 
 def _is_trading_hours(now: datetime | None = None) -> bool:
-    """現在時刻が TSE 取引時間内かどうかを返す。"""
+    """現在時刻が TSE 取引時間内かどうかを返す（土日は常に False）。"""
     if now is None:
         now = datetime.now(_JST)
+    if now.weekday() >= 5:  # 土曜(5) / 日曜(6)
+        return False
     t = now.time()
     return any(start <= t < end for start, end in _TRADING_PERIODS)
 
 
 def _count_open_orders(sqlite_path: Path) -> int:
-    """monitoring.db の orders テーブルで status='sent' の件数を返す。"""
+    """monitoring.db の orders テーブルで status='sent' の件数を返す。
+
+    Raises:
+        RuntimeError: DB 接続または照会に失敗した場合。呼び出し側で sys.exit(1) すること。
+    """
     if not sqlite_path.exists():
         return 0
     try:
@@ -57,13 +63,16 @@ def _count_open_orders(sqlite_path: Path) -> int:
         finally:
             conn.close()
     except sqlite3.Error as e:
-        logger.warning("orders テーブルの確認に失敗しました: %s", e)
-        return 0
+        raise RuntimeError(f"orders テーブルの確認に失敗しました: {e}") from e
 
 
 def _backup_duckdb(duckdb_path: Path) -> Path:
-    """DuckDB ファイルを同ディレクトリにタイムスタンプ付きでコピーする。"""
-    ts = datetime.now(_JST).strftime("%Y%m%d_%H%M%S")
+    """DuckDB ファイルを同ディレクトリにタイムスタンプ付きでコピーする。
+
+    ファイル名にマイクロ秒を含めることで同秒内連続実行でも衝突しない。
+    """
+    now = datetime.now(_JST)
+    ts = now.strftime("%Y%m%d_%H%M%S") + f"_{now.microsecond:06d}"
     backup_dir = duckdb_path.parent / "backup"
     backup_dir.mkdir(exist_ok=True)
     dest = backup_dir / f"{duckdb_path.stem}_{ts}.duckdb"
@@ -99,28 +108,46 @@ def main() -> None:
 
     settings = Settings()
 
-    # 未処理注文チェック
-    open_orders = _count_open_orders(settings.sqlite_path)
+    # B1: DuckDB ファイル存在確認（接続すると空DBを勝手に作るため事前チェック）
+    if not settings.duckdb_path.exists():
+        logger.error(
+            "DuckDB ファイルが見つかりません: %s — 実行を中止します。",
+            settings.duckdb_path,
+        )
+        sys.exit(1)
+
+    # B3: 未処理注文チェック（SQLite エラー時はエラー終了）
+    try:
+        open_orders = _count_open_orders(settings.sqlite_path)
+    except RuntimeError as e:
+        logger.error("%s — 安全のため実行を中止します。", e)
+        sys.exit(1)
+
     if open_orders > 0:
         print(
             f"警告: status='sent' の未処理注文が {open_orders} 件あります。"
             " signal_queue をクリアしても注文は取り消されません。"
+            " この後、必ず注文照合・キャンセル手順を実施してください。"
         )
         answer = input("続行しますか？ [y/N]: ").strip().lower()
         if answer != "y":
             logger.info("ユーザーによりキャンセルされました。")
             sys.exit(0)
 
-    # バックアップ
-    if settings.duckdb_path.exists():
-        backup_path = _backup_duckdb(settings.duckdb_path)
-        logger.info("バックアップを作成しました: %s", backup_path)
-    else:
-        logger.warning("DuckDB ファイルが見つかりません: %s", settings.duckdb_path)
+    # バックアップ（DuckDB 存在確認済みなので必ず実行）
+    backup_path = _backup_duckdb(settings.duckdb_path)
+    logger.info("バックアップを作成しました: %s", backup_path)
 
-    # signal_queue 削除
+    # B2: signal_queue テーブル存在確認 + 削除
     conn = duckdb.connect(str(settings.duckdb_path))
     try:
+        exists = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables"
+            " WHERE table_schema = 'main' AND table_name = 'signal_queue'"
+        ).fetchone()[0] > 0
+        if not exists:
+            logger.info("signal_queue テーブルが存在しません。何もせず終了します。")
+            return
         cursor = conn.execute("DELETE FROM signal_queue")
         n = cursor.rowcount
         logger.info("signal_queue をクリアしました（%d 件削除）", n)
