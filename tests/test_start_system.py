@@ -102,3 +102,88 @@ def test_start_all_launches_both(tmp_path):
         _run_start()  # default = all
 
     assert len(launched) == 2
+
+
+# ---------------------------------------------------------------------------
+# --dry-run モード
+# ---------------------------------------------------------------------------
+
+def test_dry_run_does_not_launch_process(tmp_path):
+    """--dry-run 指定時にプロセスが起動しないこと。"""
+    with patch("start_system.STOP_FLAG_PATH", tmp_path / "stop.flag"), \
+         patch("start_system.EXECUTION_PID_PATH", tmp_path / "exec.pid"), \
+         patch("start_system.MONITORING_PID_PATH", tmp_path / "mon.pid"), \
+         patch("start_system._DRY_RUN_DEPS_AVAILABLE", False), \
+         patch("start_system.subprocess.Popen") as mock_popen:
+        _run_start(["--dry-run"])
+
+    mock_popen.assert_not_called()
+
+
+def test_dry_run_reports_stop_flag_present(tmp_path, caplog):
+    """--dry-run で停止フラグが存在する場合に「あり」とログ出力されること。"""
+    import logging
+    flag = tmp_path / "stop.flag"
+    flag.touch()
+
+    with patch("start_system.STOP_FLAG_PATH", flag), \
+         patch("start_system._DRY_RUN_DEPS_AVAILABLE", False), \
+         caplog.at_level(logging.INFO, logger="start_system"):
+        _run_start(["--dry-run"])
+
+    assert "あり" in caplog.text
+
+
+def test_dry_run_reports_stop_flag_absent(tmp_path, caplog):
+    """--dry-run で停止フラグが存在しない場合に「なし」とログ出力されること。"""
+    import logging
+
+    with patch("start_system.STOP_FLAG_PATH", tmp_path / "stop.flag"), \
+         patch("start_system._DRY_RUN_DEPS_AVAILABLE", False), \
+         caplog.at_level(logging.INFO, logger="start_system"):
+        _run_start(["--dry-run"])
+
+    assert "なし" in caplog.text
+
+
+def test_dry_run_queries_duckdb(tmp_path, caplog):
+    """--dry-run で DuckDB が利用可能なとき pending/processing/positions をログ出力すること。"""
+    import logging
+
+    duckdb_path = tmp_path / "kabusys.duckdb"
+    duckdb_path.write_bytes(b"fake")
+
+    settings_mock = MagicMock()
+    settings_mock.duckdb_path = duckdb_path
+
+    def fake_execute(sql, *args, **kwargs):
+        m = MagicMock()
+        m.fetchone.return_value = (3,)
+        return m
+
+    conn_mock = MagicMock()
+    conn_mock.execute.side_effect = fake_execute
+
+    with patch("start_system.STOP_FLAG_PATH", tmp_path / "stop.flag"), \
+         patch("start_system._DRY_RUN_DEPS_AVAILABLE", True), \
+         patch("start_system._Settings", return_value=settings_mock), \
+         patch("start_system._duckdb.connect", return_value=conn_mock), \
+         caplog.at_level(logging.INFO, logger="start_system"):
+        _run_start(["--dry-run"])
+
+    assert "pending" in caplog.text
+    assert "processing" in caplog.text
+    assert "positions" in caplog.text
+    conn_mock.close.assert_called_once()
+
+
+def test_dry_run_does_not_clear_stop_flag(tmp_path):
+    """--dry-run 指定時に停止フラグを削除しないこと。"""
+    flag = tmp_path / "stop.flag"
+    flag.touch()
+
+    with patch("start_system.STOP_FLAG_PATH", flag), \
+         patch("start_system._DRY_RUN_DEPS_AVAILABLE", False):
+        _run_start(["--dry-run"])
+
+    assert flag.exists()  # フラグは残ったまま

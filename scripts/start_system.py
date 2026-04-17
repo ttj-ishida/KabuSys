@@ -9,6 +9,9 @@
 
     # 停止フラグが残っている場合に明示的にクリアして起動する
     python scripts/start_system.py --clear-stop-flag
+
+    # 発注なしでリコンシリエーションと状態確認のみ実行（再開判断前の確認用）
+    python scripts/start_system.py --dry-run
 """
 from __future__ import annotations
 
@@ -30,6 +33,14 @@ from utils import (
     read_pid,
     write_pid,
 )
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+try:
+    import duckdb as _duckdb
+    from kabusys.config import Settings as _Settings
+    _DRY_RUN_DEPS_AVAILABLE = True
+except ImportError:
+    _DRY_RUN_DEPS_AVAILABLE = False
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
@@ -70,6 +81,60 @@ def _launch(module: str, pid_path: Path) -> bool:
     return True
 
 
+def _run_dry_run() -> None:
+    """--dry-run モード: 発注なしで DB 状態を確認してログ出力する。"""
+    prefix = "[DRY-RUN]"
+
+    # 停止フラグ状態を報告
+    flag_status = "あり" if STOP_FLAG_PATH.exists() else "なし"
+    logger.info("%s 停止フラグ: %s (%s)", prefix, flag_status, STOP_FLAG_PATH)
+
+    # DuckDB / Settings の依存がない場合はここで終了
+    if not _DRY_RUN_DEPS_AVAILABLE:
+        logger.warning("%s duckdb または kabusys.config が利用不可のため DB 状態確認をスキップします。", prefix)
+        logger.info("%s 発注は行いません。通常起動は --clear-stop-flag を指定してください。", prefix)
+        return
+
+    try:
+        settings = _Settings()
+        if not settings.duckdb_path.exists():
+            logger.warning("%s DuckDB ファイルが見つかりません: %s", prefix, settings.duckdb_path)
+            logger.info("%s 発注は行いません。通常起動は --clear-stop-flag を指定してください。", prefix)
+            return
+
+        conn = _duckdb.connect(str(settings.duckdb_path), read_only=True)
+        try:
+            # signal_queue の pending 件数
+            pending = conn.execute(
+                "SELECT COUNT(*) FROM signal_queue WHERE status = 'pending'"
+            ).fetchone()[0]
+
+            # 未処理 orders（sent 状態）件数（リコンシリエーション対象）
+            sent_orders = conn.execute(
+                "SELECT COUNT(*) FROM signal_queue WHERE status = 'processing'"
+            ).fetchone()[0]
+
+            # positions 件数
+            positions = conn.execute(
+                "SELECT COUNT(*) FROM positions"
+            ).fetchone()[0]
+
+        finally:
+            conn.close()
+
+        logger.info(
+            "%s signal_queue: pending=%d 件, processing=%d 件（リコンシリエーション対象）",
+            prefix, pending, sent_orders,
+        )
+        logger.info("%s positions: %d 件", prefix, positions)
+        logger.info(
+            "%s 発注は行いません。通常起動は --clear-stop-flag を指定してください。", prefix
+        )
+
+    except Exception:
+        logger.exception("%s DB 状態確認中にエラーが発生しました。", prefix)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="KabuSys システム起動")
     parser.add_argument(
@@ -83,7 +148,17 @@ def main() -> None:
         action="store_true",
         help="停止フラグが残っている場合に明示的にクリアして起動する（Kill Switch 発動後の復旧用）",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="発注なしで DB 状態確認のみ実行（再開判断前の確認用）",
+    )
     args = parser.parse_args()
+
+    # --dry-run モード: プロセス起動なしで状態確認のみ
+    if args.dry_run:
+        _run_dry_run()
+        return
 
     # 停止フラグの確認
     if STOP_FLAG_PATH.exists():

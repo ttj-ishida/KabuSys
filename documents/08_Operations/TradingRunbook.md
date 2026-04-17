@@ -254,13 +254,32 @@ python scripts\stop_system.py
 python scripts\start_system.py --clear-stop-flag
 ```
 
+#### 再開前の状態確認（推奨）
+
+`--clear-stop-flag` で本起動する前に、`--dry-run` で発注なしの状態確認を実施することを推奨する。
+
+```cmd
+:: 発注なしで DB 状態を確認（プロセス起動なし、停止フラグも変更しない）
+python scripts\start_system.py --dry-run
+```
+
+出力例:
+
+```
+[DRY-RUN] 停止フラグ: あり (data\stop_requested.flag)
+[DRY-RUN] signal_queue: pending=3 件, processing=0 件（リコンシリエーション対象）
+[DRY-RUN] positions: 5 件
+[DRY-RUN] 発注は行いません。通常起動は --clear-stop-flag を指定してください。
+```
+
 ### 8.3 発動後の確認
 
 ```
 1. ログで Kill Switch 発動の原因を確認
 2. ポジションを証券口座で直接確認（手動）
-3. 原因が解消したら FailureRecovery.md §9 に従い復旧
-4. 翌日の Runbook を通常通り実行
+3. python scripts\start_system.py --dry-run で pending シグナル数とポジションを確認
+4. 原因が解消したら FailureRecovery.md §9 に従い復旧
+5. 翌日の Runbook を通常通り実行
 ```
 
 ---
