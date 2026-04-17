@@ -16,7 +16,6 @@ import json
 from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
-import duckdb
 import pytest
 
 from kabusys.data.schema import init_schema
@@ -331,7 +330,6 @@ def test_calc_news_window_values():
 
 def test_calc_news_window_boundary_inclusive_start(conn):
     """ウィンドウ開始時刻ちょうどの記事は対象に含まれる。"""
-    from datetime import datetime
     from kabusys.ai.news_nlp import score_news, calc_news_window
 
     window_start, _ = calc_news_window(TARGET_DATE)

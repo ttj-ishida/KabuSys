@@ -12,8 +12,6 @@ import pytest
 
 from kabusys.data.schema import init_schema
 from kabusys.strategy.feature_engineering import (
-    _MIN_PRICE,
-    _MIN_TURNOVER,
     _apply_universe_filter,
     build_features,
 )
@@ -586,7 +584,6 @@ def test_generate_signals_no_buy_sell_conflict(conn):
 
 def test_generate_signals_weights_invalid_values_ignored(conn):
     """weights に NaN/Inf/負値が含まれてもフォールバックして正常動作する"""
-    import math as _math
     _insert_price_history(conn, [("A", 1000.0, 6e8)])
     build_features(conn, TARGET_DATE)
     invalid_weights = {

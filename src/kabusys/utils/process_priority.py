@@ -14,12 +14,15 @@ logger = logging.getLogger(__name__)
 
 _VALID_LEVELS = frozenset({"high", "normal", "low"})
 
-# psutil の HIGH_PRIORITY_CLASS 等は Windows 専用定数
-_WINDOWS_PRIORITY = {
-    "high": psutil.HIGH_PRIORITY_CLASS,
-    "normal": psutil.NORMAL_PRIORITY_CLASS,
-    "low": psutil.IDLE_PRIORITY_CLASS,
-}
+# psutil の HIGH_PRIORITY_CLASS 等は Windows 専用定数（Linux では存在しないため遅延評価）
+if platform.system() == "Windows":
+    _WINDOWS_PRIORITY = {
+        "high": psutil.HIGH_PRIORITY_CLASS,
+        "normal": psutil.NORMAL_PRIORITY_CLASS,
+        "low": psutil.IDLE_PRIORITY_CLASS,
+    }
+else:
+    _WINDOWS_PRIORITY: dict[str, int] = {}
 
 # POSIX 系 OS の nice 値
 _LINUX_NICE = {

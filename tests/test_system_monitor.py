@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, datetime as _real_datetime, datetime, timezone
-from pathlib import Path
+from datetime import date, datetime as _real_datetime
 from unittest.mock import MagicMock, patch
 
 import pytest

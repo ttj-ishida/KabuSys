@@ -1,10 +1,7 @@
 """tests/test_kill_switch.py — KillSwitch ユニットテスト"""
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import MagicMock
 
-import pytest
 
 from kabusys.monitoring.kill_switch import KillSwitch
 from kabusys.monitoring.system_monitor import SystemCheckResult

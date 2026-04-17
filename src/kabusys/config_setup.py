@@ -8,7 +8,6 @@
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -156,8 +155,6 @@ def _prompt(item: dict, existing: dict[str, str]) -> str | None:
     current = existing.get(key, item.get("default", ""))
     choices = item.get("choices")
     is_secret = item.get("secret", False)
-    is_optional = item.get("optional", False)
-
     print(f"\n{'─' * 60}")
     print(f"  {label} [{key}]")
     if item.get("description"):

@@ -1,6 +1,5 @@
 # tests/test_run_monitoring.py
 import logging
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 

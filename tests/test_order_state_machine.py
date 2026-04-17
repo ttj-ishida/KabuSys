@@ -126,9 +126,9 @@ class TestOrderRecordTransitions:
 # Group 2: OrderRepository（インメモリ SQLite）
 # ---------------------------------------------------------------------------
 
-import sqlite3
+import sqlite3  # noqa: E402
 
-from kabusys.execution.order_repository import OrderRepository, init_orders_db
+from kabusys.execution.order_repository import OrderRepository, init_orders_db  # noqa: E402
 
 
 @pytest.fixture
@@ -253,9 +253,9 @@ class TestOrderRepository:
 # Group 3: OrderManager（MockBrokerClient + インメモリ SQLite）
 # ---------------------------------------------------------------------------
 
-from kabusys.execution.broker_api import OrderRequest
-from kabusys.execution.mock_client import MockBrokerClient
-from kabusys.execution.order_manager import DuplicateOrderError, OrderManager
+from kabusys.execution.broker_api import OrderRequest  # noqa: E402
+from kabusys.execution.mock_client import MockBrokerClient  # noqa: E402
+from kabusys.execution.order_manager import DuplicateOrderError, OrderManager  # noqa: E402
 
 
 @pytest.fixture

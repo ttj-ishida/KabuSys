@@ -2,7 +2,6 @@
 """src/kabusys/config_setup.py の単体テスト"""
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
 

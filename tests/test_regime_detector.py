@@ -137,7 +137,7 @@ def test_bull_by_ma(conn):
 
 def test_insufficient_prices(conn):
     """1321 のデータが _MA_WINDOW 日未満 → ma200_ratio=1.0 フォールバック。"""
-    from kabusys.ai.regime_detector import _calc_ma200_ratio, _MA_WINDOW
+    from kabusys.ai.regime_detector import _calc_ma200_ratio
 
     # 100 日分のみ挿入
     _insert_prices_uniform(conn, "1321", 100, 100.0, TARGET_DATE)
@@ -158,7 +158,7 @@ def test_no_prices(conn):
 # Task 3: _fetch_macro_news()
 # ---------------------------------------------------------------------------
 
-from datetime import datetime as dt_class
+from datetime import datetime as dt_class  # noqa: E402
 
 # news_nlp.calc_news_window に合わせたウィンドウ（TARGET_DATE=2026-03-21 の場合）
 # window_start = 2026-03-20 06:00 UTC, window_end = 2026-03-20 23:30 UTC

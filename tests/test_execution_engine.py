@@ -1,23 +1,19 @@
 # tests/test_execution_engine.py
 """ExecutionEngine 統合テスト（Issue #30 / #34）"""
 # NOTE: 以下は Task 7/8 で追加するテストクラス用にプリステージ済み
-import queue
 import sqlite3
-import threading
 from datetime import date, time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import duckdb
 import pytest
 
-from kabusys.execution.broker_api import OrderRequest, Position
 from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine
 from kabusys.execution.mock_client import MockBrokerClient
 from kabusys.execution.order_manager import OrderManager
 from kabusys.execution.order_record import OrderState
-from kabusys.execution.order_repository import OrderRepository, init_orders_db
+from kabusys.execution.order_repository import OrderRepository
 from kabusys.execution.risk_manager import RiskConfig, RiskManager
-from kabusys.monitoring.monitoring_db import MonitoringDB, init_monitoring_db
+from kabusys.monitoring.monitoring_db import MonitoringDB
 
 
 TARGET_DATE = date(2026, 3, 29)
@@ -148,7 +144,6 @@ class TestProcessSignals:
         cfg = EngineConfig(target_date=TARGET_DATE, signal_send_start=time(0, 0), signal_send_end=time(0, 0))
         engine = _make_engine(broker, sqlite_conn, duckdb_conn, config=cfg)
         # run_session は使わず、send_end チェックを直接テスト
-        from datetime import datetime
         # signal_send_end < 現在時刻 → _process_signals を呼ばない
         engine._stop_event.set()  # ループ停止のため
         # ← _process_signals を明示的に呼んだ場合との比較
@@ -223,7 +218,6 @@ class TestPushDrainAndKillSwitch:
         engine._drain_push_queue()
 
         updated = engine._repo.get(order.client_order_id)
-        from kabusys.execution.order_record import OrderState
         assert updated.state == OrderState.Filled
 
     def test_kill_switch_cancels_all_active_orders(self, sqlite_conn, duckdb_conn):

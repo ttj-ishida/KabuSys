@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
-import pytest
 import requests
 
 from kabusys.monitoring.alert_manager import AlertManager

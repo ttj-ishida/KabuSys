@@ -10,7 +10,6 @@ documents/01_Data/config_schema.md に沿った安全側（保守的）な初期
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent

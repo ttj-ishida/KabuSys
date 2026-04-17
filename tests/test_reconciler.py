@@ -4,7 +4,7 @@ import pytest
 from kabusys.execution.mock_client import MockBrokerClient
 from kabusys.execution.order_repository import OrderRepository, init_orders_db
 from kabusys.execution.order_manager import OrderManager
-from kabusys.execution.reconciler import Reconciler, ReconcileResult, PositionDiscrepancy
+from kabusys.execution.reconciler import Reconciler, ReconcileResult
 
 
 @pytest.fixture
@@ -412,7 +412,7 @@ class TestExecutionEngineIntegration:
         from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine
         from kabusys.execution.order_manager import OrderManager
         from kabusys.execution.risk_manager import RiskConfig, RiskManager
-        from kabusys.execution.reconciler import Reconciler, ReconcileResult
+        from kabusys.execution.reconciler import Reconciler
 
         broker = MockBrokerClient(available_cash=5_000_000.0)
         repo = OrderRepository(sqlite_conn)

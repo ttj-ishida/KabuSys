@@ -9,11 +9,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-import duckdb
-import psutil
+import duckdb  # noqa: E402
+import psutil  # noqa: E402
 
-from kabusys.data.pipeline import get_last_price_date
-from kabusys.monitoring.monitoring_db import MonitoringDB
+from kabusys.data.pipeline import get_last_price_date  # noqa: E402
+from kabusys.monitoring.monitoring_db import MonitoringDB  # noqa: E402
 
 _FRESHNESS_DAYS = 3  # ≤3 日は許容（週末・祝日のギャップをカバー）
 

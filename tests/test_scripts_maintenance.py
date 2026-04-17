@@ -31,7 +31,6 @@ def _run_reset_maintenance(mock_conn, tmp_path):
 
 
 def test_reset_signals_clears_rows(tmp_path):
-    import reset_signals
 
     mock_conn = MagicMock()
     # information_schema: table exists (1), then DELETE
@@ -47,7 +46,6 @@ def test_reset_signals_clears_rows(tmp_path):
 
 
 def test_reset_signals_empty_table_is_ok(tmp_path):
-    import reset_signals
 
     mock_conn = MagicMock()
     mock_conn.execute.side_effect = [

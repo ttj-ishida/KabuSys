@@ -33,7 +33,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, TypedDict
+from typing import TypedDict
 
 import duckdb
 from defusedxml import ElementTree as ET

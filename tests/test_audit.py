@@ -424,7 +424,7 @@ class TestUUIDChainTraceability:
         """business_date が signal → order で一致している。"""
         bdate = "2025-03-14"
         sid = _insert_signal(audit_conn, business_date=bdate)
-        oid = _insert_order(audit_conn, sid, business_date=bdate)
+        _insert_order(audit_conn, sid, business_date=bdate)
         row = audit_conn.execute(
             """
             SELECT s.business_date, o.business_date

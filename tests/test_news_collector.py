@@ -3,8 +3,7 @@ news_collector モジュールのユニットテスト
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from unittest import mock
+from datetime import datetime
 import urllib.error
 
 import duckdb
@@ -167,7 +166,6 @@ def test_parse_rss_datetime_invalid_returns_now(caplog):
     import logging
     with caplog.at_level(logging.WARNING):
         dt = _parse_rss_datetime("not a date")
-    before = datetime.now(timezone.utc).replace(tzinfo=None)
     assert isinstance(dt, datetime)
     assert "パース失敗" in caplog.text
 

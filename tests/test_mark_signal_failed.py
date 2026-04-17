@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import sys
-from datetime import date
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-import mark_signal_failed
 
 
 def _run(args: list[str]):

@@ -274,7 +274,7 @@ def run_backtest(
     if max_positions < 1:
         raise ValueError(f"max_positions は 1 以上を指定してください: {max_positions}")
     if slippage_rate < 0 or commission_rate < 0:
-        raise ValueError(f"slippage_rate / commission_rate は 0 以上を指定してください")
+        raise ValueError("slippage_rate / commission_rate は 0 以上を指定してください")
     if allocation_method == "risk_based" and not (0 < risk_pct < 1):
         raise ValueError(f"risk_pct は (0, 1) の範囲で指定してください: {risk_pct}")
     if lot_size < 1:

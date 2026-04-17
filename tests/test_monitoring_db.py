@@ -1,5 +1,4 @@
 """MonitoringDB 単体テスト（Issue #36）"""
-import sqlite3
 from datetime import datetime, timezone, timedelta
 
 import pytest

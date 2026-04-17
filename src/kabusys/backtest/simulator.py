@@ -7,7 +7,7 @@ BacktestFramework.md Section 4.3 のスリッページ・手数料モデルに�
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 
 logger = logging.getLogger(__name__)

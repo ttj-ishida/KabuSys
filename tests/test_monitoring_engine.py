@@ -4,7 +4,6 @@ from __future__ import annotations
 import sqlite3
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -161,8 +160,7 @@ def test_system_monitor_data_freshness_none(mon_conn, mock_duckdb, tmp_path):
 
 # ─── TradeMonitor ─────────────────────────────────────────────────────────────
 
-from kabusys.execution.order_record import OrderRecord, OrderState
-from kabusys.execution.order_repository import OrderRepository
+from kabusys.execution.order_record import OrderRecord, OrderState  # noqa: E402
 
 
 def _make_order(
@@ -417,8 +415,8 @@ def test_monitoring_engine_exception_does_not_stop_other_monitors():
 
 # ─── MonitoringEngine + KillSwitch / AlertManager ────────────────────────────
 
-from kabusys.monitoring.kill_switch import KillSwitch
-from kabusys.monitoring.alert_manager import AlertManager
+from kabusys.monitoring.kill_switch import KillSwitch  # noqa: E402
+from kabusys.monitoring.alert_manager import AlertManager  # noqa: E402
 
 
 def test_monitoring_engine_calls_kill_switch_when_all_results_available():
