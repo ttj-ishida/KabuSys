@@ -6,6 +6,7 @@
 #   powershell -File scripts\setup_task_scheduler.ps1 -PythonPath C:\path\to\python.exe
 #
 # 既存のジョブは -Force で上書き登録される。
+# ログは logs\<TaskName>.log に追記される（ログディレクトリは自動作成）。
 
 param(
     [string]$PythonPath = "python",
@@ -18,6 +19,13 @@ Write-Host "KabuSys Task Scheduler 登録開始"
 Write-Host "  WorkDir   : $WorkDir"
 Write-Host "  PythonPath: $PythonPath"
 
+# ログディレクトリを作成
+$LogsDir = Join-Path $WorkDir "logs"
+if (-not (Test-Path $LogsDir)) {
+    New-Item -ItemType Directory -Path $LogsDir | Out-Null
+    Write-Host "  ログディレクトリ作成: $LogsDir"
+}
+
 function Register-KabuSysTask {
     param(
         [string]$TaskName,
@@ -26,15 +34,13 @@ function Register-KabuSysTask {
         [string]$TriggerTime
     )
 
-    $action = if ($Arguments) {
-        New-ScheduledTaskAction -Execute $PythonPath `
-            -Argument "scripts\$Script $Arguments" `
-            -WorkingDirectory $WorkDir
-    } else {
-        New-ScheduledTaskAction -Execute $PythonPath `
-            -Argument "scripts\$Script" `
-            -WorkingDirectory $WorkDir
-    }
+    # 標準出力・標準エラーをログファイルにリダイレクト
+    # cmd.exe 経由で >> リダイレクトを実現する（Task Scheduler は直接リダイレクト非対応）
+    $logFile = Join-Path $WorkDir "logs\$TaskName.log"
+    $scriptArg = if ($Arguments) { "scripts\$Script $Arguments" } else { "scripts\$Script" }
+    $action = New-ScheduledTaskAction -Execute "cmd.exe" `
+        -Argument "/c `"$PythonPath`" $scriptArg >> `"$logFile`" 2>&1" `
+        -WorkingDirectory $WorkDir
 
     $trigger = New-ScheduledTaskTrigger -Daily -At $TriggerTime
 
@@ -49,7 +55,7 @@ function Register-KabuSysTask {
         -Settings $settings `
         -Force | Out-Null
 
-    Write-Host "  登録完了: $TaskName ($TriggerTime)"
+    Write-Host "  登録完了: $TaskName ($TriggerTime) → $logFile"
 }
 
 # Night batch jobs

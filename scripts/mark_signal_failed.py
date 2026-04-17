@@ -1,0 +1,129 @@
+# scripts/mark_signal_failed.py
+"""signal_queue の指定シグナルを status='failed' に手動更新するヘルパー。
+
+使い方:
+    python scripts/mark_signal_failed.py --code 7203
+    python scripts/mark_signal_failed.py --code 7203 --date 2026-04-17
+
+用途:
+    注文エラー（order rejected）発生時に FailureRecovery.md §10.1 の手順として使用する。
+    DuckDB CLI で直接 UPDATE するよりもヒューマンエラーリスクが低い。
+"""
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+from datetime import date, datetime, timezone, timedelta
+from pathlib import Path
+
+import duckdb
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from kabusys.config import Settings
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+_JST = timezone(timedelta(hours=9))
+
+
+def _fetch_targets(conn: duckdb.DuckDBPyConnection, code: str, target_date: date) -> list[dict]:
+    """status が 'pending' または 'sent' の対象レコードを返す。"""
+    rows = conn.execute(
+        """
+        SELECT id, code, signal_date, status, direction, quantity
+        FROM signal_queue
+        WHERE code = ?
+          AND signal_date = ?
+          AND status IN ('pending', 'sent')
+        ORDER BY id
+        """,
+        [code, str(target_date)],
+    ).fetchall()
+    cols = ["id", "code", "signal_date", "status", "direction", "quantity"]
+    return [dict(zip(cols, row)) for row in rows]
+
+
+def _print_records(records: list[dict]) -> None:
+    print(f"\n{'ID':>6}  {'CODE':>6}  {'DATE':>12}  {'STATUS':>10}  {'DIR':>6}  {'QTY':>8}")
+    print("-" * 60)
+    for r in records:
+        print(f"{r['id']:>6}  {r['code']:>6}  {str(r['signal_date']):>12}  "
+              f"{r['status']:>10}  {str(r.get('direction','')[:6]):>6}  {r.get('quantity', ''):>8}")
+    print()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="signal_queue の指定シグナルを status='failed' に更新する"
+    )
+    parser.add_argument(
+        "--code",
+        required=True,
+        help="銘柄コード（例: 7203）",
+    )
+    parser.add_argument(
+        "--date",
+        default=None,
+        help="対象日付（YYYY-MM-DD 形式。省略時は当日 JST）",
+    )
+    args = parser.parse_args()
+
+    # 日付の解決
+    if args.date:
+        try:
+            target_date = date.fromisoformat(args.date)
+        except ValueError:
+            logger.error("--date の形式が不正です。YYYY-MM-DD 形式で指定してください: %s", args.date)
+            sys.exit(1)
+    else:
+        target_date = datetime.now(_JST).date()
+
+    settings = Settings()
+
+    if not settings.duckdb_path.exists():
+        logger.error("DuckDB ファイルが見つかりません: %s", settings.duckdb_path)
+        sys.exit(1)
+
+    conn = duckdb.connect(str(settings.duckdb_path))
+    try:
+        targets = _fetch_targets(conn, args.code, target_date)
+
+        if not targets:
+            logger.error(
+                "対象レコードが見つかりません（code=%s, date=%s, status=pending/sent）。",
+                args.code, target_date,
+            )
+            sys.exit(1)
+
+        print(f"以下の {len(targets)} 件を status='failed' に更新します:")
+        _print_records(targets)
+
+        answer = input("続行しますか？ [y/N]: ").strip().lower()
+        if answer != "y":
+            logger.info("ユーザーによりキャンセルされました。")
+            sys.exit(0)
+
+        ids = [r["id"] for r in targets]
+        placeholders = ", ".join("?" * len(ids))
+        conn.execute(
+            f"UPDATE signal_queue SET status = 'failed' WHERE id IN ({placeholders})",
+            ids,
+        )
+        logger.info(
+            "signal_queue を更新しました（%d 件を status='failed' に変更）。",
+            len(ids),
+        )
+
+    except Exception:
+        logger.exception("signal_queue の更新に失敗しました")
+        sys.exit(1)
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    main()
