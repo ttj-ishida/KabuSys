@@ -1,4 +1,5 @@
 """Phase 5 ポートフォリオ構築エンジン テスト"""
+
 from __future__ import annotations
 
 import pytest
@@ -15,6 +16,7 @@ def conn():
 # ---------------------------------------------------------------------------
 # Task 1: schema.py — stocks テーブル
 # ---------------------------------------------------------------------------
+
 
 def test_stocks_table_exists(conn):
     """stocks テーブルが init_schema で作成される。"""
@@ -53,7 +55,9 @@ def test_stocks_table_upsert(conn):
         """,
         ["1234", "新名称", "Standard", "機械"],
     )
-    row = conn.execute("SELECT name, market, sector FROM stocks WHERE code = '1234'").fetchone()
+    row = conn.execute(
+        "SELECT name, market, sector FROM stocks WHERE code = '1234'"
+    ).fetchone()
     assert row[0] == "新名称"
     assert row[1] == "Standard"
     assert row[2] == "機械"
@@ -62,6 +66,7 @@ def test_stocks_table_upsert(conn):
 # ---------------------------------------------------------------------------
 # Task 1: jquants_client.py — fetch_listed_info のマッピングテスト
 # ---------------------------------------------------------------------------
+
 
 def test_fetch_listed_info_field_mapping():
     """fetch_listed_info が J-Quants API レスポンスを stocks スキーマにマッピングする。"""
@@ -119,8 +124,18 @@ def test_fetch_listed_info_missing_fields_skipped():
 
     mock_response = {
         "info": [
-            {"Code": "1234", "CompanyName": "正常", "MarketCode": "0111", "Sector33CodeName": "電気機器"},
-            {"Code": "", "CompanyName": "コード欠損", "MarketCode": "0111", "Sector33CodeName": ""},
+            {
+                "Code": "1234",
+                "CompanyName": "正常",
+                "MarketCode": "0111",
+                "Sector33CodeName": "電気機器",
+            },
+            {
+                "Code": "",
+                "CompanyName": "コード欠損",
+                "MarketCode": "0111",
+                "Sector33CodeName": "",
+            },
             {"CompanyName": "コードなし", "MarketCode": "0111", "Sector33CodeName": ""},
         ]
     }
@@ -335,7 +350,9 @@ def test_calc_position_sizes_max_utilization_aggregate_cap():
         max_utilization=0.70,
         lot_size=100,
     )
-    total_invested = sum(result.get(c["code"], 0) * open_prices[c["code"]] for c in candidates)
+    total_invested = sum(
+        result.get(c["code"], 0) * open_prices[c["code"]] for c in candidates
+    )
     assert total_invested <= 1_000_000 * 1.001  # 0.1% の誤差許容
 
 
@@ -436,6 +453,7 @@ def test_calc_position_sizes_existing_position_excluded():
 # Task 4: risk_adjustment.py
 # ---------------------------------------------------------------------------
 
+
 def test_apply_sector_cap_removes_overweight_sector():
     """同一セクターが 30% 超なら新規候補を除外。
 
@@ -463,8 +481,8 @@ def test_apply_sector_cap_removes_overweight_sector():
     )
 
     codes = {c["code"] for c in result}
-    assert "B" not in codes   # 除外
-    assert "C" in codes       # 通過
+    assert "B" not in codes  # 除外
+    assert "C" in codes  # 通過
 
 
 def test_apply_sector_cap_allows_under_limit():
@@ -555,6 +573,7 @@ def test_calc_regime_multiplier_case_sensitive():
 # Task 4: 統合テスト（portfolio_builder + position_sizing + risk_adjustment）
 # ---------------------------------------------------------------------------
 
+
 def test_integration_neutral_regime_reduces_available_cash():
     """`neutral` レジームで available_cash が 70% に抑制される。
 
@@ -571,9 +590,7 @@ def test_integration_neutral_regime_reduces_available_cash():
     assert multiplier == 0.7
     available_cash = portfolio_value * multiplier  # 7_000_000
 
-    candidates = select_candidates(
-        [{"code": "1234", "signal_rank": 1, "score": 0.9}]
-    )
+    candidates = select_candidates([{"code": "1234", "signal_rank": 1, "score": 0.9}])
     result = calc_position_sizes(
         weights={},
         candidates=candidates,
@@ -588,7 +605,10 @@ def test_integration_neutral_regime_reduces_available_cash():
 
 def test_integration_sector_cap_then_size():
     """セクター上限フィルタ後に position_sizing が動作する。"""
-    from kabusys.portfolio.portfolio_builder import select_candidates, calc_equal_weights
+    from kabusys.portfolio.portfolio_builder import (
+        select_candidates,
+        calc_equal_weights,
+    )
     from kabusys.portfolio.position_sizing import calc_position_sizes
     from kabusys.portfolio.risk_adjustment import apply_sector_cap
 
@@ -621,13 +641,14 @@ def test_integration_sector_cap_then_size():
         max_position_pct=0.10,
         max_utilization=0.70,
     )
-    assert result.get("A", 0) == 0   # セクター除外
-    assert result.get("B", 0) > 0    # 購入あり
+    assert result.get("A", 0) == 0  # セクター除外
+    assert result.get("B", 0) > 0  # 購入あり
 
 
 # ---------------------------------------------------------------------------
 # レビュー対応: 追加テスト
 # ---------------------------------------------------------------------------
+
 
 def test_apply_sector_cap_sell_codes_excluded_from_exposure():
     """sell_codes に含まれる銘柄はセクターエクスポージャーから除外される。
@@ -785,7 +806,9 @@ def test_calc_position_sizes_scale_down_stays_within_budget():
         lot_size=100,
     )
 
-    total_cost = sum(result.get(c["code"], 0) * open_prices[c["code"]] for c in candidates)
+    total_cost = sum(
+        result.get(c["code"], 0) * open_prices[c["code"]] for c in candidates
+    )
     assert total_cost <= available_cash * 1.001
 
 
@@ -819,7 +842,10 @@ def test_calc_position_sizes_cost_buffer_reduces_total():
     )
 
     # cost_buffer あり: 実取得コスト（buffer なし）は available_cash 以内
-    raw_cost = sum(result_with_buffer.get(c["code"], 0) * open_prices[c["code"]] for c in candidates)
+    raw_cost = sum(
+        result_with_buffer.get(c["code"], 0) * open_prices[c["code"]]
+        for c in candidates
+    )
     assert raw_cost <= available_cash
 
 

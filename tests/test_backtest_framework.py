@@ -1,4 +1,5 @@
 """バックテストフレームワーク テスト"""
+
 from __future__ import annotations
 
 import math
@@ -13,6 +14,7 @@ from kabusys.data.schema import init_schema
 # フィクスチャ
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def conn():
     """インメモリ DuckDB 接続（テスト毎に新規作成）。"""
@@ -24,6 +26,7 @@ def conn():
 def _make_history(values: list[float]) -> list:
     """portfolio_value のリストから DailySnapshot のリストを生成する。"""
     from kabusys.backtest.simulator import DailySnapshot
+
     base = date(2024, 1, 1)
     return [
         DailySnapshot(
@@ -39,6 +42,7 @@ def _make_history(values: list[float]) -> list:
 def _make_trades(pnl_list: list[float]) -> list:
     """realized_pnl のリストから TradeRecord のリストを生成する（SELL のみ）。"""
     from kabusys.backtest.simulator import TradeRecord
+
     base = date(2024, 1, 2)
     return [
         TradeRecord(
@@ -58,9 +62,11 @@ def _make_trades(pnl_list: list[float]) -> list:
 # Task 2: metrics.py
 # ---------------------------------------------------------------------------
 
+
 def test_metrics_cagr_one_year():
     """1年で資産が2倍 → CAGR = 100%。"""
     from kabusys.backtest.metrics import calc_metrics
+
     # 365 日で 1_000_000 → 2_000_000
     history = _make_history([1_000_000] + [1_000_000] * 364 + [2_000_000])
     result = calc_metrics(history, [])
@@ -70,6 +76,7 @@ def test_metrics_cagr_one_year():
 def test_metrics_max_drawdown():
     """100 → 80 → 90 の推移 → MDD = 0.20。"""
     from kabusys.backtest.metrics import calc_metrics
+
     history = _make_history([100.0, 80.0, 90.0])
     result = calc_metrics(history, [])
     assert abs(result.max_drawdown - 0.20) < 1e-9
@@ -78,6 +85,7 @@ def test_metrics_max_drawdown():
 def test_metrics_sharpe_constant_return():
     """毎日同一リターン → 標準偏差 0 → Sharpe = 0.0（ゼロ除算回避）。"""
     from kabusys.backtest.metrics import calc_metrics
+
     history = _make_history([1_000_000 + i * 1000 for i in range(252)])
     result = calc_metrics(history, [])
     assert math.isfinite(result.sharpe_ratio)
@@ -86,6 +94,7 @@ def test_metrics_sharpe_constant_return():
 def test_metrics_win_rate():
     """勝ち2件・負け1件 → win_rate ≈ 0.667。"""
     from kabusys.backtest.metrics import calc_metrics
+
     trades = _make_trades([10000.0, 5000.0, -3000.0])
     result = calc_metrics(_make_history([1_000_000, 1_000_000]), trades)
     assert abs(result.win_rate - 2 / 3) < 1e-9
@@ -94,6 +103,7 @@ def test_metrics_win_rate():
 def test_metrics_payoff_ratio():
     """平均利益 7500、平均損失 3000 → payoff ≈ 2.5。"""
     from kabusys.backtest.metrics import calc_metrics
+
     trades = _make_trades([10000.0, 5000.0, -3000.0])
     result = calc_metrics(_make_history([1_000_000, 1_000_000]), trades)
     assert abs(result.payoff_ratio - 2.5) < 1e-9
@@ -102,6 +112,7 @@ def test_metrics_payoff_ratio():
 def test_metrics_no_trades():
     """トレードなし → win_rate=0.0, payoff_ratio=0.0, total_trades=0。"""
     from kabusys.backtest.metrics import calc_metrics
+
     result = calc_metrics(_make_history([1_000_000, 1_000_000]), [])
     assert result.win_rate == 0.0
     assert result.payoff_ratio == 0.0
@@ -112,8 +123,10 @@ def test_metrics_no_trades():
 # Task 3: simulator.py
 # ---------------------------------------------------------------------------
 
+
 def _make_simulator(initial_cash: float = 1_000_000):
     from kabusys.backtest.simulator import PortfolioSimulator
+
     return PortfolioSimulator(initial_cash=initial_cash)
 
 
@@ -140,7 +153,9 @@ def test_simulator_buy_slippage():
     sim = _make_simulator()
     signals = [{"code": "1234", "side": "buy", "shares": 100}]
     open_prices = {"1234": 2000.0}
-    sim.execute_orders(signals, open_prices, slippage_rate=0.001, commission_rate=0.00055)
+    sim.execute_orders(
+        signals, open_prices, slippage_rate=0.001, commission_rate=0.00055
+    )
 
     assert len(sim.trades) == 1
     trade = sim.trades[0]
@@ -192,6 +207,7 @@ def test_simulator_sell_slippage():
 def test_simulator_mark_to_market():
     """mark_to_market → portfolio_value = cash + sum(shares * close)。"""
     from kabusys.backtest.simulator import PortfolioSimulator
+
     sim = PortfolioSimulator(initial_cash=500_000)
     sim.positions = {"1234": 100, "5678": 200}
     sim.cost_basis = {"1234": 900.0, "5678": 500.0}
@@ -233,6 +249,7 @@ def test_simulator_insufficient_cash_skips_buy():
 # ---------------------------------------------------------------------------
 # Task 4: engine.py ヘルパー
 # ---------------------------------------------------------------------------
+
 
 def _insert_price(conn, code: str, d, open_: float, close: float) -> None:
     conn.execute(
@@ -304,7 +321,9 @@ def test_write_positions_values(conn):
     from datetime import date
 
     d = date(2024, 1, 11)
-    _write_positions(conn, d, {"1234": 200, "5678": 50}, {"1234": 1050.0, "5678": 600.0})
+    _write_positions(
+        conn, d, {"1234": 200, "5678": 50}, {"1234": 1050.0, "5678": 600.0}
+    )
 
     rows = {
         row[0]: (row[1], float(row[2]))
@@ -319,6 +338,7 @@ def test_write_positions_values(conn):
 # ---------------------------------------------------------------------------
 # Task 5: run_backtest 統合テスト
 # ---------------------------------------------------------------------------
+
 
 def _setup_minimal_backtest(conn):
     """3営業日分の最小限データをセットアップするヘルパー。"""
@@ -405,7 +425,9 @@ def test_run_backtest_no_lookahead(conn):
 
     # end_date 以降のスナップショットが存在しないこと
     for snap in result1.history:
-        assert snap.date <= date(2024, 1, 9), f"未来日付 {snap.date} が履歴に含まれている"
+        assert snap.date <= date(2024, 1, 9), (
+            f"未来日付 {snap.date} が履歴に含まれている"
+        )
 
 
 def test_run_backtest_idempotent(conn):
@@ -415,8 +437,12 @@ def test_run_backtest_idempotent(conn):
 
     _setup_minimal_backtest(conn)
 
-    result1 = run_backtest(conn=conn, start_date=date(2024, 1, 4), end_date=date(2024, 1, 9))
-    result2 = run_backtest(conn=conn, start_date=date(2024, 1, 4), end_date=date(2024, 1, 9))
+    result1 = run_backtest(
+        conn=conn, start_date=date(2024, 1, 4), end_date=date(2024, 1, 9)
+    )
+    result2 = run_backtest(
+        conn=conn, start_date=date(2024, 1, 4), end_date=date(2024, 1, 9)
+    )
 
     assert abs(result1.metrics.cagr - result2.metrics.cagr) < 1e-9
     assert len(result1.history) == len(result2.history)
@@ -447,6 +473,7 @@ def test_run_backtest_max_position_pct(conn):
 # ---------------------------------------------------------------------------
 # Task 6: engine.py — Phase 5 helpers and run_backtest updates
 # ---------------------------------------------------------------------------
+
 
 def test_fetch_regime_returns_bull_on_no_data(conn):
     """_fetch_regime: market_regime にデータなし → 'bull' を返す。"""
@@ -572,12 +599,15 @@ def test_run_backtest_default_max_position_pct_is_010(conn):
 
     sig = inspect.signature(run_backtest)
     default = sig.parameters["max_position_pct"].default
-    assert default == 0.10, f"max_position_pct のデフォルトが {default}（0.10 であること）"
+    assert default == 0.10, (
+        f"max_position_pct のデフォルトが {default}（0.10 であること）"
+    )
 
 
 # ---------------------------------------------------------------------------
 # レビュー対応: 追加テスト
 # ---------------------------------------------------------------------------
+
 
 def test_fetch_sector_map_excludes_empty_string_sector(conn):
     """_fetch_sector_map: 空文字セクターは除外される（'unknown' フォールバックに委ねる）。"""
@@ -767,7 +797,9 @@ def test_execute_buy_non_lot_multiple_warns(caplog):
             trading_day=date(2024, 1, 5),
             lot_size=100,
         )
-    assert any("単元株数" in r.message for r in caplog.records), "WARNING ログが出ること"
+    assert any("単元株数" in r.message for r in caplog.records), (
+        "WARNING ログが出ること"
+    )
 
 
 def test_execute_buy_lot_multiple_no_warn(caplog):
@@ -787,7 +819,9 @@ def test_execute_buy_lot_multiple_no_warn(caplog):
             trading_day=date(2024, 1, 5),
             lot_size=100,
         )
-    assert not any("単元株数" in r.message for r in caplog.records), "WARNING ログが出ないこと"
+    assert not any("単元株数" in r.message for r in caplog.records), (
+        "WARNING ログが出ないこと"
+    )
 
 
 def test_run_backtest_invalid_risk_pct_raises(conn):

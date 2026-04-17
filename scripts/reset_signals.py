@@ -10,6 +10,7 @@
   - 未処理注文（status='sent'）が存在する場合は確認プロンプトを表示
   - 削除前に DuckDB をバックアップ
 """
+
 from __future__ import annotations
 
 import argparse
@@ -25,14 +26,12 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 _JST = timezone(timedelta(hours=9))
 _TRADING_PERIODS: list[tuple[time, time]] = [
-    (time(9, 0), time(11, 30)),   # 前場
+    (time(9, 0), time(11, 30)),  # 前場
     (time(12, 30), time(15, 0)),  # 後場
 ]
 
@@ -145,10 +144,13 @@ def main() -> None:
     # B2: signal_queue テーブル存在確認 + 削除
     conn = duckdb.connect(str(settings.duckdb_path))
     try:
-        exists = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables"
-            " WHERE table_schema = 'main' AND table_name = 'signal_queue'"
-        ).fetchone()[0] > 0
+        exists = (
+            conn.execute(
+                "SELECT COUNT(*) FROM information_schema.tables"
+                " WHERE table_schema = 'main' AND table_name = 'signal_queue'"
+            ).fetchone()[0]
+            > 0
+        )
         if not exists:
             logger.info("signal_queue テーブルが存在しません。何もせず終了します。")
             return

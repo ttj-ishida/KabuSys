@@ -1,4 +1,5 @@
 """monitoring_engine.py — 各 Monitor を束ねてポーリングする。"""
+
 from __future__ import annotations
 
 import logging
@@ -66,19 +67,27 @@ class MonitoringEngine:
                 )
             if trade_result and trade_result.stale_orders:
                 self._alert_manager.notify(
-                    f"滞留注文 {len(trade_result.stale_orders)} 件", "WARNING", category="STALE_ORDER"
+                    f"滞留注文 {len(trade_result.stale_orders)} 件",
+                    "WARNING",
+                    category="STALE_ORDER",
                 )
             if trade_result and trade_result.anomaly_fills:
                 self._alert_manager.notify(
-                    f"約定異常価格 {len(trade_result.anomaly_fills)} 件", "WARNING", category="PRICE_ANOMALY"
+                    f"約定異常価格 {len(trade_result.anomaly_fills)} 件",
+                    "WARNING",
+                    category="PRICE_ANOMALY",
                 )
             if risk_result and risk_result.drawdown_alert:
                 self._alert_manager.notify(
-                    f"DD {risk_result.drawdown_pct * 100:.1f}% 超過", "CRITICAL", category="DRAWDOWN"
+                    f"DD {risk_result.drawdown_pct * 100:.1f}% 超過",
+                    "CRITICAL",
+                    category="DRAWDOWN",
                 )
             if risk_result and risk_result.position_limit_alert:
                 self._alert_manager.notify(
-                    f"ポジション上限超過: {risk_result.position_count} 銘柄", "WARNING", category="POSITION_LIMIT"
+                    f"ポジション上限超過: {risk_result.position_count} 銘柄",
+                    "WARNING",
+                    category="POSITION_LIMIT",
                 )
             if sys_result and not sys_result.data_freshness_ok:
                 self._alert_manager.notify(

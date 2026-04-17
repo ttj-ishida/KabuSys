@@ -37,8 +37,8 @@ readme_response = client.chat.completions.create(
     model=model,
     messages=[
         {"role": "system", "content": "You are a technical documentation specialist."},
-        {"role": "user", "content": readme_prompt}
-    ]
+        {"role": "user", "content": readme_prompt},
+    ],
 )
 
 readme = readme_response.choices[0].message.content
@@ -61,8 +61,8 @@ changelog_response = client.chat.completions.create(
     model=model,
     messages=[
         {"role": "system", "content": "You are a technical documentation specialist."},
-        {"role": "user", "content": changelog_prompt}
-    ]
+        {"role": "user", "content": changelog_prompt},
+    ],
 )
 
 changelog = changelog_response.choices[0].message.content

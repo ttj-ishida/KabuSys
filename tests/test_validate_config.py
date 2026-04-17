@@ -1,5 +1,6 @@
 # tests/test_validate_config.py
 """src/kabusys/validate_config.py の単体テスト"""
+
 from __future__ import annotations
 
 import os
@@ -96,8 +97,10 @@ def test_valid_yaml_files_return_no_error(tmp_path):
     pytest.importorskip("yaml")
     sys_path = Path(__file__).resolve().parents[1] / "scripts"
     import sys
+
     sys.path.insert(0, str(sys_path))
     import generate_config
+
     with patch.object(generate_config, "_CONFIG_DIR", tmp_path):
         generate_config.generate()
 
@@ -109,12 +112,19 @@ def test_main_returns_0_on_success(tmp_path):
     """正常設定で main() が 0 を返すこと。"""
     from kabusys import validate_config as vc
 
-    with patch.dict(os.environ, {
-        "JQUANTS_REFRESH_TOKEN": "tok",
-        "KABU_API_PASSWORD": "pass",
-        "KABUSYS_ENV": "development",
-        "LOG_LEVEL": "INFO",
-    }, clear=False), patch.object(vc, "_CONFIG_DIR", tmp_path):
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "JQUANTS_REFRESH_TOKEN": "tok",
+                "KABU_API_PASSWORD": "pass",
+                "KABUSYS_ENV": "development",
+                "LOG_LEVEL": "INFO",
+            },
+            clear=False,
+        ),
+        patch.object(vc, "_CONFIG_DIR", tmp_path),
+    ):
         result = vc.main([])
     assert result == 0
 
@@ -123,10 +133,17 @@ def test_main_returns_1_on_error():
     """必須変数不足で main() が 1 を返すこと。"""
     from kabusys import validate_config as vc
 
-    with patch.dict(os.environ, {
-        "JQUANTS_REFRESH_TOKEN": "",
-        "KABU_API_PASSWORD": "pass",
-    }, clear=False), patch.object(vc, "_CONFIG_DIR", Path("/nonexistent")):
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "JQUANTS_REFRESH_TOKEN": "",
+                "KABU_API_PASSWORD": "pass",
+            },
+            clear=False,
+        ),
+        patch.object(vc, "_CONFIG_DIR", Path("/nonexistent")),
+    ):
         result = vc.main([])
     assert result == 1
 
@@ -136,12 +153,19 @@ def test_strict_mode_fails_on_warning(tmp_path):
     from kabusys import validate_config as vc
 
     # config/ が空なので missing yaml warnings が出る
-    with patch.dict(os.environ, {
-        "JQUANTS_REFRESH_TOKEN": "tok",
-        "KABU_API_PASSWORD": "pass",
-        "KABUSYS_ENV": "development",
-        "LOG_LEVEL": "INFO",
-    }, clear=False), patch.object(vc, "_CONFIG_DIR", tmp_path):
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "JQUANTS_REFRESH_TOKEN": "tok",
+                "KABU_API_PASSWORD": "pass",
+                "KABUSYS_ENV": "development",
+                "LOG_LEVEL": "INFO",
+            },
+            clear=False,
+        ),
+        patch.object(vc, "_CONFIG_DIR", tmp_path),
+    ):
         result = vc.main(["--strict"])
     # tmp_path には YAML がないので warning → strict では fail
     assert result == 1

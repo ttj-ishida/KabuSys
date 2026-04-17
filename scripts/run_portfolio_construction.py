@@ -8,6 +8,7 @@ signals テーブルから当日の BUY シグナルを読み込み、
 環境変数:
     PORTFOLIO_VALUE: 総資産額（円）。デフォルト: 10,000,000
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,9 +25,7 @@ from kabusys.config import Settings
 from kabusys.portfolio.portfolio_builder import calc_score_weights, select_candidates
 from kabusys.portfolio.position_sizing import calc_position_sizes
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PORTFOLIO_VALUE = 10_000_000  # 1000万円
@@ -39,7 +38,9 @@ def main() -> None:
     target_date = date.today()
 
     try:
-        portfolio_value_str = os.environ.get("PORTFOLIO_VALUE", str(_DEFAULT_PORTFOLIO_VALUE))
+        portfolio_value_str = os.environ.get(
+            "PORTFOLIO_VALUE", str(_DEFAULT_PORTFOLIO_VALUE)
+        )
         try:
             portfolio_value = float(portfolio_value_str)
         except ValueError:
@@ -57,9 +58,7 @@ def main() -> None:
             [target_date],
         )
         rows = cur.fetchall()
-        buy_signals = [
-            dict(zip([d[0] for d in cur.description], row)) for row in rows
-        ]
+        buy_signals = [dict(zip([d[0] for d in cur.description], row)) for row in rows]
 
         if not buy_signals:
             logger.info("本日の BUY シグナルが 0 件です。signal_queue を更新しません。")
@@ -92,7 +91,9 @@ def main() -> None:
             """,
             codes,
         )
-        close_prices = {r[0]: float(r[1]) for r in price_cur.fetchall() if r[1] is not None}
+        close_prices = {
+            r[0]: float(r[1]) for r in price_cur.fetchall() if r[1] is not None
+        }
 
         # 4. 現在のポジション取得
         pos_cur = conn.execute(
@@ -114,9 +115,7 @@ def main() -> None:
         # 6. portfolio_targets / signal_queue をトランザクション内で更新
         conn.execute("BEGIN")
         try:
-            conn.execute(
-                "DELETE FROM portfolio_targets WHERE date = ?", [target_date]
-            )
+            conn.execute("DELETE FROM portfolio_targets WHERE date = ?", [target_date])
             for code, weight in weights.items():
                 size = sizes.get(code, 0)
                 conn.execute(

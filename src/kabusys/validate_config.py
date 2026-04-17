@@ -7,6 +7,7 @@
     python -m kabusys.validate_config
     python -m kabusys.validate_config --strict   # 警告も FAIL 扱い
 """
+
 from __future__ import annotations
 
 import os
@@ -129,10 +130,13 @@ def _check_config_yaml_files() -> None:
     """config/*.yaml の存在確認。"""
     try:
         import yaml  # type: ignore[import]
+
         _yaml_available = True
     except ImportError:
         _yaml_available = False
-        _warn("PyYAML がインストールされていません。YAML ファイルの内容検証をスキップします。")
+        _warn(
+            "PyYAML がインストールされていません。YAML ファイルの内容検証をスキップします。"
+        )
 
     for filename in _CONFIG_FILES:
         path = _CONFIG_DIR / filename
@@ -144,6 +148,7 @@ def _check_config_yaml_files() -> None:
         elif _yaml_available:
             try:
                 import yaml  # type: ignore[import]
+
                 with open(path, encoding="utf-8") as f:
                     yaml.safe_load(f)
                 _info(f"config/{filename}: OK")
@@ -159,7 +164,9 @@ def _check_live_guards() -> None:
 
     # LINE 通知の設定確認
     if not os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", ""):
-        _warn("本番環境で LINE_CHANNEL_ACCESS_TOKEN が未設定です。アラートが届きません。")
+        _warn(
+            "本番環境で LINE_CHANNEL_ACCESS_TOKEN が未設定です。アラートが届きません。"
+        )
     if not os.environ.get("LINE_USER_ID", ""):
         _warn("本番環境で LINE_USER_ID が未設定です。アラートが届きません。")
 
@@ -174,6 +181,7 @@ def _check_live_guards() -> None:
 # ---------------------------------------------------------------------------
 # エントリポイント
 # ---------------------------------------------------------------------------
+
 
 def validate() -> tuple[list[str], list[str], list[str]]:
     """検証を実行し、(errors, warnings, infos) を返す。"""
@@ -193,9 +201,8 @@ def validate() -> tuple[list[str], list[str], list[str]]:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
-    parser = argparse.ArgumentParser(
-        description="KabuSys 設定を検証する"
-    )
+
+    parser = argparse.ArgumentParser(description="KabuSys 設定を検証する")
     parser.add_argument(
         "--strict",
         action="store_true",

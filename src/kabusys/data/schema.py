@@ -343,6 +343,7 @@ _ALL_DDL: list[str] = [
 # 公開 API
 # ---------------------------------------------------------------------------
 
+
 def init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection:
     """DuckDB データベースを初期化し、全テーブルを作成して接続を返す。
 

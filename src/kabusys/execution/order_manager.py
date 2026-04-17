@@ -4,14 +4,24 @@
 signal_queue からシグナルを受け取り、broker API 経由で発注・状態管理を行う。
 OrderRecord（純粋ロジック）と OrderRepository（SQLite）を組み合わせる。
 """
+
 from __future__ import annotations
 
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 
-from kabusys.execution.broker_api import BrokerAPIProtocol, OrderRequest, OrderRejectedError, OrderSentPendingError
-from kabusys.execution.order_record import InvalidStateTransitionError, OrderRecord, OrderState
+from kabusys.execution.broker_api import (
+    BrokerAPIProtocol,
+    OrderRequest,
+    OrderRejectedError,
+    OrderSentPendingError,
+)
+from kabusys.execution.order_record import (
+    InvalidStateTransitionError,
+    OrderRecord,
+    OrderState,
+)
 from kabusys.execution.order_repository import OrderRepository
 
 
@@ -48,8 +58,10 @@ class OrderManager:
         """
         existing = self._repo.get_by_signal(signal_id)
         active = [
-            r for r in existing
-            if r.state not in {OrderState.Closed, OrderState.Cancelled, OrderState.Rejected}
+            r
+            for r in existing
+            if r.state
+            not in {OrderState.Closed, OrderState.Cancelled, OrderState.Rejected}
         ]
         if active:
             raise DuplicateOrderError(
@@ -75,7 +87,9 @@ class OrderManager:
         except sqlite3.IntegrityError as exc:
             # signal_id の部分ユニークインデックス違反のみ DuplicateOrderError に変換する。
             # CHECK 制約違反（qty/price/side 不正など）は原因を隠蔽せず再スローする。
-            if "UNIQUE constraint failed" in str(exc) and "orders.signal_id" in str(exc):
+            if "UNIQUE constraint failed" in str(exc) and "orders.signal_id" in str(
+                exc
+            ):
                 raise DuplicateOrderError(
                     f"signal_id={signal_id} の active 注文が既に存在します（DB 制約）"
                 ) from exc
@@ -181,10 +195,10 @@ class OrderManager:
         try:
             # OrderSent → Filled/PartialFill は直接遷移不可のため OrderAccepted を経由する。
             # 例: ネットワーク障害後の Reconciliation で broker が "filled" を返した場合。
-            if (
-                record.state == OrderState.OrderSent
-                and new_state in {OrderState.Filled, OrderState.PartialFill}
-            ):
+            if record.state == OrderState.OrderSent and new_state in {
+                OrderState.Filled,
+                OrderState.PartialFill,
+            }:
                 record.transition_to(OrderState.OrderAccepted)
                 self._repo.update(record)
 

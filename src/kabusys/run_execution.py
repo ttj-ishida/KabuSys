@@ -4,6 +4,7 @@
 KABUSYS_ENV=paper_trading の場合は MockBrokerClient を使用し、
 data/paper_trading.db に記録する（本番 DB と完全分離）。
 """
+
 from __future__ import annotations
 
 import logging

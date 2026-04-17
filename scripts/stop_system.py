@@ -5,6 +5,7 @@
 10秒以内に終了しない場合は強制終了する。
 停止フラグは削除しない（次回 start_system.py 起動時にクリアされる）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,7 +16,10 @@ from pathlib import Path
 try:
     import psutil
 except ImportError:
-    print("ERROR: psutil が必要です。pip install psutil を実行してください。", file=sys.stderr)
+    print(
+        "ERROR: psutil が必要です。pip install psutil を実行してください。",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -30,9 +34,7 @@ from utils import (
     request_stop,
 )
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 _GRACEFUL_TIMEOUT_SEC = 10
@@ -88,13 +90,17 @@ def main() -> None:
                 logger.warning(
                     "%s (PID=%d) の起動時刻を取得できませんでした。"
                     "PID 再利用チェックをスキップして停止処理を続行します。",
-                    label, pid,
+                    label,
+                    pid,
                 )
             elif abs(actual_create_time - stored_create_time) > _CREATE_TIME_TOLERANCE:
                 logger.warning(
                     "%s (PID=%d) の起動時刻が不一致です（保存: %.3f, 実際: %.3f）。"
                     "PID が再利用された可能性があります。強制終了をスキップします。",
-                    label, pid, stored_create_time, actual_create_time,
+                    label,
+                    pid,
+                    stored_create_time,
+                    actual_create_time,
                 )
                 delete_pid(pid_path)
                 continue

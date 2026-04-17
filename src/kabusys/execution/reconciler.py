@@ -3,6 +3,7 @@
 再起動・クラッシュ後に OrderSent 状態の注文をブローカーと突合して自動同期し、
 ポジション差分をログに記録して安全に処理を再開する。
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,9 +20,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PositionDiscrepancy:
     code: str
-    broker_qty: int   # ブローカー側の保有数量
-    local_qty: int    # ローカルDB推定値（注文履歴から集計）
-    diff: int         # broker_qty - local_qty
+    broker_qty: int  # ブローカー側の保有数量
+    local_qty: int  # ローカルDB推定値（注文履歴から集計）
+    diff: int  # broker_qty - local_qty
 
 
 @dataclass
@@ -64,7 +65,10 @@ class Reconciler:
         try:
             uncertain = self._repo.list_uncertain()
         except Exception:
-            logger.error("list_uncertain() 失敗: リコンシリエーションをスキップします", exc_info=True)
+            logger.error(
+                "list_uncertain() 失敗: リコンシリエーションをスキップします",
+                exc_info=True,
+            )
             return False
 
         for record in uncertain:
@@ -84,23 +88,28 @@ class Reconciler:
                         result.orders_no_status += 1
                         logger.warning(
                             "broker に注文なし（手動確認要）: client_order_id=%s, broker_order_id=%s",
-                            record.client_order_id, record.broker_order_id,
+                            record.client_order_id,
+                            record.broker_order_id,
                         )
                 else:
                     result.orders_synced += 1
                     logger.info(
                         "注文状態同期: %s → %s (client_order_id=%s)",
-                        before_state.value, updated.state.value, record.client_order_id,
+                        before_state.value,
+                        updated.state.value,
+                        record.client_order_id,
                     )
             except BrokerAPIError:
                 logger.error(
                     "sync_order 失敗（スキップ）: client_order_id=%s",
-                    record.client_order_id, exc_info=True,
+                    record.client_order_id,
+                    exc_info=True,
                 )
             except Exception:
                 logger.error(
                     "sync_order 予期せぬ例外（スキップ）: client_order_id=%s",
-                    record.client_order_id, exc_info=True,
+                    record.client_order_id,
+                    exc_info=True,
                 )
         return True
 
@@ -108,7 +117,9 @@ class Reconciler:
         try:
             broker_positions = self._broker.get_positions()
         except BrokerAPIError:
-            logger.warning("get_positions() 失敗: ポジション照合をスキップします", exc_info=True)
+            logger.warning(
+                "get_positions() 失敗: ポジション照合をスキップします", exc_info=True
+            )
             return
 
         # ブローカーポジション: {code: qty} — 同一コードの複数エントリは合算
@@ -125,20 +136,27 @@ class Reconciler:
         try:
             active_orders = self._repo.list_active()
         except Exception:
-            logger.warning("list_active() 失敗: ポジション照合をスキップします", exc_info=True)
+            logger.warning(
+                "list_active() 失敗: ポジション照合をスキップします", exc_info=True
+            )
             return
         for record in active_orders:
             if record.state not in {OrderState.Filled, OrderState.PartialFill}:
                 continue
             side = record.side.lower()
             if side == "buy":
-                local_map[record.code] = local_map.get(record.code, 0) + record.filled_qty
+                local_map[record.code] = (
+                    local_map.get(record.code, 0) + record.filled_qty
+                )
             elif side == "sell":
-                local_map[record.code] = local_map.get(record.code, 0) - record.filled_qty
+                local_map[record.code] = (
+                    local_map.get(record.code, 0) - record.filled_qty
+                )
             else:
                 logger.warning(
                     "未知のsideをスキップ（ポジション集計から除外）: client_order_id=%s, side=%s",
-                    record.client_order_id, record.side,
+                    record.client_order_id,
+                    record.side,
                 )
 
         # 差分照合
@@ -157,5 +175,8 @@ class Reconciler:
                 )
                 logger.warning(
                     "ポジション差分検出: code=%s, broker=%d, local=%d, diff=%+d",
-                    code, broker_qty, local_qty, diff,
+                    code,
+                    broker_qty,
+                    local_qty,
+                    diff,
                 )

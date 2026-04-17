@@ -1,5 +1,6 @@
 # tests/test_scripts_utils.py
 """scripts/utils.py の単体テスト"""
+
 from __future__ import annotations
 
 import os

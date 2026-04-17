@@ -1,4 +1,5 @@
 """kill_switch.py — フラグファイル書き込みによる ExecutionEngine 停止シグナル。"""
+
 from __future__ import annotations
 
 import logging

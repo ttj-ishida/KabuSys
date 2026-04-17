@@ -41,13 +41,14 @@ _BASE_URL = "https://api.jquants.com/v1"
 _RATE_LIMIT_PER_MIN = 120
 _MIN_INTERVAL_SEC = 60.0 / _RATE_LIMIT_PER_MIN
 _MAX_RETRIES = 3
-_RETRY_BACKOFF_BASE = 2.0          # 指数バックオフ係数（秒）
-_RETRY_STATUS_CODES = {408, 429}   # ネットワーク起因の 4xx + 5xx 系
+_RETRY_BACKOFF_BASE = 2.0  # 指数バックオフ係数（秒）
+_RETRY_STATUS_CODES = {408, 429}  # ネットワーク起因の 4xx + 5xx 系
 
 
 # ---------------------------------------------------------------------------
 # レート制限（固定間隔スロットリング）
 # ---------------------------------------------------------------------------
+
 
 class _RateLimiter:
     """固定間隔スロットリングで API レート制限（120 req/min）を制御する。"""
@@ -82,6 +83,7 @@ def _get_cached_token(force_refresh: bool = False) -> str:
 # ---------------------------------------------------------------------------
 # HTTP ユーティリティ
 # ---------------------------------------------------------------------------
+
 
 def _request(
     path: str,
@@ -120,9 +122,7 @@ def _request(
         h = dict(headers)
         if token:
             h["Authorization"] = f"Bearer {token}"
-        req = urllib.request.Request(
-            url, headers=h, method=method, data=data_bytes
-        )
+        req = urllib.request.Request(url, headers=h, method=method, data=data_bytes)
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw = resp.read().decode("utf-8")
         try:
@@ -160,9 +160,11 @@ def _request(
                 last_exc = e
                 if attempt < _MAX_RETRIES - 1:  # 最終試行では sleep しない
                     # 429 は Retry-After ヘッダを優先、なければ指数バックオフ
-                    wait = _RETRY_BACKOFF_BASE ** attempt
+                    wait = _RETRY_BACKOFF_BASE**attempt
                     if status == 429:
-                        retry_after = e.headers.get("Retry-After") if e.headers else None
+                        retry_after = (
+                            e.headers.get("Retry-After") if e.headers else None
+                        )
                         if retry_after:
                             try:
                                 wait = float(retry_after)
@@ -170,7 +172,11 @@ def _request(
                                 pass
                     logger.warning(
                         "HTTP %d on %s, retry %d/%d in %.1fs",
-                        status, path, attempt + 1, _MAX_RETRIES, wait,
+                        status,
+                        path,
+                        attempt + 1,
+                        _MAX_RETRIES,
+                        wait,
                     )
                     time.sleep(wait)
                 continue
@@ -178,10 +184,14 @@ def _request(
         except (urllib.error.URLError, OSError) as e:
             last_exc = e
             if attempt < _MAX_RETRIES - 1:  # 最終試行では sleep しない
-                wait = _RETRY_BACKOFF_BASE ** attempt
+                wait = _RETRY_BACKOFF_BASE**attempt
                 logger.warning(
                     "Network error on %s, retry %d/%d in %.1fs: %s",
-                    path, attempt + 1, _MAX_RETRIES, wait, e,
+                    path,
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    wait,
+                    e,
                 )
                 time.sleep(wait)
 
@@ -193,6 +203,7 @@ def _request(
 # ---------------------------------------------------------------------------
 # 認証
 # ---------------------------------------------------------------------------
+
 
 def get_id_token(refresh_token: str | None = None) -> str:
     """リフレッシュトークンから ID トークンを取得する（POST）。
@@ -219,6 +230,7 @@ def get_id_token(refresh_token: str | None = None) -> str:
 # ---------------------------------------------------------------------------
 # データ取得関数
 # ---------------------------------------------------------------------------
+
 
 def fetch_daily_quotes(
     id_token: str | None = None,
@@ -327,6 +339,7 @@ def fetch_market_calendar(
 # DuckDB への保存関数
 # ---------------------------------------------------------------------------
 
+
 def save_daily_quotes(
     conn: duckdb.DuckDBPyConnection,
     records: list[dict[str, Any]],
@@ -343,7 +356,11 @@ def save_daily_quotes(
     if not records:
         return 0
 
-    fetched_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    fetched_at = (
+        datetime.now(tz=timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
     rows = [
         (
             r.get("Date"),
@@ -399,7 +416,11 @@ def save_financial_statements(
     if not records:
         return 0
 
-    fetched_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    fetched_at = (
+        datetime.now(tz=timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
     rows = [
         (
             str(r.get("LocalCode", "") or ""),
@@ -413,11 +434,15 @@ def save_financial_statements(
             fetched_at,
         )
         for r in records
-        if r.get("LocalCode") and r.get("DisclosedDate") and r.get("TypeOfDocument")  # PK 欠損行はスキップ
+        if r.get("LocalCode")
+        and r.get("DisclosedDate")
+        and r.get("TypeOfDocument")  # PK 欠損行はスキップ
     ]
     skipped = len(records) - len(rows)
     if skipped:
-        logger.warning("save_financial_statements: %d 件を PK 欠損によりスキップ", skipped)
+        logger.warning(
+            "save_financial_statements: %d 件を PK 欠損によりスキップ", skipped
+        )
 
     conn.executemany(
         """
@@ -463,8 +488,8 @@ def save_market_calendar(
         (
             r.get("Date"),
             str(r.get("HolidayDivision", "")) in {"0", "2", "3"},  # 取引あり（型安全）
-            str(r.get("HolidayDivision", "")) == "3",               # 半日
-            str(r.get("HolidayDivision", "")) == "2",               # SQ 日
+            str(r.get("HolidayDivision", "")) == "3",  # 半日
+            str(r.get("HolidayDivision", "")) == "2",  # SQ 日
             r.get("HolidayName") or None,
         )
         for r in records
@@ -528,7 +553,9 @@ def fetch_listed_info(
     if date_ is not None:
         params["date"] = date_.strftime("%Y%m%d")
 
-    data = _request("/listed/info", params=params if params else None, id_token=id_token)
+    data = _request(
+        "/listed/info", params=params if params else None, id_token=id_token
+    )
     records = data.get("info", [])
 
     result: list[dict[str, Any]] = []
@@ -539,12 +566,14 @@ def fetch_listed_info(
             skipped += 1
             continue
         market_code = str(r.get("MarketCode") or "")
-        result.append({
-            "code": code,
-            "name": str(r.get("CompanyName") or ""),
-            "market": _MARKET_CODE_MAP.get(market_code, "Other"),
-            "sector": str(r.get("Sector33CodeName") or ""),
-        })
+        result.append(
+            {
+                "code": code,
+                "name": str(r.get("CompanyName") or ""),
+                "market": _MARKET_CODE_MAP.get(market_code, "Other"),
+                "sector": str(r.get("Sector33CodeName") or ""),
+            }
+        )
 
     if skipped:
         logger.warning("fetch_listed_info: %d 件を Code 欠損によりスキップ", skipped)
@@ -555,6 +584,7 @@ def fetch_listed_info(
 # ---------------------------------------------------------------------------
 # ユーティリティ
 # ---------------------------------------------------------------------------
+
 
 def _to_float(value: Any) -> float | None:
     """値を float に変換する。変換失敗または空値は None を返す。"""

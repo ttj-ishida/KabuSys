@@ -4,6 +4,7 @@
 
 BacktestFramework.md Section 6〜8 に従い、全体ループと補助関数を提供する。
 """
+
 from __future__ import annotations
 
 import logging
@@ -38,6 +39,7 @@ class BacktestResult:
 # ---------------------------------------------------------------------------
 # ヘルパー関数
 # ---------------------------------------------------------------------------
+
 
 def _build_backtest_conn(
     source_conn: duckdb.DuckDBPyConnection,
@@ -80,7 +82,9 @@ def _build_backtest_conn(
                 f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})", rows
             )
         except Exception as exc:
-            logger.warning("_build_backtest_conn: %s のコピーをスキップ: %s", table, exc)
+            logger.warning(
+                "_build_backtest_conn: %s のコピーをスキップ: %s", table, exc
+            )
 
     # market_calendar は全件コピー
     try:
@@ -91,10 +95,13 @@ def _build_backtest_conn(
             col_list = ", ".join(cols)
             placeholders = ", ".join(["?" for _ in cols])
             bt_conn.executemany(
-                f"INSERT INTO market_calendar ({col_list}) VALUES ({placeholders})", rows
+                f"INSERT INTO market_calendar ({col_list}) VALUES ({placeholders})",
+                rows,
             )
     except Exception as exc:
-        logger.warning("_build_backtest_conn: market_calendar のコピーをスキップ: %s", exc)
+        logger.warning(
+            "_build_backtest_conn: market_calendar のコピーをスキップ: %s", exc
+        )
 
     # stocks は全件コピー（銘柄のセクターは日付フィルタなし）
     # TIMESTAMPTZ 型の updated_at 列は pytz 依存のため除外し、明示列のみコピーする
@@ -187,7 +194,10 @@ def _read_day_signals(
         "SELECT code FROM signals WHERE date = ? AND side = 'sell'",
         [trading_day],
     ).fetchall()
-    buy_signals = [{"code": row[0], "signal_rank": row[1], "score": row[2] or 0.0} for row in buy_rows]
+    buy_signals = [
+        {"code": row[0], "signal_rank": row[1], "score": row[2] or 0.0}
+        for row in buy_rows
+    ]
     sell_signals = [{"code": row[0]} for row in sell_rows]
     return buy_signals, sell_signals
 
@@ -203,7 +213,8 @@ def _fetch_regime(conn: duckdb.DuckDBPyConnection, trading_day: date) -> str:
     if row is None:
         # バックテスト序盤などでレジームデータが未整備の場合は通常の運用。INFO に留める。
         logger.info(
-            "_fetch_regime: %s のレジームが取得できません。'bull' でフォールバック。", trading_day
+            "_fetch_regime: %s のレジームが取得できません。'bull' でフォールバック。",
+            trading_day,
         )
         return "bull"
     return row[0]
@@ -224,6 +235,7 @@ def _fetch_sector_map(conn: duckdb.DuckDBPyConnection) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # パブリック API
 # ---------------------------------------------------------------------------
+
 
 def run_backtest(
     conn: duckdb.DuckDBPyConnection,
@@ -268,9 +280,13 @@ def run_backtest(
     if stop_loss_pct <= 0:
         raise ValueError(f"stop_loss_pct は正の値を指定してください: {stop_loss_pct}")
     if not (0 < max_position_pct <= 1):
-        raise ValueError(f"max_position_pct は (0, 1] の範囲で指定してください: {max_position_pct}")
+        raise ValueError(
+            f"max_position_pct は (0, 1] の範囲で指定してください: {max_position_pct}"
+        )
     if not (0 <= max_utilization <= 1):
-        raise ValueError(f"max_utilization は [0, 1] の範囲で指定してください: {max_utilization}")
+        raise ValueError(
+            f"max_utilization は [0, 1] の範囲で指定してください: {max_utilization}"
+        )
     if max_positions < 1:
         raise ValueError(f"max_positions は 1 以上を指定してください: {max_positions}")
     if slippage_rate < 0 or commission_rate < 0:
@@ -293,7 +309,11 @@ def run_backtest(
         trading_days = get_trading_days(bt_conn, start_date, end_date)
         logger.info(
             "run_backtest: 開始 start=%s end=%s 営業日数=%d 初期資金=%.0f allocation=%s",
-            start_date, end_date, len(trading_days), initial_cash, allocation_method,
+            start_date,
+            end_date,
+            len(trading_days),
+            initial_cash,
+            allocation_method,
         )
 
         # sector_map はバックテスト開始前に一度だけ取得（銘柄のセクターは日次変化しない）
@@ -302,10 +322,19 @@ def run_backtest(
         for trading_day in trading_days:
             # Step 1: 前日生成の発注リストを当日 open で約定
             open_prices = _fetch_open_prices(bt_conn, trading_day)
-            simulator.execute_orders(next_day_orders, open_prices, slippage_rate, commission_rate, trading_day, lot_size=lot_size)
+            simulator.execute_orders(
+                next_day_orders,
+                open_prices,
+                slippage_rate,
+                commission_rate,
+                trading_day,
+                lot_size=lot_size,
+            )
 
             # Step 2: positions テーブルに書き戻し（generate_signals の SELL 判定に必要）
-            _write_positions(bt_conn, trading_day, simulator.positions, simulator.cost_basis)
+            _write_positions(
+                bt_conn, trading_day, simulator.positions, simulator.cost_basis
+            )
 
             # Step 3: 終値で時価評価・スナップショット記録
             close_prices = _fetch_close_prices(bt_conn, trading_day)
@@ -319,16 +348,26 @@ def run_backtest(
             regime = _fetch_regime(bt_conn, trading_day)
             multiplier = calc_regime_multiplier(regime)
             # 当日 mark_to_market 後の最新ポートフォリオ価値（翌日用発注サイジングに使用）
-            current_pv = simulator.history[-1].portfolio_value if simulator.history else initial_cash
+            current_pv = (
+                simulator.history[-1].portfolio_value
+                if simulator.history
+                else initial_cash
+            )
             # max_utilization を全配分方式に一貫適用（risk_based 含む）
-            available_cash = min(simulator.cash * multiplier, current_pv * max_utilization)
+            available_cash = min(
+                simulator.cash * multiplier, current_pv * max_utilization
+            )
 
             # セクター制限を全候補に先行適用し、除外後に上位 max_positions を選ぶ
             # （従来の select → filter では除外後の補充がなかった）
             sell_codes = {s["code"] for s in sell_signals}
             all_sorted = select_candidates(buy_signals, max_positions=len(buy_signals))
             filtered = apply_sector_cap(
-                all_sorted, sector_map, current_pv, simulator.positions, close_prices,
+                all_sorted,
+                sector_map,
+                current_pv,
+                simulator.positions,
+                close_prices,
                 sell_codes=sell_codes,
             )
             candidates = filtered[:max_positions]
@@ -371,8 +410,10 @@ def run_backtest(
     metrics = calc_metrics(simulator.history, simulator.trades)
     logger.info(
         "run_backtest: 完了 CAGR=%.2f%% Sharpe=%.3f MaxDD=%.2f%% Trades=%d",
-        metrics.cagr * 100, metrics.sharpe_ratio,
-        metrics.max_drawdown * 100, metrics.total_trades,
+        metrics.cagr * 100,
+        metrics.sharpe_ratio,
+        metrics.max_drawdown * 100,
+        metrics.total_trades,
     )
     return BacktestResult(
         history=simulator.history,

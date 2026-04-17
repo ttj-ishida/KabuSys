@@ -1,4 +1,5 @@
 """MonitoringDB 単体テスト（Issue #36）"""
+
 from datetime import datetime, timezone, timedelta
 
 import pytest
@@ -12,7 +13,6 @@ def mdb(monitoring_conn):
 
 
 class TestInitMonitoringDb:
-
     def test_tables_created_idempotently(self, monitoring_conn):
         """init_monitoring_db を2回呼んでもエラーなし、5テーブルが存在する"""
         init_monitoring_db(monitoring_conn)  # 2回目の呼び出し
@@ -22,11 +22,16 @@ class TestInitMonitoringDb:
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        assert {"system_status", "trade_logs", "positions", "risk_logs", "dashboard"}.issubset(tables)
+        assert {
+            "system_status",
+            "trade_logs",
+            "positions",
+            "risk_logs",
+            "dashboard",
+        }.issubset(tables)
 
 
 class TestLogSystemStatus:
-
     def test_appends_row(self, mdb, monitoring_conn):
         """2回呼ぶと2行追記される"""
         mdb.log_system_status(50.0, 60.0, 70.0, True)
@@ -49,7 +54,6 @@ class TestLogSystemStatus:
 
 
 class TestLogTradeEvent:
-
     def test_appends_row_with_correct_fields(self, mdb, monitoring_conn):
         """全フィールドが正しく保存される"""
         ts = datetime(2026, 3, 30, 9, 0, 0, tzinfo=timezone.utc)
@@ -126,6 +130,7 @@ class TestLogTradeEvent:
     def test_migration_adds_latency_ms_column(self):
         """init_monitoring_db() が latency_ms カラムを trade_logs に追加する"""
         import sqlite3 as _sqlite3
+
         conn = _sqlite3.connect(":memory:")
         init_monitoring_db(conn)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_logs)")}
@@ -135,11 +140,13 @@ class TestLogTradeEvent:
     def test_migration_is_idempotent(self):
         """init_monitoring_db() を2回呼んでも latency_ms カラムが1つだけ"""
         import sqlite3 as _sqlite3
+
         conn = _sqlite3.connect(":memory:")
         init_monitoring_db(conn)
         init_monitoring_db(conn)  # 2回目
         count = sum(
-            1 for row in conn.execute("PRAGMA table_info(trade_logs)")
+            1
+            for row in conn.execute("PRAGMA table_info(trade_logs)")
             if row[1] == "latency_ms"
         )
         assert count == 1
@@ -147,22 +154,17 @@ class TestLogTradeEvent:
 
 
 class TestUpsertPosition:
-
     def test_insert_new_position(self, mdb, monitoring_conn):
         """新規 code が挿入される"""
         mdb.upsert_position("1234", 100, 1500.0)
-        count = monitoring_conn.execute(
-            "SELECT COUNT(*) FROM positions"
-        ).fetchone()[0]
+        count = monitoring_conn.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
         assert count == 1
 
     def test_update_existing_position(self, mdb, monitoring_conn):
         """同一 code を2回 upsert すると上書きされる（行数は1のまま）"""
         mdb.upsert_position("1234", 100, 1500.0)
         mdb.upsert_position("1234", 50, 1600.0)
-        count = monitoring_conn.execute(
-            "SELECT COUNT(*) FROM positions"
-        ).fetchone()[0]
+        count = monitoring_conn.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
         assert count == 1
         row = monitoring_conn.execute(
             "SELECT qty, avg_price FROM positions WHERE code = '1234'"
@@ -181,7 +183,6 @@ class TestUpsertPosition:
 
 
 class TestLogRiskEvent:
-
     def test_appends_row(self, mdb, monitoring_conn):
         """全フィールドが正しく保存される"""
         ts = datetime(2026, 3, 30, 9, 0, 0, tzinfo=timezone.utc)
@@ -208,22 +209,17 @@ class TestLogRiskEvent:
 
 
 class TestUpsertDashboard:
-
     def test_first_upsert_creates_row(self, mdb, monitoring_conn):
         """最初の upsert でレコードが作成される"""
         mdb.upsert_dashboard(10_000_000.0, 5_000_000.0, 0.0, 3, 5)
-        count = monitoring_conn.execute(
-            "SELECT COUNT(*) FROM dashboard"
-        ).fetchone()[0]
+        count = monitoring_conn.execute("SELECT COUNT(*) FROM dashboard").fetchone()[0]
         assert count == 1
 
     def test_second_upsert_overwrites(self, mdb, monitoring_conn):
         """2回 upsert しても行数は1のまま、値は最新"""
         mdb.upsert_dashboard(10_000_000.0, 5_000_000.0, 0.0, 3, 5)
         mdb.upsert_dashboard(9_500_000.0, 4_500_000.0, 5.0, 1, 3)
-        count = monitoring_conn.execute(
-            "SELECT COUNT(*) FROM dashboard"
-        ).fetchone()[0]
+        count = monitoring_conn.execute("SELECT COUNT(*) FROM dashboard").fetchone()[0]
         assert count == 1
 
     def test_get_dashboard_returns_latest(self, mdb):

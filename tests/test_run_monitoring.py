@@ -19,17 +19,19 @@ def _run_main():
     """全依存をモックして main() を実行するヘルパー。time.sleep で1回ループ後に終了。"""
     mock_monitor = MagicMock()
 
-    with patch("kabusys.run_monitoring.set_process_priority") as mock_priority, \
-         patch("kabusys.run_monitoring.Settings") as mock_settings_cls, \
-         patch("kabusys.run_monitoring.sqlite3.connect") as mock_sqlite, \
-         patch("kabusys.run_monitoring.init_monitoring_db"), \
-         patch("kabusys.run_monitoring.duckdb.connect"), \
-         patch("kabusys.run_monitoring.SystemMonitor", return_value=mock_monitor), \
-         patch("kabusys.run_monitoring.time.sleep", side_effect=KeyboardInterrupt):
-
+    with (
+        patch("kabusys.run_monitoring.set_process_priority") as mock_priority,
+        patch("kabusys.run_monitoring.Settings") as mock_settings_cls,
+        patch("kabusys.run_monitoring.sqlite3.connect") as mock_sqlite,
+        patch("kabusys.run_monitoring.init_monitoring_db"),
+        patch("kabusys.run_monitoring.duckdb.connect"),
+        patch("kabusys.run_monitoring.SystemMonitor", return_value=mock_monitor),
+        patch("kabusys.run_monitoring.time.sleep", side_effect=KeyboardInterrupt),
+    ):
         mock_settings_cls.return_value = _make_settings()
 
         from kabusys.run_monitoring import main
+
         main()
 
     return mock_priority, mock_sqlite, mock_monitor
@@ -57,13 +59,15 @@ def test_run_monitoring_stops_on_flag(tmp_path):
     stop_flag = tmp_path / "stop.flag"
     stop_flag.touch()
 
-    with patch.object(rm_mod, "_STOP_FLAG", stop_flag), \
-         patch("kabusys.run_monitoring.set_process_priority"), \
-         patch("kabusys.run_monitoring.Settings", return_value=_make_settings()), \
-         patch("kabusys.run_monitoring.sqlite3.connect"), \
-         patch("kabusys.run_monitoring.init_monitoring_db"), \
-         patch("kabusys.run_monitoring.duckdb.connect"), \
-         patch("kabusys.run_monitoring.SystemMonitor"):
+    with (
+        patch.object(rm_mod, "_STOP_FLAG", stop_flag),
+        patch("kabusys.run_monitoring.set_process_priority"),
+        patch("kabusys.run_monitoring.Settings", return_value=_make_settings()),
+        patch("kabusys.run_monitoring.sqlite3.connect"),
+        patch("kabusys.run_monitoring.init_monitoring_db"),
+        patch("kabusys.run_monitoring.duckdb.connect"),
+        patch("kabusys.run_monitoring.SystemMonitor"),
+    ):
         rm_mod.main()  # フラグがあるのでループせずに終了するはず
 
 

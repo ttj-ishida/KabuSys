@@ -3,6 +3,7 @@
 PortfolioConstruction.md Section 5〜7 に基づく純粋関数群。
 DB 参照なし — メモリ内計算のみ。
 """
+
 from __future__ import annotations
 
 import logging

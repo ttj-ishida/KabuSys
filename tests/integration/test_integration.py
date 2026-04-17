@@ -8,6 +8,7 @@ Issue #51 の要件:
 
 MockBrokerClient + in-memory DuckDB / SQLite を使用し、外部サービスへの依存なしで実行可能。
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -72,14 +73,18 @@ def duck_conn():
     conn.close()
 
 
-def _insert_signal(conn: duckdb.DuckDBPyConnection, code: str, side: str = "buy", score: float = 0.8):
+def _insert_signal(
+    conn: duckdb.DuckDBPyConnection, code: str, side: str = "buy", score: float = 0.8
+):
     conn.execute(
         "INSERT INTO signals VALUES (?, ?, ?, ?, ?)",
         [TARGET_DATE, code, side, score, 1],
     )
 
 
-def _insert_target(conn: duckdb.DuckDBPyConnection, code: str, qty: int = 100, price: float = 1500.0):
+def _insert_target(
+    conn: duckdb.DuckDBPyConnection, code: str, qty: int = 100, price: float = 1500.0
+):
     conn.execute(
         "INSERT INTO portfolio_targets VALUES (?, ?, ?, ?)",
         [TARGET_DATE, code, qty, price],
@@ -258,9 +263,7 @@ class TestMonitoringCapture:
         )
         engine._process_signals()
 
-        rows = mon_conn.execute(
-            "SELECT COUNT(*) FROM trade_logs"
-        ).fetchone()[0]
+        rows = mon_conn.execute("SELECT COUNT(*) FROM trade_logs").fetchone()[0]
         assert rows >= 1
 
     def test_no_trade_log_when_no_signals(self, orders_conn, duck_conn, mon_conn):
@@ -270,12 +273,12 @@ class TestMonitoringCapture:
         )
         engine._process_signals()
 
-        rows = mon_conn.execute(
-            "SELECT COUNT(*) FROM trade_logs"
-        ).fetchone()[0]
+        rows = mon_conn.execute("SELECT COUNT(*) FROM trade_logs").fetchone()[0]
         assert rows == 0
 
-    def test_monitoring_captures_fill_mode_instant(self, orders_conn, duck_conn, mon_conn):
+    def test_monitoring_captures_fill_mode_instant(
+        self, orders_conn, duck_conn, mon_conn
+    ):
         """fill_mode=instant の場合、Filled レコードがログに残ること"""
         for code in ["7203", "9984"]:
             _insert_signal(duck_conn, code)
@@ -286,7 +289,5 @@ class TestMonitoringCapture:
         )
         engine._process_signals()
 
-        rows = mon_conn.execute(
-            "SELECT COUNT(*) FROM trade_logs"
-        ).fetchone()[0]
+        rows = mon_conn.execute("SELECT COUNT(*) FROM trade_logs").fetchone()[0]
         assert rows >= 2

@@ -3,6 +3,7 @@
 PortfolioConstruction.md Section 8〜9 に基づく純粋関数。
 DB 参照なし — メモリ内計算のみ。
 """
+
 from __future__ import annotations
 
 import logging
@@ -59,7 +60,9 @@ def apply_sector_cap(
             blocked_sectors.add(sector)
             logger.debug(
                 "apply_sector_cap: セクター '%s' が上限超過 (%.1f%% > %.1f%%)",
-                sector, exposure / portfolio_value * 100, max_sector_pct * 100,
+                sector,
+                exposure / portfolio_value * 100,
+                max_sector_pct * 100,
             )
 
     if not blocked_sectors:
@@ -107,7 +110,8 @@ def calc_regime_multiplier(regime: str) -> float:
     multiplier = _MULTIPLIER_MAP.get(regime)
     if multiplier is None:
         logger.warning(
-            "calc_regime_multiplier: 未知のレジーム '%s'。1.0 でフォールバック。", regime
+            "calc_regime_multiplier: 未知のレジーム '%s'。1.0 でフォールバック。",
+            regime,
         )
         return 1.0
     return multiplier

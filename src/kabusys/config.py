@@ -86,7 +86,10 @@ def _load_env_file(
         f_obj = open(path, encoding="utf-8")
     except OSError as e:
         import warnings
-        warnings.warn(f".env ファイルの読み込みに失敗しました: {path}: {e}", stacklevel=2)
+
+        warnings.warn(
+            f".env ファイルの読み込みに失敗しました: {path}: {e}", stacklevel=2
+        )
         return
     with f_obj as f:
         for raw in f:
@@ -176,8 +179,7 @@ class Settings:
         mode = os.environ.get("PAPER_FILL_MODE", "instant").strip().lower()
         if mode not in _valid:
             raise ValueError(
-                f"PAPER_FILL_MODE の値が不正です: '{mode}'. "
-                f"有効な値: {sorted(_valid)}"
+                f"PAPER_FILL_MODE の値が不正です: '{mode}'. 有効な値: {sorted(_valid)}"
             )
         return mode
 

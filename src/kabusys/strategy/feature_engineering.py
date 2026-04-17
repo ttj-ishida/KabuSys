@@ -33,12 +33,18 @@ logger = logging.getLogger(__name__)
 # 定数
 # ---------------------------------------------------------------------------
 
-_MIN_PRICE: float = 300.0    # ユニバース最低株価（円）
-_MIN_TURNOVER: float = 5e8   # ユニバース最低平均売買代金（円）
-_ZSCORE_CLIP: float = 3.0    # Z スコアクリップ範囲
+_MIN_PRICE: float = 300.0  # ユニバース最低株価（円）
+_MIN_TURNOVER: float = 5e8  # ユニバース最低平均売買代金（円）
+_ZSCORE_CLIP: float = 3.0  # Z スコアクリップ範囲
 
 # Z スコア正規化対象カラム（per は逆数スコアに変換するため正規化しない）
-_NORM_COLS: tuple[str, ...] = ("mom_1m", "mom_3m", "atr_pct", "volume_ratio", "ma200_dev")
+_NORM_COLS: tuple[str, ...] = (
+    "mom_1m",
+    "mom_3m",
+    "atr_pct",
+    "volume_ratio",
+    "ma200_dev",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +69,11 @@ def _apply_universe_filter(
         avg_turnover = r.get("avg_turnover")
         if close is None or not math.isfinite(close) or close < _MIN_PRICE:
             continue
-        if avg_turnover is None or not math.isfinite(avg_turnover) or avg_turnover < _MIN_TURNOVER:
+        if (
+            avg_turnover is None
+            or not math.isfinite(avg_turnover)
+            or avg_turnover < _MIN_TURNOVER
+        ):
             continue
         result.append(r)
     return result
@@ -122,16 +132,20 @@ def build_features(
         m = mom_map.get(code, {})
         v = vol_map.get(code, {})
         f = val_map.get(code, {})
-        merged.append({
-            "code": code,
-            "avg_turnover": v.get("avg_turnover"),   # フィルタ用（features には保存しない）
-            "mom_1m": m.get("mom_1m"),
-            "mom_3m": m.get("mom_3m"),
-            "ma200_dev": m.get("ma200_dev"),
-            "atr_pct": v.get("atr_pct"),
-            "volume_ratio": v.get("volume_ratio"),
-            "per": f.get("per"),
-        })
+        merged.append(
+            {
+                "code": code,
+                "avg_turnover": v.get(
+                    "avg_turnover"
+                ),  # フィルタ用（features には保存しない）
+                "mom_1m": m.get("mom_1m"),
+                "mom_3m": m.get("mom_3m"),
+                "ma200_dev": m.get("ma200_dev"),
+                "atr_pct": v.get("atr_pct"),
+                "volume_ratio": v.get("volume_ratio"),
+                "per": f.get("per"),
+            }
+        )
 
     # 4. ユニバースフィルタ
     filtered = _apply_universe_filter(merged, price_map)

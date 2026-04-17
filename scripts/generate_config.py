@@ -7,6 +7,7 @@
 
 documents/01_Data/config_schema.md に沿った安全側（保守的）な初期値を使用する。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -140,9 +141,7 @@ def generate(overwrite: bool = False) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="config/*.yaml テンプレートを生成する"
-    )
+    parser = argparse.ArgumentParser(description="config/*.yaml テンプレートを生成する")
     parser.add_argument(
         "--overwrite",
         action="store_true",

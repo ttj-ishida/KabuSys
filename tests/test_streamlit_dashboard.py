@@ -1,4 +1,5 @@
 """tests/test_streamlit_dashboard.py — Streamlit ダッシュボード テスト"""
+
 from __future__ import annotations
 
 import sqlite3

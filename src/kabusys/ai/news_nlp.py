@@ -47,15 +47,15 @@ logger = logging.getLogger(__name__)
 # 定数
 # ---------------------------------------------------------------------------
 
-_BATCH_SIZE: int = 20              # 1回の API コールで処理する最大銘柄数
-_MODEL: str = "gpt-4o-mini"        # 使用する OpenAI モデル
-_SCORE_CLIP: float = 1.0           # スコアのクリップ範囲（±1.0）
-_MAX_RETRIES: int = 3              # リトライ上限回数（429・ネットワーク断・5xx 共通）
-_RETRY_BASE_SECONDS: float = 1.0   # バックオフ初回待機秒数（指数的に増加）
+_BATCH_SIZE: int = 20  # 1回の API コールで処理する最大銘柄数
+_MODEL: str = "gpt-4o-mini"  # 使用する OpenAI モデル
+_SCORE_CLIP: float = 1.0  # スコアのクリップ範囲（±1.0）
+_MAX_RETRIES: int = 3  # リトライ上限回数（429・ネットワーク断・5xx 共通）
+_RETRY_BASE_SECONDS: float = 1.0  # バックオフ初回待機秒数（指数的に増加）
 
 # 1銘柄あたりのトークン肥大化対策
-_MAX_ARTICLES_PER_STOCK: int = 10   # 1銘柄に含める最大記事数（新しい順）
-_MAX_CHARS_PER_STOCK: int = 3000    # 1銘柄に含める最大文字数（超過分はトリム）
+_MAX_ARTICLES_PER_STOCK: int = 10  # 1銘柄に含める最大記事数（新しい順）
+_MAX_CHARS_PER_STOCK: int = 3000  # 1銘柄に含める最大文字数（超過分はトリム）
 
 # ニュース対象時間ウィンドウ（JST 基準、UTC 変換して DB 比較に使用）
 # target_date の前日 15:00 JST = target_date の前日 06:00 UTC
@@ -87,12 +87,18 @@ def calc_news_window(target_date: date) -> tuple[datetime, datetime]:
         target_date=2026-03-20 → (2026-03-19 06:00, 2026-03-19 23:30)
     """
     window_start = datetime(
-        target_date.year, target_date.month, target_date.day,
-        _NEWS_WINDOW_START_HOUR, _NEWS_WINDOW_START_MINUTE,
+        target_date.year,
+        target_date.month,
+        target_date.day,
+        _NEWS_WINDOW_START_HOUR,
+        _NEWS_WINDOW_START_MINUTE,
     ) - timedelta(days=1)
     window_end = datetime(
-        target_date.year, target_date.month, target_date.day,
-        _NEWS_WINDOW_END_HOUR, _NEWS_WINDOW_END_MINUTE,
+        target_date.year,
+        target_date.month,
+        target_date.day,
+        _NEWS_WINDOW_END_HOUR,
+        _NEWS_WINDOW_END_MINUTE,
     ) - timedelta(days=1)
     return window_start, window_end
 
@@ -155,7 +161,9 @@ def score_news(
 
     logger.info(
         "score_news: チャンク数=%d スコア取得銘柄数=%d date=%s",
-        chunk_count, len(all_scores), target_date,
+        chunk_count,
+        len(all_scores),
+        target_date,
     )
 
     if not all_scores:
@@ -165,10 +173,7 @@ def score_news(
     # 6. ai_scores テーブルへスコア取得済みコードのみ置換（DELETE → INSERT）
     # code を絞り込むことで、部分失敗時に他コードの既存スコアを消さない。
     # sentiment_score と ai_score は同値（現フェーズ）
-    params = [
-        (target_date, code, score, score)
-        for code, score in all_scores.items()
-    ]
+    params = [(target_date, code, score, score) for code, score in all_scores.items()]
     codes_to_write = list(all_scores.keys())
     conn.execute("BEGIN")
     try:
@@ -274,10 +279,10 @@ def _validate_and_extract(resp: Any, requested_codes: set[str]) -> dict[str, flo
             raw = json.loads(content)
         except json.JSONDecodeError:
             # JSON mode でも稀に前後テキストが混ざる場合の復元（最外の {} を抽出）
-            start = content.find('{')
-            end = content.rfind('}')
+            start = content.find("{")
+            end = content.rfind("}")
             if start != -1 and end > start:
-                raw = json.loads(content[start:end + 1])
+                raw = json.loads(content[start : end + 1])
             else:
                 raise
     except (json.JSONDecodeError, AttributeError, IndexError) as e:
@@ -302,7 +307,9 @@ def _validate_and_extract(resp: Any, requested_codes: set[str]) -> dict[str, flo
         try:
             score = float(raw_score)
         except (TypeError, ValueError):
-            logger.warning("score_news: code=%s のスコアが数値でない: %r", code, raw_score)
+            logger.warning(
+                "score_news: code=%s のスコアが数値でない: %r", code, raw_score
+            )
             continue
         if not math.isfinite(score):
             continue
@@ -327,9 +334,9 @@ def _score_chunk(
     # 銘柄ごとの全記事テキストを結合・トリムしてプロンプトを構築
     user_lines = []
     for code in chunk_codes:
-        combined = ' '.join(article_map[code])
+        combined = " ".join(article_map[code])
         if len(combined) > _MAX_CHARS_PER_STOCK:
-            combined = combined[:_MAX_CHARS_PER_STOCK] + '…'
+            combined = combined[:_MAX_CHARS_PER_STOCK] + "…"
         user_lines.append(f"銘柄{code}: {combined}")
 
     user_content = (
@@ -351,21 +358,26 @@ def _score_chunk(
             if attempt >= _MAX_RETRIES:
                 logger.warning("score_news: リトライ上限超過 → スキップ: %s", e)
                 return {}
-            wait = _RETRY_BASE_SECONDS * (2 ** attempt)
+            wait = _RETRY_BASE_SECONDS * (2**attempt)
             logger.warning(
                 "score_news: 一時エラー(%s) リトライ %d/%d (%.1f秒待機)",
-                type(e).__name__, attempt + 1, _MAX_RETRIES, wait,
+                type(e).__name__,
+                attempt + 1,
+                _MAX_RETRIES,
+                wait,
             )
             time.sleep(wait)
         except APIError as e:
             # status_code が無い APIError は安全側（5xx扱い）でリトライ対象にする
-            if getattr(e, 'status_code', 500) < 500 or attempt >= _MAX_RETRIES:
+            if getattr(e, "status_code", 500) < 500 or attempt >= _MAX_RETRIES:
                 logger.warning("score_news: API エラー → スキップ: %s", e)
                 return {}
-            wait = _RETRY_BASE_SECONDS * (2 ** attempt)
+            wait = _RETRY_BASE_SECONDS * (2**attempt)
             logger.warning(
                 "score_news: サーバーエラー(5xx) リトライ %d/%d (%.1f秒待機)",
-                attempt + 1, _MAX_RETRIES, wait,
+                attempt + 1,
+                _MAX_RETRIES,
+                wait,
             )
             time.sleep(wait)
         except Exception as e:

@@ -1,4 +1,5 @@
 """BrokerAPI クライアント層のテスト。MockBrokerClient を使い kabu station 不要で実行可能。"""
+
 from __future__ import annotations
 
 import pytest
@@ -86,6 +87,7 @@ def test_order_response_fields():
 # 例外クラス
 # ---------------------------------------------------------------------------
 
+
 def test_broker_api_error_is_exception():
     err = BrokerAPIError("test error")
     assert isinstance(err, Exception)
@@ -112,6 +114,7 @@ def test_rate_limit_error_is_broker_api_error():
 # ファクトリ
 # ---------------------------------------------------------------------------
 
+
 def test_create_broker_api_mock_returns_mock_client():
     api = create_broker_api(mock=True)
     assert isinstance(api, MockBrokerClient)
@@ -132,6 +135,7 @@ def test_mock_broker_client_conforms_to_protocol():
 # ---------------------------------------------------------------------------
 # MockBrokerClient — ハッピーパス（instant fill）
 # ---------------------------------------------------------------------------
+
 
 def test_mock_send_order_instant_fill():
     """instant モードでの発注：即約定し positions と cash が更新される。"""
@@ -215,7 +219,9 @@ def test_mock_sell_order_increases_cash():
         available_cash=0.0,
         initial_positions=initial,
     )
-    req = OrderRequest(code="1234", side="sell", qty=50, price=600.0, order_type="limit")
+    req = OrderRequest(
+        code="1234", side="sell", qty=50, price=600.0, order_type="limit"
+    )
     client.send_order(req)
 
     assert client.get_available_cash() == 50 * 600.0
@@ -226,6 +232,7 @@ def test_mock_sell_order_increases_cash():
 # ---------------------------------------------------------------------------
 # MockBrokerClient — 部分約定
 # ---------------------------------------------------------------------------
+
 
 def test_mock_fill_mode_partial():
     """partial モードでは発注数量の50%のみ約定し status=partial になる。"""
@@ -265,6 +272,7 @@ def test_mock_fill_order_manual():
 # ---------------------------------------------------------------------------
 # MockBrokerClient — 異常系
 # ---------------------------------------------------------------------------
+
 
 def test_mock_fill_mode_reject():
     """reject モードでは OrderRejectedError が raise される。"""
@@ -309,6 +317,7 @@ def test_mock_cancel_partial_order():
 # テスト補助メソッド
 # ---------------------------------------------------------------------------
 
+
 def test_mock_get_order_history():
     """get_order_history() は送信された全注文の履歴を返す。"""
     client = MockBrokerClient(fill_mode="instant", available_cash=5_000_000.0)
@@ -328,7 +337,9 @@ def test_mock_get_order_history():
 def test_mock_sell_without_position_does_not_credit_cash():
     """ポジションのない銘柄の売注文は現金残高を変化させない。"""
     client = MockBrokerClient(fill_mode="instant", available_cash=500_000.0)
-    req = OrderRequest(code="9999", side="sell", qty=10, price=1000.0, order_type="limit")
+    req = OrderRequest(
+        code="9999", side="sell", qty=10, price=1000.0, order_type="limit"
+    )
     client.send_order(req)
     assert client.get_available_cash() == 500_000.0  # unchanged
 

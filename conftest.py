@@ -1,4 +1,5 @@
 """ルートレベル conftest.py — src/ を sys.path に追加する。"""
+
 import sys
 import pathlib
 

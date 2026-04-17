@@ -7,6 +7,7 @@ calendar_management モジュールのユニットテスト
     monkeypatch でモック化し、外部通信なしでテストする
   - テスト用カレンダーデータは直接 INSERT して用意する
 """
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -19,6 +20,7 @@ from kabusys.data import calendar_management as cm
 # ---------------------------------------------------------------------------
 # ヘルパー: テスト用カレンダーデータ挿入
 # ---------------------------------------------------------------------------
+
 
 def _insert_calendar(conn, rows: list[dict]) -> None:
     """market_calendar に rows をまとめて INSERT する。"""
@@ -47,6 +49,7 @@ def _insert_calendar(conn, rows: list[dict]) -> None:
 # _table_exists
 # ---------------------------------------------------------------------------
 
+
 class TestTableExists:
     def test_existing_table_returns_true(self, mem_db):
         assert cm._table_exists(mem_db, "market_calendar") is True
@@ -58,6 +61,7 @@ class TestTableExists:
 # ---------------------------------------------------------------------------
 # _has_calendar_data
 # ---------------------------------------------------------------------------
+
 
 class TestHasCalendarData:
     def test_empty_table_returns_false(self, mem_db):
@@ -71,6 +75,7 @@ class TestHasCalendarData:
 # ---------------------------------------------------------------------------
 # _is_weekend
 # ---------------------------------------------------------------------------
+
 
 class TestIsWeekend:
     def test_monday_is_not_weekend(self):
@@ -90,18 +95,28 @@ class TestIsWeekend:
 # is_trading_day
 # ---------------------------------------------------------------------------
 
+
 class TestIsTradingDay:
     def test_returns_true_for_trading_day_in_db(self, mem_db):
         _insert_calendar(mem_db, [{"date": date(2025, 1, 6), "is_trading_day": True}])
         assert cm.is_trading_day(mem_db, date(2025, 1, 6)) is True
 
     def test_returns_false_for_holiday_in_db(self, mem_db):
-        _insert_calendar(mem_db, [{"date": date(2025, 1, 1), "is_trading_day": False, "holiday_name": "元日"}])
+        _insert_calendar(
+            mem_db,
+            [
+                {
+                    "date": date(2025, 1, 1),
+                    "is_trading_day": False,
+                    "holiday_name": "元日",
+                }
+            ],
+        )
         assert cm.is_trading_day(mem_db, date(2025, 1, 1)) is False
 
     def test_fallback_weekday_when_no_db(self, mem_db):
         # テーブルにデータなし → 曜日フォールバック
-        assert cm.is_trading_day(mem_db, date(2025, 1, 6)) is True   # 月曜日
+        assert cm.is_trading_day(mem_db, date(2025, 1, 6)) is True  # 月曜日
 
     def test_fallback_weekend_when_no_db(self, mem_db):
         assert cm.is_trading_day(mem_db, date(2025, 1, 11)) is False  # 土曜日
@@ -109,31 +124,45 @@ class TestIsTradingDay:
     def test_fallback_weekday_when_date_out_of_db_range(self, mem_db):
         # DB には 2025-01-06 のみ存在、範囲外の 2025-02-01 は曜日フォールバック
         _insert_calendar(mem_db, [{"date": date(2025, 1, 6), "is_trading_day": True}])
-        assert cm.is_trading_day(mem_db, date(2025, 2, 1)) is False   # 土曜日（フォールバック）
+        assert (
+            cm.is_trading_day(mem_db, date(2025, 2, 1)) is False
+        )  # 土曜日（フォールバック）
 
     def test_fallback_weekday_out_of_range_weekday(self, mem_db):
         _insert_calendar(mem_db, [{"date": date(2025, 1, 6), "is_trading_day": True}])
-        assert cm.is_trading_day(mem_db, date(2025, 2, 3)) is True   # 月曜日（フォールバック）
+        assert (
+            cm.is_trading_day(mem_db, date(2025, 2, 3)) is True
+        )  # 月曜日（フォールバック）
 
 
 # ---------------------------------------------------------------------------
 # is_sq_day
 # ---------------------------------------------------------------------------
 
+
 class TestIsSqDay:
     def test_returns_true_for_sq_day(self, mem_db):
-        _insert_calendar(mem_db, [{"date": date(2025, 3, 14), "is_trading_day": True, "is_sq_day": True}])
+        _insert_calendar(
+            mem_db,
+            [{"date": date(2025, 3, 14), "is_trading_day": True, "is_sq_day": True}],
+        )
         assert cm.is_sq_day(mem_db, date(2025, 3, 14)) is True
 
     def test_returns_false_for_non_sq_day(self, mem_db):
-        _insert_calendar(mem_db, [{"date": date(2025, 3, 13), "is_trading_day": True, "is_sq_day": False}])
+        _insert_calendar(
+            mem_db,
+            [{"date": date(2025, 3, 13), "is_trading_day": True, "is_sq_day": False}],
+        )
         assert cm.is_sq_day(mem_db, date(2025, 3, 13)) is False
 
     def test_returns_false_when_no_db_data(self, mem_db):
         assert cm.is_sq_day(mem_db, date(2025, 3, 14)) is False
 
     def test_returns_false_when_date_not_in_db(self, mem_db):
-        _insert_calendar(mem_db, [{"date": date(2025, 3, 14), "is_trading_day": True, "is_sq_day": True}])
+        _insert_calendar(
+            mem_db,
+            [{"date": date(2025, 3, 14), "is_trading_day": True, "is_sq_day": True}],
+        )
         assert cm.is_sq_day(mem_db, date(2025, 3, 15)) is False
 
 
@@ -141,20 +170,31 @@ class TestIsSqDay:
 # next_trading_day
 # ---------------------------------------------------------------------------
 
+
 class TestNextTradingDay:
     def test_next_day_is_trading(self, mem_db):
-        _insert_calendar(mem_db, [
-            {"date": date(2025, 1, 6), "is_trading_day": True},
-            {"date": date(2025, 1, 7), "is_trading_day": True},
-        ])
+        _insert_calendar(
+            mem_db,
+            [
+                {"date": date(2025, 1, 6), "is_trading_day": True},
+                {"date": date(2025, 1, 7), "is_trading_day": True},
+            ],
+        )
         assert cm.next_trading_day(mem_db, date(2025, 1, 6)) == date(2025, 1, 7)
 
     def test_skips_holiday(self, mem_db):
-        _insert_calendar(mem_db, [
-            {"date": date(2025, 1, 6), "is_trading_day": True},
-            {"date": date(2025, 1, 7), "is_trading_day": False, "holiday_name": "祝日"},
-            {"date": date(2025, 1, 8), "is_trading_day": True},
-        ])
+        _insert_calendar(
+            mem_db,
+            [
+                {"date": date(2025, 1, 6), "is_trading_day": True},
+                {
+                    "date": date(2025, 1, 7),
+                    "is_trading_day": False,
+                    "holiday_name": "祝日",
+                },
+                {"date": date(2025, 1, 8), "is_trading_day": True},
+            ],
+        )
         assert cm.next_trading_day(mem_db, date(2025, 1, 6)) == date(2025, 1, 8)
 
     def test_fallback_skips_weekend(self, mem_db):
@@ -169,19 +209,29 @@ class TestNextTradingDay:
             cm.next_trading_day(mem_db, date(2025, 1, 1))
 
     def test_does_not_return_same_day(self, mem_db):
-        _insert_calendar(mem_db, [
-            {"date": date(2025, 1, 6), "is_trading_day": True},
-            {"date": date(2025, 1, 7), "is_trading_day": True},
-        ])
+        _insert_calendar(
+            mem_db,
+            [
+                {"date": date(2025, 1, 6), "is_trading_day": True},
+                {"date": date(2025, 1, 7), "is_trading_day": True},
+            ],
+        )
         result = cm.next_trading_day(mem_db, date(2025, 1, 6))
         assert result > date(2025, 1, 6)
 
     def test_skips_registered_holiday_in_sparse_db(self, mem_db):
         """DB がまばらで休日のみ登録されている場合、登録済み休日を正しくスキップする。"""
         # 2025-01-08（水）が休日として登録、他は未登録
-        _insert_calendar(mem_db, [
-            {"date": date(2025, 1, 8), "is_trading_day": False, "holiday_name": "振替休日"},
-        ])
+        _insert_calendar(
+            mem_db,
+            [
+                {
+                    "date": date(2025, 1, 8),
+                    "is_trading_day": False,
+                    "holiday_name": "振替休日",
+                },
+            ],
+        )
         # DB に 2025-01-07 は未登録 → 曜日フォールバック（火曜=平日）で返すべき
         result = cm.next_trading_day(mem_db, date(2025, 1, 6))
         assert result == date(2025, 1, 7)
@@ -189,9 +239,16 @@ class TestNextTradingDay:
     def test_skips_registered_holiday_then_falls_back(self, mem_db):
         """登録済み休日の翌日が未登録の平日 → フォールバックで返す。"""
         # 2025-01-07（火）が休日として登録
-        _insert_calendar(mem_db, [
-            {"date": date(2025, 1, 7), "is_trading_day": False, "holiday_name": "祝日"},
-        ])
+        _insert_calendar(
+            mem_db,
+            [
+                {
+                    "date": date(2025, 1, 7),
+                    "is_trading_day": False,
+                    "holiday_name": "祝日",
+                },
+            ],
+        )
         # 2025-01-07 はスキップ → 2025-01-08（水）は未登録=曜日フォールバック（平日）
         result = cm.next_trading_day(mem_db, date(2025, 1, 6))
         assert result == date(2025, 1, 8)
@@ -201,20 +258,31 @@ class TestNextTradingDay:
 # prev_trading_day
 # ---------------------------------------------------------------------------
 
+
 class TestPrevTradingDay:
     def test_prev_day_is_trading(self, mem_db):
-        _insert_calendar(mem_db, [
-            {"date": date(2025, 1, 6), "is_trading_day": True},
-            {"date": date(2025, 1, 7), "is_trading_day": True},
-        ])
+        _insert_calendar(
+            mem_db,
+            [
+                {"date": date(2025, 1, 6), "is_trading_day": True},
+                {"date": date(2025, 1, 7), "is_trading_day": True},
+            ],
+        )
         assert cm.prev_trading_day(mem_db, date(2025, 1, 7)) == date(2025, 1, 6)
 
     def test_skips_holiday(self, mem_db):
-        _insert_calendar(mem_db, [
-            {"date": date(2025, 1, 6), "is_trading_day": True},
-            {"date": date(2025, 1, 7), "is_trading_day": False, "holiday_name": "祝日"},
-            {"date": date(2025, 1, 8), "is_trading_day": True},
-        ])
+        _insert_calendar(
+            mem_db,
+            [
+                {"date": date(2025, 1, 6), "is_trading_day": True},
+                {
+                    "date": date(2025, 1, 7),
+                    "is_trading_day": False,
+                    "holiday_name": "祝日",
+                },
+                {"date": date(2025, 1, 8), "is_trading_day": True},
+            ],
+        )
         assert cm.prev_trading_day(mem_db, date(2025, 1, 8)) == date(2025, 1, 6)
 
     def test_fallback_skips_weekend(self, mem_db):
@@ -229,19 +297,29 @@ class TestPrevTradingDay:
             cm.prev_trading_day(mem_db, date(2025, 1, 31))
 
     def test_does_not_return_same_day(self, mem_db):
-        _insert_calendar(mem_db, [
-            {"date": date(2025, 1, 6), "is_trading_day": True},
-            {"date": date(2025, 1, 7), "is_trading_day": True},
-        ])
+        _insert_calendar(
+            mem_db,
+            [
+                {"date": date(2025, 1, 6), "is_trading_day": True},
+                {"date": date(2025, 1, 7), "is_trading_day": True},
+            ],
+        )
         result = cm.prev_trading_day(mem_db, date(2025, 1, 7))
         assert result < date(2025, 1, 7)
 
     def test_skips_registered_holiday_in_sparse_db(self, mem_db):
         """DB がまばらで休日のみ登録されている場合、登録済み休日を正しくスキップする。"""
         # 2025-01-07（火）が休日として登録、他は未登録
-        _insert_calendar(mem_db, [
-            {"date": date(2025, 1, 7), "is_trading_day": False, "holiday_name": "振替休日"},
-        ])
+        _insert_calendar(
+            mem_db,
+            [
+                {
+                    "date": date(2025, 1, 7),
+                    "is_trading_day": False,
+                    "holiday_name": "振替休日",
+                },
+            ],
+        )
         # DB に 2025-01-06 は未登録 → 曜日フォールバック（月曜=平日）で返すべき
         result = cm.prev_trading_day(mem_db, date(2025, 1, 8))
         assert result == date(2025, 1, 6)
@@ -249,9 +327,16 @@ class TestPrevTradingDay:
     def test_skips_registered_holiday_then_falls_back(self, mem_db):
         """登録済み休日の前日が未登録の平日 → フォールバックで返す。"""
         # 2025-01-07（火）が休日として登録
-        _insert_calendar(mem_db, [
-            {"date": date(2025, 1, 7), "is_trading_day": False, "holiday_name": "祝日"},
-        ])
+        _insert_calendar(
+            mem_db,
+            [
+                {
+                    "date": date(2025, 1, 7),
+                    "is_trading_day": False,
+                    "holiday_name": "祝日",
+                },
+            ],
+        )
         # 2025-01-07 はスキップ → 2025-01-06（月）は未登録=曜日フォールバック（平日）
         result = cm.prev_trading_day(mem_db, date(2025, 1, 8))
         assert result == date(2025, 1, 6)
@@ -260,6 +345,7 @@ class TestPrevTradingDay:
 # ---------------------------------------------------------------------------
 # get_trading_days
 # ---------------------------------------------------------------------------
+
 
 class TestGetTradingDays:
     def test_empty_when_start_after_end(self, mem_db):
@@ -271,11 +357,18 @@ class TestGetTradingDays:
         assert result == [date(2025, 1, 6)]
 
     def test_excludes_holidays(self, mem_db):
-        _insert_calendar(mem_db, [
-            {"date": date(2025, 1, 6), "is_trading_day": True},
-            {"date": date(2025, 1, 7), "is_trading_day": False, "holiday_name": "祝日"},
-            {"date": date(2025, 1, 8), "is_trading_day": True},
-        ])
+        _insert_calendar(
+            mem_db,
+            [
+                {"date": date(2025, 1, 6), "is_trading_day": True},
+                {
+                    "date": date(2025, 1, 7),
+                    "is_trading_day": False,
+                    "holiday_name": "祝日",
+                },
+                {"date": date(2025, 1, 8), "is_trading_day": True},
+            ],
+        )
         result = cm.get_trading_days(mem_db, date(2025, 1, 6), date(2025, 1, 8))
         assert result == [date(2025, 1, 6), date(2025, 1, 8)]
 
@@ -284,15 +377,18 @@ class TestGetTradingDays:
         result = cm.get_trading_days(mem_db, date(2025, 1, 6), date(2025, 1, 12))
         assert date(2025, 1, 11) not in result  # 土
         assert date(2025, 1, 12) not in result  # 日
-        assert date(2025, 1, 6) in result       # 月
-        assert date(2025, 1, 10) in result      # 金
+        assert date(2025, 1, 6) in result  # 月
+        assert date(2025, 1, 10) in result  # 金
 
     def test_result_is_sorted_ascending(self, mem_db):
-        _insert_calendar(mem_db, [
-            {"date": date(2025, 1, 6), "is_trading_day": True},
-            {"date": date(2025, 1, 7), "is_trading_day": True},
-            {"date": date(2025, 1, 8), "is_trading_day": True},
-        ])
+        _insert_calendar(
+            mem_db,
+            [
+                {"date": date(2025, 1, 6), "is_trading_day": True},
+                {"date": date(2025, 1, 7), "is_trading_day": True},
+                {"date": date(2025, 1, 8), "is_trading_day": True},
+            ],
+        )
         result = cm.get_trading_days(mem_db, date(2025, 1, 6), date(2025, 1, 8))
         assert result == sorted(result)
 
@@ -322,9 +418,16 @@ class TestGetTradingDays:
     def test_sparse_db_unregistered_weekday_included(self, mem_db):
         """DB 範囲内の未登録平日は曜日フォールバックで営業日に含まれる。"""
         # 2025-01-07（火）が休日として登録、前後は未登録
-        _insert_calendar(mem_db, [
-            {"date": date(2025, 1, 7), "is_trading_day": False, "holiday_name": "祝日"},
-        ])
+        _insert_calendar(
+            mem_db,
+            [
+                {
+                    "date": date(2025, 1, 7),
+                    "is_trading_day": False,
+                    "holiday_name": "祝日",
+                },
+            ],
+        )
         # 2025-01-06（月）: 未登録 → フォールバックで含まれる
         # 2025-01-07（火）: 休日登録 → 除外
         # 2025-01-08（水）: 未登録 → フォールバックで含まれる
@@ -338,15 +441,19 @@ class TestGetTradingDays:
 # calendar_update_job
 # ---------------------------------------------------------------------------
 
+
 class TestCalendarUpdateJob:
     def test_returns_zero_when_already_up_to_date(self, mem_db, monkeypatch):
         import kabusys.data.jquants_client as jq
+
         # 今日から 200 日先まで登録済みにしておけばデフォルト lookahead (90日) を上回る
         far_future = date.today() + timedelta(days=200)
         _insert_calendar(mem_db, [{"date": far_future, "is_trading_day": True}])
 
         fetch_called = []
-        monkeypatch.setattr(jq, "fetch_market_calendar", lambda **kw: fetch_called.append(kw) or [])
+        monkeypatch.setattr(
+            jq, "fetch_market_calendar", lambda **kw: fetch_called.append(kw) or []
+        )
         monkeypatch.setattr(jq, "save_market_calendar", lambda conn, recs: 0)
 
         result = cm.calendar_update_job(mem_db)
@@ -357,7 +464,12 @@ class TestCalendarUpdateJob:
         import kabusys.data.jquants_client as jq
 
         fake_records = [
-            {"Date": "2025-03-18", "TradingDay": True, "HalfDay": False, "SQDay": False},
+            {
+                "Date": "2025-03-18",
+                "TradingDay": True,
+                "HalfDay": False,
+                "SQDay": False,
+            },
         ]
         monkeypatch.setattr(jq, "fetch_market_calendar", lambda **kw: fake_records)
         monkeypatch.setattr(jq, "save_market_calendar", lambda conn, recs: len(recs))
@@ -403,7 +515,9 @@ class TestCalendarUpdateJob:
         _insert_calendar(mem_db, [{"date": abnormal_date, "is_trading_day": True}])
 
         fetch_called = []
-        monkeypatch.setattr(jq, "fetch_market_calendar", lambda **kw: fetch_called.append(kw) or [])
+        monkeypatch.setattr(
+            jq, "fetch_market_calendar", lambda **kw: fetch_called.append(kw) or []
+        )
         monkeypatch.setattr(jq, "save_market_calendar", lambda conn, recs: 0)
 
         result = cm.calendar_update_job(mem_db)
@@ -421,7 +535,9 @@ class TestCalendarUpdateJob:
         _insert_calendar(mem_db, [{"date": beyond, "is_trading_day": True}])
 
         fetch_called = []
-        monkeypatch.setattr(jq, "fetch_market_calendar", lambda **kw: fetch_called.append(kw) or [])
+        monkeypatch.setattr(
+            jq, "fetch_market_calendar", lambda **kw: fetch_called.append(kw) or []
+        )
 
         result = cm.calendar_update_job(mem_db)
         assert result == 0
@@ -445,10 +561,19 @@ class TestCalendarUpdateJob:
         import kabusys.data.jquants_client as jq
 
         fake_records = [
-            {"Date": "2025-03-18", "TradingDay": True, "HalfDay": False, "SQDay": False},
+            {
+                "Date": "2025-03-18",
+                "TradingDay": True,
+                "HalfDay": False,
+                "SQDay": False,
+            },
         ]
         monkeypatch.setattr(jq, "fetch_market_calendar", lambda **kw: fake_records)
-        monkeypatch.setattr(jq, "save_market_calendar", lambda conn, recs: (_ for _ in ()).throw(RuntimeError("DB 保存失敗")))
+        monkeypatch.setattr(
+            jq,
+            "save_market_calendar",
+            lambda conn, recs: (_ for _ in ()).throw(RuntimeError("DB 保存失敗")),
+        )
 
         result = cm.calendar_update_job(mem_db)
         assert result == 0

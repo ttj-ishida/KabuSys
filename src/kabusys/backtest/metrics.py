@@ -4,6 +4,7 @@
 BacktestFramework.md Section 3 に定義された評価指標を計算する。
 入力は DailySnapshot のリストと TradeRecord のリストのみ（DB 参照なし）。
 """
+
 from __future__ import annotations
 
 import math
@@ -18,12 +19,12 @@ if TYPE_CHECKING:
 class BacktestMetrics:
     """バックテスト評価指標。"""
 
-    cagr: float           # 年平均成長率
-    sharpe_ratio: float   # シャープレシオ（無リスク金利=0）
-    max_drawdown: float   # 最大ドローダウン（0〜1）
-    win_rate: float       # 勝率（0〜1）
-    payoff_ratio: float   # ペイオフレシオ（平均利益 / 平均損失）
-    total_trades: int     # 全クローズトレード数
+    cagr: float  # 年平均成長率
+    sharpe_ratio: float  # シャープレシオ（無リスク金利=0）
+    max_drawdown: float  # 最大ドローダウン（0〜1）
+    win_rate: float  # 勝率（0〜1）
+    payoff_ratio: float  # ペイオフレシオ（平均利益 / 平均損失）
+    total_trades: int  # 全クローズトレード数
 
 
 def calc_metrics(
@@ -52,6 +53,7 @@ def calc_metrics(
 # ---------------------------------------------------------------------------
 # 内部計算関数
 # ---------------------------------------------------------------------------
+
 
 def _calc_cagr(history: list["DailySnapshot"]) -> float:
     """CAGR = (最終資産 / 初期資産)^(365/(終了日-開始日)) - 1。

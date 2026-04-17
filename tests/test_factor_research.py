@@ -6,6 +6,7 @@ factor_research / feature_exploration モジュールのテスト
   - 既知のデータを挿入して計算結果を検証する
   - Research 環境の分離（発注 API 未呼び出し）を保証する（Issue #11）
 """
+
 from __future__ import annotations
 
 import math
@@ -30,6 +31,7 @@ from kabusys.research.feature_exploration import (
 # ---------------------------------------------------------------------------
 # フィクスチャ
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def db():
@@ -71,16 +73,22 @@ def _insert_financials(conn, rows: list[tuple]):
 # calc_momentum
 # ---------------------------------------------------------------------------
 
+
 class TestCalcMomentum:
-    def _make_price_series(self, conn, code: str, start_close: float, n_days: int, step: float = 1.0):
+    def _make_price_series(
+        self, conn, code: str, start_close: float, n_days: int, step: float = 1.0
+    ):
         """連続した日付の株価データを挿入するヘルパー。"""
         from datetime import timedelta
+
         base = date(2024, 1, 2)
         rows = []
         close = start_close
         for i in range(n_days):
             d = base + timedelta(days=i)
-            rows.append((d, code, close, close + 10, close - 10, close, 1000, close * 1000))
+            rows.append(
+                (d, code, close, close + 10, close - 10, close, 1000, close * 1000)
+            )
             close += step
         _insert_prices(conn, rows)
         return base + timedelta(days=n_days - 1)
@@ -111,10 +119,22 @@ class TestCalcMomentum:
     def test_insufficient_data_returns_none(self, db):
         """データが少なすぎる場合、長期モメンタムは None。"""
         from datetime import timedelta
+
         # 30 日分しかないので mom_3m/mom_6m は None になる
         base = date(2024, 6, 1)
-        rows = [(base + timedelta(days=i), "1004", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000)
-                for i in range(30)]
+        rows = [
+            (
+                base + timedelta(days=i),
+                "1004",
+                1000.0,
+                1010.0,
+                990.0,
+                1000.0,
+                1000,
+                1000000,
+            )
+            for i in range(30)
+        ]
         _insert_prices(db, rows)
         result = calc_momentum(db, base + timedelta(days=29))
         row = next((r for r in result if r["code"] == "1004"), None)
@@ -131,13 +151,23 @@ class TestCalcMomentum:
 # calc_volatility
 # ---------------------------------------------------------------------------
 
+
 class TestCalcVolatility:
     def test_atr_positive(self, db):
         from datetime import timedelta
+
         base = date(2024, 2, 1)
         rows = [
-            (base + timedelta(days=i), "2001",
-             1000.0, 1020.0, 980.0, 1000.0, 1000, 1000000.0)
+            (
+                base + timedelta(days=i),
+                "2001",
+                1000.0,
+                1020.0,
+                980.0,
+                1000.0,
+                1000,
+                1000000.0,
+            )
             for i in range(30)
         ]
         _insert_prices(db, rows)
@@ -148,10 +178,19 @@ class TestCalcVolatility:
     def test_volume_ratio_one_when_constant(self, db):
         """出来高が一定の場合 volume_ratio ≒ 1.0。"""
         from datetime import timedelta
+
         base = date(2024, 3, 1)
         rows = [
-            (base + timedelta(days=i), "2002",
-             1000.0, 1010.0, 990.0, 1000.0, 5000, 5000000.0)
+            (
+                base + timedelta(days=i),
+                "2002",
+                1000.0,
+                1010.0,
+                990.0,
+                1000.0,
+                5000,
+                5000000.0,
+            )
             for i in range(25)
         ]
         _insert_prices(db, rows)
@@ -162,9 +201,21 @@ class TestCalcVolatility:
 
     def test_columns_present(self, db):
         from datetime import timedelta
+
         base = date(2024, 4, 1)
-        rows = [(base + timedelta(days=i), "2003", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)
-                for i in range(25)]
+        rows = [
+            (
+                base + timedelta(days=i),
+                "2003",
+                1000.0,
+                1010.0,
+                990.0,
+                1000.0,
+                1000,
+                1000000.0,
+            )
+            for i in range(25)
+        ]
         _insert_prices(db, rows)
         result = calc_volatility(db, base + timedelta(days=24))
         row = next(r for r in result if r["code"] == "2003")
@@ -178,12 +229,17 @@ class TestCalcVolatility:
 # calc_value
 # ---------------------------------------------------------------------------
 
+
 class TestCalcValue:
     def test_per_calculation(self, db):
         """PER = close / eps が正しく計算される。"""
         d = date(2024, 5, 1)
-        _insert_prices(db, [(d, "3001", 2000.0, 2010.0, 1990.0, 2000.0, 1000, 2000000.0)])
-        _insert_financials(db, [("3001", date(2024, 3, 31), "Q4", 1e9, 2e8, 1e8, 100.0, 0.10)])
+        _insert_prices(
+            db, [(d, "3001", 2000.0, 2010.0, 1990.0, 2000.0, 1000, 2000000.0)]
+        )
+        _insert_financials(
+            db, [("3001", date(2024, 3, 31), "Q4", 1e9, 2e8, 1e8, 100.0, 0.10)]
+        )
         result = calc_value(db, d)
         row = next(r for r in result if r["code"] == "3001")
         assert row["per"] is not None
@@ -192,16 +248,24 @@ class TestCalcValue:
     def test_per_none_when_eps_zero(self, db):
         """EPS が 0 の場合 per は None。"""
         d = date(2024, 5, 2)
-        _insert_prices(db, [(d, "3002", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)])
-        _insert_financials(db, [("3002", date(2024, 3, 31), "Q4", 5e8, 1e8, 5e7, 0.0, 0.05)])
+        _insert_prices(
+            db, [(d, "3002", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)]
+        )
+        _insert_financials(
+            db, [("3002", date(2024, 3, 31), "Q4", 5e8, 1e8, 5e7, 0.0, 0.05)]
+        )
         result = calc_value(db, d)
         row = next(r for r in result if r["code"] == "3002")
         assert row["per"] is None
 
     def test_roe_returned(self, db):
         d = date(2024, 5, 3)
-        _insert_prices(db, [(d, "3003", 1500.0, 1510.0, 1490.0, 1500.0, 1000, 1500000.0)])
-        _insert_financials(db, [("3003", date(2024, 3, 31), "Q4", 1e9, 3e8, 2e8, 200.0, 0.15)])
+        _insert_prices(
+            db, [(d, "3003", 1500.0, 1510.0, 1490.0, 1500.0, 1000, 1500000.0)]
+        )
+        _insert_financials(
+            db, [("3003", date(2024, 3, 31), "Q4", 1e9, 3e8, 2e8, 200.0, 0.15)]
+        )
         result = calc_value(db, d)
         row = next(r for r in result if r["code"] == "3003")
         assert row["roe"] is not None
@@ -210,7 +274,9 @@ class TestCalcValue:
     def test_no_financials_returns_none_per(self, db):
         """財務データがない場合 per は None。"""
         d = date(2024, 5, 4)
-        _insert_prices(db, [(d, "3004", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)])
+        _insert_prices(
+            db, [(d, "3004", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)]
+        )
         result = calc_value(db, d)
         row = next((r for r in result if r["code"] == "3004"), None)
         assert row is not None
@@ -220,6 +286,7 @@ class TestCalcValue:
 # ---------------------------------------------------------------------------
 # zscore_normalize
 # ---------------------------------------------------------------------------
+
 
 class TestZscoreNormalize:
     def test_mean_near_zero(self):
@@ -272,13 +339,25 @@ class TestZscoreNormalize:
 # calc_forward_returns
 # ---------------------------------------------------------------------------
 
+
 class TestCalcForwardReturns:
     def test_default_horizons(self, db):
         from datetime import timedelta
+
         base = date(2024, 7, 1)
-        rows = [(base + timedelta(days=i), "4001", 1000.0 + i * 10, 1010.0 + i * 10,
-                 990.0 + i * 10, 1000.0 + i * 10, 1000, 1000000.0)
-                for i in range(30)]
+        rows = [
+            (
+                base + timedelta(days=i),
+                "4001",
+                1000.0 + i * 10,
+                1010.0 + i * 10,
+                990.0 + i * 10,
+                1000.0 + i * 10,
+                1000,
+                1000000.0,
+            )
+            for i in range(30)
+        ]
         _insert_prices(db, rows)
         result = calc_forward_returns(db, base)
         row = next(r for r in result if r["code"] == "4001")
@@ -289,11 +368,24 @@ class TestCalcForwardReturns:
     def test_fwd_1d_value(self, db):
         """翌日リターン = (close_t+1 - close_t) / close_t。"""
         from datetime import timedelta
+
         base = date(2024, 8, 1)
-        _insert_prices(db, [
-            (base, "4002", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0),
-            (base + timedelta(days=1), "4002", 1100.0, 1110.0, 1090.0, 1100.0, 1000, 1100000.0),
-        ])
+        _insert_prices(
+            db,
+            [
+                (base, "4002", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0),
+                (
+                    base + timedelta(days=1),
+                    "4002",
+                    1100.0,
+                    1110.0,
+                    1090.0,
+                    1100.0,
+                    1000,
+                    1100000.0,
+                ),
+            ],
+        )
         result = calc_forward_returns(db, base, horizons=[1])
         row = next(r for r in result if r["code"] == "4002")
         assert row["fwd_1d"] is not None
@@ -302,7 +394,9 @@ class TestCalcForwardReturns:
     def test_none_when_no_future_data(self, db):
         """将来データが存在しない場合 fwd_Xd は None。"""
         d = date(2024, 9, 30)
-        _insert_prices(db, [(d, "4003", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)])
+        _insert_prices(
+            db, [(d, "4003", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)]
+        )
         result = calc_forward_returns(db, d, horizons=[1])
         row = next(r for r in result if r["code"] == "4003")
         assert row["fwd_1d"] is None
@@ -311,6 +405,7 @@ class TestCalcForwardReturns:
 # ---------------------------------------------------------------------------
 # calc_ic
 # ---------------------------------------------------------------------------
+
 
 class TestCalcIC:
     def test_perfect_positive_correlation(self):
@@ -355,6 +450,7 @@ class TestCalcIC:
 # factor_summary
 # ---------------------------------------------------------------------------
 
+
 class TestFactorSummary:
     def test_basic_stats(self):
         records = [{"code": str(i), "factor": float(i + 1)} for i in range(5)]
@@ -387,16 +483,19 @@ class TestFactorSummary:
 # Issue #11: Research 環境分離の確認
 # ---------------------------------------------------------------------------
 
+
 class TestResearchIsolation:
     def test_no_kabu_api_import(self):
         """factor_research は kabuステーション API モジュールをインポートしない。"""
         import kabusys.research.factor_research as fr
+
         module_dict = vars(fr)
         assert "kabusys.execution" not in str(module_dict)
 
     def test_no_execution_import(self):
         """feature_exploration は execution モジュールをインポートしない。"""
         import kabusys.research.feature_exploration as fe
+
         module_dict = vars(fe)
         assert "kabusys.execution" not in str(module_dict)
 

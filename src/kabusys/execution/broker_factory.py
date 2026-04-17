@@ -1,5 +1,6 @@
 # src/kabusys/execution/broker_factory.py
 """broker_factory.py — 設定に応じたブローカークライアントを生成するファクトリ。"""
+
 from __future__ import annotations
 
 from kabusys.execution.broker_api import BrokerAPIProtocol, create_broker_api

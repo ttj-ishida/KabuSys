@@ -1,5 +1,6 @@
 # tests/test_config_setup.py
 """src/kabusys/config_setup.py の単体テスト"""
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -107,8 +108,10 @@ def test_main_saves_file_on_y(tmp_path):
     n_items = len(config_setup._ITEMS)
     env_file = tmp_path / ".env"
     inputs = iter(["development"] + [""] * (n_items - 1) + ["y"])
-    with patch("builtins.input", side_effect=inputs), \
-         patch.object(config_setup, "_ENV_PATH", env_file):
+    with (
+        patch("builtins.input", side_effect=inputs),
+        patch.object(config_setup, "_ENV_PATH", env_file),
+    ):
         result = config_setup.main(["--env-file", str(env_file)])
 
     assert result == 0
@@ -122,8 +125,10 @@ def test_main_does_not_save_on_n(tmp_path):
     n_items = len(config_setup._ITEMS)
     env_file = tmp_path / ".env"
     inputs = iter(["development"] + [""] * (n_items - 1) + ["n"])
-    with patch("builtins.input", side_effect=inputs), \
-         patch.object(config_setup, "_ENV_PATH", env_file):
+    with (
+        patch("builtins.input", side_effect=inputs),
+        patch.object(config_setup, "_ENV_PATH", env_file),
+    ):
         result = config_setup.main(["--env-file", str(env_file)])
 
     assert result == 0

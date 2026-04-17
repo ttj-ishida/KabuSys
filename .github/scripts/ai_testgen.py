@@ -33,9 +33,12 @@ prompt = f"""
 response = client.chat.completions.create(
     model=model,
     messages=[
-        {"role": "system", "content": "You are a senior software engineer specializing in Python testing."},
-        {"role": "user", "content": prompt}
-    ]
+        {
+            "role": "system",
+            "content": "You are a senior software engineer specializing in Python testing.",
+        },
+        {"role": "user", "content": prompt},
+    ],
 )
 
 tests = response.choices[0].message.content

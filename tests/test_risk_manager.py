@@ -1,5 +1,6 @@
 # tests/test_risk_manager.py
 """RiskManager 単体テスト"""
+
 import sqlite3
 import pytest
 from kabusys.execution.broker_api import Position
@@ -28,7 +29,6 @@ def _make_manager(broker, repo) -> RiskManager:
 
 
 class TestGate1CheckSignal:
-
     def test_passes_when_all_checks_ok(self, repo):
         broker = MockBrokerClient(available_cash=5_000_000.0)
         rm = _make_manager(broker, repo)
@@ -46,11 +46,15 @@ class TestGate1CheckSignal:
         broker = MockBrokerClient(available_cash=5_000_000.0)
         from kabusys.execution.order_record import OrderRecord
         from datetime import datetime, timezone
+
         active = OrderRecord(
             client_order_id="test-dup",
             signal_id="2026-03-29_1234_buy",
-            code="1234", side="buy", qty=100,
-            order_type="market", price=0.0,
+            code="1234",
+            side="buy",
+            qty=100,
+            order_type="market",
+            price=0.0,
             state=OrderState.OrderAccepted,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -65,7 +69,9 @@ class TestGate1CheckSignal:
         # 総資産 10,000,000 円、max_position_pct=0.10 → 1銘柄上限 1,000,000 円
         # 既存ポジション: 1234 @ current_price=2000, qty=400 → 800,000 円
         # 追加注文: 300,000 円 → 合計 1,100,000 円 > 1,000,000 円 → NG
-        existing_pos = Position(code="1234", qty=400, avg_price=1800.0, current_price=2000.0)
+        existing_pos = Position(
+            code="1234", qty=400, avg_price=1800.0, current_price=2000.0
+        )
         broker = MockBrokerClient(
             available_cash=5_000_000.0,
             initial_positions=[existing_pos],
@@ -80,14 +86,18 @@ class TestGate1CheckSignal:
         # 余力ゼロでも sell は通過する
         broker = MockBrokerClient(available_cash=0.0)
         rm = _make_manager(broker, repo)
-        result = rm.check_signal("2026-03-29_1234_sell", "1234", order_value=500_000.0, side="sell")
+        result = rm.check_signal(
+            "2026-03-29_1234_sell", "1234", order_value=500_000.0, side="sell"
+        )
         assert result.passed
 
     def test_fails_when_utilization_limit_exceeded(self, repo):
         # 総資産 10,000,000 円、max_utilization=0.80 → 全ポジション上限 8,000,000 円
         # 既存ポジション評価額: 7,800,000 円 (current_price あり)
         # 追加注文: 300,000 円 → 合計 8,100,000 円 > 8,000,000 円 → NG
-        big_pos = Position(code="9999", qty=780, avg_price=9000.0, current_price=10000.0)
+        big_pos = Position(
+            code="9999", qty=780, avg_price=9000.0, current_price=10000.0
+        )
         broker = MockBrokerClient(
             available_cash=5_000_000.0,
             initial_positions=[big_pos],
@@ -99,7 +109,6 @@ class TestGate1CheckSignal:
 
 
 class TestGate2CheckExecution:
-
     def test_passes_initially(self, repo):
         broker = MockBrokerClient()
         rm = _make_manager(broker, repo)
@@ -162,15 +171,14 @@ class TestGate2CheckExecution:
         rm = RiskManager(broker=broker, repo=repo, config=config)
         rm.record_api_error()
         rm.record_api_error()
-        rm.check_execution()        # OPEN (_cb_open_observed=True にするため)
-        rm.check_execution()        # OPEN → HALF_OPEN 遷移 (False)
-        rm.check_execution()        # HALF_OPEN → OPEN: プローブ1件許可 (True)
-        rm.record_api_success()     # OPEN → CLOSED に遷移
+        rm.check_execution()  # OPEN (_cb_open_observed=True にするため)
+        rm.check_execution()  # OPEN → HALF_OPEN 遷移 (False)
+        rm.check_execution()  # HALF_OPEN → OPEN: プローブ1件許可 (True)
+        rm.record_api_success()  # OPEN → CLOSED に遷移
         assert rm.check_execution().passed  # CLOSED で通過
 
 
 class TestGate3CheckMetrics:
-
     def test_passes_when_no_drawdown(self, repo):
         broker = MockBrokerClient()
         config = RiskConfig(

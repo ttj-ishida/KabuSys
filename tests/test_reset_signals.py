@@ -1,5 +1,6 @@
 # tests/test_reset_signals.py
 """scripts/reset_signals.py の単体テスト"""
+
 from __future__ import annotations
 
 import sys
@@ -16,6 +17,7 @@ import reset_signals
 
 def _run_reset(args: list[str] | None = None):
     import reset_signals as rs
+
     with patch.object(sys, "argv", ["reset_signals.py"] + (args or [])):
         return rs.main()
 
@@ -31,18 +33,21 @@ def _jst(h: int, m: int) -> datetime:
     return datetime(2024, 1, 15, h, m, 0, tzinfo=_JST)
 
 
-@pytest.mark.parametrize("h,m,expected", [
-    (8, 59, False),   # 前場前
-    (9, 0,  True),    # 前場開始
-    (10, 0, True),    # 前場中
-    (11, 29, True),   # 前場終了直前
-    (11, 30, False),  # 昼休み
-    (12, 0,  False),  # 昼休み中
-    (12, 30, True),   # 後場開始
-    (14, 59, True),   # 後場終了直前
-    (15, 0,  False),  # 後場終了
-    (20, 0,  False),  # 夜間
-])
+@pytest.mark.parametrize(
+    "h,m,expected",
+    [
+        (8, 59, False),  # 前場前
+        (9, 0, True),  # 前場開始
+        (10, 0, True),  # 前場中
+        (11, 29, True),  # 前場終了直前
+        (11, 30, False),  # 昼休み
+        (12, 0, False),  # 昼休み中
+        (12, 30, True),  # 後場開始
+        (14, 59, True),  # 後場終了直前
+        (15, 0, False),  # 後場終了
+        (20, 0, False),  # 夜間
+    ],
+)
 def test_is_trading_hours(h, m, expected):
     # 2024-01-15 は月曜日
     assert reset_signals._is_trading_hours(_jst(h, m)) == expected
@@ -61,6 +66,7 @@ def test_is_trading_hours_weekend_always_false():
 # --force 必須
 # ---------------------------------------------------------------------------
 
+
 def test_requires_force_flag():
     with pytest.raises(SystemExit) as exc:
         _run_reset([])
@@ -70,6 +76,7 @@ def test_requires_force_flag():
 # ---------------------------------------------------------------------------
 # 取引時間中は拒否
 # ---------------------------------------------------------------------------
+
 
 def test_rejects_during_trading_hours(tmp_path):
     with patch("reset_signals._is_trading_hours", return_value=True):
@@ -81,6 +88,7 @@ def test_rejects_during_trading_hours(tmp_path):
 # ---------------------------------------------------------------------------
 # 未処理注文がある場合の確認プロンプト
 # ---------------------------------------------------------------------------
+
 
 def test_aborts_on_open_orders_user_says_no(tmp_path, monkeypatch):
     monkeypatch.setattr("reset_signals._is_trading_hours", lambda: False)
@@ -104,7 +112,9 @@ def test_proceeds_on_open_orders_user_says_yes(tmp_path, monkeypatch):
     monkeypatch.setattr("reset_signals._is_trading_hours", lambda: False)
     monkeypatch.setattr("reset_signals._count_open_orders", lambda p: 2)
     monkeypatch.setattr("builtins.input", lambda prompt="": "y")
-    monkeypatch.setattr("reset_signals._backup_duckdb", lambda p: tmp_path / "backup.duckdb")
+    monkeypatch.setattr(
+        "reset_signals._backup_duckdb", lambda p: tmp_path / "backup.duckdb"
+    )
 
     duckdb_path = tmp_path / "kabusys.duckdb"
     duckdb_path.write_bytes(b"fake")  # B1: ファイル存在チェックを通過させる
@@ -115,14 +125,16 @@ def test_proceeds_on_open_orders_user_says_yes(tmp_path, monkeypatch):
 
     # information_schema: テーブルあり → DELETE 実行
     execute_results = [
-        MagicMock(fetchone=lambda: (1,)),   # information_schema → exists
-        MagicMock(rowcount=5),              # DELETE
+        MagicMock(fetchone=lambda: (1,)),  # information_schema → exists
+        MagicMock(rowcount=5),  # DELETE
     ]
     conn_mock = MagicMock()
     conn_mock.execute.side_effect = execute_results
 
-    with patch("reset_signals.Settings", return_value=settings_mock), \
-         patch("reset_signals.duckdb.connect", return_value=conn_mock):
+    with (
+        patch("reset_signals.Settings", return_value=settings_mock),
+        patch("reset_signals.duckdb.connect", return_value=conn_mock),
+    ):
         _run_reset(["--force"])
 
     delete_calls = [str(c.args[0]) for c in conn_mock.execute.call_args_list]
@@ -133,6 +145,7 @@ def test_proceeds_on_open_orders_user_says_yes(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # B1: DuckDB ファイル不存在時はエラー終了
 # ---------------------------------------------------------------------------
+
 
 def test_exits_when_duckdb_missing(tmp_path, monkeypatch):
     monkeypatch.setattr("reset_signals._is_trading_hours", lambda: False)
@@ -152,10 +165,13 @@ def test_exits_when_duckdb_missing(tmp_path, monkeypatch):
 # B2: signal_queue テーブル不存在時は noop
 # ---------------------------------------------------------------------------
 
+
 def test_noop_when_signal_queue_table_missing(tmp_path, monkeypatch):
     monkeypatch.setattr("reset_signals._is_trading_hours", lambda: False)
     monkeypatch.setattr("reset_signals._count_open_orders", lambda p: 0)
-    monkeypatch.setattr("reset_signals._backup_duckdb", lambda p: tmp_path / "backup.duckdb")
+    monkeypatch.setattr(
+        "reset_signals._backup_duckdb", lambda p: tmp_path / "backup.duckdb"
+    )
 
     duckdb_path = tmp_path / "kabusys.duckdb"
     duckdb_path.write_bytes(b"fake")
@@ -168,8 +184,10 @@ def test_noop_when_signal_queue_table_missing(tmp_path, monkeypatch):
     conn_mock = MagicMock()
     conn_mock.execute.return_value.fetchone.return_value = (0,)
 
-    with patch("reset_signals.Settings", return_value=settings_mock), \
-         patch("reset_signals.duckdb.connect", return_value=conn_mock):
+    with (
+        patch("reset_signals.Settings", return_value=settings_mock),
+        patch("reset_signals.duckdb.connect", return_value=conn_mock),
+    ):
         _run_reset(["--force"])  # SystemExit しないこと
 
     # DELETE は実行されていないこと
@@ -180,6 +198,7 @@ def test_noop_when_signal_queue_table_missing(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # B3: SQLite 確認エラー時はエラー終了
 # ---------------------------------------------------------------------------
+
 
 def test_exits_on_sqlite_error(tmp_path, monkeypatch):
     monkeypatch.setattr("reset_signals._is_trading_hours", lambda: False)
@@ -206,6 +225,7 @@ def test_exits_on_sqlite_error(tmp_path, monkeypatch):
 # 正常系: バックアップ作成 + 削除
 # ---------------------------------------------------------------------------
 
+
 def test_backup_created_and_delete_runs(tmp_path, monkeypatch):
     monkeypatch.setattr("reset_signals._is_trading_hours", lambda: False)
     monkeypatch.setattr("reset_signals._count_open_orders", lambda p: 0)
@@ -219,14 +239,16 @@ def test_backup_created_and_delete_runs(tmp_path, monkeypatch):
 
     # information_schema: テーブルあり → DELETE 実行
     execute_results = [
-        MagicMock(fetchone=lambda: (1,)),   # information_schema → exists
-        MagicMock(rowcount=7),              # DELETE
+        MagicMock(fetchone=lambda: (1,)),  # information_schema → exists
+        MagicMock(rowcount=7),  # DELETE
     ]
     conn_mock = MagicMock()
     conn_mock.execute.side_effect = execute_results
 
-    with patch("reset_signals.Settings", return_value=settings_mock), \
-         patch("reset_signals.duckdb.connect", return_value=conn_mock):
+    with (
+        patch("reset_signals.Settings", return_value=settings_mock),
+        patch("reset_signals.duckdb.connect", return_value=conn_mock),
+    ):
         _run_reset(["--force"])
 
     # バックアップディレクトリが作られていること

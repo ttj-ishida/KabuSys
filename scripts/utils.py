@@ -5,6 +5,7 @@
 run_execution.py / run_monitoring.py は直接 _STOP_FLAG パスを使うため
 このモジュールを import しない（PYTHONPATH 問題を避けるため）。
 """
+
 from __future__ import annotations
 
 import sys

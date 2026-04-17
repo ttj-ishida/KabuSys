@@ -3,6 +3,7 @@
 
 Task Scheduler から 20:00 に起動される。
 """
+
 from __future__ import annotations
 
 import logging
@@ -16,9 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
 from kabusys.strategy.signal_generator import generate_signals
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 
