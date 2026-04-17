@@ -1,78 +1,103 @@
-# Changelog
+CHANGELOG
+=========
 
-すべての重要な変更は Keep a Changelog のガイドラインに従って記載しています。  
-慣例: 変更はカテゴリ別（Added, Changed, Fixed, Deprecated, Removed, Security）で整理しています。
+すべての重要な変更点をここに記録します。フォーマットは "Keep a Changelog" に準拠します。
+リリース日付はコードベースから推測して設定しています。
 
-## [Unreleased]
+Unreleased
+----------
 
-### Added
-- 全体
-  - パッケージ初期設計に基づく主要コンポーネント群を実装（Execution / Monitoring / Portfolio / Research / AI / Tools / Utils）。
-- 起動スクリプト
-  - run_execution: ExecutionEngine 起動用スクリプトを追加。paper_trading 環境向けに専用 SQLite を使用する挙動をサポート（settings.is_paper により切替）。
-  - run_monitoring: SystemMonitor のポーリングループ起動スクリプトを追加。MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能。
+- なし
+
+0.1.0 - 2026-04-17
+------------------
+
+Added
+- 基本パッケージ初期実装を追加
+  - パッケージメタ情報: kabusys.__version__ = 0.1.0
+- 実行エントリポイント
+  - run_execution.py
+    - ExecutionEngine 起動スクリプト。プロセス優先度を "high" に設定して起動。
+    - KABUSYS_ENV=paper_trading の場合は paper_trading 用 SQLite（data/paper_trading.db, 環境変数で上書き可）を使用し、本番 DB と分離。
+    - BrokerClientFactory によるブローカークライアント生成、OrderRepository / OrderManager / RiskManager / Reconciler 組み立て、ExecutionEngine のスレッド実行と停止フラグ監視を実装。
+    - デフォルトのリスク設定 (RiskConfig) を定義（max_position_pct, max_utilization, rate_limit_per_sec, circuit_breaker 等）。
+    - PID ファイルパスと停止フラグの取り扱いを実装。
+  - run_monitoring.py
+    - SystemMonitor ポーリングループ起動スクリプト。
+    - 環境変数 MONITOR_POLL_INTERVAL によるポーリング間隔上書き対応（デフォルト 60 秒、無効値はデフォルトへフォールバック）。
+    - 監視は KABUSYS_ENV にかかわらず本番 sqlite_path を使用する仕様。
+    - stop_requested.flag による外部停止検知。
 - 設定管理
-  - config.Settings を実装。環境変数・.env/.env.local 自動ロード、必須キー検証（_require）、各種設定プロパティ（DB パス・ペーパートレーディング設定・監視閾値など）を提供。
-  - .env パーサの実装: export 構文・クォート対応・インラインコメント処理などに対応する堅牢なパーサを追加。
-- 実行コンポーネント
-  - BrokerClientFactory（抽象化により本番クライアント／MockBroker の切替を実現）。
-  - OrderRepository / OrderManager / RiskManager / Reconciler / ExecutionEngine の骨格実装を追加。ExecutionEngine は別スレッドで run_session を実行し、停止フラグで安全停止できる。
-- 監視
-  - monitoring DB 初期化ユーティリティ（init_monitoring_db）呼び出しを起動スクリプトに組み込み。run_monitoring は環境に関係なく本番 sqlite_path を監視用に使用。
-- ポートフォリオ構築
-  - portfolio モジュールを追加:
-    - portfolio_builder: 候補選定（select_candidates）・等重（calc_equal_weights）・スコア重み（calc_score_weights）を実装。スコア全てが 0 の場合は等重にフォールバックして警告を出す。
-    - risk_adjustment: セクター集中制限（apply_sector_cap）と市場レジーム乗数（calc_regime_multiplier）を実装。未知レジームは警告の上でフォールバック。
-    - position_sizing: 単元株丸め、リスクベース／等重／スコアベースの発注株数計算、集計キャップ（available_cash 超過時のスケーリング）を実装。cost_buffer を考慮した保守的見積りをサポート。
-- リサーチ
-  - research モジュールを追加:
-    - factor_research: モメンタム（1M/3M/6M、MA200乖離）、ボラティリティ（ATR/出来高/出来高比）、バリュー（PER/ROE）を DuckDB の SQL 組み合わせで計算する関数群を実装。
-    - feature_exploration: 将来リターン計算、IC（Spearman のランク相関）計算、ファクター統計サマリ、ランク関数を実装。
-  - 計算は DuckDB 接続を受け取る純粋関数設計（外部 API 不使用）。
-- AI（ニュース NLP）
-  - news_nlp: raw_news を OpenAI（gpt-4o-mini）でスコアリングして ai_scores に書き込む処理を追加。バッチ処理、トークン肥大化対策（記事数／文字数制限）、リトライ方針（429/5xx/ネットワーク等に対する指数バックオフ）、レスポンスバリデーション、スコアの ±1.0 クリップなどを設計。
-  - calc_news_window により JST ベースのニュースウィンドウ（前日 15:00 ～ 当日 08:30）を UTC に変換するユーティリティを提供。
-- ツール
-  - tools/paper_verification_report: Paper Trading の検証レポート生成スクリプトを追加。稼働率・注文成功率・送信率・P95 レイテンシなどを算出し PASS/FAIL を判定する。コマンドライン引数で期間・DB パスを指定可能。
+  - config.py
+    - .env 自動ロード実装（プロジェクトルートを .git / pyproject.toml で探索）。
+    - .env/.env.local の読み込み順序、既存 OS 環境変数保護（override/protected 機能）。
+    - .env パーサーで export 指定、クォート（シングル／ダブル）とバックスラッシュエスケープ、インラインコメントの取り扱いに対応。
+    - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動ロード無効化対応。
+    - Settings クラスを提供（J-Quants / kabu API / LINE / DB / 監視閾値 / 環境判定 / log level 等のプロパティ、妥当性チェック付き）。
+    - PAPER_FILL_MODE, PAPER_TRADING_SQLITE_PATH, PID_FILE_PATH, KILL_FLAG_PATH など主要環境変数を定義・検証。
+- 監視関連
+  - monitoring_db 初期化呼び出し（起動時に監視テーブルの存在を保証）。
+  - SystemMonitor の呼び出しポイントを実装（run_monitoring から check_once をループ実行）。
 - ユーティリティ
-  - utils/process_priority: プロセス優先度設定（Windows / POSIX の差分吸収）と CPU affinity 固定ユーティリティを追加。アクセス権限や未対応 OS の扱いは警告で安全にスキップ。
+  - utils/process_priority.py
+    - クロスプラットフォームなプロセス優先度設定を実装（Windows の HIGH_PRIORITY_CLASS / POSIX の nice 値対応）。
+    - CPU affinity 固定用 set_cpu_affinity を追加（core 数チェック、権限不足時は警告でスキップ）。
+    - 権限不足や未対応プラットフォーム時に安全にフォールバック。
+- ポートフォリオ関連（純粋関数群）
+  - portfolio/portfolio_builder.py
+    - select_candidates（スコア降順・同スコア時 signal_rank によるタイブレーク）。
+    - calc_equal_weights、calc_score_weights（スコア合計 0 の場合は等配分へフォールバック）。
+  - portfolio/risk_adjustment.py
+    - apply_sector_cap（既存保有のセクター暴露を計算し、上限超過セクターの新規候補を除外。unknown セクターは除外しない）。
+    - calc_regime_multiplier（レジームに応じた投下資金乗数。未定義レジームは警告して 1.0 でフォールバック）。
+  - portfolio/position_sizing.py
+    - calc_position_sizes（risk_based, equal, score の各 allocation_method を実装）。
+    - 単元株（lot_size）丸め、per-position 上限、aggregate cap（available_cash）でスケールダウン、スケール後の残差配分ロジックを実装。
+    - price 欠損や不正値時のスキップ、コストバッファ（cost_buffer）考慮。
+- リサーチ関連
+  - research/factor_research.py
+    - calc_momentum、calc_volatility、calc_value を実装（DuckDB の prices_daily / raw_financials を使用）。
+    - 各ファクターについてウィンドウサイズや必要データ不足時の None 処理を開始。
+  - research/feature_exploration.py
+    - calc_forward_returns（複数ホライズン対応、入力検証）、calc_ic（Spearman ランク相関）、rank（同順位は平均ランク、丸めにより ties の扱いを安定化）、factor_summary（基本統計量）を実装。
+  - research/__init__.py で zscore_normalize を再エクスポート。
+- AI / ニュース NLP
+  - ai/news_nlp.py
+    - raw_news を対象に OpenAI (gpt-4o-mini) を用いたセンチメントスコアリング設計を実装（ニュースウィンドウ計算、バッチサイズ、トークン抑制、APIリトライ戦略、レスポンス検証、スコアクリップ、ai_scores テーブルへの安全な差替え方針等）。
+    - calc_news_window により JST ベースの収集ウィンドウ（前日 15:00 JST 〜 当日 08:30 JST）を UTC naive datetime で計算するユーティリティを実装。
+    - OpenAI API キー解決（引数 > 環境変数）と未設定時の ValueError を実装。
+- CLI / ツール
+  - tools/paper_verification_report.py
+    - Paper Trading 検証レポート生成スクリプトを追加（コマンドライン実行可能）。
+    - デフォルト DB: data/paper_trading.db、--db オプションで上書き可能。
+    - 指標: 稼働率 (uptime), 注文成功率 (fill rate), 送信率 (send rate), P95 レイテンシ、リスク却下数 等を集計。
+    - 判定基準と閾値を定義（稼働率 99% 以上等）、P95 計算と表示、データ欠如に対する N/A 表示。
+- DB/ファイル操作
+  - duckdb を利用した分析／研究ワークロード向け接続を導入（duckdb_path 設定）。
+  - SQLite 接続を起動時に確立し監視/実行で使用。
 
-### Changed
-- 設定ローディング順序を明確化: OS 環境変数 > .env.local > .env。OS 環境変数は保護（上書き不可）として扱う。
-- run_monitoring の動作: Monitoring は実行環境にかかわらず本番 sqlite_path を使用する仕様に明確化。
+Changed
+- 初期バージョンの設計に基づく各種デフォルト値と挙動を定義
+  - MONITOR_POLL_INTERVAL デフォルト 60 秒（run_monitoring）。
+  - PAPER_FILL_MODE の有効値と検証 ("instant", "partial", "never", "reject") を Settings で導入。
+  - Settings.env の妥当性検査（development / paper_trading / live のみ許容）。
+  - LOG_LEVEL の妥当性検査。
 
-### Fixed
-- 環境変数パースの堅牢化: クォート内のバックスラッシュエスケープ処理や、クォートなしでのインラインコメント（#）判定の改善により .env パーサの誤読を軽減。
-- calc_score_weights: スコア合計が 0.0 の場合に等金額配分へフォールバックし、ログ警告を出すように修正（ゼロ除算防止）。
-- calc_regime_multiplier: 未知のレジーム値を受けた際に警告して 1.0 にフォールバックするように修正。
-- position_sizing:
-  - 単元株（lot_size）での丸め処理や per-stock 上限計算を整備。
-  - aggregate cap スケーリング後の残差配分を安定化（remainder による lot 単位の追加配分）。
-- utils/process_priority:
-  - 未対応 OS の場合や権限不足時に例外を送出せずログ警告で処理をスキップするように改良。
-  - set_cpu_affinity が指定コア数 > 利用可能コア数の扱いを調整（全コア使用の旨ログ出力）。
-- tools/paper_verification_report:
-  - DB 接続時のテーブル欠損に対する try/except を導入し、テーブルが存在しない場合でもレポート生成を継続できるように改善（N/A 表示）。
+Fixed
+- 設定パーサーの改良により .env の export/, クォート、エスケープ、インラインコメントに適切に対応（解析耐性向上）。
+- calc_score_weights が全スコア 0 の場合に落ちる問題を等配分でフォールバックするよう修正（警告出力を追加）。
 
-### Security
-- news_nlp: OpenAI API キーは引数または環境変数（OPENAI_API_KEY）から解決。未設定時は明示的な ValueError を発生させることで誤設定を検出可能に。
+Security
+- OpenAI API キーは引数または環境変数で解決。未設定時は明示的なエラーとし、意図しないキー漏洩を防止。
 
-### Documentation
-- 各モジュールに詳細な docstring と設計ノート（PortfolioConstruction.md / StrategyModel.md 等参照箇所の言及）を追加し、関数仕様・制約を明記。
+Notes / Known limitations
+- ai/news_nlp.score_news の実装は外部 API 呼び出しの部分が含まれるため、実行環境で OPENAI_API_KEY の設定が必要。
+- 一部の関数（例: position_sizing の price フォールバック）は TODO コメントで拡張予定。一時的に price が欠損（0.0）の場合は計算がスキップされ、エクスポージャーが過少見積りされる可能性がある。
+- run_monitoring は監視用 DB として常に production 相当の sqlite_path を参照する設計（環境に依存せず監視を行うための仕様）。
+- CPU affinity / プロセス優先度設定は OS 権限に依存し、権限がない場合は警告を出してスキップする安全設計。
 
-## [0.1.0] - 2026-04-17
+Breaking Changes
+- 初期公開リリースのため該当なし。
 
-初回公開リリース（パッケージバージョン __version__ = 0.1.0）として以下を含む。
-
-### Added
-- パッケージの基本構成を追加（kabusys パッケージ、サブモジュール群）。
-- 上記 Unreleased に記載の主要機能群を本リリースに含む（ExecutionEngine 起動、SystemMonitor ポーリング、ポートフォリオ構築/サイズ決定、リサーチ関数群、ニュース NLP、ユーティリティ、ツール等）。
-- パッケージエクスポート（kabusys.__init__.py）に基本情報と公開 API を整備。
-
-### Fixed
-- 初期実装段階での既知の挙動（環境変数の取り扱い・エッジケース）について基礎的な例外処理とフォールバックを追加。
-
----
-
-注記:
-- 本 CHANGELOG はコードベースの内容から推測して作成しています。実際のコミット履歴やイシュートラッキングに基づくものではありません。必要に応じて日付・バージョン・項目をプロジェクトの実際の履歴に合わせて調整してください。
+References
+- ソースコードの各モジュール内 docstring と設計注記に詳細あり。必要に応じて該当ファイルを参照してください。
