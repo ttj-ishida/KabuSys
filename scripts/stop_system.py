@@ -80,9 +80,17 @@ def main() -> None:
             continue
 
         # PID 再利用チェック: create_time が記録されている場合のみ照合
+        # 浮動小数点の OS/psutil バージョン差を考慮し許容誤差 1ms で比較する
+        _CREATE_TIME_TOLERANCE = 1e-3
         if stored_create_time is not None:
             actual_create_time = get_process_create_time(pid)
-            if actual_create_time is not None and actual_create_time != stored_create_time:
+            if actual_create_time is None:
+                logger.warning(
+                    "%s (PID=%d) の起動時刻を取得できませんでした。"
+                    "PID 再利用チェックをスキップして停止処理を続行します。",
+                    label, pid,
+                )
+            elif abs(actual_create_time - stored_create_time) > _CREATE_TIME_TOLERANCE:
                 logger.warning(
                     "%s (PID=%d) の起動時刻が不一致です（保存: %.3f, 実際: %.3f）。"
                     "PID が再利用された可能性があります。強制終了をスキップします。",

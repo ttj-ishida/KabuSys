@@ -108,14 +108,25 @@ def main() -> None:
             sys.exit(0)
 
         ids = [r["id"] for r in targets]
-        placeholders = ", ".join("?" * len(ids))
-        conn.execute(
-            f"UPDATE signal_queue SET status = 'failed' WHERE id IN ({placeholders})",
+        placeholders = ", ".join(["?"] * len(ids))
+        # TOCTOU 対策: UPDATE 側にも status 条件を付け、
+        # SELECT 後に別プロセスが status を変更済みの行は更新しない
+        result = conn.execute(
+            f"UPDATE signal_queue SET status = 'failed'"
+            f" WHERE id IN ({placeholders})"
+            f" AND status IN ('pending', 'sent')",
             ids,
         )
+        updated = result.rowcount if result.rowcount is not None else len(ids)
+        if updated != len(ids):
+            logger.warning(
+                "%d 件を選択しましたが実際の更新は %d 件でした。"
+                "並行処理で status が変更済みの行があります。",
+                len(ids), updated,
+            )
         logger.info(
             "signal_queue を更新しました（%d 件を status='failed' に変更）。",
-            len(ids),
+            updated,
         )
 
     except Exception:

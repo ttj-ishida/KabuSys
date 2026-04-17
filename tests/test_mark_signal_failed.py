@@ -151,14 +151,17 @@ def test_updates_on_user_yes(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_default_date_is_today_jst(tmp_path, monkeypatch):
+    """--date 省略時は JST 当日が使われること。datetime をモックして環境依存を排除。"""
+    from datetime import datetime, timezone, timedelta
+
+    fixed_jst = datetime(2026, 4, 17, 10, 0, 0, tzinfo=timezone(timedelta(hours=9)))
+    expected_date = fixed_jst.date()  # 2026-04-17
+
     duckdb_path = tmp_path / "kabusys.duckdb"
     duckdb_path.write_bytes(b"fake")
 
     settings_mock = MagicMock()
     settings_mock.duckdb_path = duckdb_path
-
-    conn_mock = MagicMock()
-    conn_mock.execute.return_value.fetchall.return_value = []
 
     captured_date = []
 
@@ -169,12 +172,18 @@ def test_default_date_is_today_jst(tmp_path, monkeypatch):
         m.fetchall.return_value = []
         return m
 
+    conn_mock = MagicMock()
     conn_mock.execute.side_effect = fake_execute
 
+    mock_dt = MagicMock()
+    mock_dt.now.return_value = fixed_jst
+    mock_dt.fromisoformat = date.fromisoformat  # --date 指定パスは通常通り
+
     with patch("mark_signal_failed.Settings", return_value=settings_mock), \
-         patch("mark_signal_failed.duckdb.connect", return_value=conn_mock):
+         patch("mark_signal_failed.duckdb.connect", return_value=conn_mock), \
+         patch("mark_signal_failed.datetime", mock_dt):
         with pytest.raises(SystemExit):  # 0件でexit(1)
             _run(["--code", "7203"])
 
-    # 日付パラメータが渡されていること（ISO形式）
-    assert any(len(p) >= 2 and str(date.today()) in str(p[1]) for p in captured_date)
+    # 固定 JST 日付がクエリパラメータに渡されていること
+    assert any(len(p) >= 2 and str(expected_date) in str(p[1]) for p in captured_date)
