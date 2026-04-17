@@ -83,6 +83,31 @@ def test_exits_when_no_targets(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# status='pending'/'processing' のみが対象になること
+# ---------------------------------------------------------------------------
+
+def test_selects_pending_and_processing_only(tmp_path, monkeypatch):
+    duckdb_path = tmp_path / "kabusys.duckdb"
+    duckdb_path.write_bytes(b"fake")
+
+    settings_mock = MagicMock()
+    settings_mock.duckdb_path = duckdb_path
+
+    conn_mock = MagicMock()
+    conn_mock.execute.return_value.fetchall.return_value = []
+
+    with patch("mark_signal_failed.Settings", return_value=settings_mock), \
+         patch("mark_signal_failed.duckdb.connect", return_value=conn_mock):
+        with pytest.raises(SystemExit):
+            _run(["--code", "7203", "--date", "2026-04-17"])
+
+    select_sql = str(conn_mock.execute.call_args_list[0].args[0])
+    assert "pending" in select_sql and "processing" in select_sql
+    assert "sent" not in select_sql
+    assert "signal_id" in select_sql  # 正しいカラム名
+
+
+# ---------------------------------------------------------------------------
 # ユーザーが "n" を入力 → キャンセル
 # ---------------------------------------------------------------------------
 
@@ -95,7 +120,7 @@ def test_cancel_on_user_no(tmp_path, monkeypatch):
 
     conn_mock = MagicMock()
     conn_mock.execute.return_value.fetchall.return_value = [
-        (1, "7203", "2026-04-17", "pending", "BUY", 100)
+        ("sig-001", "7203", "2026-04-17", "pending", "buy", 100)
     ]
     monkeypatch.setattr("builtins.input", lambda prompt="": "n")
 
@@ -121,13 +146,15 @@ def test_updates_on_user_yes(tmp_path, monkeypatch):
     settings_mock = MagicMock()
     settings_mock.duckdb_path = duckdb_path
 
-    # SELECT returns 2 records
+    # SELECT returns 2 records (実際のスキーマに沿ったカラム順: signal_id, code, date, status, side, size)
     select_result = MagicMock()
     select_result.fetchall.return_value = [
-        (1, "7203", "2026-04-17", "pending", "BUY", 100),
-        (2, "7203", "2026-04-17", "sent",    "BUY", 200),
+        ("sig-001", "7203", "2026-04-17", "pending",    "buy", 100),
+        ("sig-002", "7203", "2026-04-17", "processing", "buy", 200),
     ]
+    # UPDATE ... RETURNING signal_id の結果
     update_result = MagicMock()
+    update_result.fetchall.return_value = [("sig-001",), ("sig-002",)]
     conn_mock = MagicMock()
     conn_mock.execute.side_effect = [select_result, update_result]
 
@@ -137,12 +164,13 @@ def test_updates_on_user_yes(tmp_path, monkeypatch):
          patch("mark_signal_failed.duckdb.connect", return_value=conn_mock):
         _run(["--code", "7203", "--date", "2026-04-17"])
 
-    # UPDATE が呼ばれ、id 1 と 2 が含まれること
+    # UPDATE が呼ばれ、status='error' と signal_id が含まれること
     sql_calls = [(str(c.args[0]), c.args[1] if len(c.args) > 1 else [])
                  for c in conn_mock.execute.call_args_list]
     update_call = next(c for c in sql_calls if "UPDATE" in c[0])
-    assert "failed" in update_call[0]
-    assert 1 in update_call[1] and 2 in update_call[1]
+    assert "error" in update_call[0]
+    assert "RETURNING" in update_call[0]
+    assert "sig-001" in update_call[1] and "sig-002" in update_call[1]
     conn_mock.close.assert_called_once()
 
 
@@ -177,7 +205,7 @@ def test_default_date_is_today_jst(tmp_path, monkeypatch):
 
     mock_dt = MagicMock()
     mock_dt.now.return_value = fixed_jst
-    mock_dt.fromisoformat = date.fromisoformat  # --date 指定パスは通常通り
+    mock_dt.fromisoformat = datetime.fromisoformat  # --date 指定パスは通常通り
 
     with patch("mark_signal_failed.Settings", return_value=settings_mock), \
          patch("mark_signal_failed.duckdb.connect", return_value=conn_mock), \

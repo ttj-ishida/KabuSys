@@ -31,28 +31,28 @@ _JST = timezone(timedelta(hours=9))
 
 
 def _fetch_targets(conn: duckdb.DuckDBPyConnection, code: str, target_date: date) -> list[dict]:
-    """status が 'pending' または 'sent' の対象レコードを返す。"""
+    """status が 'pending' または 'processing' の対象レコードを返す。"""
     rows = conn.execute(
         """
-        SELECT id, code, signal_date, status, direction, quantity
+        SELECT signal_id, code, date, status, side, size
         FROM signal_queue
         WHERE code = ?
-          AND signal_date = ?
-          AND status IN ('pending', 'sent')
-        ORDER BY id
+          AND date = ?
+          AND status IN ('pending', 'processing')
+        ORDER BY signal_id
         """,
         [code, str(target_date)],
     ).fetchall()
-    cols = ["id", "code", "signal_date", "status", "direction", "quantity"]
+    cols = ["signal_id", "code", "date", "status", "side", "size"]
     return [dict(zip(cols, row)) for row in rows]
 
 
 def _print_records(records: list[dict]) -> None:
-    print(f"\n{'ID':>6}  {'CODE':>6}  {'DATE':>12}  {'STATUS':>10}  {'DIR':>6}  {'QTY':>8}")
-    print("-" * 60)
+    print(f"\n{'SIGNAL_ID':>36}  {'CODE':>6}  {'DATE':>12}  {'STATUS':>12}  {'SIDE':>6}  {'SIZE':>8}")
+    print("-" * 90)
     for r in records:
-        print(f"{r['id']:>6}  {r['code']:>6}  {str(r['signal_date']):>12}  "
-              f"{r['status']:>10}  {str(r.get('direction','')[:6]):>6}  {r.get('quantity', ''):>8}")
+        print(f"{str(r['signal_id']):>36}  {r['code']:>6}  {str(r['date']):>12}  "
+              f"{r['status']:>12}  {str(r.get('side','')[:6]):>6}  {r.get('size', ''):>8}")
     print()
 
 
@@ -94,12 +94,12 @@ def main() -> None:
 
         if not targets:
             logger.error(
-                "対象レコードが見つかりません（code=%s, date=%s, status=pending/sent）。",
+                "対象レコードが見つかりません（code=%s, date=%s, status=pending/processing）。",
                 args.code, target_date,
             )
             sys.exit(1)
 
-        print(f"以下の {len(targets)} 件を status='failed' に更新します:")
+        print(f"以下の {len(targets)} 件を status='error' に更新します:")
         _print_records(targets)
 
         answer = input("続行しますか？ [y/N]: ").strip().lower()
@@ -107,25 +107,27 @@ def main() -> None:
             logger.info("ユーザーによりキャンセルされました。")
             sys.exit(0)
 
-        ids = [r["id"] for r in targets]
-        placeholders = ", ".join(["?"] * len(ids))
+        signal_ids = [r["signal_id"] for r in targets]
+        placeholders = ", ".join(["?"] * len(signal_ids))
         # TOCTOU 対策: UPDATE 側にも status 条件を付け、
-        # SELECT 後に別プロセスが status を変更済みの行は更新しない
-        result = conn.execute(
-            f"UPDATE signal_queue SET status = 'failed'"
-            f" WHERE id IN ({placeholders})"
-            f" AND status IN ('pending', 'sent')",
-            ids,
-        )
-        updated = result.rowcount if result.rowcount is not None else len(ids)
-        if updated != len(ids):
+        # SELECT 後に別プロセスが status を変更済みの行は更新しない。
+        # DuckDB の rowcount は信頼できないため RETURNING で実更新件数を確認する。
+        updated_rows = conn.execute(
+            f"UPDATE signal_queue SET status = 'error'"
+            f" WHERE signal_id IN ({placeholders})"
+            f" AND status IN ('pending', 'processing')"
+            f" RETURNING signal_id",
+            signal_ids,
+        ).fetchall()
+        updated = len(updated_rows)
+        if updated != len(signal_ids):
             logger.warning(
                 "%d 件を選択しましたが実際の更新は %d 件でした。"
                 "並行処理で status が変更済みの行があります。",
-                len(ids), updated,
+                len(signal_ids), updated,
             )
         logger.info(
-            "signal_queue を更新しました（%d 件を status='failed' に変更）。",
+            "signal_queue を更新しました（%d 件を status='error' に変更）。",
             updated,
         )
 
