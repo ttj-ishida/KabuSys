@@ -1,103 +1,107 @@
-KEEP A CHANGELOG
-All notable changes to this project will be documented in this file.
+# Changelog
 
-フォーマットは Keep a Changelog に準拠しています。  
+すべての変更は Keep a Changelog の形式に従います。  
+このプロジェクトはセマンティックバージョニングを使用します。
 
-Unreleased
----------
+## [Unreleased]
 
-- なし
+（なし）
 
-[0.1.0] - 2026-04-17
--------------------
+## [0.1.0] - 2026-04-17
 
-Added
-- 基本パッケージ初回リリース
-  - パッケージバージョンを `kabusys.__version__ = "0.1.0"` として公開。
+### Added
+- 基本アプリケーション構成・バージョン
+  - パッケージ初期バージョンを追加（kabusys.__version__ = "0.1.0"）。
 
-- 設定・環境変数関連
-  - Settings クラスを追加（kabusys.config）
-    - .env 自動ロード機能（プロジェクトルート検出: `.git` または `pyproject.toml` を基準）。
-    - OS 環境変数を保護する読み込み順序: OS 環境変数 > .env.local > .env。
-    - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動ロード無効化オプション。
-    - 必須/任意設定のプロパティ（J-Quants / kabu API / DB パス / LINE / 監視閾値等）。
-    - env 値のバリデーション（KABUSYS_ENV, LOG_LEVEL, PAPER_FILL_MODE など）。
-  - 対話式 .env 作成ウィザード（kabusys.config_setup）
-    - .env の読み取り/上書き、シークレット入力のマスク表示、出力フォーマットを提供。
-    - CLI で実行可能: python -m kabusys.config_setup
+- 実行用スクリプト
+  - run_monitoring.py
+    - SystemMonitor のポーリングループ起動スクリプトを追加。
+    - 環境変数 `MONITOR_POLL_INTERVAL` でポーリング間隔を上書き可能（デフォルト 60 秒）。不正値はデフォルトへフォールバックして警告を出力。
+    - 起動時にプロセス優先度を "high" に設定（utils.process_priority を利用）。
+    - 監視は KABUSYS_ENV にかかわらず本番用 sqlite_path を使用して監視テーブルを初期化する。
+    - データディレクトリに配置された停止フラグファイル（data/stop_requested.flag）検出で安全終了。
+    - DuckDB 接続を併用（分析用 DB）。
 
-- 設定検証ツール
-  - 設定検証 CLI（kabusys.validate_config）
-    - 必須環境変数の存在チェック、KABUSYS_ENV/LOG_LEVEL の妥当性確認、DBパスや config/*.yaml の存在チェック（PyYAML があればパース検証実行）。
-    - 本番環境向けガード（LINE 未設定や KILL_FLAG_CLEAR_ON_START の警告）。
+  - run_execution.py
+    - ExecutionEngine 起動スクリプトを追加。
+    - 起動時にプロセス優先度を "high" に設定。
+    - Paper Trading (`KABUSYS_ENV=paper_trading`) 時は MockBrokerClient を使用し、専用 SQLite（デフォルト: data/paper_trading.db）で本番 DB と完全分離。
+    - Broker クライアント生成（BrokerClientFactory）と OrderRepository / OrderManager / RiskManager / Reconciler の組み立て。
+    - ExecutionEngine を別スレッドで起動。停止フラグ（data/stop_requested.flag）を検知すると安全にエンジン停止を試みる。
+    - 実行 PID ファイル path をサポート（data/execution.pid）。
+
+- 設定管理
+  - config.py
+    - プロジェクトルート自動検出（.git または pyproject.toml を基準）に基づく .env 自動読み込み機能を追加（環境変数で無効化可: KABUSYS_DISABLE_AUTO_ENV_LOAD）。
+    - .env パーサーはコメント、export プレフィックス、シングル/ダブルクォート、エスケープシーケンス、インラインコメントに対応。
+    - .env 読み込み時に OS 環境変数を保護するための protected 上書き制御を実装。
+    - Settings クラスを導入し、J-Quants / kabu API / LINE / DB / 監視 / システム関連の設定をプロパティとして提供。
+    - PAPER_FILL_MODE の値検証（instant/partial/never/reject）や PAPER_TRADING_SQLITE_PATH のサポート。
+    - 各種閾値（CPU/MEM/DISK）や PID/KILL フラグ設定をプロパティ化。
+    - 環境種別検証（development / paper_trading / live）とログレベル検証を実装。
+
+- 設定ユーティリティ / CLI
+  - config_setup.py
+    - .env 初期作成・更新の対話式ウィザードを追加。デフォルト値、選択肢、シークレット入力、保存確認をサポート。
+    - 生成された .env のテンプレートヘッダにはコミット禁止の注意書きを含む。
+  - validate_config.py
+    - 起動前に .env と config/*.yaml の基本的整合性をチェックする CLI を追加。
+    - 必須環境変数の未設定検出、KABUSYS_ENV の妥当性、DB パスの親ディレクトリ存在チェック、YAML ファイルの存在およびパース検証（PyYAML がある場合）などを実装。
+    - 本番環境（KABUSYS_ENV=live）向けの追加ガード（LINE 通知設定や KILL_FLAG_CLEAR_ON_START の警告）。
     - --strict オプションで警告を FAIL 扱いにできる。
-    - CLI: python -m kabusys.validate_config
 
-- 実行エンジン / 発注
-  - Execution 起動スクリプト（kabusys.run_execution）
-    - プロセス起動時に優先度を "high" に設定（set_process_priority を利用）。
-    - 環境に応じて DB を分離: KABUSYS_ENV=paper_trading の場合は paper_trading 用 SQLite（デフォルト: data/paper_trading.db）を使用し、本番 DB と完全分離。
-    - BrokerClientFactory によるブローカークライアント生成（paper_trading 時は Mock クライアント想定）。
-    - OrderRepository / OrderManager / RiskManager / Reconciler を組み合わせ、ExecutionEngine を起動。別スレッドで run_session を実行し、停止フラグファイルを監視して安全に停止する。
-    - RiskManager にデフォルト構成を付与（max_position_pct, max_utilization, rate_limit_per_sec, circuit_breaker 等）。initial_portfolio_value を broker.get_available_cash() で初期化。
+- モニタリング / レポート
+  - monitoring_db 初期化ユーティリティ（init_monitoring_db）を利用して監視テーブルの存在を保証（冪等）。
+  - tools/paper_verification_report.py
+    - ペーパートレード用検証レポート生成スクリプトを追加。期間指定（--from / --to）と DB 指定（--db）をサポート。
+    - 稼働率（uptime）、注文成功率、送信率、リスク却下数、レイテンシ（avg/max/P95）を算出し PASS/FAIL を判定する閾値を定義。
+    - P95 計算、NULL/データ不足への安全なハンドリング、SQLite の存在チェックとエラーメッセージを実装。
 
-- 監視
-  - SystemMonitor 起動スクリプト（kabusys.run_monitoring）
-    - MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を指定可能（デフォルト 60 秒）。不正値はデフォルトにフォールバックし警告を出力。
-    - Monitoring は起動環境にかかわらず本番 sqlite_path を使用（監視専用 DB 初期化を保証）。
-    - 停止フラグファイル（data/stop_requested.flag）による安全停止。
-    - 例外発生時もループ継続（ログ出力して次ポーリングまで待機）。
+- ポートフォリオ構築（純粋関数群）
+  - portfolio/portfolio_builder.py
+    - select_candidates: BUY シグナルをスコア降順で並べ上位 N を選択（同点時は signal_rank でタイブレーク）。
+    - calc_equal_weights: 等金額配分を実装。
+    - calc_score_weights: スコア正規化配分を実装。全スコアが 0 の場合は等分配へフォールバックし警告を出力。
+  - portfolio/risk_adjustment.py
+    - apply_sector_cap: 既存保有のセクター別エクスポージャに基づき、セクター上限を超えたセクターの新規候補を除外（"unknown" セクターは除外対象外）。
+    - calc_regime_multiplier: market regime（bull/neutral/bear）に基づく資金乗数を返す。未知レジームは警告の上 1.0 にフォールバック。
+  - portfolio/position_sizing.py
+    - calc_position_sizes: allocation_method ("risk_based", "equal", "score") に応じた発注株数計算を実装。
+    - risk_based: 損切り幅とリスク許容率から個別株数を算出。
+    - equal/score: weight に基づく配分と per-position / aggregate の上限を考慮。
+    - 単元株（lot_size）丸め、cost_buffer（手数料・スリッページ見積り）考慮、aggregate cap を越えた場合のスケールダウンと残差の配分ロジックを実装。
+    - 価格欠損時のスキップとログ出力に対応。
 
-- 監視 DB 初期化ユーティリティ
-  - init_monitoring_db を利用して監視用テーブルの存在を保証（冪等性を考慮）。
-
-- ポートフォリオ構築（pure function 群）
-  - kabusys.portfolio
-    - portfolio_builder
-      - select_candidates: スコア降順で上位 N を選定（同点は signal_rank でブレーク）。
-      - calc_equal_weights / calc_score_weights: 等金額配分とスコア加重配分（スコア合計が 0 の場合はフォールバック）。
-    - risk_adjustment
-      - apply_sector_cap: セクター集中上限をチェックし、超過セクターの新規候補を除外（"unknown" セクターは除外対象外）。
-      - calc_regime_multiplier: market regime に応じた投下資金乗数（bull/neutral/bear をマップ、未知のレジームはフォールバックで 1.0）。
-    - position_sizing
-      - calc_position_sizes: allocation_method（risk_based / equal / score）に応じた発注株数計算、単元株丸め、1銘柄上限・aggregate 上限の考慮、コストバッファの反映、スケールダウンと端数処理を実装。
-
-- 研究（ファクター計算）
-  - kabusys.research.factor_research
+- リサーチ / ファクター計算
+  - research/factor_research.py
     - DuckDB を用いたファクター計算モジュールを追加（prices_daily / raw_financials を参照）。
-    - Momentum（1M/3M/6M、MA200乖離）、Volatility（ATR20 等）、流動性指標等の計算ロジックを実装（営業日ウィンドウを想定）。
-    - データ不足時に None を返す設計。
+    - モメンタム（1M/3M/6M リターン、MA200 乖離）、ボラティリティ（ATR20）、流動性（20日平均売買代金 / 出来高比率）等の計算を実装。
+    - データ不足に対する安全な None 返却、計算範囲のバッファ設定を実装。
 
 - ユーティリティ
-  - process_priority（kabusys.utils.process_priority）
-    - set_process_priority(level): Windows / POSIX を吸収してプロセス優先度を設定。失敗時は警告ログでスキップ。
-    - set_cpu_affinity(cpu_count): 指定された最初 N コアにプロセスをピン留め。権限不足や未対応環境では警告でスキップ。
+  - utils/process_priority.py
+    - プロセス優先度設定ユーティリティを追加。Windows（psutil の priority constants）と POSIX 系（nice 値）を吸収しプラットフォーム非依存の呼び出しを提供。
+    - set_process_priority(level) と set_cpu_affinity(cpu_count) を実装。権限不足や未対応環境時には警告を出力してフォールバック。
 
-- ツール
-  - Paper Trading 検証レポート（kabusys.tools.paper_verification_report）
-    - SQLite（paper_trading DB）から system_status / trade_logs / risk_logs を集計し、稼働率・注文成功率・送信率・レイテンシ等を算出して CLI レポートを出力。
-    - パス/フェイル基準（稼働率 >=99%、成立率>=90%、送信率>=95%、P95<=200ms）を実装。
-    - 日付フィルタ（--from, --to）および --db オプションをサポート。
+### Changed
+- 初回リリースのため該当なし。
 
-Changed
-- なし（初回リリース）
+### Fixed
+- 初回リリースのため該当なし。
 
-Fixed
-- なし（初回リリース）
+### Deprecated
+- 初回リリースのため該当なし。
 
-Security
-- なし（初回リリース）
+### Removed
+- 初回リリースのため該当なし。
 
-Notes / Implementation details
-- .env パーサはシングル/ダブルクォート、export プレフィックス、インラインコメントなどを考慮した堅牢な実装になっており、読み込み時に既存 OS 環境変数を保護する仕組みを採用。
-- DB は SQLite（監視・paper_trading 用）と DuckDB（分析用）を併用する設計。起動スクリプトは適切にコネクションをクローズする。
-- 実運用（live）においては validate_config の警告や KILL_SWITCH 周りの設定を特に確認することを推奨。
+### Security
+- 初回リリースのため該当なし。
 
---- 
+---
 
-今後の計画（例）
-- ExecutionEngine / BrokerClient の具体実装と統合テストの追加
-- 戦略（signal generator）モジュールの追加と end-to-end テスト
-- 単体テスト・CI の整備、PyPI 配布準備
-
-（この CHANGELOG はコードの内容から推測して作成しています。実際のリリースノートとは差異がある可能性があります。）
+Notes / 注意事項:
+- .env ファイルは絶対にリポジトリにコミットしないでください（config_setup のヘッダにも警告あり）。
+- run_monitoring は KABUSYS_ENV にかかわらず本番用 sqlite_path を使用します。開発・テスト環境で監視データを分離したい場合は sqlite_path を別途指定してください。
+- Paper Trading 用の DB はデフォルトで data/paper_trading.db に保存され、本番データと分離されています（run_execution の挙動）。
+- 一部の機能（YAML 検証など）は外部ライブラリ（PyYAML 等）がインストールされていることを前提とします。存在しない場合は該当チェックをスキップして警告を出力します。
