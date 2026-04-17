@@ -1,97 +1,100 @@
 # CHANGELOG
 
-すべての項目は Keep a Changelog の形式に準拠しています。  
-コード内容から推測して作成しています。初回リリース (0.1.0) と、現在の既知の注意点を記載します。
+すべての重要な変更は Keep a Changelog の形式に従って記載しています。  
+バージョン番号は package の __version__（0.1.0）に合わせています。内容はソースコードから推測してまとめたものです。
+
+なお、日付は本 CHANGELOG 作成日時（自動推定）を使用しています。実際のリリース日が別にある場合は適宜置き換えてください。
 
 ## [Unreleased]
 
-### Notes
-- 現在の実装上の注意点 / 将来的な改善候補を列挙しています（コード内コメントを基に推測）。
-  - risk_adjustment.apply_sector_cap:
-    - price が欠損（0.0）の場合にエクスポージャーが過小見積りされる可能性がある。将来的に前日終値等のフォールバック価格を検討する必要あり。
-  - position_sizing.calc_position_sizes:
-    - lot_size を銘柄別に持てるように拡張する TODO がある（現在は全銘柄共通の lot_size を想定）。
-  - process_priority.set_cpu_affinity:
-    - cpu_count が利用可能コア数を超える場合の挙動は全コア使用となるが、より明示的なユーザー通知やエラーハンドリングが必要かもしれない。
+- 小さな改善・内部リファクタ（将来のリリース向けのプレースホルダ）
 
 ---
 
 ## [0.1.0] - 2026-04-17
 
 ### Added
-- 基本モジュールと CLI を追加（初回リリース相当）。
-  - kabusys パッケージの基本的なエントリポイントとバージョン定義
-    - src/kabusys/__init__.py: __version__ = "0.1.0"
-  - 設定管理
-    - src/kabusys/config.py
-      - .env 自動読み込み（プロジェクトルート検出: .git または pyproject.toml を基準）
-      - .env ファイルのパース機能（export 形式、クォート／エスケープ、インラインコメント対応）
-      - 設定読み出し用 Settings クラス（環境ごとのフラグ、パス、Paper Trading 用設定、閾値等）
-      - 必須値が未設定の場合は明示的に ValueError を発生させる _require() を提供
-  - 環境設定ウィザード CLI
-    - src/kabusys/config_setup.py
-      - 対話式ウィザードで .env の初期作成・更新を支援
-      - シークレット値はマスク表示、既存 .env の読み込みと Enter での再利用に対応
-      - .env のフォーマットで安全に書き出し（Git にコミットしない旨のヘッダを含む）
-  - 設定検証ツール（CLI）
-    - src/kabusys/validate_config.py
-      - 必須環境変数の存在チェック、KABUSYS_ENV / LOG_LEVEL の妥当性チェック
-      - DuckDB/SQLite パスの親ディレクトリ存在チェック、config/*.yaml の存在と（PyYAML 利用時）パース検証
-      - KABUSYS_ENV=live の場合の追加ガード（LINE通知設定や Kill Switch 動作に対する警告）
-      - --strict オプションで警告を失敗扱いにできる
-  - 実行系 / モニタリング
-    - src/kabusys/run_execution.py
-      - ExecutionEngine 起動スクリプト（プロセス優先度を高に設定）
-      - KABUSYS_ENV=paper_trading の場合、paper 用の専用 SQLite を使用し本番 DB と分離（settings.paper_sqlite_path）
-      - BrokerClientFactory によるブローカークライアント生成、OrderRepository/OrderManager/RiskManager/Reconciler の組み立て
-      - Engine をデーモンスレッドで実行、stop flag ファイルを検出して停止
-      - pid ファイルの取り扱い（data/execution.pid 等を想定）
-    - src/kabusys/run_monitoring.py
-      - SystemMonitor ポーリングループ起動スクリプト
-      - MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒）
-      - 監視は環境に関わらず本番 sqlite_path を使用する設計
-      - 停止フラグ（data/stop_requested.flag）検出でループ終了、例外発生時はログ出力して次ポーリングに移行
-  - ユーティリティ
-    - src/kabusys/utils/process_priority.py
-      - プラットフォーム差を吸収したプロセス優先度設定（Windows の priority class / POSIX の nice 値）
-      - CPU affinity 設定ユーティリティ（最初の N コアに固定）
-      - 権限不足や未サポート環境では警告ログを出して安全にフォールバック
-  - ポートフォリオ構築（純関数群）
-    - src/kabusys/portfolio/portfolio_builder.py
-      - select_candidates: スコア降順の候補選定（同点は signal_rank でタイブレーク）
-      - calc_equal_weights / calc_score_weights: 等金額配分・スコア加重配分（スコア合計が 0 の場合は等配分にフォールバック）
-    - src/kabusys/portfolio/risk_adjustment.py
-      - apply_sector_cap: セクター集中上限チェック（既存保有を考慮、売却予定銘柄を除外可能）
-      - calc_regime_multiplier: market レジームに応じた投下資金乗数（bull/neutral/bear）
-    - src/kabusys/portfolio/position_sizing.py
-      - calc_position_sizes: allocation_method("risk_based"/"equal"/"score") に基づく株数算出
-      - 単元株丸め（lot_size）、per-stock 上限、aggregate cap（利用可能現金に基づくスケーリング）を実装
-      - cost_buffer による手数料・スリッページ分の保守的見積もり
-  - リサーチ / ファクター計算
-    - src/kabusys/research/factor_research.py
-      - DuckDB を用いたファクター計算ユーティリティ（prices_daily / raw_financials を参照）
-      - calc_momentum: 1M/3M/6M リターン、MA200 乖離の算出
-      - calc_volatility: ATR20、相対 ATR、20日平均売買代金、出来高比率などの算出
-      - 過去データ不足時の None ハンドリング、ウィンドウサイズやスキャン幅を定数化
-  - ツール
-    - src/kabusys/tools/paper_verification_report.py
-      - Paper Trading 用 SQLite の検証レポート生成スクリプト
-      - システム稼働率、注文成功率（Filled/Created）、送信率（Sent/Created）、リスク却下数、レイテンシ（avg/max/P95）を集計
-      - Pass/Fail 判定基準を定数化（例: 稼働率 99％、fill rate 90％、P95 レイテンシ 200ms）
-      - コマンドライン引数で期間指定 (--from / --to) と DB パス指定 (--db) に対応
+- 全体
+  - 初期リリース。日本株自動売買システム「KabuSys」の基盤機能を実装。
+  - パッケージメタ情報を src/kabusys/__init__.py にて version=0.1.0 として定義。
+
+- 設定・環境管理
+  - 環境変数/`.env` ファイル自動読み込み機能を実装（src/kabusys/config.py）。
+    - プロジェクトルート検出（.git または pyproject.toml を基準）により cwd に依存しない読み込み。
+    - `.env` / `.env.local` の優先順位処理、OS 環境変数の保護機能を実装。
+    - クォート文字やエスケープ、インラインコメントの取り扱いなど、堅牢な .env パーサを実装。
+    - Settings クラスを公開し、各種設定値（DB パス、API トークン、環境種別など）をプロパティ経由で取得可能に。
+    - PAPER_FILL_MODE のバリデーション、有効値の明示化（instant/partial/never/reject）。
+  - 設定ウィザード CLI を追加（src/kabusys/config_setup.py）。
+    - 対話式で .env を生成・更新するウィザード。デフォルト・既存値の再利用、シークレットマスク表示、確認プロンプト付き。
+    - 書き込み時に .env のテンプレートヘッダを出力。
+
+- 構成検証
+  - 設定検証 CLI を追加（src/kabusys/validate_config.py）。
+    - 必須環境変数チェック、KABUSYS_ENV / LOG_LEVEL の妥当性検証、DB パスの親ディレクトリ存在チェック、config/*.yaml の存在・簡易パースチェック（PyYAML があれば内容検証）。
+    - KABUSYS_ENV=live 時の追加ガード（LINE 設定や KILL_FLAG_CLEAR_ON_START の危険設定に警告）。
+
+- 実行/監視ランナー
+  - 実行エンジン起動スクリプト（src/kabusys/run_execution.py）を追加。
+    - KABUSYS_ENV が paper_trading の場合は paper 専用 SQLite（data/paper_trading.db）を使用して本番 DB と完全分離。
+    - BrokerClientFactory を利用してブローカークライアントを抽象化（paper/live を切り替え）。
+    - OrderRepository / OrderManager / RiskManager / Reconciler を組み立て、ExecutionEngine をスレッドで起動。停止フラグ（data/stop_requested.flag）による安全停止処理を実装。
+    - プロセス優先度を起動時に high に設定する挙動を導入。
+  - 監視ポーリングループ起動スクリプト（src/kabusys/run_monitoring.py）を追加。
+    - Monitoring は KABUSYS_ENV にかかわらず本番 sqlite_path を使用し、monitoring テーブルの初期化を保証。
+    - MONITOR_POLL_INTERVAL 環境変数によりポーリング間隔を上書き可能。値の検証と不正値時のデフォルトフォールバック（60秒）を実装。
+    - 停止フラグ検知でループを終了、例外発生時はログを出して次ポーリングへ復帰。
+
+- モニタリング DB 初期化
+  - init_monitoring_db を呼び出して監視用テーブルが必ず存在するようにする処理を実装（実装ファイルは monitoring パッケージ内に存在すると推定）。
+
+- ユーティリティ
+  - プロセス優先度 / CPU affinity 設定ユーティリティを追加（src/kabusys/utils/process_priority.py）。
+    - Windows / POSIX（Linux/macOS 等）で差分を吸収。
+    - set_process_priority(level) と set_cpu_affinity(cpu_count) を提供。権限・非対応環境では警告を出してスキップする安全設計。
+
+- ポートフォリオ構築（純粋関数群）
+  - 候補選定・重み計算（src/kabusys/portfolio/portfolio_builder.py）
+    - select_candidates（スコア降順で上位 N を選択）。
+    - calc_equal_weights（等金額配分）、calc_score_weights（スコア正規化配分、スコア合計が 0 の場合は等金額にフォールバック）。
+  - セクター集中制限・レジーム乗数（src/kabusys/portfolio/risk_adjustment.py）
+    - apply_sector_cap（既存保有のセクター比率が閾値を超える場合に当該セクターの新規候補を除外。unknown セクターは適用除外）。
+    - calc_regime_multiplier（"bull"/"neutral"/"bear" に応じた資金乗数。未知レジームは 1.0 にフォールバックし警告）。
+  - 株数決定・リスク制限・単元丸め（src/kabusys/portfolio/position_sizing.py）
+    - calc_position_sizes: risk_based / equal / score の配分アルゴリズムを実装。
+    - 単元（lot_size）で丸め、per-stock 上限・aggregate cap（available_cash） によるスケーリング、cost_buffer を考慮した保守的見積り、残余キャッシュを用いた端数調整ロジックを実装。
+
+- 研究用ファクター計算
+  - ファクター計算モジュール（src/kabusys/research/factor_research.py）。
+    - Momentum（1M/3M/6M リターン、MA200乖離）、Volatility（ATR 等）、Liquidity（20日平均売買代金）などを DuckDB の prices_daily テーブルから計算する関数群を実装。
+    - DuckDB 接続を受け取り SQL で計算、結果は (date, code) キーの dict リストを返す設計。
+
+- Paper Trading 検証レポート
+  - コマンドラインレポート生成ツール（src/kabusys/tools/paper_verification_report.py）。
+    - paper_trading の SQLite（デフォルト: data/paper_trading.db）を読み、システム稼働率、注文成功率（fill/send）、リスク却下数、レイテンシ（平均/最大/P95）などを算出して人間向けレポートを出力。
+    - P95 計算関数、しきい値（稼働率・成功率・送信率・P95 レイテンシ）による PASS/FAIL 判定を実装。
 
 ### Changed
-- （初回リリースのため該当なし。実装コメントや設計上の注意をコード内に含む。）
+- 全体設計
+  - DB 分離ルールを明確化：paper_trading モードでは paper 専用 SQLite を使用し、本番データと完全に分離する方針を採用。
+  - 設定ロード時に OS 環境変数を保護（既存の OS 環境を上書きしないデフォルト動作）。.env.local は override=True で上書き可能だが、OS 環境変数（protected）を上書きしない。
 
-### Fixed
-- （初回リリースのため該当なし。）
+### Fixed / Robustness
+- .env パーサの強化
+  - 引用符付き値のバックスラッシュエスケープ処理、インラインコメント処理、不正行の無視など多数のケースに対応し、読み込みの堅牢性を高めた。
+- process_priority の互換性
+  - Windows 固有の優先度定数が存在しない場合に getattr でフォールバックするようにして、モジュールのインポート互換性を確保。
+  - 権限不足や未実装 API 呼び出しは警告にとどめ、実行継続するように対応。
+- CLI/起動周り
+  - run_execution/run_monitoring での DB 接続の確実なクローズ処理（finally ブロック）を実装。
+  - 実行開始前に停止フラグをチェックして、誤起動を防止するガードを追加。
+  - MONITOR_POLL_INTERVAL の不正値（0 や非数）を検出し、既定値へフォールバックして warning ログを出力。
 
-### Security
-- 環境変数読み込み時に OS 環境変数を保護する仕組みを導入（.env ロード時、既存の OS 環境変数を上書きしない／override の挙動制御）。
+### Notes / Internal
+- docstring にて外部ドキュメント（PortfolioConstruction.md, StrategyModel.md 等）を参照する設計思想が示されているが、これらのドキュメントや一部の実装依存ファイル（monitoring/*.py, execution/*.py の詳細実装や DuckDB のスキーマ）は本リポジトリ内に存在する想定（CHANGELOG はソースから推測して記載）。
+- 一部の TODO コメント（例: position_sizing の銘柄別 lot_size 対応、price 欠損時のフォールバック等）が残っており、今後の改良ポイントとして残す。
 
 ---
 
-備考:
-- 設定や DB パスのデフォルトは data/ 以下に配置する設計（例: data/monitoring.db, data/kabusys.duckdb, data/paper_trading.db）。
-- 本番（live）環境では設定ミスに対する警告を強化するガードを validate_config で用意。
-- 実際のブローカー接続や ExecutionEngine の内部実装（注文ロジック・リスク管理の詳細）は本変更履歴では概要扱いです。詳しくは該当モジュールの実装を参照してください。
+参照:
+- Keep a Changelog: https://keepachangelog.com/ja/1.0.0/
