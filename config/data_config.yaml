@@ -1,0 +1,15 @@
+# data_config.yaml — データ取得設定
+market_data:
+  provider: jquants
+  price_table: prices_daily
+  fundamental_table: fundamentals
+
+news_data:
+  provider: yahoo_news
+  table: news_articles
+
+feature_store:
+  table: features
+
+ai_scores:
+  table: ai_scores

@@ -1,0 +1,15 @@
+# strategy_config.yaml — 売買戦略パラメータ
+strategy:
+  name: momentum_strategy
+  universe_size: 500
+  rebalance_frequency: daily
+
+factors:
+  momentum_20_weight: 0.5
+  momentum_60_weight: 0.3
+  volume_factor_weight: 0.2
+
+ai_overlay:
+  enabled: true
+  # AIオーバーレイの影響度上限（RiskManagement.md §6 に準拠）
+  max_influence: 0.10

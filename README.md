@@ -79,15 +79,55 @@ Settings は src/kabusys/config.py に実装されており、自動でプロジ
 3. 依存関係をインストール
    - pip install duckdb psutil requests openai streamlit
 
-   （プロジェクトに requirements.txt があれば pip install -r requirements.txt）
+4. 環境変数設定（ウィザード推奨）:
 
-4. .env を作成（プロジェクトルート）
-   - 必須環境変数: JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD
-   - OpenAI を使う場合は OPENAI_API_KEY を設定
-   - 必要に応じて KABUSYS_ENV=paper_trading を指定（Paper Trading 用 DB を分離）
+   対話式ウィザードで `.env` を作成できます:
+   ```cmd
+   python -m kabusys.config_setup
+   ```
+   手動設定する場合は `.env.example` をコピーして `.env` を作成してください。
+   - プロジェクトルートに `.env`（または `.env.local`）を置くと自動ロードされます。
+   - 必須環境変数: `JQUANTS_REFRESH_TOKEN`, `KABU_API_PASSWORD`
+   - OpenAI を使う場合は `OPENAI_API_KEY` を設定
 
-5. data ディレクトリの作成（自動で作られる処理もありますが手動で準備しておくと安心）
-   - mkdir -p data
+5. YAML 設定ファイルの生成:
+   ```cmd
+   python scripts/generate_config.py
+   ```
+   `config/` 配下に `system_config.yaml` など 6 ファイルが生成されます（既存ファイルはスキップ）。
+
+6. 設定を検証:
+   ```cmd
+   python -m kabusys.validate_config
+   ```
+   必須環境変数の欠落・YAML ファイルの異常・`live` 環境特有の警告を検出します。
+
+7. データディレクトリの作成:
+   ```cmd
+   mkdir -p data
+   ```
+
+### 実行環境（KABUSYS_ENV）の使い分け
+
+| 値 | 用途 | 発注 |
+|----|------|------|
+| `development` | ローカル開発・単体テスト | なし |
+| `paper_trading` | 仮想発注・動作検証 | MockBrokerClient を使用 |
+| `live` | 本番稼働（実際に発注） | kabuステーション API |
+
+> `live` に切り替える前に必ず `python -m kabusys.validate_config --strict` で設定を確認してください。
+
+### 必須環境変数
+
+| 変数名 | 説明 |
+|--------|------|
+| `JQUANTS_REFRESH_TOKEN` | J-Quants API リフレッシュトークン |
+| `KABU_API_PASSWORD` | kabuステーション API パスワード |
+| `KABUSYS_ENV` | 実行環境（development / paper_trading / live） |
+
+その他の変数とデフォルト値は `.env.example` を参照してください。
+
+---
 
 ## 使い方（実行例）
 ※ すべてプロジェクトルートで実行することを想定

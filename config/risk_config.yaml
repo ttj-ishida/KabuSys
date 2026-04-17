@@ -1,0 +1,14 @@
+# risk_config.yaml — リスク管理設定（安全側の初期値）
+risk:
+  # 1銘柄最大ウェイト（ポートフォリオ対比）
+  max_position_size: 0.05
+  # ポートフォリオ総投資比率上限
+  max_portfolio_exposure: 1.0
+  # 日次最大損失率（超過で Kill Switch 検討）
+  max_daily_loss: 0.02
+  # 最大ドローダウン（超過で Kill Switch 自動発動）
+  max_drawdown: 0.15
+
+position_sizing:
+  risk_per_trade: 0.01
+  volatility_adjustment: true

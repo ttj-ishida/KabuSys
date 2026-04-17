@@ -1,0 +1,17 @@
+# system_config.yaml — システム全体設定
+# 環境: development / paper_trading / live
+environment: development
+
+timezone: Asia/Tokyo
+
+data_directory: data/
+
+log_directory: logs/
+
+database:
+  type: duckdb
+  path: data/kabusys.duckdb
+
+calendar:
+  source: jquants
+  table: market_calendar
