@@ -340,7 +340,9 @@ Jupyter Notebook。
 `constraints.txt` の更新手順（バージョンアップ時）:
 
     pip install pip-tools
-    pip-compile requirements.txt --output-file constraints.txt
+    pip-compile requirements-dev.txt --output-file constraints.txt
+
+注: `requirements-dev.txt` は `-r requirements.txt` を含むため、実行時依存・開発依存の両方がピン留めされる。
 
 ------------------------------------------------------------------------
 
