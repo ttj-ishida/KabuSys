@@ -334,8 +334,13 @@ Jupyter Notebook。
     pandas, numpy, scikit-learn
     duckdb, pyarrow
     requests, websocket-client
-    pyyaml, openai, httpx, psutil
+    PyYAML, openai, httpx, psutil
     streamlit
+
+`constraints.txt` の更新手順（バージョンアップ時）:
+
+    pip install pip-tools
+    pip-compile requirements.txt --output-file constraints.txt
 
 ------------------------------------------------------------------------
 
