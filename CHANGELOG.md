@@ -1,93 +1,110 @@
-CHANGELOG
-=========
+Keep a Changelog に準拠した CHANGELOG.md（日本語）を以下に作成しました。
+コード内容から推測できる追加点・仕様・注意点を記載しています。
 
-すべての重要な変更履歴を記載します。本ファイルは「Keep a Changelog」形式に準拠しています。  
-注: 以下は提示されたコードベースの内容から推測して作成した初期リリース向けの変更履歴です。
+なお、バージョンはパッケージの __version__ = "0.1.0" に合わせ、リリース日を現日時（2026-04-17）で設定しています。必要に応じて日付や文言を調整してください。
 
-Unreleased
-----------
-- なし（初期リリースの記録は下の 0.1.0 を参照）
+```
+# CHANGELOG
 
-[0.1.0] - 2026-04-17
--------------------
+すべての重要な変更はこのファイルに記録します。  
+フォーマットは "Keep a Changelog" に準拠します。
 
-Added
-- 基本リリース: KabuSys 自動売買システムの初期実装を追加。
-- 設定管理
-  - 環境変数/`.env` 自動読み込み機能を追加（プロジェクトルート探索: .git または pyproject.toml）。
-  - 高度な .env パーサを実装: export 形式、シングル/ダブルクォート、バックスラッシュによるエスケープ、インラインコメント処理に対応。
-  - KABUSYS_DISABLE_AUTO_ENV_LOAD により自動ロードを抑止可能。
-  - Settings クラスを実装し、アプリケーション設定をプロパティ経由で扱えるようにした。
-  - 設定時のバリデーション機能を実装（PAPER_FILL_MODE, KABUSYS_ENV, LOG_LEVEL 等の許容値チェック）。
-- 設定支援/検証 CLI
-  - config_setup: 対話式ウィザードで `.env` を初期作成・更新可能に。
-  - validate_config: .env と config/*.yaml の存在・基本妥当性を検査する CLI。--strict モードで警告を FAIL 扱いにできる。
-  - validate_config は PyYAML 未インストール時に YAML の内容検証をスキップして警告を出す。
-- 実行/監視用エントリポイント
-  - run_execution: ExecutionEngine 起動スクリプトを追加。BrokerClientFactory によるブローカークライアント生成、OrderRepository/OrderManager/RiskManager/Reconciler 組立て、ExecutionEngine のセッション起動と停止フラグ処理を実装。KABUSYS_ENV=paper_trading 時は専用（分離された）SQLite DB を使用。
-  - run_monitoring: SystemMonitor のポーリングループ起動スクリプトを追加。MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒）。停止フラグ検出や例外ハンドリングを備える。監視用 DB は環境にかかわらず本番 sqlite_path を使用する設計。
-  - 停止フラグ/PID 管理: data 内の stop_requested.flag、execution.pid 等に対応。
-- データベース / 分析
-  - DuckDB サポートを追加（duckdb 接続オブジェクトを引き回す設計）。
-  - 監視用 SQLite 初期化ヘルパ（init_monitoring_db）を組み込み、冪等にテーブルを保証。
-- ポートフォリオ構築（純粋関数群）
-  - portfolio_builder: シグナル選定 (select_candidates)、等配分(calc_equal_weights)、スコア加重(calc_score_weights) を実装。スコアが全て 0 の場合は等配分へフォールバックして警告を出す。
-  - risk_adjustment: セクター集中制限 apply_sector_cap、および市場レジームに基づく乗数 calc_regime_multiplier を実装（regime: bull/neutral/bear）。
-  - position_sizing: 各銘柄の発注株数決定ロジック calc_position_sizes を実装。allocation_method に応じた計算（risk_based / equal / score）、単元株丸め(lot_size)、max_position_pct/max_utilization による上限、aggregate cap によるスケールダウン、残差処理によるロット追加配分を行う。
-  - 設計によりこれらは DB を参照しない純粋関数で、ユニットテストしやすい。
-- 研究モジュール
-  - research/factor_research: DuckDB を使ったファクター計算機能（モメンタム、移動平均乖離、ATR、出来高/売買代金指標等）。prices_daily / raw_financials テーブルを想定した実装。
+## [Unreleased]
+
+（未リリースの変更はここに記載）
+
+## [0.1.0] - 2026-04-17
+
+### Added
+- 基本アプリケーション骨格を追加
+  - パッケージメタ情報: kabusys.__version__ = "0.1.0"
+- 環境設定管理
+  - 自動 .env 読み込み（プロジェクトルート検出: .git または pyproject.toml を基準）
+  - .env のパース機能を実装（export プレフィックス、クォート、エスケープ、コメント処理に対応）
+  - 環境変数の自動ロード制御: KABUSYS_DISABLE_AUTO_ENV_LOAD
+  - Settings クラスを実装し、環境変数から各種設定を取得（検証・デフォルト値・型変換を含む）
+    - J-Quants / kabuステーション / LINE / DuckDB / SQLite / Paper Trading 等の設定をプロパティで提供
+    - PAPER_FILL_MODE の検証（instant/partial/never/reject）
+    - KABUSYS_ENV 値検証（development/paper_trading/live）
+    - 各種しきい値（CPU/MEM/DISK）や PID/KILL フラグのパス設定を提供
+- 設定ウィザード CLI
+  - python -m kabusys.config_setup による対話式 .env 作成・更新機能
+  - 既存 .env 読み込み、シークレットのマスク表示、保存確認などを実装
+- 設定検証 CLI
+  - python -m kabusys.validate_config で必須環境変数・パス・YAML ファイル存在等の検証を実装
+  - --strict モードで警告を失敗扱いにできるオプション
+  - 本番環境（KABUSYS_ENV=live）向けの追加チェック（LINE 通知設定、KILL_FLAG_CLEAR_ON_START の危険性）
+- 実行 / 監視ランナー
+  - run_execution.py: ExecutionEngine 起動スクリプト
+    - paper_trading 環境では専用の paper_trading DB を使用し、本番 DB と分離
+    - BrokerClientFactory によるブローカークライアント生成（モック対応）
+    - OrderRepository / OrderManager / RiskManager / Reconciler / ExecutionEngine の組み立てと実行スレッド管理
+    - 停止フラグ（data/stop_requested.flag）検出で安全停止
+    - 実行 PID ファイル管理（data/execution.pid）
+  - run_monitoring.py: SystemMonitor ポーリングループ起動スクリプト
+    - MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒）
+    - 監視は環境に関わらず本番 sqlite_path を使用（監視 DB の一貫性を保つ）
+    - 監視ループ中の例外を捕捉してログに記録し、ループを継続する堅牢化
+- データベース統合
+  - DuckDB 接続を利用（分析用 DB: DUCKDB_PATH）
+  - SQLite 接続を利用（監視・注文履歴用: SQLITE_PATH / PAPER_TRADING_SQLITE_PATH）
+  - 監視テーブル初期化ユーティリティ init_monitoring_db の呼び出しを組み込み（冪等）
+- ポートフォリオ構築モジュール（純粋関数群）
+  - portfolio_builder: 候補選定（select_candidates）、等金額配分（calc_equal_weights）、スコア配分（calc_score_weights）
+  - risk_adjustment: セクター集中制限（apply_sector_cap）、市場レジーム乗数（calc_regime_multiplier）
+  - position_sizing: 発注株数決定（calc_position_sizes）
+    - risk_based / equal / score の割当方式サポート
+    - 単元株（lot_size）丸め、per-stock 上限、aggregate cap（利用可能現金に基づくスケーリング）を実装
+    - cost_buffer により手数料・スリッページを保守的に見積もるロジックを実装
+- 研究モジュール（DuckDB 利用）
+  - research.factor_research: モメンタム / ボラティリティ等のファクター計算を実装
+    - mom_1m/mom_3m/mom_6m、MA200 乖離、ATR20、20日平均売買代金等の算出（prices_daily テーブル参照）
+    - DuckDB のウィンドウ関数を利用した効率的な集計
 - ユーティリティ
-  - utils/process_priority: クロスプラットフォーム（Windows / POSIX）でプロセス優先度を設定する set_process_priority を実装。PSUtil の制約やアクセス権限エラーに対してフォールバックして警告を出す。set_cpu_affinity による CPU ピンニングも提供。
+  - utils.process_priority: プロセス優先度（Windows/Linux の差分吸収）と CPU affinity 設定ユーティリティを実装
+    - set_process_priority(level: "high"|"normal"|"low")
+    - set_cpu_affinity(cpu_count: Optional[int])
+    - 権限不足や未対応 OS を考慮したエラーハンドリングとログ出力
 - ツール
-  - tools/paper_verification_report: Paper Trading 用の検証レポート生成スクリプトを追加。稼働率、注文成功率、送信率、P95レイテンシ等を集計して PASS/FAIL 判定を出力。期間フィルタや DB パス指定 (--from/--to/--db) に対応。
-- ドキュメント化・メタ
-  - パッケージ __version__ を "0.1.0" に設定。
-  - 各モジュールに豊富な docstring と実装上の注意（TODO / 注意事項）を追加。
+  - tools.paper_verification_report: Paper Trading 検証レポート生成スクリプト
+    - 稼働率、注文成功率、送信率、P95 レイテンシ等を算出・判定（閾値はソースに定義）
+    - DB パスの上書き（--db オプション / PAPER_TRADING_SQLITE_PATH）
 
-Changed
-- 初期リリースのため該当なし（以降のリリースで変更履歴を追加予定）。
+### Changed
+- 初版のため該当なし（初回リリースで新規追加が主体）
 
-Fixed
-- 初期リリースのため該当なし。
+### Fixed
+- 初版のため該当なし
 
-Deprecated
-- なし。
+### Deprecated
+- 初版のため該当なし
 
-Removed
-- なし。
+### Removed
+- 初版のため該当なし
 
-Security
-- .env ファイルは絶対にリポジトリにコミットしない旨を config_setup の生成ヘッダに明示。
+### Security
+- 環境変数ファイル (.env) の生成スクリプトでシークレットをマスク表示し、.env を Git にコミットしない旨の注記を出力
 
-Notes / 実装上の注意（既知の制約・TODO）
-- apply_sector_cap: price_map の欠損（price == 0.0）時にエクスポージャーが過少見積りされる可能性がある旨の注記（将来的に前日終値等のフォールバックを検討）。
-- position_sizing: 現状は全銘柄共通の lot_size（デフォルト 100）。将来的には銘柄ごとの lot_size を持たせる拡張を予定。
-- validate_config: PyYAML が無い場合は YAML 構文チェックをスキップして警告を出す。
-- run_monitoring: 監視は常に settings.sqlite_path（本番）を参照する設計になっているため、paper_trading 環境での監視 DB 分離が必要な場合は運用上の注意が必要。
-- process_priority / set_cpu_affinity: 実行環境の権限 (nice 値変更や CPU affinity の設定権限) に依存し、失敗時は警告を出してスキップする。
-- research/factor_research: DuckDB の prices_daily / raw_financials のスキーマに依存。十分な履歴データがない場合は None を返す設計。
+### 注意 / 既知の制限（コード中の TODO / 実装上の注記）
+- apply_sector_cap:
+  - price_map に価格が欠損（0.0）の場合、エクスポージャーが過少見積りされる可能性がある旨をコメントで明記。将来的に前日終値や取得原価でのフォールバックを検討する必要あり。
+- calc_position_sizes:
+  - 現状は全銘柄共通の lot_size（単元株数）を想定。将来的に銘柄別 lot_map を利用する拡張が想定されている（TODO コメントあり）。
+- process_priority / set_cpu_affinity:
+  - 権限不足（psutil.AccessDenied）や未対応プラットフォームで設定に失敗した場合は警告ログを出力してフォールバックする実装。実行環境によって期待どおりの優先度設定が行えない可能性あり。
+- run_monitoring:
+  - MONITOR_POLL_INTERVAL に 0 または負数、非数を設定した場合はデフォルト（60 秒）にフォールバックして警告ログを出す実装。
+- validate_config:
+  - PyYAML が未インストールの場合、config/*.yaml の内容検証をスキップし警告を出力する設計（PyYAML を optional dependency にしている想定）。
+- その他:
+  - 本番環境（KABUSYS_ENV=live）では KILL_FLAG_CLEAR_ON_START を 1 に設定すると危険である旨を警告するチェックを実装。
+  - 監視は常に monitoring.db（Settings.sqlite_path）を使用する設計になっているため、paper_trading と監視 DB の分離が必要な運用では注意が必要。
 
-Configuration (主な環境変数・デフォルト)
-- KABUSYS_ENV: development | paper_trading | live（デフォルト: development）
-- JQUANTS_REFRESH_TOKEN (必須)
-- KABU_API_PASSWORD (必須)
-- KABU_API_BASE_URL (default: http://localhost:18080/kabusapi)
-- DUCKDB_PATH (default: data/kabusys.duckdb)
-- SQLITE_PATH (default: data/monitoring.db)
-- PAPER_TRADING_SQLITE_PATH (default: data/paper_trading.db)
-- PAPER_FILL_MODE: instant | partial | never | reject（default: instant）
-- LOG_LEVEL (default: INFO)
-- MONITOR_POLL_INTERVAL: 監視ポーリング間隔（秒、default: 60）
-- KILL_FLAG_CLEAR_ON_START (default: 0)
-- KABUSYS_DISABLE_AUTO_ENV_LOAD: 1 にすると自動 .env ロードを無効化
+```
 
-今後の予定（例）
-- per-stock lot_size のサポート（マスタ参照）
-- price 欠損時のフォールバックロジック（apply_sector_cap の改善）
-- 研究モジュールの追加ファクター・最適化・テスト強化
-- モジュール間の統合テスト、CI の整備
+必要であれば以下を追加で作成できます：
+- 変更差分を自動生成するためのコミットメッセージ→CHANGELOG マッピング案
+- リリースノート（英語版）
+- 各機能についての短いユーザードキュメント（CLI の使い方、環境変数一覧など）
 
-[0.1.0]: https://example.org/releases/0.1.0 (initial release)
-
-以上。必要であれば、リリースノートの粒度（より詳細なコミット単位の変更点、あるいは運用手順・マイグレーション手順）を増やして調整します。
+どれを優先して作成しますか？
