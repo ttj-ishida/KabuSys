@@ -5,17 +5,23 @@ Group 1: OrderRecord の状態遷移（DB なし・Mock なし）
 Group 2: OrderRepository（インメモリ SQLite）  ← 後続タスクで追記
 Group 3: OrderManager（MockBrokerClient + インメモリ SQLite）  ← 後続タスクで追記
 """
+
 import time
 
 import pytest
 from datetime import datetime, timezone
 
-from kabusys.execution.order_record import InvalidStateTransitionError, OrderRecord, OrderState
+from kabusys.execution.order_record import (
+    InvalidStateTransitionError,
+    OrderRecord,
+    OrderState,
+)
 
 
 # ---------------------------------------------------------------------------
 # ヘルパー
 # ---------------------------------------------------------------------------
+
 
 def _make_record(**overrides) -> OrderRecord:
     """テスト用の OrderRecord を生成するヘルパー。"""
@@ -43,8 +49,8 @@ def _make_record(**overrides) -> OrderRecord:
 # Group 1: OrderRecord の状態遷移（DB なし・Mock なし）
 # ---------------------------------------------------------------------------
 
-class TestOrderRecordTransitions:
 
+class TestOrderRecordTransitions:
     def test_normal_flow_created_to_closed(self):
         """正常遷移: Created→Sent→Accepted→Filled→Closed"""
         r = _make_record()
@@ -126,9 +132,9 @@ class TestOrderRecordTransitions:
 # Group 2: OrderRepository（インメモリ SQLite）
 # ---------------------------------------------------------------------------
 
-import sqlite3
+import sqlite3  # noqa: E402
 
-from kabusys.execution.order_repository import OrderRepository, init_orders_db
+from kabusys.execution.order_repository import OrderRepository, init_orders_db  # noqa: E402
 
 
 @pytest.fixture
@@ -146,7 +152,6 @@ def repo(conn):
 
 
 class TestOrderRepository:
-
     def test_save_and_get_roundtrip(self, repo):
         """save → get の往復でフィールドが一致する"""
         r = _make_record(client_order_id="repo-test-001")
@@ -211,20 +216,50 @@ class TestOrderRepository:
             OrderState.Rejected,
         ]
         for i, s in enumerate(active_states):
-            repo.save(_make_record(client_order_id=f"active-{i}", signal_id=f"sig-active-{i}", state=s))
+            repo.save(
+                _make_record(
+                    client_order_id=f"active-{i}", signal_id=f"sig-active-{i}", state=s
+                )
+            )
         for i, s in enumerate(terminal_states):
-            repo.save(_make_record(client_order_id=f"terminal-{i}", signal_id=f"sig-terminal-{i}", state=s))
+            repo.save(
+                _make_record(
+                    client_order_id=f"terminal-{i}",
+                    signal_id=f"sig-terminal-{i}",
+                    state=s,
+                )
+            )
 
         active = repo.list_active()
         active_ids = {r.client_order_id for r in active}
         assert all(f"active-{i}" in active_ids for i in range(len(active_states)))
-        assert all(f"terminal-{i}" not in active_ids for i in range(len(terminal_states)))
+        assert all(
+            f"terminal-{i}" not in active_ids for i in range(len(terminal_states))
+        )
 
     def test_list_uncertain_returns_only_sent(self, repo):
         """list_uncertain は OrderSent のみ返す"""
-        repo.save(_make_record(client_order_id="sent-001", signal_id="sig-s1", state=OrderState.OrderSent))
-        repo.save(_make_record(client_order_id="created-001", signal_id="sig-c1", state=OrderState.OrderCreated))
-        repo.save(_make_record(client_order_id="accepted-001", signal_id="sig-a1", state=OrderState.OrderAccepted))
+        repo.save(
+            _make_record(
+                client_order_id="sent-001",
+                signal_id="sig-s1",
+                state=OrderState.OrderSent,
+            )
+        )
+        repo.save(
+            _make_record(
+                client_order_id="created-001",
+                signal_id="sig-c1",
+                state=OrderState.OrderCreated,
+            )
+        )
+        repo.save(
+            _make_record(
+                client_order_id="accepted-001",
+                signal_id="sig-a1",
+                state=OrderState.OrderAccepted,
+            )
+        )
 
         uncertain = repo.list_uncertain()
         assert len(uncertain) == 1
@@ -234,10 +269,17 @@ class TestOrderRepository:
     def test_get_by_signal(self, repo):
         """get_by_signal は signal_id に紐づく全レコードを返す
         （1件目は Cancelled 済み、2件目は新規 OrderCreated — 現実の再発注シナリオ）"""
-        repo.save(_make_record(client_order_id="sig-test-001", signal_id="same-signal",
-                               state=OrderState.Cancelled))
+        repo.save(
+            _make_record(
+                client_order_id="sig-test-001",
+                signal_id="same-signal",
+                state=OrderState.Cancelled,
+            )
+        )
         repo.save(_make_record(client_order_id="sig-test-002", signal_id="same-signal"))
-        repo.save(_make_record(client_order_id="sig-test-003", signal_id="other-signal"))
+        repo.save(
+            _make_record(client_order_id="sig-test-003", signal_id="other-signal")
+        )
 
         results = repo.get_by_signal("same-signal")
         assert len(results) == 2
@@ -253,9 +295,9 @@ class TestOrderRepository:
 # Group 3: OrderManager（MockBrokerClient + インメモリ SQLite）
 # ---------------------------------------------------------------------------
 
-from kabusys.execution.broker_api import OrderRequest
-from kabusys.execution.mock_client import MockBrokerClient
-from kabusys.execution.order_manager import DuplicateOrderError, OrderManager
+from kabusys.execution.broker_api import OrderRequest  # noqa: E402
+from kabusys.execution.mock_client import MockBrokerClient  # noqa: E402
+from kabusys.execution.order_manager import DuplicateOrderError, OrderManager  # noqa: E402
 
 
 @pytest.fixture
@@ -299,10 +341,18 @@ def test_send_order_rejected(repo):
     class RejectingBroker:
         def send_order(self, order):
             raise OrderRejectedError("余力不足テスト")
-        def cancel_order(self, order_id): pass
-        def get_order_status(self, order_id): return None
-        def get_positions(self): return []
-        def get_available_cash(self): return 0.0
+
+        def cancel_order(self, order_id):
+            pass
+
+        def get_order_status(self, order_id):
+            return None
+
+        def get_positions(self):
+            return []
+
+        def get_available_cash(self):
+            return 0.0
 
     m = OrderManager(broker=RejectingBroker(), repo=repo)
     request = OrderRequest(code="1234", side="buy", qty=100, order_type="market")
@@ -316,11 +366,20 @@ def test_send_order_persists_sent_state_before_broker_call(repo):
     """クラッシュ模擬: OrderSent 永続化後に broker が例外 → list_uncertain でレコードが見つかる"""
 
     class CrashingBroker:
-        def send_order(self, order): raise RuntimeError("クラッシュ模擬")
-        def cancel_order(self, order_id): pass
-        def get_order_status(self, order_id): return None
-        def get_positions(self): return []
-        def get_available_cash(self): return 1_000_000.0
+        def send_order(self, order):
+            raise RuntimeError("クラッシュ模擬")
+
+        def cancel_order(self, order_id):
+            pass
+
+        def get_order_status(self, order_id):
+            return None
+
+        def get_positions(self):
+            return []
+
+        def get_available_cash(self):
+            return 1_000_000.0
 
     crash_manager = OrderManager(broker=CrashingBroker(), repo=repo)
     request = OrderRequest(code="1234", side="buy", qty=100, order_type="market")
@@ -339,6 +398,7 @@ def test_sync_order_sent_to_accepted(repo):
     class StubBrokerReturnsOpen:
         def get_order_status(self, order_id):
             from kabusys.execution.broker_api import OrderStatus
+
             return OrderStatus(
                 order_id=order_id,
                 code="1234",
@@ -348,12 +408,20 @@ def test_sync_order_sent_to_accepted(repo):
                 status="open",
                 price=None,
             )
+
         def send_order(self, order):
             from kabusys.execution.broker_api import OrderResponse
+
             return OrderResponse(order_id="broker-recon-001")
-        def cancel_order(self, order_id): pass
-        def get_positions(self): return []
-        def get_available_cash(self): return 1_000_000.0
+
+        def cancel_order(self, order_id):
+            pass
+
+        def get_positions(self):
+            return []
+
+        def get_available_cash(self):
+            return 1_000_000.0
 
     m = OrderManager(broker=StubBrokerReturnsOpen(), repo=repo)
 
@@ -384,10 +452,18 @@ def test_sync_order_filled(repo):
                 status="filled",
                 price=1500.0,
             )
-        def send_order(self, order): pass
-        def cancel_order(self, order_id): pass
-        def get_positions(self): return []
-        def get_available_cash(self): return 1_000_000.0
+
+        def send_order(self, order):
+            pass
+
+        def cancel_order(self, order_id):
+            pass
+
+        def get_positions(self):
+            return []
+
+        def get_available_cash(self):
+            return 1_000_000.0
 
     # OrderAccepted 状態のレコードを直接 DB に保存
     r = _make_record(
@@ -411,17 +487,27 @@ def test_sync_order_broker_returns_none(manager):
     manager.send_order(record.client_order_id)
 
     class StubBrokerReturnsNone:
-        def get_order_status(self, order_id): return None
-        def send_order(self, order): pass
-        def cancel_order(self, order_id): pass
-        def get_positions(self): return []
-        def get_available_cash(self): return 1_000_000.0
+        def get_order_status(self, order_id):
+            return None
+
+        def send_order(self, order):
+            pass
+
+        def cancel_order(self, order_id):
+            pass
+
+        def get_positions(self):
+            return []
+
+        def get_available_cash(self):
+            return 1_000_000.0
 
     repo_direct = manager._repo
     fetched = repo_direct.get(record.client_order_id)
     original_state = fetched.state
 
     from kabusys.execution.order_manager import OrderManager as OM
+
     stub_manager = OM(broker=StubBrokerReturnsNone(), repo=repo_direct)
     result = stub_manager.sync_order(record.client_order_id)
     assert result.state == original_state
@@ -461,11 +547,14 @@ def test_cancel_order_terminal_state_raises(manager):
         manager.cancel_order(filled.client_order_id)
 
 
-@pytest.mark.parametrize("terminal_state,signal_id", [
-    (OrderState.Closed,    "sig-cancel-closed"),
-    (OrderState.Cancelled, "sig-cancel-cancelled"),
-    (OrderState.Rejected,  "sig-cancel-rejected"),
-])
+@pytest.mark.parametrize(
+    "terminal_state,signal_id",
+    [
+        (OrderState.Closed, "sig-cancel-closed"),
+        (OrderState.Cancelled, "sig-cancel-cancelled"),
+        (OrderState.Rejected, "sig-cancel-rejected"),
+    ],
+)
 def test_cancel_order_all_terminal_states_raise(manager, terminal_state, signal_id):
     """cancel_order: Closed / Cancelled / Rejected も InvalidStateTransitionError"""
     from kabusys.execution.order_record import InvalidStateTransitionError
@@ -483,13 +572,23 @@ def test_send_order_persists_broker_order_id_before_accepted(repo):
         """broker_order_id を返した後、Accepted への遷移前にクラッシュを模擬する。
         実際のクラッシュを再現するため、send_order は正常応答するが
         テストでは Step3a 完了後の DB 状態を直接検証する。"""
+
         def send_order(self, order):
             from kabusys.execution.broker_api import OrderResponse
+
             return OrderResponse(order_id="broker-twophase-001")
-        def cancel_order(self, order_id): pass
-        def get_order_status(self, order_id): return None
-        def get_positions(self): return []
-        def get_available_cash(self): return 1_000_000.0
+
+        def cancel_order(self, order_id):
+            pass
+
+        def get_order_status(self, order_id):
+            return None
+
+        def get_positions(self):
+            return []
+
+        def get_available_cash(self):
+            return 1_000_000.0
 
     m = OrderManager(broker=CrashAfterBrokerIdBroker(), repo=repo)
     request = OrderRequest(code="1234", side="buy", qty=100, order_type="market")
@@ -538,6 +637,7 @@ def test_sync_order_partial_progress_updates_filled_qty(repo):
 
     class StubBrokerPartialProgress:
         """同一 partial 状態のまま filled_qty が 50→80 に進行した応答を返す。"""
+
         def get_order_status(self, order_id):
             return OrderStatus(
                 order_id=order_id,
@@ -548,17 +648,25 @@ def test_sync_order_partial_progress_updates_filled_qty(repo):
                 status="partial",
                 price=1510.0,
             )
-        def send_order(self, order): pass
-        def cancel_order(self, order_id): pass
-        def get_positions(self): return []
-        def get_available_cash(self): return 1_000_000.0
+
+        def send_order(self, order):
+            pass
+
+        def cancel_order(self, order_id):
+            pass
+
+        def get_positions(self):
+            return []
+
+        def get_available_cash(self):
+            return 1_000_000.0
 
     m = OrderManager(broker=StubBrokerPartialProgress(), repo=repo)
     result = m.sync_order(r.client_order_id)
 
-    assert result.state == OrderState.PartialFill   # 状態は変わらない
-    assert result.filled_qty == 80                  # 数量は更新される
-    assert result.avg_fill_price == 1510.0          # 価格も更新される
+    assert result.state == OrderState.PartialFill  # 状態は変わらない
+    assert result.filled_qty == 80  # 数量は更新される
+    assert result.avg_fill_price == 1510.0  # 価格も更新される
 
     # DB からも確認
     persisted = repo.get(r.client_order_id)
@@ -602,10 +710,13 @@ def test_cancel_order_from_partial_fill(repo):
     assert result.state == OrderState.Cancelled
 
 
-@pytest.mark.parametrize("broker_status,expected_state", [
-    ("cancelled", OrderState.Cancelled),
-    ("rejected",  OrderState.Rejected),
-])
+@pytest.mark.parametrize(
+    "broker_status,expected_state",
+    [
+        ("cancelled", OrderState.Cancelled),
+        ("rejected", OrderState.Rejected),
+    ],
+)
 def test_sync_order_cancelled_and_rejected_mapping(repo, broker_status, expected_state):
     """sync_order: broker が 'cancelled'/'rejected' を返したとき正しい状態にマッピングされる"""
     from kabusys.execution.broker_api import OrderStatus
@@ -613,6 +724,7 @@ def test_sync_order_cancelled_and_rejected_mapping(repo, broker_status, expected
     class StubBrokerTerminal:
         def __init__(self, status: str):
             self._status = status
+
         def get_order_status(self, order_id):
             return OrderStatus(
                 order_id=order_id,
@@ -623,10 +735,18 @@ def test_sync_order_cancelled_and_rejected_mapping(repo, broker_status, expected
                 status=self._status,
                 price=None,
             )
-        def send_order(self, order): pass
-        def cancel_order(self, order_id): pass
-        def get_positions(self): return []
-        def get_available_cash(self): return 1_000_000.0
+
+        def send_order(self, order):
+            pass
+
+        def cancel_order(self, order_id):
+            pass
+
+        def get_positions(self):
+            return []
+
+        def get_available_cash(self):
+            return 1_000_000.0
 
     r = _make_record(
         signal_id=f"sig-sync-{broker_status}",

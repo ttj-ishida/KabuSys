@@ -1,4 +1,5 @@
 """alert_manager.py — LINE Messaging API による一方向プッシュ通知。"""
+
 from __future__ import annotations
 
 import logging
@@ -37,14 +38,20 @@ class AlertManager:
             False: スキップ（トークン未設定 / cooldown / エラー）
         """
         if not self._token or not self._user_id:
-            logger.warning("LINE token/user_id not configured — skipping alert: [%s] %s", level, message)
+            logger.warning(
+                "LINE token/user_id not configured — skipping alert: [%s] %s",
+                level,
+                message,
+            )
             return False
 
         key = (level, category)
         now = datetime.now(tz=timezone.utc)
         last = self._last_sent.get(key)
         if last is not None and now - last < self._cooldown:
-            logger.debug("Alert cooldown active for (%s, %s) — skipping", level, category)
+            logger.debug(
+                "Alert cooldown active for (%s, %s) — skipping", level, category
+            )
             return False
 
         now_jst = datetime.now(tz=timezone(timedelta(hours=9)))
@@ -54,7 +61,10 @@ class AlertManager:
             resp = requests.post(
                 LINE_PUSH_URL,
                 headers={"Authorization": f"Bearer {self._token}"},
-                json={"to": self._user_id, "messages": [{"type": "text", "text": text}]},
+                json={
+                    "to": self._user_id,
+                    "messages": [{"type": "text", "text": text}],
+                },
                 timeout=10,
             )
         except requests.exceptions.RequestException as exc:

@@ -4,10 +4,11 @@ PortfolioSimulator — 擬似約定とポートフォリオ状態管理。
 
 BacktestFramework.md Section 4.3 のスリッページ・手数料モデルに従う。
 """
+
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 
 logger = logging.getLogger(__name__)
@@ -19,8 +20,8 @@ class DailySnapshot:
 
     date: date
     cash: float
-    positions: dict[str, int]     # code → 株数
-    portfolio_value: float        # cash + 時価評価額
+    positions: dict[str, int]  # code → 株数
+    portfolio_value: float  # cash + 時価評価額
 
 
 @dataclass
@@ -29,11 +30,13 @@ class TradeRecord:
 
     date: date
     code: str
-    side: str                     # "buy" | "sell"
+    side: str  # "buy" | "sell"
     shares: int
-    price: float                  # 約定価格（スリッページ適用後）
+    price: float  # 約定価格（スリッページ適用後）
     commission: float
-    realized_pnl: float | None    # SELL 時のみ。shares*(exit_price - avg_cost) - SELL手数料。BUY手数料は cash から別途控除済みのため含まない。
+    realized_pnl: (
+        float | None
+    )  # SELL 時のみ。shares*(exit_price - avg_cost) - SELL手数料。BUY手数料は cash から別途控除済みのため含まない。
 
 
 class PortfolioSimulator:
@@ -44,8 +47,8 @@ class PortfolioSimulator:
 
     def __init__(self, initial_cash: float) -> None:
         self.cash: float = initial_cash
-        self.positions: dict[str, int] = {}          # code → 株数
-        self.cost_basis: dict[str, float] = {}       # code → 平均取得単価
+        self.positions: dict[str, int] = {}  # code → 株数
+        self.cost_basis: dict[str, float] = {}  # code → 平均取得単価
         self.history: list[DailySnapshot] = []
         self.trades: list[TradeRecord] = []
 
@@ -75,7 +78,9 @@ class PortfolioSimulator:
         """
         # SELL を先に処理
         for sig in [s for s in signals if s["side"] == "sell"]:
-            self._execute_sell(sig["code"], open_prices, slippage_rate, commission_rate, trading_day)
+            self._execute_sell(
+                sig["code"], open_prices, slippage_rate, commission_rate, trading_day
+            )
         # BUY を後に処理
         for sig in [s for s in signals if s["side"] == "buy"]:
             self._execute_buy(
@@ -106,12 +111,16 @@ class PortfolioSimulator:
             logger.warning(
                 "execute_orders: BUY %s shares=%d は単元株数 %d の倍数ではありません。"
                 "呼び出し側の丸め漏れの可能性があります。",
-                code, shares, lot_size,
+                code,
+                shares,
+                lot_size,
             )
 
         open_price = open_prices.get(code)
         if open_price is None:
-            logger.warning("execute_orders: BUY %s の始値が取得できません。スキップ。", code)
+            logger.warning(
+                "execute_orders: BUY %s の始値が取得できません。スキップ。", code
+            )
             return
 
         entry_price = open_price * (1.0 + slippage_rate)
@@ -126,12 +135,18 @@ class PortfolioSimulator:
             if max_affordable <= 0:
                 logger.debug(
                     "execute_orders: BUY %s 現金不足（必要: %.0f, 保有: %.0f）。スキップ。",
-                    code, total_cost, self.cash,
+                    code,
+                    total_cost,
+                    self.cash,
                 )
                 return
             logger.debug(
                 "execute_orders: BUY %s 部分約定 %d→%d 株（現金: %.0f, 必要: %.0f）",
-                code, shares, max_affordable, self.cash, total_cost,
+                code,
+                shares,
+                max_affordable,
+                self.cash,
+                total_cost,
             )
             shares = max_affordable
             cost = shares * entry_price
@@ -147,18 +162,22 @@ class PortfolioSimulator:
         self.cost_basis[code] = (existing_cost + cost) / new_total_shares
         self.positions[code] = new_total_shares
 
-        trade_date = trading_day if trading_day is not None else (
-            self.history[-1].date if self.history else date(1970, 1, 1)
+        trade_date = (
+            trading_day
+            if trading_day is not None
+            else (self.history[-1].date if self.history else date(1970, 1, 1))
         )
-        self.trades.append(TradeRecord(
-            date=trade_date,
-            code=code,
-            side="buy",
-            shares=shares,
-            price=entry_price,
-            commission=commission,
-            realized_pnl=None,
-        ))
+        self.trades.append(
+            TradeRecord(
+                date=trade_date,
+                code=code,
+                side="buy",
+                shares=shares,
+                price=entry_price,
+                commission=commission,
+                realized_pnl=None,
+            )
+        )
 
     def _execute_sell(
         self,
@@ -175,7 +194,9 @@ class PortfolioSimulator:
 
         open_price = open_prices.get(code)
         if open_price is None:
-            logger.warning("execute_orders: SELL %s の始値が取得できません。スキップ。", code)
+            logger.warning(
+                "execute_orders: SELL %s の始値が取得できません。スキップ。", code
+            )
             return
 
         exit_price = open_price * (1.0 - slippage_rate)
@@ -190,18 +211,22 @@ class PortfolioSimulator:
         del self.positions[code]
         del self.cost_basis[code]
 
-        trade_date = trading_day if trading_day is not None else (
-            self.history[-1].date if self.history else date(1970, 1, 1)
+        trade_date = (
+            trading_day
+            if trading_day is not None
+            else (self.history[-1].date if self.history else date(1970, 1, 1))
         )
-        self.trades.append(TradeRecord(
-            date=trade_date,
-            code=code,
-            side="sell",
-            shares=shares,
-            price=exit_price,
-            commission=commission,
-            realized_pnl=realized_pnl,
-        ))
+        self.trades.append(
+            TradeRecord(
+                date=trade_date,
+                code=code,
+                side="sell",
+                shares=shares,
+                price=exit_price,
+                commission=commission,
+                realized_pnl=realized_pnl,
+            )
+        )
 
     def mark_to_market(
         self,
@@ -218,15 +243,18 @@ class PortfolioSimulator:
             if price is None:
                 logger.warning(
                     "mark_to_market: %s の終値が取得できません。0 で評価します。date=%s",
-                    code, trading_day,
+                    code,
+                    trading_day,
                 )
                 price = 0.0
             stock_value += shares * price
 
         portfolio_value = self.cash + stock_value
-        self.history.append(DailySnapshot(
-            date=trading_day,
-            cash=self.cash,
-            positions=dict(self.positions),
-            portfolio_value=portfolio_value,
-        ))
+        self.history.append(
+            DailySnapshot(
+                date=trading_day,
+                cash=self.cash,
+                positions=dict(self.positions),
+                portfolio_value=portfolio_value,
+            )
+        )

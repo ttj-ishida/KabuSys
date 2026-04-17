@@ -3,6 +3,7 @@
 
 ビジネスロジックを持たない。読み書きのみ。
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -86,7 +87,9 @@ def init_monitoring_db(conn: sqlite3.Connection) -> None:
         conn.commit()
 
     # 既存 DB に latency_ms カラムがない場合のマイグレーション
-    existing_trade_cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_logs)")}
+    existing_trade_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(trade_logs)")
+    }
     if "latency_ms" not in existing_trade_cols:
         conn.execute("ALTER TABLE trade_logs ADD COLUMN latency_ms REAL")
         conn.commit()
@@ -153,7 +156,18 @@ class MonitoringDB:
                 (logged_at, event_type, client_order_id, code, side, qty, price, filled_qty, state, latency_ms)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (ts, event_type, client_order_id, code, side, qty, price, filled_qty, state, latency_ms),
+            (
+                ts,
+                event_type,
+                client_order_id,
+                code,
+                side,
+                qty,
+                price,
+                filled_qty,
+                state,
+                latency_ms,
+            ),
         )
         self._conn.commit()
 
@@ -275,7 +289,15 @@ class MonitoringDB:
                 position_count   = excluded.position_count,
                 peak_value       = COALESCE(excluded.peak_value, dashboard.peak_value)
             """,
-            (ts, portfolio_value, cash, drawdown_pct, open_order_count, position_count, peak_value),
+            (
+                ts,
+                portfolio_value,
+                cash,
+                drawdown_pct,
+                open_order_count,
+                position_count,
+                peak_value,
+            ),
         )
         self._conn.commit()
 

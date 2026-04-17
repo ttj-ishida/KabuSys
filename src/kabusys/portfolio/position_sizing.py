@@ -3,6 +3,7 @@
 PortfolioConstruction.md Section 7、StrategyModel.md Section 6 に基づく純粋関数。
 DB 参照なし — メモリ内計算のみ。
 """
+
 from __future__ import annotations
 
 import logging
@@ -65,7 +66,9 @@ def calc_position_sizes(
             code = c["code"]
             price = open_prices.get(code)
             if price is None or price <= 0:
-                logger.debug("calc_position_sizes: %s の価格が取得できません。スキップ。", code)
+                logger.debug(
+                    "calc_position_sizes: %s の価格が取得できません。スキップ。", code
+                )
                 continue
 
             base_shares = math.floor(
@@ -84,7 +87,9 @@ def calc_position_sizes(
             code = c["code"]
             price = open_prices.get(code)
             if price is None or price <= 0:
-                logger.debug("calc_position_sizes: %s の価格が取得できません。スキップ。", code)
+                logger.debug(
+                    "calc_position_sizes: %s の価格が取得できません。スキップ。", code
+                )
                 continue
             w = weights.get(code, 0.0)
             if w <= 0.0:

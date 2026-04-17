@@ -97,7 +97,17 @@ class TestSchemaIntegrity:
                 "WHERE table_name = 'raw_prices'"
             ).fetchall()
         }
-        assert {"date", "code", "open", "high", "low", "close", "volume", "turnover", "fetched_at"} <= cols
+        assert {
+            "date",
+            "code",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "turnover",
+            "fetched_at",
+        } <= cols
 
     def test_raw_financials_columns(self, mem_db):
         """raw_financials テーブルに必要なカラムが揃っていることを確認。"""
@@ -108,8 +118,17 @@ class TestSchemaIntegrity:
                 "WHERE table_name = 'raw_financials'"
             ).fetchall()
         }
-        assert {"code", "report_date", "period_type", "revenue", "operating_profit",
-                "net_income", "eps", "roe", "fetched_at"} <= cols
+        assert {
+            "code",
+            "report_date",
+            "period_type",
+            "revenue",
+            "operating_profit",
+            "net_income",
+            "eps",
+            "roe",
+            "fetched_at",
+        } <= cols
 
     def test_market_calendar_columns(self, mem_db):
         """market_calendar テーブルに必要なカラムが揃っていることを確認。"""
@@ -120,7 +139,13 @@ class TestSchemaIntegrity:
                 "WHERE table_name = 'market_calendar'"
             ).fetchall()
         }
-        assert {"date", "is_trading_day", "is_half_day", "is_sq_day", "holiday_name"} <= cols
+        assert {
+            "date",
+            "is_trading_day",
+            "is_half_day",
+            "is_sq_day",
+            "holiday_name",
+        } <= cols
 
     def test_raw_prices_pk_constraint(self, mem_db):
         """raw_prices に同一 (date, code) を2回挿入すると ON CONFLICT で更新されることを確認。"""
@@ -147,7 +172,8 @@ class TestJQuantsClientMock:
         """ページネーションなしで株価日足を取得できることを確認。"""
         records = [_sample_price_record()]
         monkeypatch.setattr(
-            jquants, "_request",
+            jquants,
+            "_request",
             mock.MagicMock(return_value={"daily_quotes": records}),
         )
         result = jquants.fetch_daily_quotes(id_token="dummy")
@@ -178,7 +204,10 @@ class TestJQuantsClientMock:
 
     def test_fetch_daily_quotes_dedup_pagination_key(self, monkeypatch):
         """同一 pagination_key が返り続けても無限ループしないことを確認。"""
-        infinite = {"daily_quotes": [_sample_price_record()], "pagination_key": "same_key"}
+        infinite = {
+            "daily_quotes": [_sample_price_record()],
+            "pagination_key": "same_key",
+        }
         call_count = {"n": 0}
 
         def fake_request(path, params=None, **kw):
@@ -195,7 +224,8 @@ class TestJQuantsClientMock:
         """財務データを取得できることを確認。"""
         records = [_sample_financial_record()]
         monkeypatch.setattr(
-            jquants, "_request",
+            jquants,
+            "_request",
             mock.MagicMock(return_value={"statements": records}),
         )
         result = jquants.fetch_financial_statements(id_token="dummy")
@@ -206,7 +236,8 @@ class TestJQuantsClientMock:
         """カレンダーデータを取得できることを確認。"""
         records = [_sample_calendar_record()]
         monkeypatch.setattr(
-            jquants, "_request",
+            jquants,
+            "_request",
             mock.MagicMock(return_value={"trading_calendar": records}),
         )
         result = jquants.fetch_market_calendar(id_token="dummy")
@@ -215,7 +246,8 @@ class TestJQuantsClientMock:
     def test_get_id_token(self, monkeypatch):
         """リフレッシュトークンから ID トークンを取得できることを確認。"""
         monkeypatch.setattr(
-            jquants, "_request",
+            jquants,
+            "_request",
             mock.MagicMock(return_value={"idToken": "my_id_token"}),
         )
         monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "dummy_refresh")
@@ -262,8 +294,22 @@ class TestEtlIdempotency:
     def test_save_daily_quotes_skips_missing_pk(self, mem_db):
         """Date または Code が欠損したレコードはスキップされることを確認。"""
         records = [
-            {"Date": None, "Code": "7203", "Open": 100.0, "High": 110.0, "Low": 90.0, "Close": 105.0},
-            {"Date": "2024-01-10", "Code": "", "Open": 100.0, "High": 110.0, "Low": 90.0, "Close": 105.0},
+            {
+                "Date": None,
+                "Code": "7203",
+                "Open": 100.0,
+                "High": 110.0,
+                "Low": 90.0,
+                "Close": 105.0,
+            },
+            {
+                "Date": "2024-01-10",
+                "Code": "",
+                "Open": 100.0,
+                "High": 110.0,
+                "Low": 90.0,
+                "Close": 105.0,
+            },
             _sample_price_record(),  # 正常レコード
         ]
         count = jquants.save_daily_quotes(mem_db, records)
@@ -290,17 +336,18 @@ class TestEtlIdempotency:
     def test_save_market_calendar_holiday_division(self, mem_db):
         """HolidayDivision ごとに is_trading_day / is_half_day / is_sq_day が正しくセットされることを確認。"""
         records = [
-            _sample_calendar_record("2024-01-10", "0"),   # 全日営業
-            _sample_calendar_record("2024-01-11", "2"),   # SQ日
-            _sample_calendar_record("2024-01-12", "3"),   # 半日
-            _sample_calendar_record("2024-01-13", "1"),   # 休場
+            _sample_calendar_record("2024-01-10", "0"),  # 全日営業
+            _sample_calendar_record("2024-01-11", "2"),  # SQ日
+            _sample_calendar_record("2024-01-12", "3"),  # 半日
+            _sample_calendar_record("2024-01-13", "1"),  # 休場
         ]
         jquants.save_market_calendar(mem_db, records)
 
         def fetch(d):
             return mem_db.execute(
                 "SELECT is_trading_day, is_half_day, is_sq_day "
-                "FROM market_calendar WHERE date = ?", [d]
+                "FROM market_calendar WHERE date = ?",
+                [d],
             ).fetchone()
 
         trading, half, sq = fetch("2024-01-10")
@@ -420,7 +467,9 @@ class TestAdditionalCases:
 
     def test_save_market_calendar_unknown_holiday_division(self, mem_db):
         """未知の HolidayDivision（例: '9'）はデフォルト非営業日として扱われることを確認。"""
-        records = [{"Date": "2024-01-15", "HolidayDivision": "9", "HolidayName": "Unknown"}]
+        records = [
+            {"Date": "2024-01-15", "HolidayDivision": "9", "HolidayName": "Unknown"}
+        ]
         count = jquants.save_market_calendar(mem_db, records)
         assert count == 1
         row = mem_db.execute(
@@ -432,7 +481,8 @@ class TestAdditionalCases:
     def test_fetch_daily_quotes_empty_response(self, monkeypatch):
         """API が空の daily_quotes を返した場合に空リストを返すことを確認。"""
         monkeypatch.setattr(
-            jquants, "_request",
+            jquants,
+            "_request",
             mock.MagicMock(return_value={"daily_quotes": []}),
         )
         result = jquants.fetch_daily_quotes(id_token="dummy")

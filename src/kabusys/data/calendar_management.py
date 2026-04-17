@@ -388,7 +388,5 @@ def calendar_update_job(
         logger.exception("calendar_update_job: save_market_calendar 失敗")
         return 0
 
-    logger.info(
-        "calendar_update_job: fetched=%d saved=%d", len(records), saved
-    )
+    logger.info("calendar_update_job: fetched=%d saved=%d", len(records), saved)
     return saved

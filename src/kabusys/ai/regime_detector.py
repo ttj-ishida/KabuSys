@@ -60,11 +60,30 @@ _RETRY_BASE_SECONDS: float = 1.0
 
 _MACRO_KEYWORDS: list[str] = [
     # 日本
-    "日銀", "日本銀行", "金利", "利上げ", "利下げ", "政策金利",
-    "為替", "円安", "円高", "為替介入", "インフレ", "物価", "GDP",
+    "日銀",
+    "日本銀行",
+    "金利",
+    "利上げ",
+    "利下げ",
+    "政策金利",
+    "為替",
+    "円安",
+    "円高",
+    "為替介入",
+    "インフレ",
+    "物価",
+    "GDP",
     # 米国・グローバル
-    "Fed", "FRB", "FOMC", "CPI", "PPI", "雇用統計", "失業率",
-    "米国債", "リセッション", "景気後退",
+    "Fed",
+    "FRB",
+    "FOMC",
+    "CPI",
+    "PPI",
+    "雇用統計",
+    "失業率",
+    "米国債",
+    "リセッション",
+    "景気後退",
 ]
 
 _SYSTEM_PROMPT = (
@@ -79,6 +98,7 @@ _SYSTEM_PROMPT = (
 # ---------------------------------------------------------------------------
 # 内部関数
 # ---------------------------------------------------------------------------
+
 
 def _calc_ma200_ratio(
     conn: duckdb.DuckDBPyConnection,
@@ -170,7 +190,9 @@ def _call_openai_api(client: Any, messages: list[dict]) -> Any:
     )
 
 
-def _score_macro(client: Any, titles: list[str], *, _sleep_fn: Any = time.sleep) -> float:
+def _score_macro(
+    client: Any, titles: list[str], *, _sleep_fn: Any = time.sleep
+) -> float:
     """マクロニュースタイトルを LLM に渡し、市場センチメントスコアを返す。
 
     titles が空の場合は LLM を呼ばず 0.0 を返す。
@@ -198,11 +220,14 @@ def _score_macro(client: Any, titles: list[str], *, _sleep_fn: Any = time.sleep)
         except (RateLimitError, APIConnectionError, APITimeoutError) as exc:
             if attempt >= _MAX_RETRIES - 1:
                 logger.warning(
-                    "_score_macro: API失敗（全リトライ消費）: %s, macro_sentiment=0.0", exc
+                    "_score_macro: API失敗（全リトライ消費）: %s, macro_sentiment=0.0",
+                    exc,
                 )
                 return 0.0
-            wait = _RETRY_BASE_SECONDS * (2 ** attempt)
-            logger.warning("_score_macro: リトライ %d/%d: %s", attempt + 1, _MAX_RETRIES, exc)
+            wait = _RETRY_BASE_SECONDS * (2**attempt)
+            logger.warning(
+                "_score_macro: リトライ %d/%d: %s", attempt + 1, _MAX_RETRIES, exc
+            )
             _sleep_fn(wait)
         except APIError as exc:
             # openai v1 SDK では APIStatusError（APIError のサブクラス）が status_code を持つ。
@@ -211,10 +236,11 @@ def _score_macro(client: Any, titles: list[str], *, _sleep_fn: Any = time.sleep)
             if status is not None and 500 <= status < 600:
                 if attempt >= _MAX_RETRIES - 1:
                     logger.warning(
-                        "_score_macro: API失敗（全リトライ消費）: %s, macro_sentiment=0.0", exc
+                        "_score_macro: API失敗（全リトライ消費）: %s, macro_sentiment=0.0",
+                        exc,
                     )
                     return 0.0
-                wait = _RETRY_BASE_SECONDS * (2 ** attempt)
+                wait = _RETRY_BASE_SECONDS * (2**attempt)
                 logger.warning(
                     "_score_macro: リトライ %d/%d: %s", attempt + 1, _MAX_RETRIES, exc
                 )
@@ -236,6 +262,7 @@ def _score_macro(client: Any, titles: list[str], *, _sleep_fn: Any = time.sleep)
 # ---------------------------------------------------------------------------
 # パブリック API
 # ---------------------------------------------------------------------------
+
 
 def score_regime(
     conn: duckdb.DuckDBPyConnection,
@@ -275,7 +302,9 @@ def score_regime(
     macro_sentiment = _score_macro(client, titles)
 
     # [5] レジームスコア合成
-    raw_score = _MA_WEIGHT * (ma200_ratio - 1.0) * _MA_SCALE + _MACRO_WEIGHT * macro_sentiment
+    raw_score = (
+        _MA_WEIGHT * (ma200_ratio - 1.0) * _MA_SCALE + _MACRO_WEIGHT * macro_sentiment
+    )
     regime_score = max(-1.0, min(1.0, raw_score))
 
     if regime_score >= _BULL_THRESHOLD:
@@ -306,6 +335,10 @@ def score_regime(
 
     logger.info(
         "score_regime: 完了 date=%s label=%s score=%.3f ma200_ratio=%.4f macro=%.3f",
-        target_date, regime_label, regime_score, ma200_ratio, macro_sentiment,
+        target_date,
+        regime_label,
+        regime_score,
+        ma200_ratio,
+        macro_sentiment,
     )
     return 1

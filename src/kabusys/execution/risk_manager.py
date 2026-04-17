@@ -5,6 +5,7 @@ Gate 1: check_signal()    — 余力・重複・ポジション上限（発注�
 Gate 2: check_execution() — レート制限・サーキットブレーカー（API 送信前）
 Gate 3: check_metrics()   — ドローダウン監視（約定後）
 """
+
 from __future__ import annotations
 
 import logging
@@ -35,12 +36,12 @@ class RiskRejectReason(Enum):
 
 @dataclass
 class RiskConfig:
-    max_position_pct: float = 0.10        # 1銘柄最大投資比率
-    max_utilization: float = 0.80         # 全ポジション投下上限（キャッシュ最低20%）
-    rate_limit_per_sec: int = 5           # API レート制限（毎秒5回）
-    circuit_breaker_errors: int = 10      # ウィンドウ内エラー上限
+    max_position_pct: float = 0.10  # 1銘柄最大投資比率
+    max_utilization: float = 0.80  # 全ポジション投下上限（キャッシュ最低20%）
+    rate_limit_per_sec: int = 5  # API レート制限（毎秒5回）
+    circuit_breaker_errors: int = 10  # ウィンドウ内エラー上限
     circuit_breaker_window_sec: int = 60  # エラーカウントウィンドウ（秒）
-    max_drawdown: float = 0.15            # キルスイッチ発動ドローダウン閾値
+    max_drawdown: float = 0.15  # キルスイッチ発動ドローダウン閾値
     initial_portfolio_value: float = 0.0  # セッション開始時の資産評価額
 
 
@@ -116,9 +117,12 @@ class RiskManager:
             return RiskResult(True)
 
         positions = self._broker.get_positions()
+
         # 評価額計算: current_price=None は avg_price でフォールバック（過小評価を防ぐ）
         def _eval(p) -> float:
-            return p.qty * (p.current_price if p.current_price is not None else p.avg_price)
+            return p.qty * (
+                p.current_price if p.current_price is not None else p.avg_price
+            )
 
         total_market_value = sum(_eval(p) for p in positions)
         same_code_value = sum(_eval(p) for p in positions if p.code == code)
@@ -205,7 +209,8 @@ class RiskManager:
             self._cb_open_observed = False
             logger.warning(
                 "サーキットブレーカー OPEN: %d秒以内に%dエラー",
-                window, len(self._cb_error_times),
+                window,
+                len(self._cb_error_times),
             )
 
     def record_api_success(self) -> None:
@@ -224,7 +229,10 @@ class RiskManager:
             # OPEN 状態を少なくとも1回返してからウィンドウ経過を確認する。
             # これにより window_sec=0 でも最初の check で False を返し、
             # 次の check で HALF_OPEN に遷移できる。
-            if self._cb_open_observed and now - self._cb_open_at >= self._config.circuit_breaker_window_sec:
+            if (
+                self._cb_open_observed
+                and now - self._cb_open_at >= self._config.circuit_breaker_window_sec
+            ):
                 # HALF_OPEN へ遷移するが、このコールでは True を返さない。
                 # 次のコールで HALF_OPEN ブランチが 1 件だけ許可することで
                 # 「2連続 True」バグを防ぐ。
@@ -246,7 +254,9 @@ class RiskManager:
         self._cb_state = "OPEN"
         self._cb_open_at = now
         self._cb_open_observed = False
-        logger.warning("サーキットブレーカー HALF_OPEN → OPEN: プローブ送信 (成功なら record_api_success() を呼ぶこと)")
+        logger.warning(
+            "サーキットブレーカー HALF_OPEN → OPEN: プローブ送信 (成功なら record_api_success() を呼ぶこと)"
+        )
         return RiskResult(True)
 
     # ------------------------------------------------------------------

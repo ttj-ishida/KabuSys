@@ -13,6 +13,7 @@
     # 発注なしでリコンシリエーションと状態確認のみ実行（再開判断前の確認用）
     python scripts/start_system.py --dry-run
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,13 +39,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 try:
     import duckdb as _duckdb
     from kabusys.config import Settings as _Settings
+
     _DRY_RUN_DEPS_AVAILABLE = True
 except ImportError:
     _DRY_RUN_DEPS_AVAILABLE = False
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -91,15 +91,26 @@ def _run_dry_run() -> None:
 
     # DuckDB / Settings の依存がない場合はここで終了
     if not _DRY_RUN_DEPS_AVAILABLE:
-        logger.warning("%s duckdb または kabusys.config が利用不可のため DB 状態確認をスキップします。", prefix)
-        logger.info("%s 発注は行いません。通常起動は --clear-stop-flag を指定してください。", prefix)
+        logger.warning(
+            "%s duckdb または kabusys.config が利用不可のため DB 状態確認をスキップします。",
+            prefix,
+        )
+        logger.info(
+            "%s 発注は行いません。通常起動は --clear-stop-flag を指定してください。",
+            prefix,
+        )
         return
 
     try:
         settings = _Settings()
         if not settings.duckdb_path.exists():
-            logger.warning("%s DuckDB ファイルが見つかりません: %s", prefix, settings.duckdb_path)
-            logger.info("%s 発注は行いません。通常起動は --clear-stop-flag を指定してください。", prefix)
+            logger.warning(
+                "%s DuckDB ファイルが見つかりません: %s", prefix, settings.duckdb_path
+            )
+            logger.info(
+                "%s 発注は行いません。通常起動は --clear-stop-flag を指定してください。",
+                prefix,
+            )
             return
 
         conn = _duckdb.connect(str(settings.duckdb_path), read_only=True)
@@ -115,20 +126,21 @@ def _run_dry_run() -> None:
             ).fetchone()[0]
 
             # positions 件数
-            positions = conn.execute(
-                "SELECT COUNT(*) FROM positions"
-            ).fetchone()[0]
+            positions = conn.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
 
         finally:
             conn.close()
 
         logger.info(
             "%s signal_queue: pending=%d 件, processing=%d 件（リコンシリエーション対象）",
-            prefix, pending, sent_orders,
+            prefix,
+            pending,
+            sent_orders,
         )
         logger.info("%s positions: %d 件", prefix, positions)
         logger.info(
-            "%s 発注は行いません。通常起動は --clear-stop-flag を指定してください。", prefix
+            "%s 発注は行いません。通常起動は --clear-stop-flag を指定してください。",
+            prefix,
         )
 
     except Exception:

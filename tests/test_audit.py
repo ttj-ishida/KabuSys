@@ -8,6 +8,7 @@ audit モジュールのユニットテスト
   - UUID 連鎖によるトレーサビリティ（signal → order → execution）を確認
   - ステータス遷移・棄却シグナルの永続化も検証
 """
+
 from __future__ import annotations
 
 import uuid
@@ -24,6 +25,7 @@ from kabusys.data.audit import init_audit_schema, init_audit_db
 # フィクスチャ
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def audit_conn():
     """監査テーブル初期化済みのインメモリ DuckDB 接続。"""
@@ -36,6 +38,7 @@ def audit_conn():
 # ---------------------------------------------------------------------------
 # ヘルパー
 # ---------------------------------------------------------------------------
+
 
 def _uid() -> str:
     return str(uuid.uuid4())
@@ -113,6 +116,7 @@ def _insert_execution(conn, order_request_id: str, **kwargs) -> str:
 # init_audit_schema / init_audit_db
 # ---------------------------------------------------------------------------
 
+
 class TestInitAuditSchema:
     def test_tables_created(self, audit_conn):
         tables = {
@@ -155,6 +159,7 @@ class TestInitAuditSchema:
 # signal_events テーブル
 # ---------------------------------------------------------------------------
 
+
 class TestSignalEvents:
     def test_insert_buy_signal(self, audit_conn):
         sid = _insert_signal(audit_conn, decision="buy")
@@ -174,9 +179,14 @@ class TestSignalEvents:
 
     def test_all_decision_values_valid(self, audit_conn):
         valid_decisions = [
-            "buy", "sell", "hold",
-            "rejected_by_risk", "rejected_by_position_limit",
-            "rejected_by_drawdown", "cancelled", "error",
+            "buy",
+            "sell",
+            "hold",
+            "rejected_by_risk",
+            "rejected_by_position_limit",
+            "rejected_by_drawdown",
+            "cancelled",
+            "error",
         ]
         for decision in valid_decisions:
             _insert_signal(audit_conn, decision=decision)
@@ -223,6 +233,7 @@ class TestSignalEvents:
 # order_requests テーブル
 # ---------------------------------------------------------------------------
 
+
 class TestOrderRequests:
     def test_insert_pending_order(self, audit_conn):
         sid = _insert_signal(audit_conn)
@@ -246,8 +257,15 @@ class TestOrderRequests:
             _insert_order(audit_conn, "nonexistent-signal-id")
 
     def test_all_status_values_valid(self, audit_conn):
-        for status in ["pending", "sent", "filled", "partially_filled",
-                       "cancelled", "rejected", "error"]:
+        for status in [
+            "pending",
+            "sent",
+            "filled",
+            "partially_filled",
+            "cancelled",
+            "rejected",
+            "error",
+        ]:
             sid = _insert_signal(audit_conn)
             _insert_order(audit_conn, sid, status=status)
 
@@ -286,7 +304,8 @@ class TestOrderRequests:
         sid = _insert_signal(audit_conn)
         oid = _insert_order(audit_conn, sid)
         audit_conn.execute(
-            "UPDATE order_requests SET status = 'sent' WHERE order_request_id = ?", [oid]
+            "UPDATE order_requests SET status = 'sent' WHERE order_request_id = ?",
+            [oid],
         )
         row = audit_conn.execute(
             "SELECT status FROM order_requests WHERE order_request_id = ?", [oid]
@@ -315,6 +334,7 @@ class TestOrderRequests:
 # ---------------------------------------------------------------------------
 # executions テーブル
 # ---------------------------------------------------------------------------
+
 
 class TestExecutions:
     def test_insert_execution(self, audit_conn):
@@ -368,6 +388,7 @@ class TestExecutions:
 # UUID 連鎖トレーサビリティ
 # ---------------------------------------------------------------------------
 
+
 class TestUUIDChainTraceability:
     def test_full_chain_signal_to_execution(self, audit_conn):
         """signal → order → execution の UUID 連鎖が結合できる。"""
@@ -404,8 +425,12 @@ class TestUUIDChainTraceability:
         """1 つの発注から複数の約定（部分約定等）が可能。"""
         sid = _insert_signal(audit_conn)
         oid = _insert_order(audit_conn, sid, requested_qty=100)
-        eid1 = _insert_execution(audit_conn, oid, filled_qty=60, broker_execution_id=_uid())
-        eid2 = _insert_execution(audit_conn, oid, filled_qty=40, broker_execution_id=_uid())
+        eid1 = _insert_execution(
+            audit_conn, oid, filled_qty=60, broker_execution_id=_uid()
+        )
+        eid2 = _insert_execution(
+            audit_conn, oid, filled_qty=40, broker_execution_id=_uid()
+        )
         rows = audit_conn.execute(
             "SELECT execution_id FROM executions WHERE order_request_id = ?", [oid]
         ).fetchall()
@@ -424,7 +449,7 @@ class TestUUIDChainTraceability:
         """business_date が signal → order で一致している。"""
         bdate = "2025-03-14"
         sid = _insert_signal(audit_conn, business_date=bdate)
-        oid = _insert_order(audit_conn, sid, business_date=bdate)
+        _insert_order(audit_conn, sid, business_date=bdate)
         row = audit_conn.execute(
             """
             SELECT s.business_date, o.business_date

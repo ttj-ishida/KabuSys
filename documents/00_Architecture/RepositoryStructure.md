@@ -263,10 +263,16 @@ AI関連コード。
 テストコード。
 
     tests/
-    ├ test_strategy.py
-    ├ test_execution.py
-    ├ test_portfolio.py
-    └ test_data_pipeline.py
+    ├ integration/               ← 統合テスト（モジュール間連携）
+    │   ├ test_integration.py    ← Portfolio → Execution → Monitoring フロー
+    │   └ test_paper_trading.py  ← ペーパートレード検証
+    ├ test_execution_engine.py
+    ├ test_risk_manager.py
+    ├ test_portfolio_construction.py
+    ├ test_monitoring_db.py
+    └ （その他ユニットテスト）
+
+ユニットテストは `tests/` 直下、モジュール間連携テストは `tests/integration/` に配置する。
 
 ------------------------------------------------------------------------
 
@@ -307,17 +313,36 @@ Jupyter Notebook。
 
 # 5. Python依存関係
 
-    requirements.txt
+依存ファイルは3本構成で管理する。
 
-例:
+  ファイル               用途
+  ---------------------- -----------------------------------------------
+  `requirements.txt`     実行時依存（バージョン範囲指定）
+  `requirements-dev.txt` 開発・テスト用追加依存（`-r requirements.txt` を含む）
+  `constraints.txt`      ピン留めバージョン（サプライチェーンリスク低減）
 
-    pandas
-    numpy
-    scikit-learn
-    duckdb
-    websocket-client
-    requests
-    pyyaml
+インストール例:
+
+    # 実行環境（制約付き）
+    pip install -c constraints.txt -r requirements.txt
+
+    # 開発環境
+    pip install -c constraints.txt -r requirements-dev.txt
+
+主な実行時依存:
+
+    pandas, numpy, scikit-learn
+    duckdb, pyarrow
+    requests, websocket-client
+    PyYAML, openai, httpx, psutil
+    streamlit
+
+`constraints.txt` の更新手順（バージョンアップ時）:
+
+    pip install pip-tools
+    pip-compile requirements-dev.txt --output-file constraints.txt
+
+注: `requirements-dev.txt` は `-r requirements.txt` を含むため、実行時依存・開発依存の両方がピン留めされる。
 
 ------------------------------------------------------------------------
 
@@ -328,6 +353,25 @@ Jupyter Notebook。
     main        (production)
     develop     (development)
     feature/*   (new feature)
+
+## CI/CD
+
+GitHub Actions により push / PR 時に以下を自動実行する（`.github/workflows/ci.yml`）。
+
+  ジョブ   内容
+  -------- -------------------------------------------------
+  lint     `ruff check` + `ruff format --check`
+  test     `pytest tests/`（ユニットテスト + 統合テスト）
+
+## pre-commit
+
+ローカル開発では pre-commit フックで `ruff` による lint + format チェックを実施する。
+
+    # 初回セットアップ
+    pip install pre-commit
+    pre-commit install
+
+設定ファイル: `.pre-commit-config.yaml`
 
 ------------------------------------------------------------------------
 

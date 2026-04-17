@@ -1,10 +1,7 @@
 """tests/test_kill_switch.py — KillSwitch ユニットテスト"""
+
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import MagicMock
-
-import pytest
 
 from kabusys.monitoring.kill_switch import KillSwitch
 from kabusys.monitoring.system_monitor import SystemCheckResult
@@ -12,7 +9,9 @@ from kabusys.monitoring.trade_monitor import TradeCheckResult
 from kabusys.monitoring.risk_monitor import RiskCheckResult
 
 
-def _make_sys(process_ok: bool = True, data_freshness_ok: bool = True) -> SystemCheckResult:
+def _make_sys(
+    process_ok: bool = True, data_freshness_ok: bool = True
+) -> SystemCheckResult:
     return SystemCheckResult(
         recorded_at="2026-04-02T09:05:00+09:00",
         cpu_percent=30.0,
@@ -24,7 +23,9 @@ def _make_sys(process_ok: bool = True, data_freshness_ok: bool = True) -> System
     )
 
 
-def _make_trade(stale: list[str] | None = None, anomaly: list[str] | None = None) -> TradeCheckResult:
+def _make_trade(
+    stale: list[str] | None = None, anomaly: list[str] | None = None
+) -> TradeCheckResult:
     return TradeCheckResult(
         logged_at="2026-04-02T09:05:00+09:00",
         stale_orders=stale or [],
@@ -32,8 +33,12 @@ def _make_trade(stale: list[str] | None = None, anomaly: list[str] | None = None
     )
 
 
-def _make_risk(drawdown_alert: bool = False, position_limit_alert: bool = False,
-               drawdown_pct: float = 0.0, position_count: int = 0) -> RiskCheckResult:
+def _make_risk(
+    drawdown_alert: bool = False,
+    position_limit_alert: bool = False,
+    drawdown_pct: float = 0.0,
+    position_count: int = 0,
+) -> RiskCheckResult:
     return RiskCheckResult(
         logged_at="2026-04-02T09:05:00+09:00",
         drawdown_pct=drawdown_pct,
@@ -44,7 +49,6 @@ def _make_risk(drawdown_alert: bool = False, position_limit_alert: bool = False,
 
 
 class TestKillSwitchEvaluate:
-
     def test_drawdown_alert_writes_flag_and_returns_reason(self, tmp_path):
         """drawdown_alert=True → kill.flag 書き込み・理由文字列返却"""
         ks = KillSwitch(flag_path=tmp_path / "kill.flag")
@@ -104,14 +108,15 @@ class TestKillSwitchEvaluate:
         reason = ks.evaluate(
             _make_sys(),
             _make_trade(),
-            _make_risk(drawdown_alert=True, position_limit_alert=True, drawdown_pct=0.12),
+            _make_risk(
+                drawdown_alert=True, position_limit_alert=True, drawdown_pct=0.12
+            ),
         )
         assert reason is not None
         assert "DRAWDOWN" in reason
 
 
 class TestKillSwitchIsFlaggedAndClear:
-
     def test_is_flagged_true_when_flag_exists(self, tmp_path):
         flag_path = tmp_path / "kill.flag"
         flag_path.write_text("test")

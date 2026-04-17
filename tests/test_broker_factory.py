@@ -36,13 +36,15 @@ class TestPaperSqlitePath:
     def test_default_path(self, monkeypatch):
         monkeypatch.delenv("PAPER_TRADING_SQLITE_PATH", raising=False)
         from pathlib import Path
-        assert Settings().paper_sqlite_path == Path("data/paper_trading.db").expanduser()
+
+        assert (
+            Settings().paper_sqlite_path == Path("data/paper_trading.db").expanduser()
+        )
 
     def test_override(self, monkeypatch, tmp_path):
         custom = str(tmp_path / "custom.db")
         monkeypatch.setenv("PAPER_TRADING_SQLITE_PATH", custom)
         assert str(Settings().paper_sqlite_path) == custom
-
 
 
 class TestBrokerClientFactory:

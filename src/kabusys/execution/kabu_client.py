@@ -4,6 +4,7 @@
 httpx（同期）を使用。将来の async 対応は httpx.AsyncClient への切り替えで対応可能。
 DB には一切触れない。トークン管理は内部で完結（_get_token として隠蔽）。
 """
+
 from __future__ import annotations
 
 import json
@@ -28,13 +29,13 @@ logger = logging.getLogger(__name__)
 
 # kabu station 注文状態コード → 内部ステータス文字列
 _KABU_STATUS_MAP: dict[int, str] = {
-    1: "open",       # 待機
-    2: "open",       # 処理中
-    3: "open",       # 受付済
-    4: "partial",    # 一部約定
-    5: "filled",     # 全部約定
+    1: "open",  # 待機
+    2: "open",  # 処理中
+    3: "open",  # 受付済
+    4: "partial",  # 一部約定
+    5: "filled",  # 全部約定
     6: "cancelled",  # 取消済
-    7: "rejected",   # 失効
+    7: "rejected",  # 失効
 }
 
 
@@ -57,7 +58,9 @@ class KabuStationClient:
     ) -> None:
         self._api_password = api_password
         # trade_password 省略時は api_password と同一とみなす（単一パスワード設定の場合）
-        self._trade_password = trade_password if trade_password is not None else api_password
+        self._trade_password = (
+            trade_password if trade_password is not None else api_password
+        )
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._token: str | None = None
@@ -237,7 +240,9 @@ class KabuStationClient:
                     code=str(p.get("Symbol", "")),
                     qty=int(p.get("LeavesQty", 0)),
                     avg_price=float(p.get("Price", 0.0)),
-                    current_price=float(raw_current) if raw_current is not None else None,
+                    current_price=float(raw_current)
+                    if raw_current is not None
+                    else None,
                 )
             )
         return positions
@@ -281,7 +286,9 @@ class KabuStationClient:
         def _on_error(_ws: websocket.WebSocketApp, error: Exception) -> None:
             logger.error("WebSocket エラー: %s", error)
 
-        def _on_close(_ws: websocket.WebSocketApp, code: int | None, msg: str | None) -> None:
+        def _on_close(
+            _ws: websocket.WebSocketApp, code: int | None, msg: str | None
+        ) -> None:
             logger.info("WebSocket クローズ: code=%s", code)
 
         def _on_open(_ws: websocket.WebSocketApp) -> None:
@@ -297,7 +304,9 @@ class KabuStationClient:
             if _ws_current[0] is not None:
                 _ws_current[0].close()
 
-        threading.Thread(target=_stop_watcher, daemon=True, name="ws-stop-watcher").start()
+        threading.Thread(
+            target=_stop_watcher, daemon=True, name="ws-stop-watcher"
+        ).start()
 
         while not stop_event.is_set():
             try:

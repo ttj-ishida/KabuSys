@@ -3,6 +3,7 @@
 起動方法:
     streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
 """
+
 from __future__ import annotations
 
 import argparse
@@ -66,7 +67,9 @@ def main(db_path: str) -> None:
         uri = Path(db_path).resolve().as_uri() + "?mode=ro"
         conn = sqlite3.connect(uri, uri=True)
     except sqlite3.OperationalError:
-        st.error(f"Database not found or cannot open (read-only): {db_path}. Start MonitoringEngine first.")
+        st.error(
+            f"Database not found or cannot open (read-only): {db_path}. Start MonitoringEngine first."
+        )
         return
     db = MonitoringDB(conn)
 
@@ -115,7 +118,6 @@ def main(db_path: str) -> None:
         if risk_logs:
             st.subheader("Recent Risk Events")
             st.dataframe(risk_logs, use_container_width=True)
-
 
 
 if __name__ == "__main__":

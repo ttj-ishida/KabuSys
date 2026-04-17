@@ -9,6 +9,7 @@ Prerequisite:
     The specified DB file must be pre-populated with prices_daily, features, ai_scores,
     market_regime, and market_calendar.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,24 +32,63 @@ def main() -> None:
     )
     parser.add_argument("--start", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--end", required=True, help="End date YYYY-MM-DD")
-    parser.add_argument("--cash", type=float, default=10_000_000, help="Initial cash (JPY) [default: 10000000]")
-    parser.add_argument("--slippage", type=float, default=0.001, help="Slippage rate [default: 0.001]")
-    parser.add_argument("--commission", type=float, default=0.00055, help="Commission rate [default: 0.00055]")
-    parser.add_argument("--max-position-pct", type=float, default=0.10,
-                        help="Max position size as %% of portfolio per security [default: 0.10]")
-    parser.add_argument("--allocation-method", default="risk_based",
-                        choices=["equal", "score", "risk_based"],
-                        help="Capital allocation method [default: risk_based]")
-    parser.add_argument("--max-utilization", type=float, default=0.70,
-                        help="Max fraction of portfolio to deploy [default: 0.70]")
-    parser.add_argument("--max-positions", type=int, default=10,
-                        help="Max number of concurrent positions [default: 10]")
-    parser.add_argument("--risk-pct", type=float, default=0.005,
-                        help="Risk per trade as fraction of portfolio (risk_based only) [default: 0.005]")
-    parser.add_argument("--stop-loss-pct", type=float, default=0.08,
-                        help="Stop-loss rate for position sizing (risk_based only) [default: 0.08]")
-    parser.add_argument("--lot-size", type=int, default=100,
-                        help="Lot size (shares per lot) for Japanese stocks [default: 100]")
+    parser.add_argument(
+        "--cash",
+        type=float,
+        default=10_000_000,
+        help="Initial cash (JPY) [default: 10000000]",
+    )
+    parser.add_argument(
+        "--slippage", type=float, default=0.001, help="Slippage rate [default: 0.001]"
+    )
+    parser.add_argument(
+        "--commission",
+        type=float,
+        default=0.00055,
+        help="Commission rate [default: 0.00055]",
+    )
+    parser.add_argument(
+        "--max-position-pct",
+        type=float,
+        default=0.10,
+        help="Max position size as %% of portfolio per security [default: 0.10]",
+    )
+    parser.add_argument(
+        "--allocation-method",
+        default="risk_based",
+        choices=["equal", "score", "risk_based"],
+        help="Capital allocation method [default: risk_based]",
+    )
+    parser.add_argument(
+        "--max-utilization",
+        type=float,
+        default=0.70,
+        help="Max fraction of portfolio to deploy [default: 0.70]",
+    )
+    parser.add_argument(
+        "--max-positions",
+        type=int,
+        default=10,
+        help="Max number of concurrent positions [default: 10]",
+    )
+    parser.add_argument(
+        "--risk-pct",
+        type=float,
+        default=0.005,
+        help="Risk per trade as fraction of portfolio (risk_based only) [default: 0.005]",
+    )
+    parser.add_argument(
+        "--stop-loss-pct",
+        type=float,
+        default=0.08,
+        help="Stop-loss rate for position sizing (risk_based only) [default: 0.08]",
+    )
+    parser.add_argument(
+        "--lot-size",
+        type=int,
+        default=100,
+        help="Lot size (shares per lot) for Japanese stocks [default: 100]",
+    )
     parser.add_argument("--db", required=True, help="DuckDB file path")
     args = parser.parse_args()
 
@@ -87,16 +127,16 @@ def main() -> None:
         conn.close()
 
     m = result.metrics
-    print(f"\n{'='*40}")
+    print(f"\n{'=' * 40}")
     print(f"  Backtest Result  {start_date} → {end_date}")
-    print(f"{'='*40}")
+    print(f"{'=' * 40}")
     print(f"  CAGR           : {m.cagr:+.2%}")
     print(f"  Sharpe Ratio   : {m.sharpe_ratio:.3f}")
     print(f"  Max Drawdown   : {m.max_drawdown:.2%}")
     print(f"  Win Rate       : {m.win_rate:.2%}")
     print(f"  Payoff Ratio   : {m.payoff_ratio:.3f}")
     print(f"  Total Trades   : {m.total_trades}")
-    print(f"{'='*40}\n")
+    print(f"{'=' * 40}\n")
 
 
 if __name__ == "__main__":

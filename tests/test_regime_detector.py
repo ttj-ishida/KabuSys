@@ -1,6 +1,7 @@
 """
 市場レジーム判定モジュール テスト
 """
+
 from __future__ import annotations
 
 import json
@@ -15,6 +16,7 @@ from kabusys.data.schema import init_schema
 # ---------------------------------------------------------------------------
 # フィクスチャ
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def conn():
@@ -31,6 +33,7 @@ TARGET_DATE = date(2026, 3, 21)
 # ヘルパー
 # ---------------------------------------------------------------------------
 
+
 def _insert_price(conn, code: str, d: date, close: float) -> None:
     """prices_daily に1行挿入するヘルパー。"""
     conn.execute(
@@ -40,7 +43,9 @@ def _insert_price(conn, code: str, d: date, close: float) -> None:
     )
 
 
-def _insert_prices_uniform(conn, code: str, days: int, close: float, before_date: date) -> None:
+def _insert_prices_uniform(
+    conn, code: str, days: int, close: float, before_date: date
+) -> None:
     """before_date の直前 days 日間を同一終値で挿入するヘルパー。
 
     挿入される日付は before_date - (days+1) から before_date - 2 までの days 日間。
@@ -69,6 +74,7 @@ def _make_macro_response(score: float) -> MagicMock:
 # ---------------------------------------------------------------------------
 # Task 1: market_regime テーブルの存在確認
 # ---------------------------------------------------------------------------
+
 
 def test_market_regime_table_exists(conn):
     """init_schema() 後に market_regime テーブルが存在する。"""
@@ -102,6 +108,7 @@ def test_market_regime_columns(conn):
 # ---------------------------------------------------------------------------
 # Task 2: _calc_ma200_ratio()
 # ---------------------------------------------------------------------------
+
 
 def test_bear_by_ma(conn):
     """1321 が 200MA を大きく下回る → ma200_ratio が 1.0 未満 → score が bear に十分低い。"""
@@ -137,7 +144,7 @@ def test_bull_by_ma(conn):
 
 def test_insufficient_prices(conn):
     """1321 のデータが _MA_WINDOW 日未満 → ma200_ratio=1.0 フォールバック。"""
-    from kabusys.ai.regime_detector import _calc_ma200_ratio, _MA_WINDOW
+    from kabusys.ai.regime_detector import _calc_ma200_ratio
 
     # 100 日分のみ挿入
     _insert_prices_uniform(conn, "1321", 100, 100.0, TARGET_DATE)
@@ -158,11 +165,11 @@ def test_no_prices(conn):
 # Task 3: _fetch_macro_news()
 # ---------------------------------------------------------------------------
 
-from datetime import datetime as dt_class
+from datetime import datetime as dt_class  # noqa: E402
 
 # news_nlp.calc_news_window に合わせたウィンドウ（TARGET_DATE=2026-03-21 の場合）
 # window_start = 2026-03-20 06:00 UTC, window_end = 2026-03-20 23:30 UTC
-_MACRO_WINDOW_DT = dt_class(2026, 3, 20, 12, 0, 0)   # ウィンドウ内
+_MACRO_WINDOW_DT = dt_class(2026, 3, 20, 12, 0, 0)  # ウィンドウ内
 _OUT_OF_WINDOW_DT = dt_class(2026, 3, 18, 12, 0, 0)  # ウィンドウ外
 
 
@@ -221,6 +228,7 @@ def test_fetch_macro_news_limit(conn):
 # ---------------------------------------------------------------------------
 # Task 4: _score_macro()
 # ---------------------------------------------------------------------------
+
 
 def test_score_macro_returns_float():
     """正常系：LLM が {"macro_sentiment": -0.7} を返す → -0.7 が返される。"""
@@ -290,6 +298,7 @@ def test_score_macro_clip():
 # Task 5: score_regime()
 # ---------------------------------------------------------------------------
 
+
 def test_bear_by_ma_end_to_end(conn):
     """test_bear_by_ma と同条件 → score_regime が 'bear' を market_regime に書く。"""
     from kabusys.ai.regime_detector import score_regime
@@ -309,8 +318,8 @@ def test_bear_by_ma_end_to_end(conn):
     ).fetchone()
     assert row is not None
     assert row[0] == "bear"
-    assert row[2] < 1.0    # ma200_ratio が 1.0 未満
-    assert row[3] == 0.0   # マクロニュースなしのためLLMを呼んでも 0.0
+    assert row[2] < 1.0  # ma200_ratio が 1.0 未満
+    assert row[3] == 0.0  # マクロニュースなしのためLLMを呼んでも 0.0
 
 
 def test_bull_by_ma_end_to_end(conn):
@@ -320,7 +329,10 @@ def test_bull_by_ma_end_to_end(conn):
     _insert_prices_uniform(conn, "1321", 199, 100.0, TARGET_DATE)
     _insert_price(conn, "1321", TARGET_DATE - timedelta(days=1), 130.0)
 
-    with patch("kabusys.ai.regime_detector._call_openai_api", return_value=_make_macro_response(0.0)):
+    with patch(
+        "kabusys.ai.regime_detector._call_openai_api",
+        return_value=_make_macro_response(0.0),
+    ):
         result = score_regime(conn, TARGET_DATE, api_key="test-key")
 
     assert result == 1
@@ -368,7 +380,8 @@ def test_no_macro_news(conn):
     mock_api.assert_not_called()
 
     row = conn.execute(
-        "SELECT regime_label, macro_sentiment FROM market_regime WHERE date = ?", [TARGET_DATE]
+        "SELECT regime_label, macro_sentiment FROM market_regime WHERE date = ?",
+        [TARGET_DATE],
     ).fetchone()
     assert row[1] == 0.0
     assert row[0] == "neutral"  # ratio=1.0 → score=0.0 → neutral
@@ -380,7 +393,10 @@ def test_idempotent(conn):
 
     _insert_prices_uniform(conn, "1321", 200, 100.0, TARGET_DATE)
 
-    with patch("kabusys.ai.regime_detector._call_openai_api", return_value=_make_macro_response(0.0)):
+    with patch(
+        "kabusys.ai.regime_detector._call_openai_api",
+        return_value=_make_macro_response(0.0),
+    ):
         score_regime(conn, TARGET_DATE, api_key="test-key")
         score_regime(conn, TARGET_DATE, api_key="test-key")
 
@@ -398,18 +414,22 @@ def test_api_failure(conn):
     _insert_prices_uniform(conn, "1321", 200, 100.0, TARGET_DATE)
     _insert_raw_news(conn, "n1", _MACRO_WINDOW_DT, "FOMC が声明発表")
 
-    with patch(
-        "kabusys.ai.regime_detector._call_openai_api",
-        side_effect=APIConnectionError(request=MagicMock()),
-    ), patch("kabusys.ai.regime_detector._RETRY_BASE_SECONDS", 0):
+    with (
+        patch(
+            "kabusys.ai.regime_detector._call_openai_api",
+            side_effect=APIConnectionError(request=MagicMock()),
+        ),
+        patch("kabusys.ai.regime_detector._RETRY_BASE_SECONDS", 0),
+    ):
         result = score_regime(conn, TARGET_DATE, api_key="test-key")
 
     assert result == 1
     row = conn.execute(
-        "SELECT regime_label, macro_sentiment FROM market_regime WHERE date = ?", [TARGET_DATE]
+        "SELECT regime_label, macro_sentiment FROM market_regime WHERE date = ?",
+        [TARGET_DATE],
     ).fetchone()
     assert row is not None
-    assert row[1] == 0.0     # フォールバック
+    assert row[1] == 0.0  # フォールバック
     assert row[0] == "neutral"  # ratio=1.0, macro=0.0 → score=0.0 → neutral
 
 
@@ -457,7 +477,10 @@ def test_db_write_failure(conn):
 
     failing_conn = _FailOnInsertConn(conn)
 
-    with patch("kabusys.ai.regime_detector._call_openai_api", return_value=_make_macro_response(0.0)):
+    with patch(
+        "kabusys.ai.regime_detector._call_openai_api",
+        return_value=_make_macro_response(0.0),
+    ):
         with pytest.raises(Exception):
             score_regime(failing_conn, TARGET_DATE, api_key="test-key")
 

@@ -1,12 +1,12 @@
 # tests/test_scripts_utils.py
 """scripts/utils.py の単体テスト"""
+
 from __future__ import annotations
 
 import os
 import sys
 from pathlib import Path
 
-import pytest
 
 # scripts/ ディレクトリを PYTHONPATH に追加してインポート
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))

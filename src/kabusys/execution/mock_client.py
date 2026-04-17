@@ -1,4 +1,5 @@
 """MockBrokerClient — テスト・開発用モック実装。"""
+
 from __future__ import annotations
 
 from kabusys.execution.broker_api import (
@@ -111,7 +112,9 @@ class MockBrokerClient:
             raise BrokerAPIError(f"注文が見つかりません: {order_id}")
         status = self._orders[order_id]
         if status.status in ("filled", "cancelled", "rejected"):
-            raise BrokerAPIError(f"キャンセルできない状態の注文です (status={status.status}): {order_id}")
+            raise BrokerAPIError(
+                f"キャンセルできない状態の注文です (status={status.status}): {order_id}"
+            )
         self._orders[order_id] = OrderStatus(
             order_id=order_id,
             code=status.code,
@@ -139,7 +142,9 @@ class MockBrokerClient:
             raise BrokerAPIError(f"注文が見つかりません: {order_id}")
         status = self._orders[order_id]
         if status.status in ("filled", "cancelled", "rejected"):
-            raise BrokerAPIError(f"fill_order: 状態 '{status.status}' の注文は変更できません")
+            raise BrokerAPIError(
+                f"fill_order: 状態 '{status.status}' の注文は変更できません"
+            )
         remaining = status.qty - status.filled_qty
         if remaining > 0:
             price = status.price if status.price is not None else 0.0

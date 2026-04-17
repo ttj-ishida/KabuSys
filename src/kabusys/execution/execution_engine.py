@@ -3,6 +3,7 @@
 
 シグナル処理（8:50-9:10）+ WebSocket push ドレインループ（9:10-15:30）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -17,6 +18,7 @@ from pathlib import Path
 import duckdb
 
 from kabusys.execution.broker_api import BrokerAPIProtocol, OrderSentPendingError
+
 # DuplicateOrderError は _process_signals() (Task 7) で使用
 from kabusys.execution.order_manager import DuplicateOrderError, OrderManager
 from kabusys.execution.order_repository import OrderRepository
@@ -32,8 +34,8 @@ logger = logging.getLogger(__name__)
 class EngineConfig:
     target_date: date
     signal_send_start: time = time(8, 50)  # 発注開始時刻
-    signal_send_end: time = time(9, 10)    # 発注締切時刻
-    market_close: time = time(15, 30)      # セッション終了時刻
+    signal_send_end: time = time(9, 10)  # 発注締切時刻
+    market_close: time = time(15, 30)  # セッション終了時刻
 
 
 class ExecutionEngine:
@@ -92,7 +94,9 @@ class ExecutionEngine:
             order_value = price * qty
 
             # Gate 1: シグナルレベル検査
-            g1 = self._risk_manager.check_signal(signal_id, code, order_value, side=side)
+            g1 = self._risk_manager.check_signal(
+                signal_id, code, order_value, side=side
+            )
             if not g1.passed:
                 logger.info("Gate 1 NG - signal_id=%s: %s", signal_id, g1.reason)
                 continue
@@ -107,7 +111,9 @@ class ExecutionEngine:
                 if g2.reject_reason == RiskRejectReason.CIRCUIT_BREAKER:
                     logger.warning("Gate 2 CB OPEN: シグナルループ停止 - %s", g2.reason)
                     return  # ドレインループは継続するため return のみ
-                logger.debug("Gate 2 rate limit (attempt %d/3), waiting 0.2s", attempt + 1)
+                logger.debug(
+                    "Gate 2 rate limit (attempt %d/3), waiting 0.2s", attempt + 1
+                )
                 self._stop_event.wait(timeout=0.2)
 
             if not g2_passed:
@@ -119,7 +125,13 @@ class ExecutionEngine:
                 order_type = "market" if price == 0.0 else "limit"
                 record = self._order_manager.create_order(
                     signal_id,
-                    OrderRequest(code=code, side=side, qty=qty, order_type=order_type, price=price),
+                    OrderRequest(
+                        code=code,
+                        side=side,
+                        qty=qty,
+                        order_type=order_type,
+                        price=price,
+                    ),
                 )
             except DuplicateOrderError:
                 logger.info("DuplicateOrderError - skip: signal_id=%s", signal_id)
@@ -131,7 +143,11 @@ class ExecutionEngine:
                 self._order_manager.send_order(record.client_order_id)
                 latency_ms = (_time_module.perf_counter() - t0) * 1000
                 self._risk_manager.record_api_success()
-                logger.info("発注成功: signal_id=%s, client_order_id=%s", signal_id, record.client_order_id)
+                logger.info(
+                    "発注成功: signal_id=%s, client_order_id=%s",
+                    signal_id,
+                    record.client_order_id,
+                )
             except OrderSentPendingError:
                 latency_ms = (_time_module.perf_counter() - t0) * 1000
                 self._risk_manager.record_api_success()
@@ -144,14 +160,20 @@ class ExecutionEngine:
                 try:
                     updated = self._repo.get(record.client_order_id)
                     self._monitoring_db.log_trade_event(
-                        "Sent", record.client_order_id, record.code, record.side,
-                        record.qty, record.price,
+                        "Sent",
+                        record.client_order_id,
+                        record.code,
+                        record.side,
+                        record.qty,
+                        record.price,
                         updated.filled_qty if updated else 0,
                         updated.state.value if updated else "",
                         latency_ms=latency_ms,
                     )
                 except Exception as _mon_exc:
-                    logger.warning("監視DB書き込み失敗（発注フローは継続）: %s", _mon_exc)
+                    logger.warning(
+                        "監視DB書き込み失敗（発注フローは継続）: %s", _mon_exc
+                    )
 
     def _drain_push_queue(self) -> None:
         """_push_queue を全件処理する（sync_order + Gate 3 チェック）。"""
@@ -175,7 +197,9 @@ class ExecutionEngine:
             if order.broker_order_id == str(order_id):
                 try:
                     self._order_manager.sync_order(order.client_order_id)
-                    logger.debug("sync_order: client_order_id=%s", order.client_order_id)
+                    logger.debug(
+                        "sync_order: client_order_id=%s", order.client_order_id
+                    )
                 except Exception as exc:
                     logger.error("sync_order 失敗: %s", exc)
                 break
@@ -205,14 +229,21 @@ class ExecutionEngine:
 
         from kabusys.execution.broker_api import BrokerAPIError
         from kabusys.execution.order_record import InvalidStateTransitionError
+
         for order in self._repo.list_active():
             try:
                 self._order_manager.cancel_order(order.client_order_id)
                 logger.info("注文キャンセル: client_order_id=%s", order.client_order_id)
             except (InvalidStateTransitionError, RuntimeError) as exc:
-                logger.debug("cancel_order スキップ: %s - %s", order.client_order_id, exc)
+                logger.debug(
+                    "cancel_order スキップ: %s - %s", order.client_order_id, exc
+                )
             except BrokerAPIError as exc:
-                logger.warning("cancel_order API エラー（継続）: %s - %s", order.client_order_id, exc)
+                logger.warning(
+                    "cancel_order API エラー（継続）: %s - %s",
+                    order.client_order_id,
+                    exc,
+                )
 
     def stop(self) -> None:
         """エンジンを停止する（外部停止フラグ検知時に呼ばれる）。kill_switch() の公開エイリアス。"""
@@ -220,12 +251,15 @@ class ExecutionEngine:
 
     def _websocket_worker(self) -> None:
         """WebSocket スレッド: kabu push を受信して _push_queue に投入する。"""
+
         def _on_message(payload: dict) -> None:
             self._push_queue.put(payload)
 
         # KabuStationClient のみ stream_push を持つ
         if not hasattr(self._broker, "stream_push"):
-            logger.warning("broker が stream_push() を持たないため WebSocket スレッドをスキップします")
+            logger.warning(
+                "broker が stream_push() を持たないため WebSocket スレッドをスキップします"
+            )
             return
 
         self._broker.stream_push(on_message=_on_message, stop_event=self._stop_event)
@@ -236,7 +270,9 @@ class ExecutionEngine:
         8:50 でシグナル処理 → 9:10 で発注締切 → 15:30 でセッション終了。
         テスト環境では _process_signals() と _drain_push_queue() を直接呼ぶこと。
         """
-        logger.info("ExecutionEngine: セッション開始 target_date=%s", self._config.target_date)
+        logger.info(
+            "ExecutionEngine: セッション開始 target_date=%s", self._config.target_date
+        )
 
         # 起動時リコンシリエーション（reconciler が設定されている場合のみ）
         if self._reconciler is not None:
@@ -249,7 +285,9 @@ class ExecutionEngine:
                     len(rec_result.position_discrepancies),
                 )
             except Exception:
-                logger.exception("Reconciliation 実行中に予期せぬ例外。セッションは続行します。")
+                logger.exception(
+                    "Reconciliation 実行中に予期せぬ例外。セッションは続行します。"
+                )
 
         # kill.flag 検査（PID 書き込みより先に実施して残留を防ぐ）
         if settings.kill_flag_path.exists():
@@ -260,34 +298,51 @@ class ExecutionEngine:
                 )
                 settings.kill_flag_path.unlink(missing_ok=True)
             else:
-                logger.critical("kill.flag が存在するため起動を拒否します: %s", settings.kill_flag_path)
+                logger.critical(
+                    "kill.flag が存在するため起動を拒否します: %s",
+                    settings.kill_flag_path,
+                )
                 raise SystemExit(1)
 
         # PID ファイルへの書き出し（None の場合は config.pid_file_path を使用）
         from kabusys.config import settings as _config
-        _active_pid_file = self._pid_file if self._pid_file is not None else _config.pid_file_path
+
+        _active_pid_file = (
+            self._pid_file if self._pid_file is not None else _config.pid_file_path
+        )
         _active_pid_file.parent.mkdir(parents=True, exist_ok=True)
         _active_pid_file.write_text(str(os.getpid()))
 
         try:
             # WebSocket スレッド起動
-            ws_thread = threading.Thread(target=self._websocket_worker, daemon=True, name="ws-push")
+            ws_thread = threading.Thread(
+                target=self._websocket_worker, daemon=True, name="ws-push"
+            )
             ws_thread.start()
 
             def _now_time() -> time:
                 return datetime.now().time().replace(microsecond=0)
 
             # signal_send_start まで待機
-            while _now_time() < self._config.signal_send_start and not self._stop_event.is_set():
+            while (
+                _now_time() < self._config.signal_send_start
+                and not self._stop_event.is_set()
+            ):
                 self._stop_event.wait(timeout=5.0)
 
             # シグナル処理ループ（8:50 ～ 9:10）
             # 現在時刻が signal_send_end を超えている場合はシグナル処理をスキップ
-            if not self._stop_event.is_set() and _now_time() < self._config.signal_send_end:
+            if (
+                not self._stop_event.is_set()
+                and _now_time() < self._config.signal_send_end
+            ):
                 self._process_signals()
 
             # push drain ループ（9:10 ～ 15:30）
-            while _now_time() < self._config.market_close and not self._stop_event.is_set():
+            while (
+                _now_time() < self._config.market_close
+                and not self._stop_event.is_set()
+            ):
                 self._drain_push_queue()
                 self._stop_event.wait(timeout=1.0)
 

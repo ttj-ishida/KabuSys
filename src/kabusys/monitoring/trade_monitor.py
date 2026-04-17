@@ -1,4 +1,5 @@
 """trade_monitor.py — 注文滞留・約定異常価格を監視する。"""
+
 from __future__ import annotations
 
 import sqlite3

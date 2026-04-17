@@ -16,7 +16,6 @@ import json
 from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
-import duckdb
 import pytest
 
 from kabusys.data.schema import init_schema
@@ -42,7 +41,9 @@ TARGET_DATE = date(2026, 3, 20)
 _WINDOW_DT = datetime(2026, 3, 19, 20, 0, 0)  # ウィンドウ内の UTC 時刻
 
 
-def _insert_article(conn, news_id: str, dt: datetime, title: str, content: str = "") -> None:
+def _insert_article(
+    conn, news_id: str, dt: datetime, title: str, content: str = ""
+) -> None:
     """raw_news に1件挿入するヘルパー。"""
     conn.execute(
         "INSERT INTO raw_news (id, datetime, source, title, content, url) "
@@ -99,12 +100,16 @@ def test_score_news_idempotent(conn):
     _insert_article(conn, "art1", _WINDOW_DT, "ソニー新製品")
     _link_code(conn, "art1", "6758")
 
-    with patch("kabusys.ai.news_nlp._call_openai_api",
-               return_value=_make_api_response([{"code": "6758", "score": 0.5}])):
+    with patch(
+        "kabusys.ai.news_nlp._call_openai_api",
+        return_value=_make_api_response([{"code": "6758", "score": 0.5}]),
+    ):
         score_news(conn, TARGET_DATE, api_key="test-key")
 
-    with patch("kabusys.ai.news_nlp._call_openai_api",
-               return_value=_make_api_response([{"code": "6758", "score": 0.9}])):
+    with patch(
+        "kabusys.ai.news_nlp._call_openai_api",
+        return_value=_make_api_response([{"code": "6758", "score": 0.9}]),
+    ):
         score_news(conn, TARGET_DATE, api_key="test-key")
 
     rows = conn.execute(
@@ -129,11 +134,18 @@ def test_score_news_api_failure(conn):
     _insert_article(conn, "art1", _WINDOW_DT, "任天堂決算")
     _link_code(conn, "art1", "7974")
 
-    with patch("kabusys.ai.news_nlp._call_openai_api", side_effect=Exception("API error")):
+    with patch(
+        "kabusys.ai.news_nlp._call_openai_api", side_effect=Exception("API error")
+    ):
         count = score_news(conn, TARGET_DATE, api_key="test-key")
 
     assert count == 0
-    assert conn.execute("SELECT COUNT(*) FROM ai_scores WHERE date = ?", [TARGET_DATE]).fetchone()[0] == 0
+    assert (
+        conn.execute(
+            "SELECT COUNT(*) FROM ai_scores WHERE date = ?", [TARGET_DATE]
+        ).fetchone()[0]
+        == 0
+    )
 
 
 def test_score_news_json_parse_error(conn):
@@ -159,8 +171,10 @@ def test_score_news_score_clipping(conn):
     _insert_article(conn, "art1", _WINDOW_DT, "三菱UFJ")
     _link_code(conn, "art1", "8306")
 
-    with patch("kabusys.ai.news_nlp._call_openai_api",
-               return_value=_make_api_response([{"code": "8306", "score": 1.5}])):
+    with patch(
+        "kabusys.ai.news_nlp._call_openai_api",
+        return_value=_make_api_response([{"code": "8306", "score": 1.5}]),
+    ):
         score_news(conn, TARGET_DATE, api_key="test-key")
 
     row = conn.execute(
@@ -178,8 +192,10 @@ def test_score_news_score_clipping_negative(conn):
     _insert_article(conn, "art1", _WINDOW_DT, "三菱UFJ悪材料")
     _link_code(conn, "art1", "8306")
 
-    with patch("kabusys.ai.news_nlp._call_openai_api",
-               return_value=_make_api_response([{"code": "8306", "score": -2.0}])):
+    with patch(
+        "kabusys.ai.news_nlp._call_openai_api",
+        return_value=_make_api_response([{"code": "8306", "score": -2.0}]),
+    ):
         score_news(conn, TARGET_DATE, api_key="test-key")
 
     row = conn.execute(
@@ -258,7 +274,8 @@ def test_score_news_partial_chunk_failure(conn):
     # チャンク1の20銘柄だけ書き込まれる
     assert count == 20
     saved_codes = {
-        r[0] for r in conn.execute(
+        r[0]
+        for r in conn.execute(
             "SELECT code FROM ai_scores WHERE date = ?", [TARGET_DATE]
         ).fetchall()
     }
@@ -304,14 +321,20 @@ def test_score_news_response_validation_unknown_code(conn):
     _link_code(conn, "art1", "6098")
 
     # 6098 をリクエストしたが、9999（未知コード）が返ってきた
-    with patch("kabusys.ai.news_nlp._call_openai_api",
-               return_value=_make_api_response([{"code": "9999", "score": 0.5}])):
+    with patch(
+        "kabusys.ai.news_nlp._call_openai_api",
+        return_value=_make_api_response([{"code": "9999", "score": 0.5}]),
+    ):
         count = score_news(conn, TARGET_DATE, api_key="test-key")
 
     assert count == 0
-    assert conn.execute(
-        "SELECT COUNT(*) FROM ai_scores WHERE date = ? AND code = ?", [TARGET_DATE, "9999"]
-    ).fetchone()[0] == 0
+    assert (
+        conn.execute(
+            "SELECT COUNT(*) FROM ai_scores WHERE date = ? AND code = ?",
+            [TARGET_DATE, "9999"],
+        ).fetchone()[0]
+        == 0
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +354,6 @@ def test_calc_news_window_values():
 
 def test_calc_news_window_boundary_inclusive_start(conn):
     """ウィンドウ開始時刻ちょうどの記事は対象に含まれる。"""
-    from datetime import datetime
     from kabusys.ai.news_nlp import score_news, calc_news_window
 
     window_start, _ = calc_news_window(TARGET_DATE)

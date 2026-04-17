@@ -6,9 +6,9 @@
 使い方:
     python -m kabusys.config_setup
 """
+
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -94,6 +94,7 @@ _ITEMS: list[dict] = [
 # .env ファイル読み書き
 # ---------------------------------------------------------------------------
 
+
 def _read_env(path: Path) -> dict[str, str]:
     """既存の .env ファイルを読み込む。存在しない場合は空 dict。"""
     if not path.exists():
@@ -149,6 +150,7 @@ def _write_env(path: Path, values: dict[str, str]) -> None:
 # 対話ループ
 # ---------------------------------------------------------------------------
 
+
 def _prompt(item: dict, existing: dict[str, str]) -> str | None:
     """1項目を対話式に入力してもらう。スキップ時は None を返す。"""
     key = item["key"]
@@ -156,8 +158,6 @@ def _prompt(item: dict, existing: dict[str, str]) -> str | None:
     current = existing.get(key, item.get("default", ""))
     choices = item.get("choices")
     is_secret = item.get("secret", False)
-    is_optional = item.get("optional", False)
-
     print(f"\n{'─' * 60}")
     print(f"  {label} [{key}]")
     if item.get("description"):
@@ -218,6 +218,7 @@ def run_wizard(env_path: Path = _ENV_PATH) -> dict[str, str]:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
+
     parser = argparse.ArgumentParser(
         description="KabuSys 環境設定ウィザード（.env の作成・更新）"
     )
@@ -257,7 +258,9 @@ def main(argv: list[str] | None = None) -> int:
 
     _write_env(env_path, values)
     print(f"\n✓ .env を保存しました: {env_path}")
-    print("  次のステップ: python -m kabusys.validate_config で設定を検証してください。")
+    print(
+        "  次のステップ: python -m kabusys.validate_config で設定を検証してください。"
+    )
     return 0
 
 

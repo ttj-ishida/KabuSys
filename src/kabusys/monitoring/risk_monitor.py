@@ -1,4 +1,5 @@
 """risk_monitor.py — ドローダウン・ポジション上限を監視する。"""
+
 from __future__ import annotations
 
 import sqlite3

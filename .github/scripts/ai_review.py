@@ -32,8 +32,8 @@ response = client.chat.completions.create(
     model=model,
     messages=[
         {"role": "system", "content": "You are a senior software engineer."},
-        {"role": "user", "content": prompt}
-    ]
+        {"role": "user", "content": prompt},
+    ],
 )
 
 review = response.choices[0].message.content
@@ -47,7 +47,7 @@ url = f"https://api.github.com/repos/{repo}/issues/{pr}/comments"
 resp = requests.post(
     url,
     headers={"Authorization": f"Bearer {token}"},
-    json={"body": f"## AI Code Review\n\n{review}"}
+    json={"body": f"## AI Code Review\n\n{review}"},
 )
 
 if resp.status_code == 201:

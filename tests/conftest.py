@@ -3,6 +3,7 @@
 DuckDB の FK CASCADE 制約が古いバージョン（1.x 以前）で使えないため、
 init_schema() の代わりに最小 DDL でテーブルを作成する共通フィクスチャを提供する。
 """
+
 from __future__ import annotations
 
 import duckdb

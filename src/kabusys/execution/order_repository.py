@@ -3,21 +3,24 @@
 
 ビジネスロジックを持たない。読み書きのみ。
 """
+
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime
 
 from kabusys.execution.order_record import OrderRecord, OrderState
 
 
 # Closed / Cancelled / Rejected が「終端」。
 # Filled は終端ではなく 'active' 扱い（Closed になるまで list_active で返す）。
-_TERMINAL_STATES = frozenset({
-    OrderState.Closed.value,
-    OrderState.Cancelled.value,
-    OrderState.Rejected.value,
-})
+_TERMINAL_STATES = frozenset(
+    {
+        OrderState.Closed.value,
+        OrderState.Cancelled.value,
+        OrderState.Rejected.value,
+    }
+)
 
 
 def init_orders_db(conn: sqlite3.Connection) -> None:

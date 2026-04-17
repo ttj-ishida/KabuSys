@@ -4,6 +4,7 @@
 MockBrokerClient + ExecutionEngine + MonitoringDB を組み合わせて
 4指標（安定性・注文成功率・シグナル精度・APIレイテンシ）を自動検証する。
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -42,11 +43,16 @@ def mon_conn():
 
 
 def _sig(conn, code: str, side: str = "buy"):
-    conn.execute("INSERT INTO signals VALUES (?, ?, ?, ?, ?)", [TARGET_DATE, code, side, 0.8, 1])
+    conn.execute(
+        "INSERT INTO signals VALUES (?, ?, ?, ?, ?)", [TARGET_DATE, code, side, 0.8, 1]
+    )
 
 
 def _tgt(conn, code: str, qty: int = 100, price: float = 1500.0):
-    conn.execute("INSERT INTO portfolio_targets VALUES (?, ?, ?, ?)", [TARGET_DATE, code, qty, price])
+    conn.execute(
+        "INSERT INTO portfolio_targets VALUES (?, ?, ?, ?)",
+        [TARGET_DATE, code, qty, price],
+    )
 
 
 def _engine(
@@ -54,7 +60,11 @@ def _engine(
 ) -> ExecutionEngine:
     broker = MockBrokerClient(available_cash=cash, fill_mode=fill_mode)
     repo = OrderRepository(orders_conn)
-    rm = RiskManager(broker=broker, repo=repo, config=RiskConfig(initial_portfolio_value=10_000_000.0))
+    rm = RiskManager(
+        broker=broker,
+        repo=repo,
+        config=RiskConfig(initial_portfolio_value=10_000_000.0),
+    )
     om = OrderManager(broker=broker, repo=repo)
     mdb = MonitoringDB(mon_conn) if mon_conn is not None else None
     return ExecutionEngine(
@@ -83,7 +93,9 @@ class TestSystemStability:
         """シグナル処理後に monitoring_db.trade_logs へ 'Sent' イベントが記録される"""
         _sig(duckdb_conn, "1234")
         _tgt(duckdb_conn, "1234")
-        engine = _engine(orders_conn, duckdb_conn, fill_mode="instant", mon_conn=mon_conn)
+        engine = _engine(
+            orders_conn, duckdb_conn, fill_mode="instant", mon_conn=mon_conn
+        )
         engine._process_signals()
         count = mon_conn.execute(
             "SELECT COUNT(*) FROM trade_logs WHERE event_type = 'Sent'"
@@ -175,7 +187,9 @@ class TestApiLatency:
         """_process_signals() 後に trade_logs の Sent イベントに latency_ms が記録される"""
         _sig(duckdb_conn, "1234")
         _tgt(duckdb_conn, "1234")
-        engine = _engine(orders_conn, duckdb_conn, fill_mode="instant", mon_conn=mon_conn)
+        engine = _engine(
+            orders_conn, duckdb_conn, fill_mode="instant", mon_conn=mon_conn
+        )
         engine._process_signals()
         row = mon_conn.execute(
             "SELECT latency_ms FROM trade_logs WHERE event_type = 'Sent'"

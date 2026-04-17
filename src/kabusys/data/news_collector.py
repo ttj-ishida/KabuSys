@@ -33,7 +33,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, TypedDict
+from typing import TypedDict
 
 import duckdb
 from defusedxml import ElementTree as ET
@@ -217,7 +217,9 @@ def _parse_rss_datetime(date_str: str | None) -> datetime:
                 dt = dt.replace(tzinfo=timezone.utc)
             return dt.astimezone(timezone.utc).replace(tzinfo=None)
         except Exception:
-            logger.warning("_parse_rss_datetime: パース失敗 pubDate=%r、現在時刻で代替", date_str)
+            logger.warning(
+                "_parse_rss_datetime: パース失敗 pubDate=%r、現在時刻で代替", date_str
+            )
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
@@ -235,9 +237,7 @@ class _SSRFBlockRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
         parsed = urllib.parse.urlparse(newurl)
         if parsed.scheme.lower() not in ("http", "https"):
-            raise urllib.error.URLError(
-                f"リダイレクト先のスキームが不正: {newurl!r}"
-            )
+            raise urllib.error.URLError(f"リダイレクト先のスキームが不正: {newurl!r}")
         if _is_private_host(parsed.hostname):
             raise urllib.error.URLError(
                 f"リダイレクト先がプライベートアドレス: {newurl!r}"
@@ -298,9 +298,7 @@ def fetch_rss(
             logger.warning("fetch_rss: 最終URLのスキームが不正 url=%s", final_url)
             return []
         if _is_private_host(parsed_final.hostname):
-            logger.warning(
-                "fetch_rss: 最終URLがプライベートアドレス url=%s", final_url
-            )
+            logger.warning("fetch_rss: 最終URLがプライベートアドレス url=%s", final_url)
             return []
 
         # Content-Length の事前チェック（不正値は無視してスキップ）
@@ -312,7 +310,9 @@ def fetch_rss(
         if clen is not None and clen > MAX_RESPONSE_BYTES:
             logger.warning(
                 "fetch_rss: レスポンスサイズ超過 Content-Length=%s > %d source=%s",
-                content_length, MAX_RESPONSE_BYTES, source,
+                content_length,
+                MAX_RESPONSE_BYTES,
+                source,
             )
             return []
         # MAX_RESPONSE_BYTES + 1 バイト読み込んで超過確認
@@ -322,7 +322,9 @@ def fetch_rss(
     if len(raw) > MAX_RESPONSE_BYTES:
         logger.warning(
             "fetch_rss: レスポンスサイズ超過 size=%d > %d source=%s",
-            len(raw), MAX_RESPONSE_BYTES, source,
+            len(raw),
+            MAX_RESPONSE_BYTES,
+            source,
         )
         return []
 
@@ -337,7 +339,9 @@ def fetch_rss(
         if len(raw) > MAX_RESPONSE_BYTES:
             logger.warning(
                 "fetch_rss: gzip解凍後サイズ超過 size=%d > %d source=%s",
-                len(raw), MAX_RESPONSE_BYTES, source,
+                len(raw),
+                MAX_RESPONSE_BYTES,
+                source,
             )
             return []
 
@@ -354,7 +358,11 @@ def fetch_rss(
         # 名前空間付きフィードや非標準レイアウトへのフォールバック
         items = root.findall(".//item")
         if not items:
-            logger.warning("fetch_rss: <channel>/<item> 要素が見つかりません source=%s url=%s", source, url)
+            logger.warning(
+                "fetch_rss: <channel>/<item> 要素が見つかりません source=%s url=%s",
+                source,
+                url,
+            )
             return []
 
     articles: list[NewsArticle] = []
@@ -370,14 +378,15 @@ def fetch_rss(
             continue
         # <link> のスキームを検証（mailto:, javascript:, file: 等を排除）
         if urllib.parse.urlparse(link).scheme.lower() not in ("http", "https"):
-            logger.warning("fetch_rss: 不正なlinkスキームをスキップ url=%r source=%s", link, source)
+            logger.warning(
+                "fetch_rss: 不正なlinkスキームをスキップ url=%r source=%s", link, source
+            )
             continue
 
         title = preprocess_text(item.findtext("title"))
         # content:encoded が存在する場合は description より優先する
-        raw_content = (
-            item.findtext(f"{_CONTENT_NS}encoded")
-            or item.findtext("description")
+        raw_content = item.findtext(f"{_CONTENT_NS}encoded") or item.findtext(
+            "description"
         )
         content = preprocess_text(raw_content)
         pub_date = _parse_rss_datetime(item.findtext("pubDate"))
@@ -602,7 +611,9 @@ def run_news_collection(
             articles = fetch_rss(rss_url, source=source_name, timeout=timeout)
             new_ids = save_raw_news(conn, articles)
         except Exception:
-            logger.exception("run_news_collection: ソース取得失敗 source=%s", source_name)
+            logger.exception(
+                "run_news_collection: ソース取得失敗 source=%s", source_name
+            )
             results[source_name] = 0
             continue
 

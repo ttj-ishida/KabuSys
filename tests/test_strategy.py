@@ -12,8 +12,6 @@ import pytest
 
 from kabusys.data.schema import init_schema
 from kabusys.strategy.feature_engineering import (
-    _MIN_PRICE,
-    _MIN_TURNOVER,
     _apply_universe_filter,
     build_features,
 )
@@ -63,9 +61,14 @@ def _insert_price_history(
                         "(date, code, open, high, low, close, volume, turnover) "
                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                         [
-                            d, code,
-                            close * 0.99, close * 1.01, close * 0.98, close,
-                            1_000_000, turnover,
+                            d,
+                            code,
+                            close * 0.99,
+                            close * 1.01,
+                            close * 0.98,
+                            close,
+                            1_000_000,
+                            turnover,
                         ],
                     )
                 except Exception:
@@ -113,8 +116,12 @@ def test_compute_momentum_score_partial():
 
 
 def test_compute_momentum_score_positive_higher():
-    pos = _compute_momentum_score({"momentum_20": 2.0, "momentum_60": 2.0, "ma200_dev": 2.0})
-    neg = _compute_momentum_score({"momentum_20": -2.0, "momentum_60": -2.0, "ma200_dev": -2.0})
+    pos = _compute_momentum_score(
+        {"momentum_20": 2.0, "momentum_60": 2.0, "ma200_dev": 2.0}
+    )
+    neg = _compute_momentum_score(
+        {"momentum_20": -2.0, "momentum_60": -2.0, "ma200_dev": -2.0}
+    )
     assert pos > neg
 
 
@@ -174,7 +181,11 @@ def test_is_bear_regime_bull():
 
 def test_is_bear_regime_bear():
     # _BEAR_MIN_SAMPLES=3 を満たすため3銘柄用意
-    ai = {"A": {"regime_score": -0.5}, "B": {"regime_score": -0.3}, "C": {"regime_score": -0.1}}
+    ai = {
+        "A": {"regime_score": -0.5},
+        "B": {"regime_score": -0.3},
+        "C": {"regime_score": -0.1},
+    }
     assert _is_bear_regime(ai) is True
 
 
@@ -277,7 +288,9 @@ def test_build_features_idempotent(conn):
 
 def test_build_features_zscore_clipped(conn):
     """Z スコア値は ±3 内に収まる"""
-    _insert_price_history(conn, [("A", 1000.0, 6e8), ("B", 500.0, 6e8), ("C", 800.0, 6e8)])
+    _insert_price_history(
+        conn, [("A", 1000.0, 6e8), ("B", 500.0, 6e8), ("C", 800.0, 6e8)]
+    )
     build_features(conn, TARGET_DATE)
     rows = conn.execute(
         "SELECT momentum_20, momentum_60, ma200_dev FROM features WHERE date = ?",
@@ -303,7 +316,9 @@ def test_generate_signals_empty_features(conn):
 
 def test_generate_signals_buy_signal(conn):
     """高スコアの銘柄に BUY シグナルが生成される"""
-    _insert_price_history(conn, [("A", 1000.0, 6e8), ("B", 1000.0, 6e8), ("C", 1000.0, 6e8)])
+    _insert_price_history(
+        conn, [("A", 1000.0, 6e8), ("B", 1000.0, 6e8), ("C", 1000.0, 6e8)]
+    )
     build_features(conn, TARGET_DATE)
     # A に高い momentum z スコアを手動設定
     conn.execute(
@@ -333,7 +348,9 @@ def test_generate_signals_below_threshold_no_buy(conn):
 
 def test_generate_signals_bear_regime_suppresses_buy(conn):
     """Bear レジーム時は BUY シグナルが抑制される"""
-    _insert_price_history(conn, [("A", 1000.0, 6e8), ("B", 1000.0, 6e8), ("C", 1000.0, 6e8)])
+    _insert_price_history(
+        conn, [("A", 1000.0, 6e8), ("B", 1000.0, 6e8), ("C", 1000.0, 6e8)]
+    )
     build_features(conn, TARGET_DATE)
     conn.execute(
         "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 WHERE date = ?",
@@ -407,11 +424,14 @@ def test_generate_signals_idempotent(conn):
 
 def test_generate_signals_rank_order(conn):
     """BUY シグナルのランクはスコア降順に割り当てられる"""
-    _insert_price_history(conn, [
-        ("A", 1000.0, 6e8),
-        ("B", 1000.0, 6e8),
-        ("C", 1000.0, 6e8),
-    ])
+    _insert_price_history(
+        conn,
+        [
+            ("A", 1000.0, 6e8),
+            ("B", 1000.0, 6e8),
+            ("C", 1000.0, 6e8),
+        ],
+    )
     build_features(conn, TARGET_DATE)
     # A > B > C の順でスコアを設定
     conn.execute(
@@ -448,11 +468,16 @@ def test_generate_signals_isolation():
     import importlib
     import sys
 
-    for mod_name in ["kabusys.strategy.feature_engineering", "kabusys.strategy.signal_generator"]:
+    for mod_name in [
+        "kabusys.strategy.feature_engineering",
+        "kabusys.strategy.signal_generator",
+    ]:
         mod = sys.modules.get(mod_name) or importlib.import_module(mod_name)
         forbidden = [
-            name for name in dir(mod)
-            if "kabusys.execution" in getattr(getattr(mod, name, None), "__module__", "")
+            name
+            for name in dir(mod)
+            if "kabusys.execution"
+            in getattr(getattr(mod, name, None), "__module__", "")
         ]
         assert forbidden == [], f"{mod_name} が execution 層に依存している: {forbidden}"
 
@@ -471,7 +496,13 @@ def test_generate_signals_weights_rescaled(conn):
     _insert_price_history(conn, [("A", 1000.0, 6e8)])
     build_features(conn, TARGET_DATE)
     # 合計 2.0 の weights を渡す
-    w = {"momentum": 0.80, "value": 0.40, "volatility": 0.30, "liquidity": 0.30, "news": 0.20}
+    w = {
+        "momentum": 0.80,
+        "value": 0.40,
+        "volatility": 0.30,
+        "liquidity": 0.30,
+        "news": 0.20,
+    }
     generate_signals(conn, TARGET_DATE, threshold=0.0, weights=w)
     rows = conn.execute(
         "SELECT score FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
@@ -503,7 +534,13 @@ def test_generate_signals_weights_zero_total_fallback(conn):
     """weights 合計が 0 の場合は _DEFAULT_WEIGHTS にフォールバックし正常動作する"""
     _insert_price_history(conn, [("A", 1000.0, 6e8)])
     build_features(conn, TARGET_DATE)
-    zero_weights = {"momentum": 0.0, "value": 0.0, "volatility": 0.0, "liquidity": 0.0, "news": 0.0}
+    zero_weights = {
+        "momentum": 0.0,
+        "value": 0.0,
+        "volatility": 0.0,
+        "liquidity": 0.0,
+        "news": 0.0,
+    }
     count = generate_signals(conn, TARGET_DATE, weights=zero_weights)
     assert isinstance(count, int)
 
@@ -535,7 +572,9 @@ def test_generate_signals_weights_unknown_key_ignored(conn):
         [TARGET_DATE],
     )
     # 未知キー "foo" を含む weights で実行しても例外にならず BUY シグナルが生成される
-    generate_signals(conn, TARGET_DATE, threshold=0.5, weights={"momentum": 0.8, "foo": 99.9})
+    generate_signals(
+        conn, TARGET_DATE, threshold=0.5, weights={"momentum": 0.8, "foo": 99.9}
+    )
     row = conn.execute(
         "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
     ).fetchone()
@@ -586,7 +625,6 @@ def test_generate_signals_no_buy_sell_conflict(conn):
 
 def test_generate_signals_weights_invalid_values_ignored(conn):
     """weights に NaN/Inf/負値が含まれてもフォールバックして正常動作する"""
-    import math as _math
     _insert_price_history(conn, [("A", 1000.0, 6e8)])
     build_features(conn, TARGET_DATE)
     invalid_weights = {
@@ -602,12 +640,15 @@ def test_generate_signals_weights_invalid_values_ignored(conn):
 
 def test_generate_signals_rank_consecutive_after_sell_exclusion(conn):
     """SELL 除外後も BUY の signal_rank が連番（1,2,3…）になること"""
-    _insert_price_history(conn, [
-        ("A", 1000.0, 6e8),
-        ("B", 1000.0, 6e8),
-        ("C", 1000.0, 6e8),
-        ("D", 1000.0, 6e8),
-    ])
+    _insert_price_history(
+        conn,
+        [
+            ("A", 1000.0, 6e8),
+            ("B", 1000.0, 6e8),
+            ("C", 1000.0, 6e8),
+            ("D", 1000.0, 6e8),
+        ],
+    )
     build_features(conn, TARGET_DATE)
     # A > B > C > D の順にスコアを設定
     conn.execute(

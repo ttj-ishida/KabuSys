@@ -3,6 +3,7 @@
 
 Windows と Linux の差分を吸収し、呼び出し元はプラットフォームを意識しない。
 """
+
 from __future__ import annotations
 
 import logging
@@ -14,11 +15,12 @@ logger = logging.getLogger(__name__)
 
 _VALID_LEVELS = frozenset({"high", "normal", "low"})
 
-# psutil の HIGH_PRIORITY_CLASS 等は Windows 専用定数
-_WINDOWS_PRIORITY = {
-    "high": psutil.HIGH_PRIORITY_CLASS,
-    "normal": psutil.NORMAL_PRIORITY_CLASS,
-    "low": psutil.IDLE_PRIORITY_CLASS,
+# psutil の HIGH_PRIORITY_CLASS 等は Windows 専用定数（Linux では存在しない）
+# getattr でフォールバック値を使い、全 OS でモジュールロードを成功させる
+_WINDOWS_PRIORITY: dict[str, int] = {
+    "high": getattr(psutil, "HIGH_PRIORITY_CLASS", 128),
+    "normal": getattr(psutil, "NORMAL_PRIORITY_CLASS", 32),
+    "low": getattr(psutil, "IDLE_PRIORITY_CLASS", 64),
 }
 
 # POSIX 系 OS の nice 値
@@ -53,9 +55,7 @@ def set_process_priority(level: str) -> None:
         elif sysname in _SUPPORTED_POSIX:
             p.nice(_LINUX_NICE[level])
         else:
-            logger.warning(
-                "未対応 OS (%s) のため優先度設定をスキップします。", sysname
-            )
+            logger.warning("未対応 OS (%s) のため優先度設定をスキップします。", sysname)
             return
         logger.debug("プロセス優先度を %r に設定しました (PID=%d)", level, p.pid)
     except (psutil.AccessDenied, AttributeError, NotImplementedError) as e:
@@ -91,9 +91,7 @@ def set_cpu_affinity(cpu_count: int | None = None) -> None:
                 len(available),
             )
         p.cpu_affinity(pinned)
-        logger.debug(
-            "CPU affinity を %r に設定しました (PID=%d)", pinned, p.pid
-        )
+        logger.debug("CPU affinity を %r に設定しました (PID=%d)", pinned, p.pid)
     except (psutil.AccessDenied, AttributeError, NotImplementedError) as e:
         logger.warning(
             "CPU affinity の設定に失敗しました（%s: %s）。スキップします。",

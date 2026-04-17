@@ -1,5 +1,4 @@
 import os
-import requests
 from openai import OpenAI
 
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"].strip())
@@ -9,7 +8,9 @@ code = ""
 
 for root, dirs, files in os.walk("."):
     # .github, .git, __pycache__ は除外
-    dirs[:] = [d for d in dirs if d not in {".git", ".github", "__pycache__", "node_modules"}]
+    dirs[:] = [
+        d for d in dirs if d not in {".git", ".github", "__pycache__", "node_modules"}
+    ]
     for file in files:
         if file.endswith(".py"):
             with open(os.path.join(root, file)) as f:
@@ -34,9 +35,12 @@ prompt = f"""
 response = client.chat.completions.create(
     model=model,
     messages=[
-        {"role": "system", "content": "You are a senior software engineer specializing in bug detection and code review."},
-        {"role": "user", "content": prompt}
-    ]
+        {
+            "role": "system",
+            "content": "You are a senior software engineer specializing in bug detection and code review.",
+        },
+        {"role": "user", "content": prompt},
+    ],
 )
 
 fixed = response.choices[0].message.content

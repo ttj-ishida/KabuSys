@@ -4,6 +4,7 @@
 Task Scheduler から 18:00 に起動される。
 score_news() と score_regime() を順次実行する。
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,9 +19,7 @@ from kabusys.config import Settings
 from kabusys.ai.news_nlp import score_news
 from kabusys.ai.regime_detector import score_regime
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 

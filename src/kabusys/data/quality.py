@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # 株価スパイク判定閾値（前日比の絶対値がこの値を超えたら異常とみなす）
-_SPIKE_THRESHOLD = 0.5   # 50% 超の変動をスパイクとみなす
+_SPIKE_THRESHOLD = 0.5  # 50% 超の変動をスパイクとみなす
 
 # ---------------------------------------------------------------------------
 # データクラス
@@ -165,7 +165,8 @@ def check_spike(
     """
 
     sample_rows = conn.execute(
-        spike_cte + """
+        spike_cte
+        + """
         SELECT date, code, prev_close, curr_close, change_rate
         FROM spikes
         ORDER BY ABS(change_rate) DESC
@@ -395,7 +396,5 @@ def run_all_checks(
 
     errors = [i for i in issues if i.severity == "error"]
     warnings = [i for i in issues if i.severity == "warning"]
-    logger.info(
-        "run_all_checks: error=%d, warning=%d", len(errors), len(warnings)
-    )
+    logger.info("run_all_checks: error=%d, warning=%d", len(errors), len(warnings))
     return issues

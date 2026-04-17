@@ -8,6 +8,7 @@
 環境変数:
     PAPER_TRADING_SQLITE_PATH: SQLite DBファイルパス (デフォルト: data/paper_trading.db)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -21,9 +22,9 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 # Pass/Fail 基準値
 # ---------------------------------------------------------------------------
-THRESHOLD_UPTIME_PCT = 99.0       # 稼働率 >= 99%
-THRESHOLD_FILL_RATE_PCT = 90.0    # 注文成功率 >= 90%
-THRESHOLD_SEND_RATE_PCT = 95.0    # 送信率 >= 95%
+THRESHOLD_UPTIME_PCT = 99.0  # 稼働率 >= 99%
+THRESHOLD_FILL_RATE_PCT = 90.0  # 注文成功率 >= 90%
+THRESHOLD_SEND_RATE_PCT = 95.0  # 送信率 >= 95%
 THRESHOLD_P95_LATENCY_MS = 200.0  # P95 レイテンシ <= 200 ms
 
 
@@ -231,7 +232,9 @@ def generate_report(
     # DB 存在チェック
     if not Path(db_path).exists():
         print(f"エラー: DB ファイルが見つかりません: {db_path}")
-        print("PAPER_TRADING_SQLITE_PATH 環境変数または --db オプションで正しいパスを指定してください。")
+        print(
+            "PAPER_TRADING_SQLITE_PATH 環境変数または --db オプションで正しいパスを指定してください。"
+        )
         return
 
     # DB 接続
@@ -280,7 +283,9 @@ def generate_report(
 
     fill_rate_pct = orders["fill_rate_pct"]
     if fill_rate_pct is not None and fill_rate_pct < THRESHOLD_FILL_RATE_PCT:
-        failures.append(f"注文成功率: {fill_rate_pct:.1f}% < {THRESHOLD_FILL_RATE_PCT}%")
+        failures.append(
+            f"注文成功率: {fill_rate_pct:.1f}% < {THRESHOLD_FILL_RATE_PCT}%"
+        )
 
     send_rate_pct = orders["send_rate_pct"]
     if send_rate_pct is not None and send_rate_pct < THRESHOLD_SEND_RATE_PCT:
@@ -288,10 +293,16 @@ def generate_report(
 
     p95_ms = latency["p95_ms"]
     if p95_ms is not None and p95_ms > THRESHOLD_P95_LATENCY_MS:
-        failures.append(f"P95レイテンシ: {p95_ms:.1f} ms > {THRESHOLD_P95_LATENCY_MS} ms")
+        failures.append(
+            f"P95レイテンシ: {p95_ms:.1f} ms > {THRESHOLD_P95_LATENCY_MS} ms"
+        )
 
     passed = len(failures) == 0
-    verdict = "PASS (全指標が基準値を満たしています)" if passed else f"FAIL ({'; '.join(failures)})"
+    verdict = (
+        "PASS (全指標が基準値を満たしています)"
+        if passed
+        else f"FAIL ({'; '.join(failures)})"
+    )
 
     # レポート出力
     print("========================================")

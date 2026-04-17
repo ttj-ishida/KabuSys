@@ -31,16 +31,16 @@ logger = logging.getLogger(__name__)
 # 定数
 # ---------------------------------------------------------------------------
 
-_MOMENTUM_SHORT_DAYS = 21    # 約1ヶ月（営業日）
-_MOMENTUM_MID_DAYS = 63      # 約3ヶ月（営業日）
-_MOMENTUM_LONG_DAYS = 126    # 約6ヶ月（営業日）
-_MA_LONG_DAYS = 200          # 長期移動平均
-_ATR_DAYS = 20               # ATR 計算期間
-_VOLUME_DAYS = 20            # 出来高移動平均期間
+_MOMENTUM_SHORT_DAYS = 21  # 約1ヶ月（営業日）
+_MOMENTUM_MID_DAYS = 63  # 約3ヶ月（営業日）
+_MOMENTUM_LONG_DAYS = 126  # 約6ヶ月（営業日）
+_MA_LONG_DAYS = 200  # 長期移動平均
+_ATR_DAYS = 20  # ATR 計算期間
+_VOLUME_DAYS = 20  # 出来高移動平均期間
 
 # スキャン範囲バッファ（営業日×2 カレンダー日で週末・祝日を吸収）
-_MOMENTUM_SCAN_DAYS = _MA_LONG_DAYS * 2   # 400 calendar days
-_VOLATILITY_SCAN_DAYS = _ATR_DAYS * 3     # 60 calendar days
+_MOMENTUM_SCAN_DAYS = _MA_LONG_DAYS * 2  # 400 calendar days
+_VOLATILITY_SCAN_DAYS = _ATR_DAYS * 3  # 60 calendar days
 
 
 # ---------------------------------------------------------------------------

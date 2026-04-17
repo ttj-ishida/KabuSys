@@ -1,10 +1,10 @@
 """tests/test_monitoring_engine.py — Phase 7 監視エンジン テスト"""
+
 from __future__ import annotations
 
 import sqlite3
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -17,6 +17,7 @@ from kabusys.monitoring.trade_monitor import TradeMonitor
 
 
 # ─── Fixtures ───────────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def mon_conn():
@@ -33,15 +34,21 @@ def mock_duckdb():
 
 # ─── SystemMonitor ────────────────────────────────────────────────────────────
 
+
 def test_system_monitor_no_pid_file(mon_conn, mock_duckdb, tmp_path):
     """PID ファイルなし → process_ok=False, stale_pid_detected=False"""
     pid_file = tmp_path / "execution.pid"
     monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
 
-    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=date.today()), \
-         patch("psutil.cpu_percent", return_value=30.0), \
-         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
-         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+    with (
+        patch(
+            "kabusys.monitoring.system_monitor.get_last_price_date",
+            return_value=date.today(),
+        ),
+        patch("psutil.cpu_percent", return_value=30.0),
+        patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)),
+        patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)),
+    ):
         result = monitor.check_once(today=date.today())
 
     assert result.process_ok is False
@@ -57,11 +64,16 @@ def test_system_monitor_pid_alive(mon_conn, mock_duckdb, tmp_path):
     pid_file.write_text("12345")
     monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
 
-    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=date.today()), \
-         patch("psutil.pid_exists", return_value=True), \
-         patch("psutil.cpu_percent", return_value=30.0), \
-         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
-         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+    with (
+        patch(
+            "kabusys.monitoring.system_monitor.get_last_price_date",
+            return_value=date.today(),
+        ),
+        patch("psutil.pid_exists", return_value=True),
+        patch("psutil.cpu_percent", return_value=30.0),
+        patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)),
+        patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)),
+    ):
         result = monitor.check_once(today=date.today())
 
     assert result.process_ok is True
@@ -75,11 +87,16 @@ def test_system_monitor_stale_pid(mon_conn, mock_duckdb, tmp_path):
     pid_file.write_text("12345")
     monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
 
-    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=date.today()), \
-         patch("psutil.pid_exists", return_value=False), \
-         patch("psutil.cpu_percent", return_value=30.0), \
-         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
-         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+    with (
+        patch(
+            "kabusys.monitoring.system_monitor.get_last_price_date",
+            return_value=date.today(),
+        ),
+        patch("psutil.pid_exists", return_value=False),
+        patch("psutil.cpu_percent", return_value=30.0),
+        patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)),
+        patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)),
+    ):
         result = monitor.check_once(today=date.today())
 
     assert result.process_ok is False
@@ -88,7 +105,9 @@ def test_system_monitor_stale_pid(mon_conn, mock_duckdb, tmp_path):
 
     # risk_logs に STALE_PID が記録されているか確認
     mon_conn.row_factory = sqlite3.Row
-    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='STALE_PID'").fetchall()
+    rows = mon_conn.execute(
+        "SELECT * FROM risk_logs WHERE event_type='STALE_PID'"
+    ).fetchall()
     assert len(rows) == 1
 
 
@@ -98,10 +117,15 @@ def test_system_monitor_invalid_pid_file(mon_conn, mock_duckdb, tmp_path):
     pid_file.write_text("not-a-number")
     monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
 
-    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=date.today()), \
-         patch("psutil.cpu_percent", return_value=30.0), \
-         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
-         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+    with (
+        patch(
+            "kabusys.monitoring.system_monitor.get_last_price_date",
+            return_value=date.today(),
+        ),
+        patch("psutil.cpu_percent", return_value=30.0),
+        patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)),
+        patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)),
+    ):
         result = monitor.check_once(today=date.today())
 
     assert result.process_ok is False
@@ -109,7 +133,9 @@ def test_system_monitor_invalid_pid_file(mon_conn, mock_duckdb, tmp_path):
     assert not pid_file.exists()
 
     mon_conn.row_factory = sqlite3.Row
-    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='STALE_PID'").fetchall()
+    rows = mon_conn.execute(
+        "SELECT * FROM risk_logs WHERE event_type='STALE_PID'"
+    ).fetchall()
     assert len(rows) == 1
 
 
@@ -120,10 +146,15 @@ def test_system_monitor_data_freshness_ok(mon_conn, mock_duckdb, tmp_path):
     pid_file = tmp_path / "execution.pid"
     monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
 
-    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=last_price), \
-         patch("psutil.cpu_percent", return_value=30.0), \
-         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
-         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+    with (
+        patch(
+            "kabusys.monitoring.system_monitor.get_last_price_date",
+            return_value=last_price,
+        ),
+        patch("psutil.cpu_percent", return_value=30.0),
+        patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)),
+        patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)),
+    ):
         result = monitor.check_once(today=today)
 
     assert result.data_freshness_ok is True
@@ -136,10 +167,15 @@ def test_system_monitor_data_freshness_ng(mon_conn, mock_duckdb, tmp_path):
     pid_file = tmp_path / "execution.pid"
     monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
 
-    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=last_price), \
-         patch("psutil.cpu_percent", return_value=30.0), \
-         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
-         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+    with (
+        patch(
+            "kabusys.monitoring.system_monitor.get_last_price_date",
+            return_value=last_price,
+        ),
+        patch("psutil.cpu_percent", return_value=30.0),
+        patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)),
+        patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)),
+    ):
         result = monitor.check_once(today=today)
 
     assert result.data_freshness_ok is False
@@ -150,10 +186,14 @@ def test_system_monitor_data_freshness_none(mon_conn, mock_duckdb, tmp_path):
     pid_file = tmp_path / "execution.pid"
     monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
 
-    with patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=None), \
-         patch("psutil.cpu_percent", return_value=30.0), \
-         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
-         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)):
+    with (
+        patch(
+            "kabusys.monitoring.system_monitor.get_last_price_date", return_value=None
+        ),
+        patch("psutil.cpu_percent", return_value=30.0),
+        patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)),
+        patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)),
+    ):
         result = monitor.check_once(today=date.today())
 
     assert result.data_freshness_ok is False
@@ -161,8 +201,7 @@ def test_system_monitor_data_freshness_none(mon_conn, mock_duckdb, tmp_path):
 
 # ─── TradeMonitor ─────────────────────────────────────────────────────────────
 
-from kabusys.execution.order_record import OrderRecord, OrderState
-from kabusys.execution.order_repository import OrderRepository
+from kabusys.execution.order_record import OrderRecord, OrderState  # noqa: E402
 
 
 def _make_order(
@@ -231,7 +270,9 @@ def test_trade_monitor_stale_order_detected(mon_conn):
     result = monitor.check_once(now=now)
 
     assert order.client_order_id in result.stale_orders
-    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='STALE_ORDER'").fetchall()
+    rows = mon_conn.execute(
+        "SELECT * FROM risk_logs WHERE event_type='STALE_ORDER'"
+    ).fetchall()
     assert len(rows) == 1
 
 
@@ -265,7 +306,9 @@ def test_trade_monitor_price_anomaly_detected(mon_conn):
     result = monitor.check_once()
 
     assert order.client_order_id in result.anomaly_fills
-    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='PRICE_ANOMALY'").fetchall()
+    rows = mon_conn.execute(
+        "SELECT * FROM risk_logs WHERE event_type='PRICE_ANOMALY'"
+    ).fetchall()
     assert len(rows) == 1
 
 
@@ -288,7 +331,10 @@ def test_trade_monitor_market_order_excluded(mon_conn):
 
 # ─── RiskMonitor ─────────────────────────────────────────────────────────────
 
-def _setup_dashboard(conn: sqlite3.Connection, portfolio_value: float, cash: float = 0.0) -> None:
+
+def _setup_dashboard(
+    conn: sqlite3.Connection, portfolio_value: float, cash: float = 0.0
+) -> None:
     """dashboard テーブルに1行セットアップ。"""
     db = MonitoringDB(conn)
     db.upsert_dashboard(
@@ -334,7 +380,9 @@ def test_risk_monitor_drawdown_alert(mon_conn):
     assert result.drawdown_pct == pytest.approx(0.15)
     assert result.drawdown_alert is True
 
-    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='DRAWDOWN_ALERT'").fetchall()
+    rows = mon_conn.execute(
+        "SELECT * FROM risk_logs WHERE event_type='DRAWDOWN_ALERT'"
+    ).fetchall()
     assert len(rows) == 1
 
 
@@ -360,7 +408,7 @@ def test_risk_monitor_position_limit_alert(mon_conn):
     _setup_dashboard(mon_conn, portfolio_value=1_000_000)
     db = MonitoringDB(mon_conn)
     for i in range(11):
-        db.upsert_position(code=f"{7000+i}", qty=100, avg_price=1000.0)
+        db.upsert_position(code=f"{7000 + i}", qty=100, avg_price=1000.0)
 
     monitor = RiskMonitor(mon_conn, max_positions=10)
     result = monitor.check_once()
@@ -368,7 +416,9 @@ def test_risk_monitor_position_limit_alert(mon_conn):
     assert result.position_count == 11
     assert result.position_limit_alert is True
 
-    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='POSITION_LIMIT'").fetchall()
+    rows = mon_conn.execute(
+        "SELECT * FROM risk_logs WHERE event_type='POSITION_LIMIT'"
+    ).fetchall()
     assert len(rows) == 1
 
 
@@ -386,6 +436,7 @@ def test_risk_monitor_qty_zero_excluded(mon_conn):
 
 
 # ─── MonitoringEngine ─────────────────────────────────────────────────────────
+
 
 def test_monitoring_engine_run_once_calls_all_monitors():
     """run_once() が 3 つの Monitor の check_once() をすべて呼び出す"""
@@ -417,8 +468,8 @@ def test_monitoring_engine_exception_does_not_stop_other_monitors():
 
 # ─── MonitoringEngine + KillSwitch / AlertManager ────────────────────────────
 
-from kabusys.monitoring.kill_switch import KillSwitch
-from kabusys.monitoring.alert_manager import AlertManager
+from kabusys.monitoring.kill_switch import KillSwitch  # noqa: E402
+from kabusys.monitoring.alert_manager import AlertManager  # noqa: E402
 
 
 def test_monitoring_engine_calls_kill_switch_when_all_results_available():
@@ -470,7 +521,9 @@ def test_monitoring_engine_notifies_alert_manager_on_kill_switch_trigger():
     alert_manager = MagicMock(spec=AlertManager)
 
     engine = MonitoringEngine(
-        sys_mon, trade_mon, risk_mon,
+        sys_mon,
+        trade_mon,
+        risk_mon,
         kill_switch=kill_switch,
         alert_manager=alert_manager,
     )
@@ -497,6 +550,7 @@ def test_monitoring_engine_without_kill_switch_still_works():
 
 # ─── Issue #141: log_risk_event デデュープ ────────────────────────────────────
 
+
 class TestLogRiskEventDedup:
     """log_risk_event() の dedup_minutes 引数のテスト。"""
 
@@ -506,12 +560,20 @@ class TestLogRiskEventDedup:
         now = datetime.now(timezone.utc)
 
         r1 = db.log_risk_event(
-            "DRAWDOWN_ALERT", "drawdown_pct", 0.15, 0.10,
-            logged_at=now, dedup_minutes=30,
+            "DRAWDOWN_ALERT",
+            "drawdown_pct",
+            0.15,
+            0.10,
+            logged_at=now,
+            dedup_minutes=30,
         )
         r2 = db.log_risk_event(
-            "DRAWDOWN_ALERT", "drawdown_pct", 0.16, 0.10,
-            logged_at=now + timedelta(minutes=10), dedup_minutes=30,
+            "DRAWDOWN_ALERT",
+            "drawdown_pct",
+            0.16,
+            0.10,
+            logged_at=now + timedelta(minutes=10),
+            dedup_minutes=30,
         )
 
         assert r1 is True
@@ -526,12 +588,20 @@ class TestLogRiskEventDedup:
         now = datetime.now(timezone.utc)
 
         db.log_risk_event(
-            "DRAWDOWN_ALERT", "drawdown_pct", 0.15, 0.10,
-            logged_at=past, dedup_minutes=30,
+            "DRAWDOWN_ALERT",
+            "drawdown_pct",
+            0.15,
+            0.10,
+            logged_at=past,
+            dedup_minutes=30,
         )
         r2 = db.log_risk_event(
-            "DRAWDOWN_ALERT", "drawdown_pct", 0.16, 0.10,
-            logged_at=now, dedup_minutes=30,
+            "DRAWDOWN_ALERT",
+            "drawdown_pct",
+            0.16,
+            0.10,
+            logged_at=now,
+            dedup_minutes=30,
         )
 
         assert r2 is True
@@ -555,12 +625,22 @@ class TestLogRiskEventDedup:
         now = datetime.now(timezone.utc)
 
         db.log_risk_event(
-            "STALE_ORDER", "order_age_minutes", 35.0, 30.0,
-            detail="order-001", logged_at=now, dedup_minutes=30,
+            "STALE_ORDER",
+            "order_age_minutes",
+            35.0,
+            30.0,
+            detail="order-001",
+            logged_at=now,
+            dedup_minutes=30,
         )
         db.log_risk_event(
-            "STALE_ORDER", "order_age_minutes", 35.0, 30.0,
-            detail="order-002", logged_at=now, dedup_minutes=30,
+            "STALE_ORDER",
+            "order_age_minutes",
+            35.0,
+            30.0,
+            detail="order-002",
+            logged_at=now,
+            dedup_minutes=30,
         )
 
         rows = mon_conn.execute("SELECT * FROM risk_logs").fetchall()
@@ -568,6 +648,7 @@ class TestLogRiskEventDedup:
 
 
 # ─── Issue #142: dashboard peak_value カラム ──────────────────────────────────
+
 
 class TestDashboardPeakValue:
     """dashboard テーブルの peak_value カラム追加テスト。"""
@@ -591,15 +672,21 @@ class TestDashboardPeakValue:
         # init_monitoring_db を再実行 → エラーなし
         init_monitoring_db(conn)
         # peak_value カラムが存在することを確認
-        cols = [row[1] for row in conn.execute("PRAGMA table_info(dashboard)").fetchall()]
+        cols = [
+            row[1] for row in conn.execute("PRAGMA table_info(dashboard)").fetchall()
+        ]
         assert "peak_value" in cols
 
     def test_upsert_dashboard_sets_peak_value(self, mon_conn):
         """peak_value を指定すると dashboard に保存される。"""
         db = MonitoringDB(mon_conn)
         db.upsert_dashboard(
-            portfolio_value=1_000_000, cash=500_000, drawdown_pct=0.0,
-            open_order_count=0, position_count=0, peak_value=1_200_000,
+            portfolio_value=1_000_000,
+            cash=500_000,
+            drawdown_pct=0.0,
+            open_order_count=0,
+            position_count=0,
+            peak_value=1_200_000,
         )
         row = db.get_dashboard()
         assert row["peak_value"] == 1_200_000
@@ -608,13 +695,20 @@ class TestDashboardPeakValue:
         """peak_value=None で呼ぶと既存の peak_value が保護される。"""
         db = MonitoringDB(mon_conn)
         db.upsert_dashboard(
-            portfolio_value=1_000_000, cash=500_000, drawdown_pct=0.0,
-            open_order_count=0, position_count=0, peak_value=1_200_000,
+            portfolio_value=1_000_000,
+            cash=500_000,
+            drawdown_pct=0.0,
+            open_order_count=0,
+            position_count=0,
+            peak_value=1_200_000,
         )
         # peak_value=None（デフォルト）で再呼び出し
         db.upsert_dashboard(
-            portfolio_value=900_000, cash=400_000, drawdown_pct=0.1,
-            open_order_count=0, position_count=0,
+            portfolio_value=900_000,
+            cash=400_000,
+            drawdown_pct=0.1,
+            open_order_count=0,
+            position_count=0,
         )
         row = db.get_dashboard()
         assert row["peak_value"] == 1_200_000  # 保護されていること
@@ -624,18 +718,27 @@ class TestDashboardPeakValue:
         """新しい高値で upsert_dashboard() を呼ぶと peak_value が更新される。"""
         db = MonitoringDB(mon_conn)
         db.upsert_dashboard(
-            portfolio_value=1_000_000, cash=500_000, drawdown_pct=0.0,
-            open_order_count=0, position_count=0, peak_value=1_000_000.0,
+            portfolio_value=1_000_000,
+            cash=500_000,
+            drawdown_pct=0.0,
+            open_order_count=0,
+            position_count=0,
+            peak_value=1_000_000.0,
         )
         db.upsert_dashboard(
-            portfolio_value=1_100_000, cash=500_000, drawdown_pct=0.0,
-            open_order_count=0, position_count=0, peak_value=1_100_000.0,
+            portfolio_value=1_100_000,
+            cash=500_000,
+            drawdown_pct=0.0,
+            open_order_count=0,
+            position_count=0,
+            peak_value=1_100_000.0,
         )
         row = db.get_dashboard()
         assert row["peak_value"] == 1_100_000.0
 
 
 # ─── Issue #142: RiskMonitor peak_value DB 永続化 ─────────────────────────────
+
 
 class TestRiskMonitorPeakValuePersistence:
     """RiskMonitor が _peak_value を dashboard DB に読み書きするテスト。"""
@@ -701,30 +804,46 @@ class TestRiskMonitorPeakValuePersistence:
 
 # ─── Issue #41: MonitoringEngine alert notify paths ──────────────────────────
 
+
 class TestMonitoringEngineAlerts:
     """MonitoringEngine.run_once() の個別アラート notify パスのテスト (Issue #41)。"""
 
-    def _make_engine(self, sys_ok=True, freshness_ok=True, stale_orders=None,
-                     anomaly_fills=None, drawdown_alert=False, position_limit_alert=False):
+    def _make_engine(
+        self,
+        sys_ok=True,
+        freshness_ok=True,
+        stale_orders=None,
+        anomaly_fills=None,
+        drawdown_alert=False,
+        position_limit_alert=False,
+    ):
         """テスト用 MonitoringEngine を構築する。各フラグで結果を制御できる。"""
         sys_mon = MagicMock()
         sys_mon.check_once.return_value.process_ok = sys_ok
         sys_mon.check_once.return_value.data_freshness_ok = freshness_ok
 
         trade_mon = MagicMock()
-        trade_mon.check_once.return_value.stale_orders = stale_orders if stale_orders is not None else []
-        trade_mon.check_once.return_value.anomaly_fills = anomaly_fills if anomaly_fills is not None else []
+        trade_mon.check_once.return_value.stale_orders = (
+            stale_orders if stale_orders is not None else []
+        )
+        trade_mon.check_once.return_value.anomaly_fills = (
+            anomaly_fills if anomaly_fills is not None else []
+        )
 
         risk_mon = MagicMock()
         risk_mon.check_once.return_value.drawdown_alert = drawdown_alert
         risk_mon.check_once.return_value.position_limit_alert = position_limit_alert
         risk_mon.check_once.return_value.drawdown_pct = 0.15 if drawdown_alert else 0.0
-        risk_mon.check_once.return_value.position_count = 11 if position_limit_alert else 0
+        risk_mon.check_once.return_value.position_count = (
+            11 if position_limit_alert else 0
+        )
 
         alert_manager = MagicMock()
 
         engine = MonitoringEngine(
-            sys_mon, trade_mon, risk_mon,
+            sys_mon,
+            trade_mon,
+            risk_mon,
             alert_manager=alert_manager,
         )
         return engine, alert_manager
@@ -773,6 +892,7 @@ class TestMonitoringEngineAlerts:
 
 
 # ─── Issue #141: TradeMonitor / RiskMonitor dedup_minutes 適用 ────────────────
+
 
 class TestMonitorDedup:
     """TradeMonitor / RiskMonitor が dedup_minutes=30 を渡すことを確認するテスト。"""

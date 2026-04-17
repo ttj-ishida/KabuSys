@@ -5,6 +5,7 @@ Exports:
     calc_position_sizes — position_sizing
     apply_sector_cap, calc_regime_multiplier — risk_adjustment
 """
+
 from kabusys.portfolio.portfolio_builder import (
     calc_equal_weights,
     calc_score_weights,

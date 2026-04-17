@@ -44,9 +44,11 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
     "news": 0.10,
 }
 
-_DEFAULT_THRESHOLD: float = 0.60   # BUY シグナル閾値
-_STOP_LOSS_RATE: float = -0.08     # ストップロス閾値（Section 5.2）
-_BEAR_MIN_SAMPLES: int = 3         # Bear 判定に必要な最小サンプル数（不足時は Bear とみなさない）
+_DEFAULT_THRESHOLD: float = 0.60  # BUY シグナル閾値
+_STOP_LOSS_RATE: float = -0.08  # ストップロス閾値（Section 5.2）
+_BEAR_MIN_SAMPLES: int = (
+    3  # Bear 判定に必要な最小サンプル数（不足時は Bear とみなさない）
+)
 
 
 # ---------------------------------------------------------------------------
@@ -72,11 +74,13 @@ def _avg_scores(values: list[float | None]) -> float | None:
 
 def _compute_momentum_score(feat: dict[str, Any]) -> float | None:
     """モメンタムスコア（高いほど上昇トレンド）。"""
-    return _avg_scores([
-        _sigmoid(feat.get("momentum_20")),
-        _sigmoid(feat.get("momentum_60")),
-        _sigmoid(feat.get("ma200_dev")),
-    ])
+    return _avg_scores(
+        [
+            _sigmoid(feat.get("momentum_20")),
+            _sigmoid(feat.get("momentum_60")),
+            _sigmoid(feat.get("ma200_dev")),
+        ]
+    )
 
 
 def _compute_value_score(feat: dict[str, Any]) -> float | None:
@@ -186,7 +190,8 @@ def _generate_sell_signals(
         if close is None:
             logger.warning(
                 "_generate_sell_signals: %s の価格が取得できないため SELL 判定をスキップ date=%s",
-                code, target_date,
+                code,
+                target_date,
             )
             continue
 
@@ -194,29 +199,36 @@ def _generate_sell_signals(
         if code not in score_map:
             logger.warning(
                 "_generate_sell_signals: %s は features に存在しません。score=0.0 として SELL 判定します date=%s",
-                code, target_date,
+                code,
+                target_date,
             )
         final_score = score_map.get(code, 0.0)
 
         # 1. ストップロス（最優先）
         pnl_rate = (close - avg_price) / avg_price
         if pnl_rate <= _STOP_LOSS_RATE:
-            sell_signals.append({
-                "code": code,
-                "score": final_score,
-                "reason": "stop_loss",
-            })
+            sell_signals.append(
+                {
+                    "code": code,
+                    "score": final_score,
+                    "reason": "stop_loss",
+                }
+            )
             continue
 
         # 2. スコア低下
         if final_score < threshold:
-            sell_signals.append({
-                "code": code,
-                "score": final_score,
-                "reason": "score_drop",
-            })
+            sell_signals.append(
+                {
+                    "code": code,
+                    "score": final_score,
+                    "reason": "score_drop",
+                }
+            )
 
-    logger.debug("_generate_sell_signals: %d シグナル date=%s", len(sell_signals), target_date)
+    logger.debug(
+        "_generate_sell_signals: %d シグナル date=%s", len(sell_signals), target_date
+    )
     return sell_signals
 
 
@@ -251,14 +263,25 @@ def generate_signals(
     for k, v in (weights or {}).items():
         if k not in allowed:
             continue
-        if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or v < 0:
-            logger.warning("generate_signals: weights[%s]=%r は無効な値のためスキップします。", k, v)
+        if (
+            not isinstance(v, (int, float))
+            or isinstance(v, bool)
+            or not math.isfinite(v)
+            or v < 0
+        ):
+            logger.warning(
+                "generate_signals: weights[%s]=%r は無効な値のためスキップします。",
+                k,
+                v,
+            )
             continue
         user_w[k] = float(v)
     merged_weights = {**_DEFAULT_WEIGHTS, **user_w}
     total_w = sum(merged_weights.values())
     if total_w <= 0:
-        logger.warning("generate_signals: weights の合計が 0 以下です。_DEFAULT_WEIGHTS にフォールバックします。")
+        logger.warning(
+            "generate_signals: weights の合計が 0 以下です。_DEFAULT_WEIGHTS にフォールバックします。"
+        )
         merged_weights = dict(_DEFAULT_WEIGHTS)
     elif not math.isclose(total_w, 1.0):
         merged_weights = {k: v / total_w for k, v in merged_weights.items()}
@@ -273,11 +296,22 @@ def generate_signals(
         """,
         [target_date],
     ).fetchall()
-    feat_cols = ["code", "momentum_20", "momentum_60", "volatility_20", "volume_ratio", "per", "ma200_dev"]
+    feat_cols = [
+        "code",
+        "momentum_20",
+        "momentum_60",
+        "volatility_20",
+        "volume_ratio",
+        "per",
+        "ma200_dev",
+    ]
     features = [dict(zip(feat_cols, r)) for r in feat_rows]
 
     if not features:
-        logger.warning("generate_signals: features が空 date=%s — BUY シグナルなし、SELL 判定のみ実施", target_date)
+        logger.warning(
+            "generate_signals: features が空 date=%s — BUY シグナルなし、SELL 判定のみ実施",
+            target_date,
+        )
 
     # 2. AI スコア読み込み（未登録の場合は空辞書）
     ai_rows = conn.execute(
@@ -285,14 +319,16 @@ def generate_signals(
         [target_date],
     ).fetchall()
     ai_map: dict[str, dict] = {
-        code: {"ai_score": ai, "regime_score": reg}
-        for code, ai, reg in ai_rows
+        code: {"ai_score": ai, "regime_score": reg} for code, ai, reg in ai_rows
     }
 
     # 3. Bear レジーム判定（Section 5.1）
     regime_is_bear = _is_bear_regime(ai_map)
     if regime_is_bear:
-        logger.info("generate_signals: Bear レジーム検知 — BUY シグナル抑制 date=%s", target_date)
+        logger.info(
+            "generate_signals: Bear レジーム検知 — BUY シグナル抑制 date=%s",
+            target_date,
+        )
 
     # 4. 各銘柄の final_score 計算（Section 4.1）
     scored: list[dict[str, Any]] = []
@@ -309,11 +345,11 @@ def generate_signals(
 
         # None のコンポーネントは中立値 0.5 で補完（欠損銘柄の不当な降格を防ぐ）
         final_score = (
-            weights["momentum"]   * (s_mom   if s_mom   is not None else 0.5)
-            + weights["value"]    * (s_val   if s_val   is not None else 0.5)
-            + weights["volatility"] * (s_vol if s_vol   is not None else 0.5)
-            + weights["liquidity"] * (s_liq  if s_liq   is not None else 0.5)
-            + weights["news"]     * (s_news  if s_news  is not None else 0.5)
+            weights["momentum"] * (s_mom if s_mom is not None else 0.5)
+            + weights["value"] * (s_val if s_val is not None else 0.5)
+            + weights["volatility"] * (s_vol if s_vol is not None else 0.5)
+            + weights["liquidity"] * (s_liq if s_liq is not None else 0.5)
+            + weights["news"] * (s_news if s_news is not None else 0.5)
         )
         scored.append({"code": code, "score": final_score})
 
@@ -326,7 +362,9 @@ def generate_signals(
     if not regime_is_bear:
         for rank, r in enumerate(scored, 1):
             if r["score"] >= threshold:
-                buy_signals.append({"code": r["code"], "score": r["score"], "rank": rank})
+                buy_signals.append(
+                    {"code": r["code"], "score": r["score"], "rank": rank}
+                )
 
     # 7. SELL シグナル生成（エグジット条件）
     sell_signals = _generate_sell_signals(conn, target_date, score_map, threshold)
@@ -339,14 +377,8 @@ def generate_signals(
         b["rank"] = i
 
     # 8. signals テーブルへ日付単位の置換（トランザクション＋バルク挿入で原子性を保証）
-    buy_params = [
-        (target_date, r["code"], r["score"], r["rank"])
-        for r in buy_signals
-    ]
-    sell_params = [
-        (target_date, r["code"], r["score"])
-        for r in sell_signals
-    ]
+    buy_params = [(target_date, r["code"], r["score"], r["rank"]) for r in buy_signals]
+    sell_params = [(target_date, r["code"], r["score"]) for r in sell_signals]
     conn.execute("BEGIN")
     try:
         conn.execute("DELETE FROM signals WHERE date = ?", [target_date])
@@ -371,6 +403,9 @@ def generate_signals(
     total = len(buy_signals) + len(sell_signals)
     logger.info(
         "generate_signals: BUY=%d SELL=%d total=%d date=%s",
-        len(buy_signals), len(sell_signals), total, target_date,
+        len(buy_signals),
+        len(sell_signals),
+        total,
+        target_date,
     )
     return total

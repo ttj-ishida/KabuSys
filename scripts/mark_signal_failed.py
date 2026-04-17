@@ -9,6 +9,7 @@
     注文エラー（order rejected）発生時に FailureRecovery.md §10.1 の手順として使用する。
     DuckDB CLI で直接 UPDATE するよりもヒューマンエラーリスクが低い。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,15 +23,15 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 _JST = timezone(timedelta(hours=9))
 
 
-def _fetch_targets(conn: duckdb.DuckDBPyConnection, code: str, target_date: date) -> list[dict]:
+def _fetch_targets(
+    conn: duckdb.DuckDBPyConnection, code: str, target_date: date
+) -> list[dict]:
     """status が 'pending' または 'processing' の対象レコードを返す。"""
     rows = conn.execute(
         """
@@ -48,11 +49,15 @@ def _fetch_targets(conn: duckdb.DuckDBPyConnection, code: str, target_date: date
 
 
 def _print_records(records: list[dict]) -> None:
-    print(f"\n{'SIGNAL_ID':>36}  {'CODE':>6}  {'DATE':>12}  {'STATUS':>12}  {'SIDE':>6}  {'SIZE':>8}")
+    print(
+        f"\n{'SIGNAL_ID':>36}  {'CODE':>6}  {'DATE':>12}  {'STATUS':>12}  {'SIDE':>6}  {'SIZE':>8}"
+    )
     print("-" * 90)
     for r in records:
-        print(f"{str(r['signal_id']):>36}  {r['code']:>6}  {str(r['date']):>12}  "
-              f"{r['status']:>12}  {str(r.get('side','')[:6]):>6}  {r.get('size', ''):>8}")
+        print(
+            f"{str(r['signal_id']):>36}  {r['code']:>6}  {str(r['date']):>12}  "
+            f"{r['status']:>12}  {str(r.get('side', '')[:6]):>6}  {r.get('size', ''):>8}"
+        )
     print()
 
 
@@ -77,7 +82,10 @@ def main() -> None:
         try:
             target_date = date.fromisoformat(args.date)
         except ValueError:
-            logger.error("--date の形式が不正です。YYYY-MM-DD 形式で指定してください: %s", args.date)
+            logger.error(
+                "--date の形式が不正です。YYYY-MM-DD 形式で指定してください: %s",
+                args.date,
+            )
             sys.exit(1)
     else:
         target_date = datetime.now(_JST).date()
@@ -95,7 +103,8 @@ def main() -> None:
         if not targets:
             logger.error(
                 "対象レコードが見つかりません（code=%s, date=%s, status=pending/processing）。",
-                args.code, target_date,
+                args.code,
+                target_date,
             )
             sys.exit(1)
 
@@ -124,7 +133,8 @@ def main() -> None:
             logger.warning(
                 "%d 件を選択しましたが実際の更新は %d 件でした。"
                 "並行処理で status が変更済みの行があります。",
-                len(signal_ids), updated,
+                len(signal_ids),
+                updated,
             )
         logger.info(
             "signal_queue を更新しました（%d 件を status='failed' に変更）。",

@@ -1,5 +1,6 @@
 # tests/test_generate_config.py
 """scripts/generate_config.py の単体テスト"""
+
 from __future__ import annotations
 
 import sys

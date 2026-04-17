@@ -159,6 +159,7 @@ _AUDIT_DDL: list[str] = [
 # 内部ヘルパー
 # ---------------------------------------------------------------------------
 
+
 def _apply_audit_schema(conn: duckdb.DuckDBPyConnection) -> None:
     """DDL とインデックスを順に実行する（トランザクション管理なし）。"""
     for ddl in _AUDIT_DDL:
@@ -170,6 +171,7 @@ def _apply_audit_schema(conn: duckdb.DuckDBPyConnection) -> None:
 # ---------------------------------------------------------------------------
 # 公開 API
 # ---------------------------------------------------------------------------
+
 
 def init_audit_schema(
     conn: duckdb.DuckDBPyConnection,

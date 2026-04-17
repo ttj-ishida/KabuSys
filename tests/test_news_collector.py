@@ -1,10 +1,10 @@
 """
 news_collector モジュールのユニットテスト
 """
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from unittest import mock
+from datetime import datetime
 import urllib.error
 
 import duckdb
@@ -165,9 +165,9 @@ def test_parse_rss_datetime_rfc2822():
 
 def test_parse_rss_datetime_invalid_returns_now(caplog):
     import logging
+
     with caplog.at_level(logging.WARNING):
         dt = _parse_rss_datetime("not a date")
-    before = datetime.now(timezone.utc).replace(tzinfo=None)
     assert isinstance(dt, datetime)
     assert "パース失敗" in caplog.text
 
@@ -266,6 +266,7 @@ def test_fetch_rss_rejects_private_initial_url():
 def test_fetch_rss_skips_items_with_invalid_link_scheme(monkeypatch, caplog):
     """<link> が mailto: など非 http/https の item はスキップされること。"""
     import logging
+
     rss_with_bad_link = b"""<?xml version="1.0"?>
 <rss><channel>
   <item><link>mailto:attacker@evil.com</link><title>Bad</title></item>
@@ -312,6 +313,7 @@ def test_fetch_rss_namespace_fallback(monkeypatch):
 
 def test_fetch_rss_invalid_content_length_is_ignored(monkeypatch):
     """Content-Length が非数値でも ValueError にならず記事を正常取得できること。"""
+
     class _BadCLHeaders:
         def get(self, key, default=None):
             if key == "Content-Length":
@@ -351,6 +353,7 @@ def test_fetch_rss_rejects_redirect_to_private_ip(monkeypatch, caplog):
 
 def test_fetch_rss_invalid_xml_returns_empty(monkeypatch, caplog):
     import logging
+
     monkeypatch.setattr(
         "kabusys.data.news_collector._urlopen",
         lambda req, timeout=30: _MockResponse(b"<not valid xml>>>"),
@@ -427,8 +430,16 @@ def test_save_raw_news_returns_actual_inserted_count(news_db):
 
 
 def test_save_raw_news_skips_missing_id(news_db):
-    articles = [{"id": "", "datetime": datetime.now(), "source": "x",
-                 "title": "t", "content": "", "url": "u"}]
+    articles = [
+        {
+            "id": "",
+            "datetime": datetime.now(),
+            "source": "x",
+            "title": "t",
+            "content": "",
+            "url": "u",
+        }
+    ]
     saved = save_raw_news(news_db, articles)
     assert saved == []
 
@@ -443,7 +454,9 @@ def test_save_raw_news_empty(news_db):
 
 
 def test_extract_stock_codes_finds_known_codes():
-    codes = extract_stock_codes("Toyota 7203 surge, Sony 6758 up", {"7203", "6758", "9999"})
+    codes = extract_stock_codes(
+        "Toyota 7203 surge, Sony 6758 up", {"7203", "6758", "9999"}
+    )
     assert "7203" in codes
     assert "6758" in codes
 
@@ -506,7 +519,9 @@ def test_run_news_collection_uses_default_sources(monkeypatch, news_db):
         return [_make_article(1)]
 
     monkeypatch.setattr("kabusys.data.news_collector.fetch_rss", fake_fetch_rss)
-    monkeypatch.setattr("kabusys.data.news_collector.save_raw_news", lambda conn, arts: [])
+    monkeypatch.setattr(
+        "kabusys.data.news_collector.save_raw_news", lambda conn, arts: []
+    )
 
     results = run_news_collection(news_db)
     assert set(results.keys()) == set(DEFAULT_RSS_SOURCES.keys())
