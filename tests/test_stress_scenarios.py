@@ -258,13 +258,9 @@ class TestAPIConnectionDisruptionScenario:
         rm = _make_risk_manager(broker, repo, circuit_breaker_errors=3)
         for _ in range(3):
             rm.record_api_error()
-        # 連続 5 回の発注試行がすべて失敗
-        blocked_count = 0
-        for _ in range(5):
-            r = rm.check_execution()
-            if not r.passed:
-                blocked_count += 1
-        assert blocked_count >= 1
+        # 連続 5 回の発注試行がすべて失敗（60 秒ウィンドウ内のため HALF_OPEN に遷移しない）
+        blocked_count = sum(1 for _ in range(5) if not rm.check_execution().passed)
+        assert blocked_count == 5
 
     def test_rate_limiter_blocks_burst_requests(self, repo):
         """レート制限（3件/秒）を超えるバースト発注は拒否される。"""
