@@ -20,7 +20,7 @@ from kabusys.execution.mock_client import MockBrokerClient
 from kabusys.execution.order_manager import OrderManager
 from kabusys.execution.order_record import OrderState
 from kabusys.execution.order_repository import OrderRepository, init_orders_db
-from kabusys.execution.risk_manager import RiskConfig, RiskManager
+from kabusys.execution.risk_manager import RiskConfig, RiskManager, RiskRejectReason
 from kabusys.monitoring.kill_switch import KillSwitch
 from kabusys.monitoring.risk_monitor import RiskCheckResult
 from kabusys.monitoring.system_monitor import SystemCheckResult
@@ -53,6 +53,8 @@ def _make_risk_manager(
     circuit_breaker_errors: int = 5,
     circuit_breaker_window_sec: int = 60,
     rate_limit_per_sec: int = 5,
+    max_utilization: float = 0.80,
+    max_position_pct: float = 0.10,
 ) -> RiskManager:
     config = RiskConfig(
         initial_portfolio_value=initial_portfolio_value,
@@ -60,6 +62,8 @@ def _make_risk_manager(
         circuit_breaker_errors=circuit_breaker_errors,
         circuit_breaker_window_sec=circuit_breaker_window_sec,
         rate_limit_per_sec=rate_limit_per_sec,
+        max_utilization=max_utilization,
+        max_position_pct=max_position_pct,
     )
     return RiskManager(broker=broker, repo=repo, config=config)
 
@@ -117,20 +121,27 @@ class TestMarketCrashScenario:
     def test_severe_crash_triggers_drawdown_limit(self, repo):
         """20% ドローダウン（> 15% 閾値）でチェックが失敗する。"""
         broker = MockBrokerClient(available_cash=5_000_000.0)
-        rm = _make_risk_manager(broker, repo, initial_portfolio_value=10_000_000.0)
+        rm = _make_risk_manager(
+            broker, repo, initial_portfolio_value=10_000_000.0, max_drawdown=0.15
+        )
         # 10M → 8M = 20% ドローダウン
         result = rm.check_metrics(current_portfolio_value=8_000_000.0)
         assert not result.passed
-        assert "ドローダウン" in result.reason
+        assert result.reject_reason == RiskRejectReason.DRAWDOWN_LIMIT
 
     def test_crash_at_exact_threshold_still_passes(self, repo):
-        """ちょうど 15% のドローダウンは閾値未満として通過する。"""
+        """ちょうど 15% のドローダウンは通過する。
+
+        実装は `drawdown > max_drawdown`（厳密な大なり）のため、
+        == は False → RiskResult(True) を返す。
+        """
         broker = MockBrokerClient(available_cash=5_000_000.0)
-        rm = _make_risk_manager(broker, repo, initial_portfolio_value=10_000_000.0)
-        # 10M → 8.5M = 15% ドローダウン（max_drawdown=0.15 は厳密には < でチェック）
+        rm = _make_risk_manager(
+            broker, repo, initial_portfolio_value=10_000_000.0, max_drawdown=0.15
+        )
+        # 10M → 8.5M = ちょうど 15% ドローダウン
         result = rm.check_metrics(current_portfolio_value=8_500_000.0)
-        # 境界値: 実装が > か >= かによる。passed/failed どちらでもロジックを確認
-        assert isinstance(result.passed, bool)
+        assert result.passed is True
 
     def test_kill_switch_activates_on_severe_crash(self, tmp_path):
         """急落アラートで KillSwitch が kill.flag を書き込む。"""
@@ -160,7 +171,11 @@ class TestMarketCrashScenario:
         assert ks.is_flagged()
 
     def test_kill_switch_idempotent_on_repeated_crashes(self, tmp_path):
-        """複数回のクラッシュ評価でも kill.flag の内容が上書きされない（冪等）。"""
+        """複数回のクラッシュ評価でも kill.flag が更新されない（冪等）。
+
+        ファイル内容ではなく mtime_ns の不変性で検証することで、
+        将来の内容フォーマット変更（タイムスタンプ追記等）への耐性を確保する。
+        """
         flag_path = tmp_path / "kill.flag"
         ks = KillSwitch(flag_path=flag_path)
         # 1 回目
@@ -169,14 +184,14 @@ class TestMarketCrashScenario:
             _make_trade_check(),
             _make_risk_check(drawdown_pct=0.20, drawdown_alert=True),
         )
-        original_content = flag_path.read_text()
+        mtime_after_first = flag_path.stat().st_mtime_ns
         # 2 回目（さらに急落）
         ks.evaluate(
             _make_sys_check(),
             _make_trade_check(),
             _make_risk_check(drawdown_pct=0.30, drawdown_alert=True),
         )
-        assert flag_path.read_text() == original_content
+        assert flag_path.stat().st_mtime_ns == mtime_after_first
 
     def test_positions_still_held_after_crash(self, repo):
         """クラッシュ後も保有ポジションはそのまま維持される（強制清算しない）。"""
@@ -203,10 +218,12 @@ class TestMarketCrashScenario:
         """
         big_pos = Position(code="9999", qty=900, avg_price=9000.0, current_price=9000.0)
         broker = MockBrokerClient(available_cash=500_000.0, initial_positions=[big_pos])
-        rm = _make_risk_manager(broker, repo, initial_portfolio_value=10_000_000.0)
+        rm = _make_risk_manager(
+            broker, repo, initial_portfolio_value=10_000_000.0, max_utilization=0.80
+        )
         result = rm.check_signal("2026-04-18_1111_buy", "1111", order_value=300_000.0)
         assert not result.passed
-        assert "全体上限" in result.reason
+        assert result.reject_reason == RiskRejectReason.UTILIZATION_LIMIT
 
 
 # ===========================================================================
@@ -233,7 +250,7 @@ class TestAPIConnectionDisruptionScenario:
             rm.record_api_error()
         result = rm.check_execution()
         assert not result.passed
-        assert "サーキットブレーカー" in result.reason
+        assert result.reject_reason == RiskRejectReason.CIRCUIT_BREAKER
 
     def test_circuit_breaker_blocks_all_orders_when_open(self, repo):
         """サーキットブレーカー OPEN 中は複数の発注試行がすべてブロックされる。"""
@@ -259,7 +276,7 @@ class TestAPIConnectionDisruptionScenario:
         # 4 件目は拒否
         result = rm.check_execution()
         assert not result.passed
-        assert "レート制限" in result.reason
+        assert result.reject_reason == RiskRejectReason.RATE_LIMIT
 
     def test_rate_limiter_burst_then_sustained_high_volume(self, repo):
         """バースト後に追加リクエストが続いても安全に拒否され続ける。"""
@@ -357,9 +374,9 @@ class TestLiquidityExhaustionScenario:
         assert result.state == OrderState.Rejected
 
     def test_mass_rejection_does_not_create_duplicate_orders(self, repo):
-        """多数の発注拒否シナリオで重複注文が作成されないことを確認する。
+        """未約定保留シナリオで重複注文が作成されないことを確認する。
 
-        Rejected は終端状態なので、同一 signal_id での再 create_order は許可される。
+        fill_mode='never' では注文が OrderSent 状態で保留される（active 扱い）。
         ただし active 注文（OrderSent 等）がある場合は DuplicateOrderError になる。
         """
         from kabusys.execution.broker_api import OrderRequest
@@ -443,7 +460,7 @@ class TestLiquidityExhaustionScenario:
         # 100,000 円の発注は余力不足で失敗
         result = rm.check_signal("2026-04-18_3456_buy", "3456", order_value=100_000.0)
         assert not result.passed
-        assert "余力" in result.reason
+        assert result.reject_reason == RiskRejectReason.INSUFFICIENT_CASH
 
     def test_cash_depletion_does_not_block_sell_orders(self, repo):
         """現金枯渇中でも売り注文はブロックされない（ポジション解消のため）。"""
@@ -463,7 +480,7 @@ class TestLiquidityExhaustionScenario:
             rm.record_api_error()
         result = rm.check_execution()
         assert not result.passed
-        assert "サーキットブレーカー" in result.reason
+        assert result.reject_reason == RiskRejectReason.CIRCUIT_BREAKER
 
     def test_position_limit_blocks_illiquid_stock_overallocation(self, repo):
         """流動性の低い銘柄へのオーバーアロケーションがポジション上限でブロックされる。"""
@@ -474,11 +491,13 @@ class TestLiquidityExhaustionScenario:
         broker = MockBrokerClient(
             available_cash=5_000_000.0, initial_positions=[illiquid_pos]
         )
-        rm = _make_risk_manager(broker, repo, initial_portfolio_value=10_000_000.0)
+        rm = _make_risk_manager(
+            broker, repo, initial_portfolio_value=10_000_000.0, max_position_pct=0.10
+        )
         # さらに 300,000 円追加 → 合計 1,100,000 円 > 1,000,000 円 (10%) → NG
         result = rm.check_signal("2026-04-18_1234_buy", "1234", order_value=300_000.0)
         assert not result.passed
-        assert "ポジション上限" in result.reason
+        assert result.reject_reason == RiskRejectReason.POSITION_LIMIT
 
     def test_sell_during_liquidity_crisis_updates_cash(self, repo):
         """流動性危機中でも売却が成功し、現金残高が増加する。"""
