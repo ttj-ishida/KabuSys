@@ -1,95 +1,110 @@
 # Changelog
 
-すべての変更は Keep a Changelog の形式に従って記載しています。  
-このファイルはコードベースの内容から推測して作成した変更履歴です。
+すべての重要な変更をここに記録します。  
+このファイルは「Keep a Changelog」の形式に従います。  
+リリースはセマンティックバージョニングを想定します。
 
-フォーマット:
-- Unreleased: 今後の変更（このスナップショットでは未使用）
-- 各リリース: 日付はこのスナップショットの作成日（2026-04-18）
+※ 本履歴はソースコードから機能・変更点を推測して作成しています。
 
 ## [Unreleased]
-- なし
-
-## [0.1.0] - 2026-04-18
-初回公開リリース。
 
 ### Added
-- コアアプリケーションと起動スクリプト
-  - run_execution.py
-    - ExecutionEngine を起動する CLI スクリプトを追加。
-    - KABUSYS_ENV=paper_trading 時にペーパートレード用の専用 SQLite DB を使用（data/paper_trading.db、PAPER_TRADING_SQLITE_PATH で上書き可）。
-    - ブローカークライアントのファクトリを使用して環境に応じた BrokerClient を生成。
-    - OrderRepository、OrderManager、RiskManager、Reconciler を組み立てて ExecutionEngine をスレッドで実行。停止フラグ（data/stop_requested.flag）による安全な停止をサポート。
-  - run_monitoring.py
-    - SystemMonitor のポーリングループ起動スクリプトを追加。
-    - 環境変数 MONITOR_POLL_INTERVAL でポーリング間隔を上書き可能（デフォルト 60 秒）。
-    - 監視は環境にかかわらず本番の sqlite_path を使用して監視テーブルを初期化。
-    - 停止フラグ（data/stop_requested.flag）検出でループ終了。
-- 設定管理・ウィザード・検証
-  - config.py
-    - .env 自動ロード機能を実装（.env → .env.local、OS 環境変数優先）。プロジェクトルートは .git または pyproject.toml 基準で探索。
-    - 複雑な .env 行のパース（export プレフィクス、シングル/ダブルクォート、エスケープ、インラインコメントの扱い）に対応。
-    - Settings クラスを追加し、環境変数から型変換された設定値をプロパティ形式で提供（DB パス、paper_trading 用パス、閾値、ログレベル、env 判定等）。
-    - 環境値のバリデーション（KABUSYS_ENV, LOG_LEVEL, PAPER_FILL_MODE など）。
-  - config_setup.py
-    - 対話式 .env 作成/更新ウィザードを追加。既存 .env の読み込み、秘密値マスク、選択肢・デフォルト対応、保存機能を実装。
-  - validate_config.py
-    - 起動前設定検証 CLI を追加。
-    - 必須環境変数チェック、KABUSYS_ENV/LOG_LEVEL 検証、DB パスの親ディレクトリチェック、config/*.yaml の存在チェック（PyYAML がない場合は警告）、本番時のガード（LINE 設定や KILL_FLAG_CLEAR_ON_START の注意喚起）。
-    - --strict モードで警告を失敗扱いにできる。
-- ロギング・プロセス制御ユーティリティ
-  - utils/logging_setup.py
-    - 統一的なログ設定ユーティリティを追加。
-    - stdout への StreamHandler と日次ローテーション（TimedRotatingFileHandler、30日分保持）をルートロガーに設定。
-    - LOG_LEVEL / LOG_DIR の解決順に対応、既存ハンドラの安全なクローズ／差し替え処理を実装。
-    - ログディレクトリ作成失敗時はファイル出力をスキップし、コンソールのみで継続。
-  - utils/process_priority.py
-    - プラットフォーム差を吸収したプロセス優先度設定ユーティリティを追加。
-    - Windows と POSIX（Linux/Mac/FreeBSD）の優先度設定を抽象化。psutil を用いて nice や priority class を設定。権限不足や未対応環境では warning を出力して安全にスキップ。
-    - CPU affinity を最初の N コアに固定するユーティリティも提供（設定省略可）。
-- ポートフォリオ構築ライブラリ（純関数群）
-  - portfolio/portfolio_builder.py
-    - シグナルの候補選定（スコア順／タイブレーク）select_candidates。
-    - 等金額配分 calc_equal_weights、スコア重み calc_score_weights（スコアが全て 0 の場合は等分にフォールバック）。
-  - portfolio/risk_adjustment.py
-    - セクター集中制限 apply_sector_cap（既存保有のセクター比率が閾値超過のとき新規候補を除外、unknown セクターは除外対象外）。
-    - レジームに応じた投下資金乗数 calc_regime_multiplier（bull/neutral/bear をサポート、未知レジームは 1.0 にフォールバック）。
-  - portfolio/position_sizing.py
-    - 発注株数算出 calc_position_sizes を実装（allocation_method: risk_based / equal / score）。
-    - 単元株丸め、per-position 上限（max_position_pct）、aggregate cap によるスケールダウン、cost_buffer を考慮した保守的見積り、残差分を lot 単位で再配分するロジックを実装。
-    - 価格欠損時のスキップやログ出力を考慮。
-  - portfolio/__init__.py で主要関数を再エクスポート。
-- 研究・ファクター計算
-  - research/factor_research.py
-    - DuckDB 接続を受け取り、momentum/value/volatility/liquidity 等のファクターを計算する設計を追加。
-    - モメンタム計算（calc_momentum）の骨組みと定数を実装（1M/3M/6M、MA200、ATR など）。（注: ファイル末尾で calc_momentum の実装が途中のスニペットを含むため、追加実装の余地あり）
-- ツール
-  - tools/paper_verification_report.py
-    - Paper Trading の検証レポート生成ツールを追加。
-    - 稼働率（uptime）、注文成功率（fill_rate）、送信率（send_rate）、P95 レイテンシなどを集計して PASS/FAIL 判定を出力。
-    - --from / --to / --db オプションで期間・DB を指定可能。PAPER_TRADING_SQLITE_PATH 環境変数対応。
-    - P95 計算、欠損時（テーブルが無い等）のフォールバック処理を実装。
-- パッケージ設定
-  - __init__.py にバージョン情報 __version__ = "0.1.0" を追加。
+- 今後の改善候補・未実装リストを追加
+  - 銘柄ごとの単元（lot_size）を stocks マスタで管理する拡張
+  - 価格欠損時のフォールバック（前日終値や取得原価）ロジック
+  - research モジュールの残り実装（ファクター計算の続き）
 
 ### Changed
-- なし（初回リリースのため全て追加扱い）
+- 監視・実行関連の運用改善案を記載（ログ/フラグ/プロセス管理の追加改善）
+
+### Fixed
+- （将来対応予定の既知制約の明示）
+
+---
+
+## [0.1.0] - 2026-04-18
+
+初回公開リリース。以下の主要機能を実装・提供します。
+
+### Added
+- アプリケーション基盤
+  - パッケージ初期化（kabusys.__version__ = 0.1.0）
+  - Settings クラスによる環境変数/設定値集中管理（config.py）
+    - 自動 .env ロード（.env / .env.local、OS 環境変数優先）
+    - 必須変数検証ヘルパー（_require）
+    - 各種パス・フラグ・閾値・モードのプロパティ（duckdb/sqlite/paper_trading 等）
+    - PAPER_FILL_MODE の妥当性チェック
+    - 環境モード判定ヘルパー（is_live / is_paper / is_dev）
+- 起動スクリプト
+  - 実行エンジン起動スクリプト（run_execution.py）
+    - KABUSYS_ENV=paper_trading の場合は paper_trading 専用 SQLite を使用し、本番 DB と分離
+    - BrokerClientFactory を使用したブローカークライアント生成
+    - ExecutionEngine の組み立て（OrderRepository, OrderManager, RiskManager, Reconciler 等）
+    - ストップフラグ（data/stop_requested.flag）検知で安全停止
+    - 起動時にプロセス優先度を High に設定
+  - 監視ループ起動スクリプト（run_monitoring.py）
+    - MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可（デフォルト 60 秒）
+    - 監視は環境にかかわらず本番 sqlite_path を参照して監視データを記録
+    - SystemMonitor を用いた単一チェックループ（check_once）と例外耐性
+- 設定サポートツール
+  - 対話式 .env 作成ウィザード（config_setup.py）
+    - 各種設定項目の入力支援、既存 .env 読込、ファイルへの安全な書き出し
+  - 設定検証 CLI（validate_config.py）
+    - 必須環境変数・KABUSYS_ENV・LOG_LEVEL・DB パス・config/*.yaml 存在チェック
+    - PyYAML がない場合は YAML 検証をスキップして警告
+    - 本番環境時の追加ガード（LINE 通知設定、KILL_FLAG_CLEAR_ON_START の警告）
+    - --strict オプションで警告を失敗扱いにできる
+- ロギング・プロセス管理ユーティリティ
+  - 統一ログ設定ユーティリティ（utils/logging_setup.py）
+    - stdout ストリームハンドラと日次ローテートファイルハンドラを設定
+    - LOG_DIR 作成失敗時はファイル出力をスキップし、コンソール出力のみで継続
+    - 環境変数/引数からログレベル・ログディレクトリを決定
+  - プロセス優先度・CPU affinity 設定（utils/process_priority.py）
+    - Windows / POSIX を吸収する抽象化
+    - set_process_priority(level)（high/normal/low）と set_cpu_affinity(n)
+    - 権限不足や未対応 OS の場合は安全にスキップして警告ログ
+- ポートフォリオ構築（純粋関数群、DB 参照なし）
+  - portfolio.portfolio_builder
+    - select_candidates: スコア降順・タイブレークの実装
+    - calc_equal_weights, calc_score_weights（スコア全0時は等配分へフォールバック）
+  - portfolio.risk_adjustment
+    - apply_sector_cap: セクター集中の既存保有比率チェックと候補除外
+    - calc_regime_multiplier: レジーム別乗数（bull/neutral/bear）と未知レジームのフォールバック
+  - portfolio.position_sizing
+    - calc_position_sizes: allocation_method（risk_based / equal / score）に対応した発注株数計算
+    - aggregate cap（available_cash を超えた場合のスケーリング）と lot_size（単元）丸め
+    - cost_buffer を用いた保守的なコスト見積もりと再分配ロジック
+    - TODO コメントで将来の拡張点を明示（銘柄別単元マップ、価格フォールバック等）
+- リサーチ・ファクター計算基盤
+  - research.factor_research の骨組み（モメンタム等の定数・calc_momentum の冒頭実装）
+    - DuckDB 接続を受け、prices_daily / raw_financials に基づくファクター計算設計
+- Paper Trading 向け検証ツール
+  - tools.paper_verification_report
+    - Paper Trading 用 SQLite（デフォルト data/paper_trading.db）から指標を抽出してレポート出力
+    - 指標: 稼働率（uptime）、注文成功率（fill_rate）、送信率（send_rate）、P95 レイテンシ等
+    - 日付フィルタ、P95 計算、閾値を満たすかの PASS/FAIL 判定を実装
+    - DB が存在しない・テーブル不足時のフォールバックとエラーメッセージ
+
+### Changed
+- なし（初回リリース）
 
 ### Fixed
 - なし（初回リリース）
 
-### Notes / Implementation details（コードから推測される挙動）
-- .env の自動読み込みはプロジェクトルートが検出できない場合にスキップされ、安全設計（テスト時などに KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で無効化可能）。
-- run_monitoring/run_execution は起動直後にプロセス優先度を "high" に設定しようとする（権限がない場合は警告でフォールバック）。
-- run_execution は paper_trading モードで本番 DB と完全に分離された DB を使う設計（安全性重視）。
-- ログ出力は標準出力を優先して使用する（cron/スケジューラ向けに stdout に出す設計）。
-- position_sizing の aggregate cap スケーリングは端数の処理（lot 単位）と残余キャッシュへの追加配分を考慮しており、実運用での安定性を意識した実装。
+### Notes / Implementation details
+- run_monitoring は MONITOR_POLL_INTERVAL の不正値を検知してデフォルトにフォールバックする（0 以下や非整数を拒否）。
+- run_execution は paper_trading モードと本番モードの DB を明確に分離する（paper_trading は PAPER_TRADING_SQLITE_PATH）。
+- logging_setup はログディレクトリ作成失敗時に安全にフォールバックし、stderr ではなく stdout にストリーム出力する設計。
+- process_priority は権限やプラットフォーム差分を考慮して安全にスキップ可能。
+- validate_config は PyYAML 未導入環境でも graceful に警告を出しつつ実行できるよう設計。
 
-### Known / Potential Improvements
-- research/factor_research.calc_momentum が途中で終わっているため、完全実装が必要（ファクター計算のデータ取得・ウィンドウ処理等）。
-- price が欠損（0.0） の場合のエクスポージャーや position_sizing の扱いに関する改善点（例: 前日終値やマスタからのフォールバック）がコメントで示されているため、将来的な拡張候補。
-- logging_setup のファイルハンドラ作成失敗時の代替処理はあるが、もっと詳細な障害通知（例えば EMAIL/LINE）を組み込む余地あり。
+### Known issues / TODO
+- position_sizing: price が欠損した場合にエクスポージャーが過少見積りされる可能性あり（コメントに取り扱い注意・将来のフォールバック実装予定）。
+- research.factor_research の実装が途中で切れている（ファクター計算ロジックの継続実装が必要）。
+- 銘柄別の単元（lot_size）や手数料・スリッページのより精緻な取り扱いは今後の拡張対象。
+- config/*.yaml が存在しない場合の自動生成スクリプトが参照されているが、運用時の整備が必要。
 
 ---
 
-今後のリリースでは、research モジュールの完成、テストカバレッジの追加、監視・実行の耐障害性強化（再試行・メトリクス出力等）を想定しています。もし変更履歴に特定の項目（例: 過去のリリースやコミット単位）を反映したい場合は、さらに詳細なコミットログやバージョン管理履歴を提供してください。
+（補足）
+- 本 CHANGELOG はソースコードのコメント・関数名・設計意図から推測して作成しています。実際のリリース日やバージョン方針はプロジェクトの運用に合わせて調整してください。
