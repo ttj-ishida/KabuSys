@@ -15,12 +15,13 @@ from kabusys.utils.logging_setup import setup_logging
 
 @pytest.fixture(autouse=True)
 def reset_root_logger():
-    """各テスト後にルートロガーのハンドラをリセットする。"""
+    """各テスト後にルートロガーのハンドラとレベルをリセットしてテスト間の独立性を保つ。"""
     yield
     root = logging.getLogger()
     for h in list(root.handlers):
         h.close()
         root.removeHandler(h)
+    root.setLevel(logging.WARNING)
 
 
 class TestSetupLogging:
@@ -66,6 +67,11 @@ class TestSetupLogging:
     def test_log_level_from_argument(self, tmp_path):
         """引数 level が反映される。"""
         setup_logging(app_name="test", log_dir=tmp_path, level="DEBUG")
+        assert logging.getLogger().level == logging.DEBUG
+
+    def test_log_level_as_int(self, tmp_path):
+        """引数 level に int（例: logging.DEBUG）を渡しても正しく設定される。"""
+        setup_logging(app_name="test", log_dir=tmp_path, level=logging.DEBUG)
         assert logging.getLogger().level == logging.DEBUG
 
     def test_log_level_from_env(self, tmp_path, monkeypatch):

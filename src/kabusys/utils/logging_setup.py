@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 def setup_logging(
     app_name: str = "kabusys",
     log_dir: Path | None = None,
-    level: str | None = None,
+    level: str | int | None = None,
 ) -> None:
     """ロギングを設定する。
 
@@ -52,14 +52,17 @@ def setup_logging(
     Args:
         app_name: ログファイル名のプレフィックス（例: ``"execution"`` → ``logs/execution.log``）。
         log_dir:  ログファイルの保存ディレクトリ。None の場合は上記解決順を使用。
-        level:    ログレベル文字列（"DEBUG"/"INFO"/"WARNING"/"ERROR"/"CRITICAL"）。
-                  None の場合は上記解決順を使用。
+        level:    ログレベル文字列（"DEBUG"/"INFO"/"WARNING"/"ERROR"/"CRITICAL"）または
+                  整数値（例: ``logging.DEBUG``）。None の場合は上記解決順を使用。
     """
-    # ログレベル解決
-    resolved_level_str = (
-        level or os.environ.get("LOG_LEVEL", _DEFAULT_LOG_LEVEL)
-    ).upper()
-    numeric_level = getattr(logging, resolved_level_str, logging.INFO)
+    # ログレベル解決（int / str の両形式を受け入れる）
+    if isinstance(level, int):
+        numeric_level = level
+    else:
+        resolved_level_str = (
+            level or os.environ.get("LOG_LEVEL", _DEFAULT_LOG_LEVEL)
+        ).upper()
+        numeric_level = getattr(logging, resolved_level_str, logging.INFO)
 
     # ログディレクトリ解決・作成
     resolved_dir = log_dir or Path(os.environ.get("LOG_DIR", str(_DEFAULT_LOG_DIR)))
@@ -82,6 +85,8 @@ def setup_logging(
     formatter = logging.Formatter(_LOG_FORMAT, datefmt=_DATE_FORMAT)
 
     # StreamHandler（コンソール stdout 出力）
+    # stderr ではなく stdout を使用: Task Scheduler/cron から起動する際に
+    # stdout/stderr を一本化してリダイレクトするため
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setLevel(numeric_level)
     stream_handler.setFormatter(formatter)
@@ -107,6 +112,6 @@ def setup_logging(
 
     logger.debug(
         "ロギングを設定しました: level=%s, log_file=%s",
-        resolved_level_str,
+        logging.getLevelName(numeric_level),
         log_file,
     )
