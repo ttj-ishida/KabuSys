@@ -316,8 +316,11 @@ Cancelled
 
 ## 14.1 マーケットクラッシュシナリオ
 
+> **閾値比較仕様**: ドローダウンチェックは **厳密な超過（`drawdown > max_drawdown`）** でブロック。閾値ちょうど（`==`）は通過する。
+
 検証内容:
 - ドローダウン 5% は発注ブロックしない（閾値 15%）
+- ドローダウン閾値ちょうど（15%）は通過（`>` 判定のため）
 - ドローダウン 20% で `RiskManager.check_metrics()` が失敗
 - `KillSwitch.evaluate()` が drawdown_alert=True で `kill.flag` を書き込む
 - 複数回クラッシュ評価でも `kill.flag` が冪等（上書きしない）

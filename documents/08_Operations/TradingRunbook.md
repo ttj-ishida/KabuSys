@@ -134,7 +134,7 @@ python scripts\stop_system.py
 
 各プロセス・スクリプトは `kabusys.utils.logging_setup.setup_logging` を使用して統一されたログ設定を行う。  
 ログは **stdout（コンソール）** と **ファイル（日次ローテーション）** の2か所に出力される。  
-フォーマット: `%(asctime)s %(levelname)-8s %(name)s: %(message)s`（ISO8601形式タイムスタンプ）
+フォーマット: `%(asctime)s %(levelname)-8s %(name)s: %(message)s`（`datefmt="%Y-%m-%dT%H:%M:%S"` によるローカル時刻・タイムゾーンなし。例: `2026-04-18T09:00:00`）
 
 **アプリケーションログファイル（`logs\` ディレクトリ、自動ローテーション）:**
 

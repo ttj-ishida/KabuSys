@@ -207,6 +207,8 @@ Phase 2: Grafana
 
 **フォーマット:** `%(asctime)s %(levelname)-8s %(name)s: %(message)s`
 
+> `asctime` は `datefmt="%Y-%m-%dT%H:%M:%S"` によりローカル時刻の ISO8601 形式（タイムゾーンなし）で出力される。例: `2026-04-18T09:00:00`
+
 **保存対象:**
 - システムログ（`logs/execution.log`, `logs/monitoring.log`）
 - ETLログ（`logs/data_update.log`, `logs/feature_gen.log`）

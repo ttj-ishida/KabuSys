@@ -15,9 +15,9 @@ import sqlite3
 
 import pytest
 
-from kabusys.execution.broker_api import Position
+from kabusys.execution.broker_api import OrderRequest, OrderSentPendingError, Position
 from kabusys.execution.mock_client import MockBrokerClient
-from kabusys.execution.order_manager import OrderManager
+from kabusys.execution.order_manager import DuplicateOrderError, OrderManager
 from kabusys.execution.order_record import OrderState
 from kabusys.execution.order_repository import OrderRepository, init_orders_db
 from kabusys.execution.risk_manager import RiskConfig, RiskManager, RiskRejectReason
@@ -353,8 +353,6 @@ class TestLiquidityExhaustionScenario:
 
     def test_all_orders_rejected_by_broker(self, repo):
         """ブローカーが全発注を拒否する場合、send_order は Rejected 状態を返す。"""
-        from kabusys.execution.broker_api import OrderRequest
-
         broker = MockBrokerClient(fill_mode="reject")
         om = OrderManager(broker=broker, repo=repo)
         request = OrderRequest(
@@ -374,9 +372,6 @@ class TestLiquidityExhaustionScenario:
         fill_mode='never' では注文が OrderSent 状態で保留される（active 扱い）。
         active 注文（OrderSent 等）がある場合は DuplicateOrderError になる。
         """
-        from kabusys.execution.broker_api import OrderRequest
-        from kabusys.execution.order_manager import DuplicateOrderError
-
         broker = MockBrokerClient(fill_mode="never")  # OrderSent 状態で止まる
         om = OrderManager(broker=broker, repo=repo)
 
@@ -384,8 +379,6 @@ class TestLiquidityExhaustionScenario:
         request = OrderRequest(
             code="1234", side="buy", qty=100, order_type="market", price=0.0
         )
-
-        from kabusys.execution.broker_api import OrderSentPendingError
 
         # 1 回目: 注文作成 → OrderSent（never fill → active のまま）
         record1 = om.create_order(signal_id, request)
@@ -402,8 +395,6 @@ class TestLiquidityExhaustionScenario:
         send_order は OrderSentPendingError を呼び出し元へ伝播させる。
         DB には OrderSent 状態 + broker_order_id が保存される（Reconciliation 対象）。
         """
-        from kabusys.execution.broker_api import OrderRequest, OrderSentPendingError
-
         broker = MockBrokerClient(fill_mode="never")
         om = OrderManager(broker=broker, repo=repo)
         request = OrderRequest(
@@ -425,8 +416,6 @@ class TestLiquidityExhaustionScenario:
         fill_mode='partial': qty=100 → filled_qty=50, status='partial'
         OrderAccepted に遷移後 sync_order で PartialFill に更新される。
         """
-        from kabusys.execution.broker_api import OrderRequest
-
         broker = MockBrokerClient(fill_mode="partial", available_cash=5_000_000.0)
         om = OrderManager(broker=broker, repo=repo)
         request = OrderRequest(
@@ -496,8 +485,6 @@ class TestLiquidityExhaustionScenario:
 
     def test_sell_during_liquidity_crisis_updates_cash(self, repo):
         """流動性危機中でも売却が成功し、現金残高が増加する。"""
-        from kabusys.execution.broker_api import OrderRequest
-
         pos = Position(code="7777", qty=200, avg_price=2000.0)
         broker = MockBrokerClient(
             fill_mode="instant",
