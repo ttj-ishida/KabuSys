@@ -327,6 +327,11 @@ Cancelled
 - クラッシュ後もポジションは保持される（強制清算しない）
 - ポジション評価額が全体利用率上限（80%）を超える新規発注は拒否される
 
+**breadth_stop による BUY 停止（Issue #173 で追加予定）:**
+- 25日移動平均上銘柄比率が 35% 未満の場合、`market_breadth.breadth_stop = True` となり新規 BUY を全件停止する
+- この停止は `regime_score` や KillSwitch とは独立して動作する（SELL は停止されない）
+- 騰落レシオ < 80 の場合は `regime_score` に −0.2 の補正を加えて bear 判定を強化する
+
 ## 14.2 API 接続遮断シナリオ
 
 検証内容:

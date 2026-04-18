@@ -42,26 +42,62 @@ AIが直接「買う・売る」の判断を下したり、APIを叩いて直接
 2. **Neutral (ニュートラル・中立)**: ボックス相場。標準的なポジションサイズで運用。
 3. **Bear (ベア・弱気)**: 下落トレンド、ボラティリティ急騰時など。**新規買いシグナルをすべて遮断・無効化する。** キャッシュ比率を高める。
 
-### 3.2 判定要素（実装済み）
+### 3.2 判定要素
+
+**実装済み（主要スコア）:**
 - **ETF 1321（日経225連動型）の200日移動平均との乖離（重み70%）**: `prices_daily` から取得。
   `ma200_ratio = 終値 / 200日MA`
 - **マクロ経済ニュースの LLM センチメント（重み30%）**: `raw_news` からキーワード
   （日銀・FOMC・CPI・為替介入等）でフィルタし、gpt-4o-mini で評価。
 
+**実装予定（Issue #173）— 市場内部指標（breadth）補正:**
+- **25日騰落レシオ**: 直近25営業日の値上がり銘柄数合計 / 値下がり銘柄数合計 × 100
+  - 80 未満 → `raw_score -= 0.2`（市場の弱さをスコアに反映）
+  - 120 超 → `raw_score += 0.1`（市場の強さをスコアに反映）
+- **25日移動平均上銘柄比率**: close > 25日MA の銘柄数 / 全銘柄数
+  - 35% 未満 → `breadth_stop = True`（新規 BUY を全件停止。レジームラベルとは独立した停止条件）
+- **新高値/新安値比率**: 52週高値銘柄数 / 52週安値銘柄数（記録用。将来のフィルタ拡張に備える）
+
+計算対象: `prices_daily`（J-Quants から取得した東証上場全銘柄の日足データ）
+
 将来対応（別 Issue）:
 - VIX指数 / 日経VIの閾値超え
 
 ### 3.3 スコア合成
+
+**ステップ1: 主要スコア（既存）**
 ```
-regime_score = clip(0.7 * (ma200_ratio - 1.0) * 10 + 0.3 * macro_sentiment, -1.0, 1.0)
+raw_score = 0.7 * (ma200_ratio - 1.0) * 10 + 0.3 * macro_sentiment
 ```
-- `score >= +0.2` → 'bull'
-- `score <= -0.2` → 'bear'
+
+**ステップ2: breadth 補正（Issue #173 で追加）**
+```
+if adv_decline_ratio < 80:  raw_score -= 0.2
+if adv_decline_ratio > 120: raw_score += 0.1
+```
+
+**ステップ3: クリップ & ラベル判定**
+```
+regime_score = clip(raw_score, -1.0, 1.0)
+```
+- `regime_score >= +0.2` → 'bull'
+- `regime_score <= -0.2` → 'bear'
 - それ以外 → 'neutral'
 
-### 3.4 実装モジュール
-- `src/kabusys/ai/regime_detector.py` — `score_regime(conn, target_date, api_key)`
-- 出力先: `market_regime` テーブル（日付単位・1行）
+> `breadth_stop`（25日MA上銘柄比率 < 35%）は `regime_score` には影響しない。
+> シグナル生成層（`signal_generator.py`）で独立した BUY 停止条件として評価される。
+
+### 3.4 出力テーブル
+
+| テーブル | 更新頻度 | 主な用途 |
+|---------|---------|---------|
+| `market_regime` | 日次（18:00 ai_analysis バッチ） | regime_score, regime_label |
+| `market_breadth` | 日次（15:30 data_update バッチ） | 騰落レシオ, MA上比率, breadth_stop |
+
+### 3.5 実装モジュール
+- `src/kabusys/ai/regime_detector.py` — `score_regime(conn, target_date, api_key)`（breadth 補正追加）
+- `src/kabusys/data/breadth.py` — `calc_and_save_breadth(conn, target_date)`（Issue #173 で新規追加）
+- 出力先: `market_regime` テーブル、`market_breadth` テーブル（日付単位・各1行）
 - `ai_scores.regime_score` は使用しない（NULL のまま保持）
 
 ---
