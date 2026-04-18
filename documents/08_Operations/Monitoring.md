@@ -199,19 +199,25 @@ Phase 2: Grafana
 
 # 11. ログ管理
 
-ログは以下を保存する。
+各プロセス・スクリプトは `kabusys.utils.logging_setup.setup_logging` で統一されたロギングを設定する。
 
-- システムログ
-- ETLログ
-- AIログ
-- 発注ログ
-- エラーログ
+**出力先:**
+- stdout（コンソール）: Task Scheduler 等でリダイレクト可能
+- ファイル: `logs/<app_name>.log`（日次ローテーション・30日保持）
 
-保存期間
+**フォーマット:** `%(asctime)s %(levelname)-8s %(name)s: %(message)s`
 
-```
-長期保存
-```
+**保存対象:**
+- システムログ（`logs/execution.log`, `logs/monitoring.log`）
+- ETLログ（`logs/data_update.log`, `logs/feature_gen.log`）
+- AIログ（`logs/ai_analysis.log`）
+- 発注ログ（`logs/strategy_signal.log`, `logs/portfolio_construction.log`）
+- エラーログ（各ファイル内に ERROR / CRITICAL レベルで記録）
+
+**保存期間:** 30日（`TimedRotatingFileHandler` による自動ローテーション）
+
+**ログレベル設定:** 環境変数 `LOG_LEVEL`（デフォルト: `INFO`）  
+**ログディレクトリ設定:** 環境変数 `LOG_DIR`（Task Scheduler 起動時は絶対パスを推奨）
 
 ---
 

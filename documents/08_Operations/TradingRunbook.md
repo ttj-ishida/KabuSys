@@ -132,32 +132,38 @@ python scripts\stop_system.py
 
 ### 5.3 ログ確認
 
-ログは標準出力に出力される。Task Scheduler 経由で起動したジョブは `logs\<ジョブ名>.log` にリダイレクトされる（`setup_task_scheduler.ps1` で設定済み）。  
-`logging.basicConfig` で `%(asctime)s %(levelname)s %(message)s` 形式。
+各プロセス・スクリプトは `kabusys.utils.logging_setup.setup_logging` を使用して統一されたログ設定を行う。  
+ログは **stdout（コンソール）** と **ファイル（日次ローテーション）** の2か所に出力される。  
+フォーマット: `%(asctime)s %(levelname)-8s %(name)s: %(message)s`（ISO8601形式タイムスタンプ）
 
-**ログファイル一覧（`logs\` ディレクトリ）:**
+**アプリケーションログファイル（`logs\` ディレクトリ、自動ローテーション）:**
 
-| ジョブ名 | ログファイル |
-|---------|------------|
-| KabuSys_ExecutionStart | `logs\KabuSys_ExecutionStart.log` |
-| KabuSys_MonitoringStart | `logs\KabuSys_MonitoringStart.log` |
-| KabuSys_DataUpdate | `logs\KabuSys_DataUpdate.log` |
-| KabuSys_FeatureGen | `logs\KabuSys_FeatureGen.log` |
-| KabuSys_AiAnalysis | `logs\KabuSys_AiAnalysis.log` |
-| KabuSys_StrategySignal | `logs\KabuSys_StrategySignal.log` |
-| KabuSys_PortfolioConstruction | `logs\KabuSys_PortfolioConstruction.log` |
+| プロセス / スクリプト | ログファイル | ローテーション |
+|---------------------|------------|--------------|
+| ExecutionEngine | `logs\execution.log` | 日次・30日保持 |
+| MonitoringEngine | `logs\monitoring.log` | 日次・30日保持 |
+| data_update バッチ | `logs\data_update.log` | 日次・30日保持 |
+| feature_gen バッチ | `logs\feature_gen.log` | 日次・30日保持 |
+| ai_analysis バッチ | `logs\ai_analysis.log` | 日次・30日保持 |
+| strategy_signal バッチ | `logs\strategy_signal.log` | 日次・30日保持 |
+| portfolio_construction バッチ | `logs\portfolio_construction.log` | 日次・30日保持 |
+
+> ログファイルは日次（深夜0時）に自動ローテーションされ、30日分保持される。手動アーカイブは不要。  
+> ログディレクトリは `LOG_DIR` 環境変数で変更可能（未設定時はプロセス起動時のカレントディレクトリ配下の `logs/`）。  
+> Task Scheduler から起動した場合は `LOG_DIR` を絶対パスで設定すること（例: `C:\KabuSys\logs`）。
 
 **ログ確認コマンド（PowerShell）:**
 
 ```powershell
 # 直近50行を確認
-Get-Content logs\KabuSys_DataUpdate.log -Tail 50
+Get-Content logs\execution.log -Tail 50
 
 # ERROR / CRITICAL のみ抽出
 Select-String -Path logs\*.log -Pattern "ERROR|CRITICAL"
-```
 
-> ログは各実行ごとに **追記** される。定期的（週1回推奨）に手動でアーカイブまたは削除すること。
+# 過去ローテーションファイルの確認（例: execution.log.2026-04-17）
+Get-ChildItem logs\execution.log* | Sort-Object LastWriteTime -Descending
+```
 
 主要なログキーワード:
 
