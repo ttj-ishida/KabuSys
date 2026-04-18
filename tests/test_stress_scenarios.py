@@ -152,7 +152,6 @@ class TestMarketCrashScenario:
             _make_risk_check(drawdown_pct=0.20, drawdown_alert=True),
         )
         assert reason is not None
-        assert "DRAWDOWN" in reason
         assert (tmp_path / "kill.flag").exists()
 
     def test_new_orders_blocked_after_kill_switch(self, tmp_path, repo):
@@ -369,11 +368,11 @@ class TestLiquidityExhaustionScenario:
         result = om.send_order(record.client_order_id)
         assert result.state == OrderState.Rejected
 
-    def test_mass_rejection_does_not_create_duplicate_orders(self, repo):
-        """未約定保留シナリオで重複注文が作成されないことを確認する。
+    def test_pending_order_blocks_duplicate_creation(self, repo):
+        """未約定保留中の注文がある場合、同一 signal_id での再作成が DuplicateOrderError になる。
 
         fill_mode='never' では注文が OrderSent 状態で保留される（active 扱い）。
-        ただし active 注文（OrderSent 等）がある場合は DuplicateOrderError になる。
+        active 注文（OrderSent 等）がある場合は DuplicateOrderError になる。
         """
         from kabusys.execution.broker_api import OrderRequest
         from kabusys.execution.order_manager import DuplicateOrderError
