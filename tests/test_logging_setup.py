@@ -4,10 +4,7 @@
 from __future__ import annotations
 
 import logging
-import os
 from logging.handlers import TimedRotatingFileHandler
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
