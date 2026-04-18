@@ -1,81 +1,92 @@
+
 import os
+from pathlib import Path
+import tempfile
+import io
 
 import pytest
 
-# --- config._parse_env_line, Settings, _load_env_file, _require tests ---
-from kabusys.config import (
-    _parse_env_line,
-    _load_env_file,
-    Settings,
-    _require,
-)
+from kabusys import config as config_mod
 
 
 def test_parse_env_line_basic_and_comments():
-    assert _parse_env_line("") is None
-    assert _parse_env_line("   # comment") is None
-    assert _parse_env_line("KEYWITHOUTEQ") is None
+    assert config_mod._parse_env_line("") is None
+    assert config_mod._parse_env_line("   ") is None
+    assert config_mod._parse_env_line("# comment") is None
 
-    assert _parse_env_line("export FOO=bar") == ("FOO", "bar")
-    assert _parse_env_line("KEY= value  ") == ("KEY", "value")
-    # inline comment is trimmed only if preceded by space/tab
-    assert _parse_env_line("K=val #comment") == ("K", "val")
-    assert _parse_env_line("K=val#notcomment") == ("K", "val#notcomment")
+    assert config_mod._parse_env_line("KEY=val") == ("KEY", "val")
+    assert config_mod._parse_env_line(" export KEY2 =  another ") == ("KEY2", "another")
+
+    # quoted with double quote and escape
+    assert config_mod._parse_env_line('Q="a\\\"b c"') == ("Q", 'a"b c')
+    # single quote with escape
+    assert config_mod._parse_env_line("S='a\\'b'") == ("S", "a'b")
+
+    # inline comment (space before #)
+    assert config_mod._parse_env_line("FOO=bar # comment") == ("FOO", "bar")
+    # hash inside value without preceding space should be kept
+    assert config_mod._parse_env_line("FOO=bar#baz") == ("FOO", "bar#baz")
+
+    # missing '='
+    assert config_mod._parse_env_line("NOEQ") is None
+    # empty key
+    assert config_mod._parse_env_line("=value") is None
 
 
-def test_parse_env_line_quoted_and_escaped():
-    # single quotes with escaped quote
-    assert _parse_env_line("A='a\\'b'") == ("A", "a'b")
-    # double quotes with escape
-    assert _parse_env_line('B="x\\"y"') == ("B", 'x"y')
-    # empty value in quotes
-    assert _parse_env_line("C=''") == ("C", "")
-    # quoted with trailing comment ignored
-    assert _parse_env_line("D='foo'  # comment") == ("D", "foo")
+def test_load_env_file_override_and_protected(monkeypatch, tmp_path):
+    target = tmp_path / ".env.test"
+    target.write_text("A=1\nB=2\nC=3\n", encoding="utf-8")
 
+    # start with B already set in os.environ
+    monkeypatch.setenv("B", "exists")
+    # protected contains current os.environ keys (B)
+    protected = frozenset(os.environ.keys())
 
-def test_load_env_file_override_and_protected(tmp_path, monkeypatch):
-    p = tmp_path / ".env.test"
-    p.write_text("A=1\nB=2\nC=3\n", encoding="utf-8")
-
-    # ensure environment starts empty for these keys
-    monkeypatch.delenv("A", raising=False)
-    monkeypatch.delenv("B", raising=False)
-    monkeypatch.delenv("C", raising=False)
-
-    # load without override -> set missing keys only
-    _load_env_file(p, override=False, protected=frozenset())
+    # override=False should not overwrite existing B
+    config_mod._load_env_file(path=target, override=False, protected=protected)
     assert os.environ.get("A") == "1"
-    assert os.environ.get("B") == "2"
+    assert os.environ.get("B") == "exists"
+    assert os.environ.get("C") == "3"
 
-    # set B to something else, then load with override but protected contains B
-    os.environ["B"] = "orig"
-    _load_env_file(p, override=True, protected=frozenset({"B"}))
-    # B should remain orig because it's protected
-    assert os.environ["B"] == "orig"
+    # now test override=True but protected prevents overwriting B
+    target.write_text("A=9\nB=9\nD=4\n", encoding="utf-8")
+    config_mod._load_env_file(path=target, override=True, protected=protected)
+    assert os.environ.get("A") == "9"  # overwritten
+    assert os.environ.get("B") == "exists"  # protected, not overwritten
+    assert os.environ.get("D") == "4"
 
 
 def test_require_raises_when_missing(monkeypatch):
-    monkeypatch.delenv("SOME_NONEXISTENT_KEY", raising=False)
+    # ensure KEY not present
+    monkeypatch.delenv("SOME_MISSING_KEY", raising=False)
     with pytest.raises(ValueError):
-        _require("SOME_NONEXISTENT_KEY")
+        config_mod._require("SOME_MISSING_KEY")
 
 
-def test_settings_env_and_fill_mode(monkeypatch):
-    s = Settings()
-    # default env is development
-    monkeypatch.setenv("KABUSYS_ENV", "development")
-    assert s.env == "development"
-    # invalid env should raise
-    monkeypatch.setenv("KABUSYS_ENV", "invalid_env_value")
+def test_settings_paper_fill_mode_and_env_log_level(monkeypatch):
+    # valid fill mode
+    monkeypatch.setenv("PAPER_FILL_MODE", "partial")
+    s = config_mod.Settings()
+    assert s.paper_fill_mode == "partial"
+
+    # invalid fill mode raises
+    monkeypatch.setenv("PAPER_FILL_MODE", "INVALID_MODE")
+    with pytest.raises(ValueError):
+        _ = s.paper_fill_mode
+
+    # env valid
+    monkeypatch.setenv("KABUSYS_ENV", "live")
+    assert s.env == "live"
+    assert s.is_live
+
+    # invalid env
+    monkeypatch.setenv("KABUSYS_ENV", "not_valid")
     with pytest.raises(ValueError):
         _ = s.env
 
-    # PAPER_FILL_MODE valid/invalid
-    monkeypatch.setenv("PAPER_FILL_MODE", "instant")
-    assert s.paper_fill_mode == "instant"
-    monkeypatch.setenv("PAPER_FILL_MODE", "PARTIAL")
-    assert s.paper_fill_mode == "partial"
-    monkeypatch.setenv("PAPER_FILL_MODE", "invalid_mode")
+    # log level valid/invalid
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+    assert s.log_level == "DEBUG"
+    monkeypatch.setenv("LOG_LEVEL", "BAD_LEVEL")
     with pytest.raises(ValueError):
-        _ = s.paper_fill_mode
+        _ = s.log_level
