@@ -1,11 +1,4 @@
-
-import io
-import json
-import logging
-import math
 import os
-from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -34,7 +27,7 @@ def test_parse_env_line_quoted_and_escaped():
     # single quotes with escaped quote
     assert _parse_env_line("A='a\\'b'") == ("A", "a'b")
     # double quotes with escape
-    assert _parse_env_line('B="x\\\"y"') == ("B", 'x"y')
+    assert _parse_env_line('B="x\\"y"') == ("B", 'x"y')
     # empty value in quotes
     assert _parse_env_line("C=''") == ("C", "")
     # quoted with trailing comment ignored
