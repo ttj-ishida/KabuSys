@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import logging
+import sys
 from logging.handlers import TimedRotatingFileHandler
+from unittest.mock import patch
 
 import pytest
 
@@ -41,6 +43,14 @@ class TestSetupLogging:
         handler_types = {type(h) for h in root.handlers}
         assert logging.StreamHandler in handler_types
         assert TimedRotatingFileHandler in handler_types
+
+    def test_stream_handler_uses_stdout(self, tmp_path):
+        """StreamHandler が sys.stdout を使用する。"""
+        setup_logging(app_name="test", log_dir=tmp_path)
+        root = logging.getLogger()
+        stream_handlers = [h for h in root.handlers if type(h) is logging.StreamHandler]
+        assert len(stream_handlers) == 1
+        assert stream_handlers[0].stream is sys.stdout
 
     def test_handler_count_is_two(self, tmp_path):
         """ハンドラ数がちょうど2（stream + file）。"""
@@ -105,3 +115,39 @@ class TestSetupLogging:
         setup_logging(app_name="my_service", log_dir=tmp_path)
         assert (tmp_path / "my_service.log").exists()
         assert not (tmp_path / "kabusys.log").exists()
+
+    def test_file_handler_failure_falls_back_to_stream_only(self, tmp_path):
+        """FileHandler 作成失敗時も StreamHandler のみで継続する。"""
+        with patch(
+            "kabusys.utils.logging_setup.TimedRotatingFileHandler",
+            side_effect=OSError("permission denied"),
+        ):
+            setup_logging(app_name="test", log_dir=tmp_path)
+        root = logging.getLogger()
+        assert len(root.handlers) == 1
+        assert type(root.handlers[0]) is logging.StreamHandler
+
+    def test_existing_handlers_closed_before_setup(self, tmp_path):
+        """2回目の呼び出しで既存ハンドラが close される（ spy で検証）。"""
+        setup_logging(app_name="test", log_dir=tmp_path)
+        root = logging.getLogger()
+        first_handlers = list(root.handlers)
+
+        closed = []
+
+        # 既存ハンドラの close をラップして呼び出しを追跡する
+        for h in first_handlers:
+            original = h.close
+
+            def make_spy(orig, handler):
+                def spy():
+                    closed.append(handler)
+                    orig()
+
+                return spy
+
+            h.close = make_spy(original, h)
+
+        setup_logging(app_name="test", log_dir=tmp_path)
+
+        assert len(closed) == len(first_handlers)

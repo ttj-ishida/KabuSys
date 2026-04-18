@@ -1,7 +1,7 @@
 # src/kabusys/utils/logging_setup.py
 """logging_setup.py — ログ設定ユーティリティ。
 
-StreamHandler（コンソール）と TimedRotatingFileHandler（日次ローテーション）を
+StreamHandler（コンソール stdout）と TimedRotatingFileHandler（日次ローテーション）を
 ルートロガーに設定する。全起動スクリプトから呼び出して統一的なログ管理を実現する。
 
 使い方:
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
@@ -64,30 +65,45 @@ def setup_logging(
     resolved_dir = log_dir or Path(os.environ.get("LOG_DIR", str(_DEFAULT_LOG_DIR)))
     resolved_dir.mkdir(parents=True, exist_ok=True)
 
-    # ルートロガーにレベルを設定（既存ハンドラをクリア）
+    # ルートロガーにレベルを設定（既存ハンドラを flush/close してから削除）
     root = logging.getLogger()
     root.setLevel(numeric_level)
-    root.handlers.clear()
+    for h in list(root.handlers):
+        try:
+            h.flush()
+        except Exception:
+            pass
+        try:
+            h.close()
+        except Exception:
+            pass
+        root.removeHandler(h)
 
     formatter = logging.Formatter(_LOG_FORMAT, datefmt=_DATE_FORMAT)
 
-    # StreamHandler（コンソール出力）
-    stream_handler = logging.StreamHandler()
+    # StreamHandler（コンソール stdout 出力）
+    stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setLevel(numeric_level)
     stream_handler.setFormatter(formatter)
     root.addHandler(stream_handler)
 
     # TimedRotatingFileHandler（日次ローテーション・30日保持）
+    # ファイル作成に失敗した場合は StreamHandler のみで継続する
     log_file = resolved_dir / f"{app_name}.log"
-    file_handler = TimedRotatingFileHandler(
-        log_file,
-        when="midnight",
-        backupCount=_BACKUP_COUNT,
-        encoding="utf-8",
-    )
-    file_handler.setLevel(numeric_level)
-    file_handler.setFormatter(formatter)
-    root.addHandler(file_handler)
+    try:
+        file_handler = TimedRotatingFileHandler(
+            log_file,
+            when="midnight",
+            backupCount=_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(numeric_level)
+        file_handler.setFormatter(formatter)
+        root.addHandler(file_handler)
+    except Exception as e:
+        logger.warning(
+            "ファイルハンドラの作成に失敗しました。コンソール出力のみ有効です: %s", e
+        )
 
     logger.debug(
         "ロギングを設定しました: level=%s, log_file=%s",
