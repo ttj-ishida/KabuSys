@@ -1,92 +1,103 @@
-# Changelog
+# CHANGELOG
 
-すべての重要な変更点を記録します。形式は「Keep a Changelog」に準拠しています。    
+すべての注目すべき変更をここに記録します。フォーマットは「Keep a Changelog」に準拠します。
 
-現在のパッケージバージョン: 0.1.0
+現在のバージョンは src/kabusys/__init__.py の __version__ に従っています。
 
----
+## [Unreleased]
+- ドキュメント化・補足情報の追記予定
+- research/factor_research モジュールの一部実装が途中（calc_momentum の実装開始のみ、未完）であるため、追加の実装・テストが必要
 
 ## [0.1.0] - 2026-04-18
+初回公開リリース。自動売買基盤のコア機能群をまとめて実装しました。
 
 ### Added
-- 初期リリースを追加。
-- 実行・監視用エントリポイントを追加:
+- 起動スクリプト
   - run_execution.py
-    - ExecutionEngine の起動スクリプト。
-    - KABUSYS_ENV に応じて Paper Trading 用の専用 SQLite（data/paper_trading.db）を使い、本番 DB と分離。
-    - BrokerClientFactory を用いたブローカークライアント生成、OrderRepository / OrderManager / RiskManager / Reconciler の組み立て、ExecutionEngine のデーモン実行と停止フラグ（data/stop_requested.flag）監視を実装。
-    - 起動時にプロセス優先度を "high" に設定し、PID ファイル（data/execution.pid）を管理。
+    - ExecutionEngine を起動するエントリポイントを実装。
+    - 起動時にプロセス優先度を "high" に設定。
+    - KABUSYS_ENV に応じて Paper Trading 用 DB を分離（settings.paper_sqlite_path を使用）。
+    - Broker クライアントのファクトリ利用、OrderRepository / OrderManager / RiskManager / Reconciler を組み立て、ExecutionEngine をスレッドで実行。
+    - data/stop_requested.flag による外部停止フラグ検知、data/execution.pid に PID を記録する仕組み（Engine 側で PID ファイルを扱う想定）。
   - run_monitoring.py
-    - SystemMonitor のポーリングループ起動スクリプト。
-    - MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒）。不正値はデフォルトにフォールバック。
-    - 監視は KABUSYS_ENV にかかわらず本番 sqlite_path（data/monitoring.db）を使用。
-    - 停止フラグ（data/stop_requested.flag）検知による安全終了。
-- 設定管理とウィザード:
+    - SystemMonitor のポーリングループ起動スクリプトを実装。
+    - 環境変数 MONITOR_POLL_INTERVAL でポーリング間隔を上書き可能（デフォルト 60 秒）。無効値はデフォルトにフォールバック。
+    - 監視は環境にかかわらず本番用 sqlite_path を使用して初期化。
+
+- 設定周り
   - config.py
-    - .env/.env.local の自動ロード（プロジェクトルート検出: .git または pyproject.toml を基準）。
-    - .env パーサを実装（export プレフィックス対応、シングル/ダブルクォート内のエスケープ処理、インラインコメントの扱いなど）。
-    - Settings クラスで各種設定値をプロパティとして提供（J-Quants, kabu API, DuckDB/SQLite パス, PAPER_FILL_MODE, PID/KILL フラグ設定, CPU/MEM/DISK 閾値, 環境判定ユーティリティ等）。
-    - 自動ロードを無効化するための環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD をサポート。
+    - .env の自動ロード機能を実装（プロジェクトルートを .git / pyproject.toml で検出）。
+    - .env のパース処理でクォート、エスケープ、export 形式、インラインコメントに対応。
+    - Settings クラスを実装し、環境変数をラッパー化（J-Quants / kabu API / DB パス / 各種閾値 / 環境判定プロパティ等）。
+    - PAPER_FILL_MODE の妥当性検証、KABUSYS_ENV / LOG_LEVEL の検証など。
+    - KABUSYS_DISABLE_AUTO_ENV_LOAD により自動ロードを無効化可能。
+
   - config_setup.py
-    - 対話式 .env 作成/更新ウィザードを実装。シークレット項目のマスク表示、既存 .env の読み込み、最終確認・保存機能を提供。
-- 設定検証 CLI:
+    - 対話式ウィザードで .env を初期作成・更新する CLI を実装。
+    - シークレット項目はマスク表示、既存 .env の読み込み・再利用に対応。
+    - 生成した .env テンプレートの保存機能を提供。
+
   - validate_config.py
-    - .env と config/*.yaml の基本的な設定検証を行う CLI。必須環境変数チェック、KABUSYS_ENV / LOG_LEVEL の妥当性、DB パスの親ディレクトリチェック、YAML パース（PyYAML が存在する場合）の検証、本番環境に対する追加ガードを実装。
-    - --strict オプションで警告を FAIL 扱いにできる。
-- ロギングユーティリティ:
-  - utils/logging_setup.py
-    - ルートロガーに StreamHandler (stdout) と TimedRotatingFileHandler（日次ローテーション）を設定。
-    - ログディレクトリ作成の失敗時はファイル出力をスキップしてコンソールログのみで継続。
-    - ログレベル解決順序およびログディレクトリ解決順序を実装。
-    - 日次ログの 30 世代保持（backupCount=30）。
-- プロセス優先度ユーティリティ:
-  - utils/process_priority.py
-    - Windows / POSIX の差分を吸収してカレントプロセスの優先度（high/normal/low）を設定。
-    - psutil に基づく実装で、権限エラー等は警告を出してスキップ。
-    - set_cpu_affinity を提供（最初の N コアに固定）。
-- ポートフォリオ構築ライブラリ:
+    - .env と config/*.yaml の事前検証 CLI を実装。
+    - 必須環境変数チェック、KABUSYS_ENV/LOG_LEVEL の検証、DB パスの親ディレクトリチェック、YAML パース（PyYAML がある場合）などを実行。
+    - --strict モードで警告を FAIL 扱いにできる。
+
+- ポートフォリオ構築ライブラリ（純粋関数群）
   - portfolio/portfolio_builder.py
-    - 候補選定 (select_candidates)、等配分 (calc_equal_weights)、スコア加重 (calc_score_weights) を実装。
+    - select_candidates: BUY シグナルのスコア順選定
+    - calc_equal_weights: 等金額配分
+    - calc_score_weights: スコア加重配分（全スコアが 0 の場合は等配分にフォールバック）
   - portfolio/risk_adjustment.py
-    - セクター集中度上限チェック (apply_sector_cap)、市場レジームに応じた資金乗数 (calc_regime_multiplier) を実装。レジームマップ: bull=1.0, neutral=0.7, bear=0.3。未知レジームは 1.0 でフォールバック。
+    - apply_sector_cap: セクター集中制限（既存保有比率に基づいて新規候補を除外）
+    - calc_regime_multiplier: 市場レジームに応じた投下資金乗数を返す（bull/neutral/bear のマッピング、未知レジームはフォールバック）
   - portfolio/position_sizing.py
-    - 発注株数計算 (calc_position_sizes) を実装。allocation_method による分岐（risk_based / equal / score）、lot_size による丸め、per-stock 上限と aggregate cap（利用可能現金）によるスケーリングと端数配分ロジックを実装。cost_buffer により保守的見積りを行う。
-- リサーチ / ファクター計算:
-  - research/factor_research.py（設計・一部実装）
-    - Momentum, Value, Volatility, Liquidity などのファクター群の計算設計を実装（DuckDB 経由で prices_daily / raw_financials を参照する設計）。
-    - モメンタム周り（関数群の枠組み、定数定義等）を実装。
-- ペーパートレード検証ツール:
+    - calc_position_sizes: リスクベース / 等配分 / スコア配分に対応した発注株数計算
+    - 単元株（lot_size）丸め、max_position_pct / max_utilization / cost_buffer を考慮した aggregate cap スケールダウンロジックを実装
+
+- ユーティリティ
+  - utils/logging_setup.py
+    - ルートロガーに StreamHandler (stdout) と TimedRotatingFileHandler（日次・30日保持）を設定するユーティリティを実装。
+    - LOG_LEVEL / LOG_DIR / 引数による設定切替に対応。ログディレクトリ作成失敗時はファイル出力をスキップして stdout のみで継続。
+  - utils/process_priority.py
+    - psutil を用いたプロセス優先度設定（Windows の priority class、POSIX の nice 値）と CPU affinity 設定ユーティリティを実装。
+    - 権限不足などで失敗した場合は警告を出してスキップ。
+
+- 監視・検証ツール
+  - monitoring 側の DB 初期化呼び出し（init_monitoring_db）を各起動スクリプトから担保。
   - tools/paper_verification_report.py
-    - Paper Trading 用 SQLite（環境変数 PAPER_TRADING_SQLITE_PATH / --db）から統計を集計し検証レポートを生成。
-    - 指標: 稼働率（uptime）、注文成功率（fill_rate）、送信率（send_rate）、P95 レイテンシなど。
-    - 合否基準（デフォルト閾値）を定義: 稼働率 >= 99.0%, 成功率 >= 90.0%, 送信率 >= 95.0%, P95 <= 200ms。
-    - P95 計算、データ無しケースのハンドリング、出力フォーマットを実装。
+    - ペーパートレード用 SQLite DB からシステム稼働率・注文成功率・レイテンシ等を集計してレポートを生成する CLI を実装。
+    - P95 の計算、各種閾値（稼働率 99% 等）に基づく PASS/FAIL 判定を搭載。
+    - --from / --to / --db オプション対応。環境変数 PAPER_TRADING_SQLITE_PATH を優先。
+
+- パッケージメタ
+  - パッケージ初期化: src/kabusys/__init__.py に __version__ = "0.1.0" を設定。
 
 ### Changed
-- (初回リリースのため該当なし)
+- ログ出力設計
+  - console は stdout に出力するよう統一（cron 等での一元リダイレクトを考慮）。
+- .env ロード順
+  - OS 環境変数 > .env.local > .env の順で読み込み（OS 環境変数は保護される）。
 
-### Fixed
-- (初回リリースのため該当なし)
+### Fixed / Behavior
+- DB/監視周りの安全策
+  - 起動時に監視用テーブルが存在しない場合でも init_monitoring_db() を呼んで冪等に初期化する（存在確認と作成）。
+- ExecutionEngine 起動前チェック
+  - data/stop_requested.flag が既に立っている場合はエンジンを起動せず終了する。
+
+### Known issues / Notes
+- research/factor_research.py の実装は途中（ファイル末尾で calc_momentum 実装開始のみ、以降未収録）。ファクター計算ロジックの完成とテストが必要。
+- portfolio/risk_adjustment.apply_sector_cap:
+  - 現状 price_map に価格が欠損（0.0）する場合のエクスポージャー過少見積りのリスクをコメントで指摘。将来的に前日終値等のフォールバックを検討する旨を TODO として残しています。
+- position_sizing:
+  - 現在 lot_size は全銘柄共通での扱い。将来的に銘柄別単元対応（stocks マスタの lot_size）への拡張を計画中。
+
+### Removed
+- なし
 
 ### Security
-- (該当なし)
-
-### Notes / 実装上の重要な挙動
-- .env の自動読み込みはプロジェクトルートが検出された場合にのみ行われ、OS 環境変数は上書きされないよう保護（.env.local は既存 OS 環境変数を保護しつつ上書き可能）。
-- config.Settngs のプロパティは起動時の環境変数を即座に参照するため、テストやスクリプト内で環境変数を変更する場合は注意が必要。
-- run_monitoring は MONITOR_POLL_INTERVAL の不正値を検出してデフォルトにフォールバックすることで監視ループのクラッシュを防止する設計。
-- run_execution は起動前に停止フラグが立っている場合は起動を中止する安全処理を備える。
-- logging_setup はログディレクトリ作成失敗時にファイルハンドラ作成をスキップし、標準出力のみで動作継続するフォールバックを実装。
-- process_priority / cpu_affinity の設定は実行環境の権限や OS に依存するため、失敗時は警告が出て安全に続行する。
-
-### Migration / Upgrade notes
-- なし（初回公開）。既存の運用を開始する際は以下を確認してください:
-  - .env を作成し、必須環境変数（JQUANTS_REFRESH_TOKEN / KABU_API_PASSWORD）を設定する。
-  - KABUSYS_ENV を適切に設定（development / paper_trading / live）。
-  - Paper Trading を使用する場合は PAPER_TRADING_SQLITE_PATH を設定するかデフォルトの data/paper_trading.db を利用する。
-  - ログ出力先を変更したい場合は LOG_DIR 環境変数を設定する。
-  - 本番環境では KILL_FLAG_CLEAR_ON_START を 0（デフォルト）にすることを推奨。
+- なし
 
 ---
 
-今後のリリースでは、StrategyModel や ExecutionEngine の詳細実装、テストカバレッジの追加、errors/metrics の拡充、YAML ベースの詳細設定読み込みなどを予定しています。ご要望や不具合は issue を作成してください。
+参考:
+- 本 CHANGELOG はコードベースの実装内容から推測して作成しています。実際のリリース履歴や変更履歴管理（コミットログ・チケット）と異なる場合があります。必要に応じて差分を反映してください。
