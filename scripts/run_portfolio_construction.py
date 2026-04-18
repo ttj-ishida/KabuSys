@@ -24,8 +24,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
 from kabusys.portfolio.portfolio_builder import calc_score_weights, select_candidates
 from kabusys.portfolio.position_sizing import calc_position_sizes
+from kabusys.utils.logging_setup import setup_logging
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+setup_logging(app_name="portfolio_construction")
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PORTFOLIO_VALUE = 10_000_000  # 1000万円

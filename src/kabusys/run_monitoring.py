@@ -20,6 +20,7 @@ from kabusys.config import Settings
 _STOP_FLAG = Path(__file__).resolve().parents[2] / "data" / "stop_requested.flag"
 from kabusys.monitoring.monitoring_db import init_monitoring_db  # noqa: E402
 from kabusys.monitoring.system_monitor import SystemMonitor  # noqa: E402
+from kabusys.utils.logging_setup import setup_logging  # noqa: E402
 from kabusys.utils.process_priority import set_process_priority  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ def _get_poll_interval() -> int:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO)
+    setup_logging(app_name="monitoring")
     # 1. プロセス優先度を High に設定（最初に実行）
     set_process_priority("high")
 
