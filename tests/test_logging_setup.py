@@ -133,6 +133,16 @@ class TestSetupLogging:
         assert len(root.handlers) == 1
         assert type(root.handlers[0]) is logging.StreamHandler
 
+    def test_mkdir_failure_falls_back_to_stream_only(self, tmp_path):
+        """ログディレクトリ作成失敗時も StreamHandler のみで継続する。"""
+        with patch.object(
+            type(tmp_path), "mkdir", side_effect=PermissionError("permission denied")
+        ):
+            setup_logging(app_name="test", log_dir=tmp_path)
+        root = logging.getLogger()
+        assert len(root.handlers) == 1
+        assert type(root.handlers[0]) is logging.StreamHandler
+
     def test_existing_handlers_closed_before_setup(self, tmp_path):
         """2回目の呼び出しで既存ハンドラが close される（ spy で検証）。"""
         setup_logging(app_name="test", log_dir=tmp_path)

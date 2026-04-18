@@ -65,8 +65,18 @@ def setup_logging(
         numeric_level = getattr(logging, resolved_level_str, logging.INFO)
 
     # ログディレクトリ解決・作成
+    # 作成失敗時は FileHandler をスキップして StreamHandler のみで継続する
     resolved_dir = log_dir or Path(os.environ.get("LOG_DIR", str(_DEFAULT_LOG_DIR)))
-    resolved_dir.mkdir(parents=True, exist_ok=True)
+    _dir_ok = True
+    try:
+        resolved_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        _dir_ok = False
+        # ルートロガー未設定のため print で警告を出す
+        print(
+            f"WARNING: ログディレクトリの作成に失敗しました。ファイル出力を無効化します: {e}",
+            file=sys.stderr,
+        )
 
     # ルートロガーにレベルを設定（既存ハンドラを flush/close してから削除）
     root = logging.getLogger()
@@ -93,22 +103,24 @@ def setup_logging(
     root.addHandler(stream_handler)
 
     # TimedRotatingFileHandler（日次ローテーション・30日保持）
-    # ファイル作成に失敗した場合は StreamHandler のみで継続する
+    # ディレクトリ作成またはファイル作成に失敗した場合は StreamHandler のみで継続する
     log_file = resolved_dir / f"{app_name}.log"
-    try:
-        file_handler = TimedRotatingFileHandler(
-            log_file,
-            when="midnight",
-            backupCount=_BACKUP_COUNT,
-            encoding="utf-8",
-        )
-        file_handler.setLevel(numeric_level)
-        file_handler.setFormatter(formatter)
-        root.addHandler(file_handler)
-    except Exception as e:
-        logger.warning(
-            "ファイルハンドラの作成に失敗しました。コンソール出力のみ有効です: %s", e
-        )
+    if _dir_ok:
+        try:
+            file_handler = TimedRotatingFileHandler(
+                log_file,
+                when="midnight",
+                backupCount=_BACKUP_COUNT,
+                encoding="utf-8",
+            )
+            file_handler.setLevel(numeric_level)
+            file_handler.setFormatter(formatter)
+            root.addHandler(file_handler)
+        except Exception as e:
+            logger.warning(
+                "ファイルハンドラの作成に失敗しました。コンソール出力のみ有効です: %s",
+                e,
+            )
 
     logger.debug(
         "ロギングを設定しました: level=%s, log_file=%s",
