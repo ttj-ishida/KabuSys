@@ -18,8 +18,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
 from kabusys.ai.news_nlp import score_news
 from kabusys.ai.regime_detector import score_regime
+from kabusys.utils.logging_setup import setup_logging
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+setup_logging(app_name="ai_analysis")
 logger = logging.getLogger(__name__)
 
 

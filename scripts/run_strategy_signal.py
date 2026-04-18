@@ -16,8 +16,9 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
 from kabusys.strategy.signal_generator import generate_signals
+from kabusys.utils.logging_setup import setup_logging
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+setup_logging(app_name="strategy_signal")
 logger = logging.getLogger(__name__)
 
 

@@ -44,7 +44,14 @@ try:
 except ImportError:
     _DRY_RUN_DEPS_AVAILABLE = False
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+try:
+    from kabusys.utils.logging_setup import setup_logging as _setup_logging
+
+    _setup_logging(app_name="start_system")
+except ImportError:
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
 logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
