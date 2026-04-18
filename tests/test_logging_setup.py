@@ -86,7 +86,9 @@ class TestSetupLogging:
         """TimedRotatingFileHandler が midnight/30日保持で設定される。"""
         setup_logging(app_name="test", log_dir=tmp_path)
         root = logging.getLogger()
-        file_handlers = [h for h in root.handlers if isinstance(h, TimedRotatingFileHandler)]
+        file_handlers = [
+            h for h in root.handlers if isinstance(h, TimedRotatingFileHandler)
+        ]
         assert len(file_handlers) == 1
         fh = file_handlers[0]
         assert fh.when == "MIDNIGHT"
