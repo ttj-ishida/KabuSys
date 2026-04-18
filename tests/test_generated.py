@@ -1,8 +1,4 @@
-
 import os
-from pathlib import Path
-import tempfile
-import io
 
 import pytest
 
@@ -18,7 +14,7 @@ def test_parse_env_line_basic_and_comments():
     assert config_mod._parse_env_line(" export KEY2 =  another ") == ("KEY2", "another")
 
     # quoted with double quote and escape
-    assert config_mod._parse_env_line('Q="a\\\"b c"') == ("Q", 'a"b c')
+    assert config_mod._parse_env_line('Q="a\\"b c"') == ("Q", 'a"b c')
     # single quote with escape
     assert config_mod._parse_env_line("S='a\\'b'") == ("S", "a'b")
 
