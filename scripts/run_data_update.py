@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import sys
-from datetime import timedelta
 from pathlib import Path
 
 import duckdb
@@ -40,7 +39,7 @@ def main() -> None:
             "SELECT MAX(date) FROM prices_daily"
         ).fetchone()
         if max_date_row and max_date_row[0]:
-            target_date = max_date_row[0] + timedelta(days=1)
+            target_date = max_date_row[0]
             breadth_result = calc_and_save_breadth(conn, target_date)
             logger.info(
                 "breadth 計算完了: date=%s result=%d", target_date, breadth_result
