@@ -137,6 +137,7 @@ def _calc_new_high_low_ratio(
 
     直近250営業日の最高値と等しい銘柄を新高値、最安値と等しい銘柄を新安値とする。
     新安値=0 の場合は None（NULL）を返す。
+    high_250 == low_250 の銘柄（250日間ずっと同値）は高値・安値の両方から除外する。
     """
     row = conn.execute(
         """
@@ -195,7 +196,8 @@ def calc_and_save_breadth(
 
     冪等: 同日を再実行しても上書きせず 0 を返す。
     """
-    # 冪等チェック
+    # 冪等チェック（regime_detector と異なり DELETE+INSERT しない。
+    # 仕様により同日の再実行は上書きせず 0 を返す）
     existing = conn.execute(
         "SELECT 1 FROM market_breadth WHERE date = ?", [target_date]
     ).fetchone()
