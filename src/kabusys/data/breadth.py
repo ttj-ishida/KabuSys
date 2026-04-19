@@ -218,6 +218,21 @@ def calc_and_save_breadth(
         )
         return 0
 
+    # データ充足確認（銘柄数）
+    stock_count = conn.execute(
+        "SELECT COUNT(DISTINCT code) FROM prices_daily WHERE date < ?",
+        [target_date],
+    ).fetchone()[0]
+
+    if stock_count < _MIN_STOCKS:
+        logger.warning(
+            "calc_and_save_breadth: 銘柄数不足 %d 件（必要: %d） date=%s",
+            stock_count,
+            _MIN_STOCKS,
+            target_date,
+        )
+        return 0
+
     # 各指標を計算
     adv_decline_ratio = _calc_adv_decline_ratio(conn, target_date)
     ma25_above_pct = _calc_ma25_above_pct(conn, target_date)

@@ -116,6 +116,11 @@ def test_adv_decline_ratio_normal(conn):
     for i, d in enumerate(dates):
         _insert_price(conn, "B", d, 200.0 - i)
 
+    # _MIN_STOCKS=10 を満たすためのダミー銘柄（横ばい）
+    for s in ["C", "D", "E", "F", "G", "H", "I", "J"]:
+        for d in dates:
+            _insert_price(conn, s, d, 100.0)
+
     result = calc_and_save_breadth(conn, TARGET_DATE)
     assert result == 1
 
@@ -134,6 +139,11 @@ def test_adv_decline_ratio_no_declines(conn):
     dates = _make_dates(26, TARGET_DATE)
     for i, d in enumerate(dates):
         _insert_price(conn, "A", d, 100.0 + i)
+
+    # _MIN_STOCKS=10 を満たすためのダミー銘柄（横ばい）
+    for s in ["B", "C", "D", "E", "F", "G", "H", "I", "J"]:
+        for d in dates:
+            _insert_price(conn, s, d, 100.0)
 
     result = calc_and_save_breadth(conn, TARGET_DATE)
     assert result == 1
@@ -300,6 +310,24 @@ def test_insufficient_data_returns_zero(conn):
     for s in ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]:
         for d in dates:
             _insert_price(conn, s, d, 100.0)
+
+    result = calc_and_save_breadth(conn, TARGET_DATE)
+    assert result == 0
+
+    row = conn.execute(
+        "SELECT 1 FROM market_breadth WHERE date = ?", [TARGET_DATE]
+    ).fetchone()
+    assert row is None
+
+
+def test_insufficient_stocks_returns_zero(conn):
+    """計算対象銘柄数 < 10 件 → 0 を返してスキップ。"""
+    from kabusys.data.breadth import calc_and_save_breadth
+
+    dates = _make_dates(26, TARGET_DATE)
+    for s in ["A", "B", "C"]:  # 3 stocks only (< 10)
+        for d in dates:
+            _insert_price(conn, s, d, 100.0 + 1)
 
     result = calc_and_save_breadth(conn, TARGET_DATE)
     assert result == 0
