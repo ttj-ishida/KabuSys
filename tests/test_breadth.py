@@ -74,7 +74,7 @@ def test_market_breadth_columns(conn):
     assert abs(row[1] - 100.0) < 1e-9
     assert abs(row[2] - 0.5) < 1e-9
     assert abs(row[3] - 2.0) < 1e-9
-    assert row[4] == False
+    assert not row[4]
     assert row[5] is not None  # created_at は自動設定
 
 
@@ -217,7 +217,7 @@ def test_breadth_stop_true(conn):
         [TARGET_DATE],
     ).fetchone()
     assert row is not None
-    assert row[0] == True
+    assert row[0]
     assert row[1] < 0.35
 
 
@@ -240,7 +240,7 @@ def test_breadth_stop_false(conn):
         [TARGET_DATE],
     ).fetchone()
     assert row is not None
-    assert row[0] == False
+    assert not row[0]
 
 
 def test_new_high_low_ratio_normal(conn):
