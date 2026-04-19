@@ -1,93 +1,73 @@
-# Changelog
+# CHANGELOG
 
-すべての注目すべき変更をこのファイルに記録します。  
-フォーマットは「Keep a Changelog」に準拠します。  
+すべての変更は Keep a Changelog の方針に従って記載しています。  
+このファイルはコードベースから推測して作成した変更履歴です。
 
-最新版: 0.1.0 — 2026-04-19
+フォーマット:
+- 重要度順: Added / Changed / Fixed / Deprecated / Removed / Security
+- 日付はリリース日を示します（推定値）。
 
-## [0.1.0] - 2026-04-19
+## [0.1.0] - 2026-04-11
+初回リリース。KabuSys のコアユーティリティ、起動スクリプト、ポートフォリオ構築ロジック、監視・検証ツール群を含みます。
 
-リリース初版。日本株自動売買システム KabuSys の主要コンポーネントとユーティリティを実装・追加しました。
-
-### 追加
-- 全体
-  - パッケージ初期版を追加。バージョンは `__version__ = "0.1.0"`。
-
-- 起動スクリプト
-  - run_execution: ExecutionEngine 起動スクリプトを追加。
-    - 起動時にプロセス優先度を "high" に設定。
-    - KABUSYS_ENV が `paper_trading` の場合は paper_trading 用の専用 SQLite（デフォルト: data/paper_trading.db）を使用し、本番 DB と完全分離。
-    - BrokerClientFactory を用いたブローカークライアント生成、OrderRepository / OrderManager / RiskManager / Reconciler の組み立て、ExecutionEngine のスレッド実行と停止フラグ監視を実装。
-    - 起動時に停止フラグが立っている場合は起動せず終了するロジックを追加。
-  - run_monitoring: SystemMonitor のポーリングループ起動スクリプトを追加。
-    - 環境変数 `MONITOR_POLL_INTERVAL` でポーリング間隔を上書き可能（デフォルト 60 秒、無効値は警告してデフォルトにフォールバック）。
-    - 監視は KABUSYS_ENV に関わらず本番用 `sqlite_path` を使用（監視 DB は共通管理）。
-    - 停止フラグファイル検出でループを終了、例外はログ出力して次ポーリングに継続。
-
+### Added
+- CLI / 起動スクリプト
+  - run_execution.py: 実行エンジン起動スクリプトを追加。環境に応じてブローカークライアントを生成し、ExecutionEngine をスレッドで実行。停止フラグ・PID ファイルの取り扱いを実装。
+  - run_monitoring.py: SystemMonitor のポーリングループ起動スクリプトを追加。MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能。停止フラグ検知・例外耐性を備える。
+  - kabusys.validate_config: .env や config/*.yaml の設定検証 CLI を追加。--strict オプションをサポート。
+  - kabusys.config_setup: 対話式の .env 作成/更新ウィザードを追加（各種設定項目の説明・デフォルト値を含む）。
+  - kabusys.tools.paper_verification_report: Paper Trading 用検証レポート生成ツールを追加。稼働率、注文成功率、送信率、レイテンシ（P95）等の判定を行う。
 - 設定管理
-  - config: 環境変数/.env の読み込みおよび Settings クラスを実装。
-    - 自動 .env 読み込み: プロジェクトルート（.git または pyproject.toml）を基準に `.env` → `.env.local` の順で読み込み。OS 環境変数は保護して上書きを制御。
-    - .env パーサは `export KEY=val` フォーマット、シングル/ダブルクォート内のバックスラッシュエスケープ、インラインコメントの扱い等をサポート。
-    - Settings プロパティ群（J-Quants / kabu API / LINE / DB パス / 監視閾値 / システムフラグ等）を提供。`PAPER_FILL_MODE` の妥当性チェック、`KABUSYS_ENV` / `LOG_LEVEL` の検証などを実装。
-    - `settings` の単一インスタンスをエクスポート。
+  - kabusys.config: 環境変数読み込み・管理クラスを追加。プロジェクトルート検出による .env / .env.local 自動読み込み（OS 環境変数を保護して上書き制御）。多くの設定プロパティ（DB パス、Paper Trading の DB 切り分け、監視閾値、ログレベル等）を提供。
+  - .env ファイルのパースロジック強化: export 形式対応、クォート付き値のエスケープ処理、インラインコメントの扱い等を実装。
+  - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動ロード無効化オプションを追加。
+- ロギング・プロセス制御ユーティリティ
+  - kabusys.utils.logging_setup: stdout への StreamHandler と日次ローテーションのファイルハンドラ（TimedRotatingFileHandler）を整備。LOG_DIR/LOG_LEVEL 解決ルールを実装。
+  - kabusys.utils.process_priority: Windows / POSIX の差分を吸収したプロセス優先度設定（high/normal/low）と CPU affinity 設定を追加。アクセス権限がない場合は警告でスキップ。
+- ポートフォリオ構築関連（純粋関数群）
+  - kabusys.portfolio.portfolio_builder:
+    - select_candidates: BUY シグナルのスコア降順選定。
+    - calc_equal_weights / calc_score_weights: 等金額配分とスコア加重配分（スコア全0 の場合はフォールバック）。
+  - kabusys.portfolio.risk_adjustment:
+    - apply_sector_cap: セクター集中制限の実装（既存保有からセクター別エクスポージャ算出し、新規候補を除外）。
+    - calc_regime_multiplier: 市場レジームに基づく投下資金乗数 (bull/neutral/bear をサポート、未知レジームはフォールバック)。
+  - kabusys.portfolio.position_sizing:
+    - calc_position_sizes: リスクベース / equal / score ベースの株数算出ロジック。単元（lot）で丸め、max_position_pct や aggregate cap（available_cash）によるスケーリング、残差に基づく再配分アルゴリズムを実装。
+- データベース / 分析連携
+  - DuckDB 接続サポート（duckdb パスを Settings で管理し、起動時に接続）。
+  - 監視 DB（SQLite）初期化ユーティリティを呼び出す仕組みを導入（monitoring テーブルの冪等初期化）。
+- 監視・運用性向上
+  - 停止フラグ (data/stop_requested.flag / kill.flag) と PID ファイルの取り扱いを標準化（起動スクリプトで利用）。
+  - run_execution は paper_trading 環境のときに専用 SQLite（data/paper_trading.db をデフォルト）を使用し、本番 DB と完全分離。
+- 研究モジュール（骨格）
+  - kabusys.research.factor_research: モメンタム・ボラティリティ等ファクター計算のための骨組みを追加（DuckDB 経由で prices_daily / raw_financials を参照する設計）。複数の定数・関数を定義（未完成箇所あり）。
 
-  - config_setup: .env を対話式に生成・更新するウィザード CLI を追加。
-    - 各設定項目の説明付きプロンプト、既存 .env の読み込みと Enter による既存値の再利用、シークレット入力のマスク表示、保存確認とファイル書き込みを実装。
+### Changed
+- ログ出力の標準化: すべての起動スクリプトが setup_logging を呼び出すことで、コンソールと日次ログファイルへ一貫した出力を行うようにした。
+- 環境変数のロード順序: OS 環境 > .env.local > .env（.env.local は .env を上書きする）を明文化し実装。
+- モニタリング挙動: Monitoring は環境に関係なく本番 sqlite_path を使用する仕様に明示（run_monitoring）。
+- プロセス優先度: 起動時に set_process_priority("high") を呼び出して優先度を上げる（起動直後に実行）。
+- run_monitoring の MONITOR_POLL_INTERVAL の不正値取り扱い: 0 以下や非数はデフォルト（60秒）にフォールバックして警告を出すようにした。
+- logging_setup: ログディレクトリ作成失敗時はファイルハンドラをスキップして stdout のみで継続する堅牢化を実施。stdout を使用する設計変更（stderr ではなく stdout）。
 
-  - validate_config: 起動前設定検証 CLI を追加。
-    - 必須環境変数チェック、KABUSYS_ENV / LOG_LEVEL の値検証、DB パスの親ディレクトリ存在チェック、config/*.yaml の存在確認と（PyYAML があれば）パース検証、本番 (live) 向け追加ガード（LINE通知、kill flag 動作）を実装。
-    - `--strict` オプションで警告を FAIL 扱いにできる。
+### Fixed
+- run_monitoring: monitor.check_once() 内で例外が発生しても監視ループを継続するように例外捕捉とログ出力を追加。
+- config._load_env_file: ファイル読み込み失敗時に警告を出し、プロセスを中断しないよう安全に扱うよう改善。
+- process_priority: 未対応 OS や権限エラー時に例外ではなく警告でスキップすることで起動失敗を防止。
+- position_sizing: aggregate cap によるスケールダウン後の切り捨て・残差処理で、残余キャッシュに応じて lot 単位で再配分するロジックを追加し、より効率的な配分を実現。
 
-- ログまわり
-  - utils/logging_setup: 統一ログ設定ユーティリティを追加。
-    - ルートロガーに StreamHandler (stdout) と TimedRotatingFileHandler（日次ローテーション、30日分保持）を設定。
-    - ログレベル・ログディレクトリの解決順を実装（引数 > 環境変数 > デフォルト）。
-    - ログディレクトリ作成失敗時はファイル出力をスキップし、コンソール出力のみにフォールバック。
-    - 既存ハンドラをクリアして二重設定を防止。
+### Deprecated
+- なし（初回リリースのため該当なし）。
 
-- プロセス優先度 & CPU affinity
-  - utils/process_priority: psutil を使ってプラットフォーム差分を吸収するユーティリティを追加。
-    - set_process_priority(level): Windows / POSIX(nice) 両対応。権限不足等は警告してスキップ。
-    - set_cpu_affinity(cpu_count): 指定コア数にプロセスをピン留め（権限不足等は警告してスキップ）。
+### Removed
+- なし（初回リリースのため該当なし）。
 
-- ポートフォリオ構築（純粋関数群）
-  - portfolio/portfolio_builder:
-    - select_candidates: スコア降順で候補選定（タイブレーク: signal_rank 昇順）。
-    - calc_equal_weights: 等金額配分。
-    - calc_score_weights: スコア比率で配分。全スコアが 0 の場合は等金額配分にフォールバックして警告。
-  - portfolio/risk_adjustment:
-    - apply_sector_cap: セクター集中制限（既存ポジションのセクター比率 >= max_sector_pct の場合、そのセクターを候補から除外）。"unknown" セクターは上限適用対象外。
-    - calc_regime_multiplier: 市場レジームに応じた投下資金乗数 ("bull"/"neutral"/"bear") と未知レジームのフォールバック（1.0）を実装。未知レジーム時に警告ログ。
-  - portfolio/position_sizing:
-    - calc_position_sizes: 資金配分アルゴリズムを実装（allocation_method: "risk_based" / "equal" / "score"）。
-    - 単元株（lot_size）で丸め、1銘柄上限や aggregate cap（available_cash）に基づく縮小処理を実装。
-    - aggregate 縮小時は切り捨てによる端数を fractional 残差順に lot 単位で追加配分するアルゴリズムを実装（再現性確保のため tie-break に code を使用）。
-    - price 欠損や価格 0 のケースはスキップして安全に処理。
-
-- リサーチ（ファクター計算）
-  - research/factor_research: モメンタム等ファクター計算の枠組みを実装（DuckDB 接続を受け取り prices_daily / raw_financials を参照）。モメンタム（1M/3M/6M）、MA200 乖離、ATR/VOL/Liquidity の設計方針と定義を含む（実装の一部がファイル末尾で切れているが基盤を追加）。
-
-- ツール
-  - tools/paper_verification_report: Paper Trading の検証レポート生成スクリプトを追加。
-    - 稼働率 / 注文成功率 / 送信率 / レイテンシ（平均・最大・P95）等を算出し、閾値に基づく PASS/FAIL 判定を出力。
-    - P95 計算、日付フィルタの WHERE 句生成、DB パス解決（--db / 環境変数 / デフォルト）を実装。
-    - 対象テーブルが存在しない場合は例外を捕捉して N/A や 0 で安全に表示。
-
-### 変更（設計上の決定）
-- 監視（run_monitoring）は KABUSYS_ENV に依存せず常に本番の monitoring 用 sqlite_path を使用する方針を採用（監視データは環境に依存しない中央管理）。
-- ログ出力は stdout を標準出力に使用する（cron / Task Scheduler でのリダイレクトを想定）。
-
-### 修正（堅牢性 / エラーハンドリング）
-- .env パース処理でクォート内のバックスラッシュエスケープとインラインコメント処理を適切に扱うよう改善し、誤ったパースを防止。
-- logging_setup: ログディレクトリ作成失敗時にアプリケーションが例外で停止しないようフォールバック処理を追加。
-- process_priority / set_cpu_affinity: 権限不足や未サポート環境での例外をキャッチして警告ログを出すようにして、安全にスキップする実装。
-- run_monitoring / run_execution: 停止フラグ (data/stop_requested.flag) を検知してグレースフルに停止するロジックを追加。ループ内の check_once() 等で例外が起きてもログ出力して次サイクルに継続する実装。
-
-### 既知の制限 / TODO
-- position_sizing: price が欠損（0.0）の場合、エクスポージャーや発注量が過少見積もられる可能性があり、将来的に前日終値や取得原価でのフォールバックを検討する旨コメントを残しています。
-- research/factor_research の一部実装がファイル末尾で切れており、完全な関数実装・テストが必要。
-- 一部のコンポーネント（ExecutionEngine、SystemMonitor、BrokerClient 等）は本リリースでの参照実装として呼び出し側に組込まれていますが、その内部実装や例外ハンドリングの詳細は別途テストが必要です。
+### Security
+- なし（明示的なセキュリティ修正は検出できず）。
 
 ---
 
-以上が初版の主な変更点です。ドキュメントやユーティリティ（config_setup、validate_config、paper_verification_report）を通じて、開発・検証・本番運用の流れを意識した基盤を整えています。今後のリリースではテスト、監視アラート、さらなる安定化・チューニング、欠損データへのフォールバック実装などを予定しています。
+注記（推測）
+- 一部のモジュール（例: research.factor_research）は実装途中の箇所があり、今後のリリースで完成・追加テストが想定されます。
+- 実行時の具体的な BrokerClient の切り替え（MockBrokerClient の利用など）は BrokerClientFactory に依存しており、この CHANGELOG では high-level な挙動のみを記載しています。
+- 日付はコード内のコメント／ヘルプ文を参考に推定しています。
