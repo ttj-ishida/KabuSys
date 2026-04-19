@@ -1,9 +1,5 @@
 
 import os
-import sqlite3
-from pathlib import Path
-import builtins
-import sys
 
 import pytest
 
