@@ -170,35 +170,37 @@ def test_compute_liquidity_score_none():
 # ---------------------------------------------------------------------------
 
 
-def test_is_bear_regime_empty():
-    assert _is_bear_regime({}) is False
+def test_is_bear_regime_empty(conn):
+    """market_regime にデータなし → False（安全側）"""
+    assert _is_bear_regime(conn, TARGET_DATE) is False
 
 
-def test_is_bear_regime_bull():
-    ai = {"A": {"regime_score": 0.5}, "B": {"regime_score": 0.3}}
-    assert _is_bear_regime(ai) is False
+def test_is_bear_regime_bull(conn):
+    """regime_label='bull' → False"""
+    conn.execute(
+        "INSERT INTO market_regime (date, regime_score, regime_label) VALUES (?, ?, ?)",
+        [TARGET_DATE, 0.5, "bull"],
+    )
+    assert _is_bear_regime(conn, TARGET_DATE) is False
 
 
-def test_is_bear_regime_bear():
-    # _BEAR_MIN_SAMPLES=3 を満たすため3銘柄用意
-    ai = {
-        "A": {"regime_score": -0.5},
-        "B": {"regime_score": -0.3},
-        "C": {"regime_score": -0.1},
-    }
-    assert _is_bear_regime(ai) is True
+def test_is_bear_regime_bear(conn):
+    """regime_label='bear' → True"""
+    conn.execute(
+        "INSERT INTO market_regime (date, regime_score, regime_label) VALUES (?, ?, ?)",
+        [TARGET_DATE, -0.5, "bear"],
+    )
+    assert _is_bear_regime(conn, TARGET_DATE) is True
 
 
-def test_is_bear_regime_insufficient_samples():
-    """サンプル数が _BEAR_MIN_SAMPLES 未満の場合は Bear とみなさない"""
-    # 2銘柄（< 3）では Bear 判定しない
-    ai = {"A": {"regime_score": -0.5}, "B": {"regime_score": -0.3}}
-    assert _is_bear_regime(ai) is False
+def test_is_bear_regime_insufficient_samples(conn):
+    """market_regime にデータなし（旧：サンプル不足）→ False"""
+    assert _is_bear_regime(conn, TARGET_DATE) is False
 
 
-def test_is_bear_regime_all_none():
-    ai = {"A": {"regime_score": None}, "B": {"regime_score": None}}
-    assert _is_bear_regime(ai) is False
+def test_is_bear_regime_all_none(conn):
+    """market_regime にデータなし → False"""
+    assert _is_bear_regime(conn, TARGET_DATE) is False
 
 
 # ---------------------------------------------------------------------------
@@ -356,13 +358,11 @@ def test_generate_signals_bear_regime_suppresses_buy(conn):
         "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 WHERE date = ?",
         [TARGET_DATE],
     )
-    # _BEAR_MIN_SAMPLES=3 を満たすため3銘柄分の regime_score を登録（全て負）
-    for code in ("A", "B", "C"):
-        conn.execute(
-            "INSERT INTO ai_scores (date, code, sentiment_score, regime_score, ai_score) "
-            "VALUES (?, ?, -0.5, -0.8, -0.5)",
-            [TARGET_DATE, code],
-        )
+    # market_regime テーブルに bear を登録（新しい _is_bear_regime の参照先）
+    conn.execute(
+        "INSERT INTO market_regime (date, regime_score, regime_label) VALUES (?, ?, ?)",
+        [TARGET_DATE, -0.8, "bear"],
+    )
     generate_signals(conn, TARGET_DATE, threshold=0.1)
     rows = conn.execute(
         "SELECT side FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
@@ -749,11 +749,9 @@ def test_generate_signals_no_price_suppresses_sell(conn):
 
 
 def test_is_bear_regime_exactly_min_samples(conn):
-    """_BEAR_MIN_SAMPLES ちょうどのサンプル数で Bear 判定が有効になること"""
-    # 3銘柄（= _BEAR_MIN_SAMPLES）すべて負 → Bear とみなす
-    ai = {
-        "A": {"regime_score": -0.5},
-        "B": {"regime_score": -0.3},
-        "C": {"regime_score": -0.1},
-    }
-    assert _is_bear_regime(ai) is True
+    """regime_label='bear' → True（旧：_BEAR_MIN_SAMPLES ちょうどのサンプル数テスト）"""
+    conn.execute(
+        "INSERT INTO market_regime (date, regime_score, regime_label) VALUES (?, ?, ?)",
+        [TARGET_DATE, -0.3, "bear"],
+    )
+    assert _is_bear_regime(conn, TARGET_DATE) is True

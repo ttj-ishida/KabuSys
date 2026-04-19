@@ -14,6 +14,7 @@ import duckdb
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
+from kabusys.data.breadth import calc_and_save_breadth
 from kabusys.data.pipeline import run_daily_etl
 from kabusys.utils.logging_setup import setup_logging
 
@@ -25,13 +26,30 @@ def main() -> None:
     settings = Settings()
     conn = duckdb.connect(str(settings.duckdb_path))
     try:
+        # ETL: 当日の価格データを取得して prices_daily に追加
         result = run_daily_etl(conn)
         if result.errors:
             logger.warning("ETL 完了（エラーあり）: %s", result.errors)
         else:
             logger.info("ETL 完了")
+
+        # ETL で挿入された最新日付を target_date として breadth を計算
+        # （内部計算は WHERE date < target_date のため前日以前のデータを使用し、
+        #   計算結果は market_breadth.date = target_date（当日）として保存する）
+        max_date_row = conn.execute("SELECT MAX(date) FROM prices_daily").fetchone()
+        if max_date_row and max_date_row[0]:
+            target_date = max_date_row[0]
+            breadth_result = calc_and_save_breadth(conn, target_date)
+            if breadth_result == 1:
+                logger.info("breadth 挿入完了: date=%s", target_date)
+            else:
+                logger.info(
+                    "breadth スキップ（既存 or データ不足）: date=%s", target_date
+                )
+        else:
+            logger.warning("breadth 計算スキップ: prices_daily にデータなし")
     except Exception:
-        logger.exception("run_daily_etl が失敗しました")
+        logger.exception("data_update バッチが失敗しました")
         sys.exit(1)
     finally:
         conn.close()

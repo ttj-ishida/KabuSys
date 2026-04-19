@@ -259,6 +259,23 @@ def _score_macro(
     return 0.0
 
 
+def _fetch_breadth(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+) -> dict | None:
+    """market_breadth テーブルから target_date の breadth データを取得する。
+
+    データが存在しない場合は None を返す（補正なしで後方互換を保つ）。
+    """
+    row = conn.execute(
+        "SELECT adv_decline_ratio FROM market_breadth WHERE date = ?",
+        [target_date],
+    ).fetchone()
+    if row is None:
+        return None
+    return {"adv_decline_ratio": float(row[0])}
+
+
 # ---------------------------------------------------------------------------
 # パブリック API
 # ---------------------------------------------------------------------------
@@ -305,6 +322,15 @@ def score_regime(
     raw_score = (
         _MA_WEIGHT * (ma200_ratio - 1.0) * _MA_SCALE + _MACRO_WEIGHT * macro_sentiment
     )
+
+    # [5b] breadth 補正（騰落レシオによる調整）
+    breadth = _fetch_breadth(conn, target_date)
+    if breadth is not None:
+        if breadth["adv_decline_ratio"] < 80:
+            raw_score -= 0.2
+        elif breadth["adv_decline_ratio"] > 120:
+            raw_score += 0.1
+
     regime_score = max(-1.0, min(1.0, raw_score))
 
     if regime_score >= _BULL_THRESHOLD:
