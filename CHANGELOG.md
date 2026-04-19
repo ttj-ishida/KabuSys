@@ -1,82 +1,90 @@
 # CHANGELOG
 
-すべての重要な変更を記録します。フォーマットは Keep a Changelog に準拠しています。
+すべての注目すべき変更点をここに記録します。  
+このファイルは Keep a Changelog の形式に準拠しています。
 
-注: 以下の履歴は提示されたコードベースの実装内容から推測して作成したものであり、実際のコミット履歴とは異なる場合があります。
+- リリース日付はコミット時点のソースから推測しています。  
 
 ## [Unreleased]
 
-- ドキュメント・テスト向けの小さな改善や文言修正を予定。
-
----
-
 ## [0.1.0] - 2026-04-19
+初回公開リリース。
 
-初回リリース — 基本的な自動売買フレームワークのコア機能を実装。
+### 追加 (Added)
+- パッケージ基盤
+  - パッケージ情報とエクスポート定義を追加（kabusys.__init__、バージョン "0.1.0"）。
+- 実行 / デーモン起動スクリプト
+  - run_execution.py: ExecutionEngine 起動スクリプトを追加。
+    - KABUSYS_ENV=paper_trading の場合は MockBrokerClient を使用し、paper_trading 用の専用 SQLite（PAPER_TRADING_SQLITE_PATH / data/paper_trading.db）にデータを記録して本番 DB と分離。
+    - プロセス優先度を最初に "high" に設定。
+    - init_monitoring_db により監視用テーブルの存在を保証（冪等）。
+    - 停止フラグ (data/stop_requested.flag) を検知して安全に停止する仕組みを実装。
+    - 実行用 pid ファイルを管理（data/execution.pid）。
+  - run_monitoring.py: SystemMonitor ポーリングループ起動スクリプトを追加。
+    - MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒）。不正な値は警告を出してデフォルトにフォールバック。
+    - Monitoring は KABUSYS_ENV にかかわらず本番 sqlite_path を使用する（監視 DB を常に本番向けに確保）。
+    - duckdb 接続を併用してデータ処理を行う。
+    - 停止フラグの検知、例外時のログ出力、KeyboardInterrupt のハンドリング等を実装。
+- 設定管理 / 初期化
+  - config.py: Settings クラスを追加。
+    - .env 自動ロード機能（プロジェクトルート判定に .git または pyproject.toml を使用）。
+    - .env / .env.local の読み込み順序（OS 環境変数を保護）。
+    - 環境変数パーサは export プレフィックス、クォート文字列、インラインコメント等に対応。
+    - 各種設定プロパティ（DB パス、PID/kill フラグパス、閾値、PAPER_FILL_MODE バリデーションなど）を提供。
+    - 環境判定ユーティリティ（is_live / is_paper / is_dev）。
+  - config_setup.py: 対話式 .env 作成ウィザードを追加。
+    - よく使う設定項目（KABUSYS_ENV、JQUANTS_REFRESH_TOKEN、KABU_API_PASSWORD、DB パス、LINE トークン等）を対話的に入力可能。
+    - 既存 .env の読み込みと既存値の再利用、シークレット値のマスク表示、保存確認を実装。
+  - validate_config.py: 起動前設定検証 CLI を追加。
+    - 必須環境変数チェック、KABUSYS_ENV / LOG_LEVEL 検証、DB パス親ディレクトリ存在チェック、config/*.yaml の存在・パース検証（PyYAML がない場合はスキップ）等。
+    - --strict オプションで警告も失敗扱いにできる。
+- ロギング / プロセス管理ユーティリティ
+  - utils/logging_setup.py: 統一ロギング設定ユーティリティを追加。
+    - StreamHandler（stdout）と TimedRotatingFileHandler（ログ日次ローテーション、既定 logs/ ディレクトリ、30日保持）をルートロガーに設定。
+    - ログディレクトリ作成失敗時はファイル出力をスキップしてコンソールのみで継続。
+    - ログレベル・ログディレクトリの解決順を明示。
+  - utils/process_priority.py: クロスプラットフォームのプロセス優先度 / CPU affinity 設定機能を追加。
+    - Windows と POSIX（Linux / macOS / FreeBSD）を吸収。
+    - set_process_priority(level) — "high" | "normal" | "low"。アクセス権限不足や未実装 API は警告でスキップ。
+    - set_cpu_affinity(cpu_count) — 指定コア数にピンニング（例外ハンドリング付き）。
+- ポートフォリオ構築ロジック
+  - portfolio/portfolio_builder.py: 候補選定と重み計算を追加。
+    - select_candidates: スコア降順・タイブレークに signal_rank を使用して上位 N を選出。
+    - calc_equal_weights / calc_score_weights: 等金額およびスコア加重（スコア合計が 0 の場合は等金額にフォールバックして警告）。
+  - portfolio/risk_adjustment.py: セクター集中制限とレジーム乗数を実装。
+    - apply_sector_cap: 既存保有のセクター別時価から上限超過セクターを除外（"unknown" セクターは除外対象外）。
+    - calc_regime_multiplier: market_regime に基づく投下資金乗数（bull=1.0, neutral=0.7, bear=0.3）。未知のレジームは警告して 1.0 にフォールバック。
+  - portfolio/position_sizing.py: 株数決定ロジックを実装。
+    - risk_based / equal / score の配分方式をサポート。
+    - 単元株（lot_size）丸め、1 銘柄上限（max_position_pct）、aggregate cap（available_cash）でスケールダウンする補正ロジック。
+    - cost_buffer を加味した保守的なコスト見積もりおよび残差処理による追加配分の実装。
+- 研究・シグナル補助
+  - research/factor_research.py: ファクター計算モジュールを追加（Momentum、Value、Volatility、Liquidity を想定）。
+    - DuckDB を用いた prices_daily / raw_financials 参照ベースの計算設計。
+    - モメンタム計算 calc_momentum の実装（営業日ベースの複数ハラizon 計算、MA200 乖離率等）を含む設計（ソース一部に続きあり）。
+- ツール類
+  - tools/paper_verification_report.py: Paper Trading 検証レポート生成スクリプトを追加。
+    - PAPER_TRADING_SQLITE_PATH（または --db オプション）で指定した SQLite から指標を抽出し、稼働率、注文成功率、送信率、レイテンシ（平均/最大/P95）などを計算。
+    - 定義済み閾値に基づく PASS/FAIL 判定（稼働率 >= 99%、注文成功率 >= 90% 等）。
+    - P95 計算、期間フィルタリング（ISO8601 UTC タイムスタンプ）対応。
+- DB 初期化ユーティリティ
+  - monitoring/monitoring_db.py への参照により、監視用テーブルの初期化を行う機能を起動フローに組み込み（冪等）。
 
-### Added
-- 実行／監視のエントリポイントを追加
-  - run_execution.py: ExecutionEngine を起動するスクリプト。KABUSYS_ENV=paper_trading 時は MockBrokerClient を使用し、paper_trading 用 SQLite（data/paper_trading.db）と完全分離して動作する。
-  - run_monitoring.py: SystemMonitor のポーリングループ起動スクリプト。MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒）。監視は環境にかかわらず本番用 sqlite_path を使用する設計。
+### 変更 (Changed)
+- なし（初回リリース）。
 
-- 環境設定／検証ツール
-  - config_setup.py: 対話式 .env 作成・更新ウィザードを追加（秘密値はマスク表示、.env を上書き保存）。
-  - validate_config.py: 起動前検証 CLI を追加（必須環境変数、KABUSYS_ENV、ログレベル、DB パス、config/*.yaml 存在チェック、live 環境向けガード等）。--strict オプションで警告を FAIL 扱いにできる。
+### 修正 (Fixed)
+- なし（初回リリース）。
 
-- 設定管理
-  - config.py: .env 自動読み込み（プロジェクトルート検出: .git または pyproject.toml）、.env パースの堅牢化（export 構文、クォート内エスケープ、インラインコメント処理等）、Settings クラス（各種環境変数の getter / バリデーション）を実装。PAPER_FILL_MODE の有効値検証や env/log level の検証ロジックを含む。
+### 注意事項 / 補足
+- .env 自動ロードは環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で無効化可能。
+- PAPER_FILL_MODE は "instant" | "partial" | "never" | "reject" のみ有効。無効な値は ValueError を送出。
+- ログは標準で logs/<app_name>.log に日次ローテーションで出力するが、ディレクトリ作成に失敗するとコンソール出力のみとなる。
+- run_monitoring は監視 DB に常に Settings.sqlite_path（本番）を使用する点に注意。実行エンジンは paper_trading 環境時に DB を分離する。
+- process_priority や CPU affinity の設定は環境によって権限エラーや未実装 API によりスキップされることがあります（警告ログ出力）。
+- research/factor_research.py は DuckDB ベースでのファクター計算を設計しており、関数が継続実装される想定。
 
-- ポートフォリオ構築関連（純粋関数群）
-  - portfolio/portfolio_builder.py: 候補選定 (select_candidates)、等分配/スコア加重の重み計算 (calc_equal_weights / calc_score_weights) を実装。スコア全ゼロ時のフォールバック挙動あり。
-  - portfolio/risk_adjustment.py: セクター集中制限の適用 (apply_sector_cap)、市場レジームに応じた投下資金乗数 (calc_regime_multiplier) を実装。未知レジームのフォールバックやログ出力あり。
-  - portfolio/position_sizing.py: 発注株数決定ロジックを実装（risk_based / equal / score 手法対応、単元株丸め、per-position 上限、aggregate cap によるスケールダウン、cost_buffer による保守的見積り、残差処理の再配分アルゴリズム）。lot_size 固定だが将来的拡張を想定した TODO コメントあり。
-  - portfolio パッケージのエクスポートを整備。
-
-- ロギング／プロセス制御ユーティリティ
-  - utils/logging_setup.py: ルートロガーの一元設定ユーティリティを追加。StreamHandler（stdout）と日次ローテートのファイルハンドラ（TimedRotatingFileHandler）を設定。ログディレクトリ自動作成とフォールバックの挙動を明記（作成失敗時はコンソールのみ）。
-  - utils/process_priority.py: Windows/Linux/macOS を透過するプロセス優先度設定（set_process_priority）および CPU affinity 設定（set_cpu_affinity）を実装。アクセス権限不足や未対応 OS の場合は警告を出してスキップ。
-
-- Paper Trading 検証ツール
-  - tools/paper_verification_report.py: Paper Trading の SQLite DB から稼働率・注文成功率・送信率・レイテンシ等を集計して人間向けレポートを出力するスクリプトを追加。期間フィルタ、P95 計算、閾値比較（稼働率 99%、成立率 90%、送信率 95%、P95 レイテンシ 200ms）に基づく PASS/FAIL 判定を提供。
-
-- 研究（ファクター計算）モジュール（実装開始）
-  - research/factor_research.py: DuckDB 接続を用いたファクター計算モジュールの骨組み（モメンタム・MA・ATR 等）を追加。価格テーブル参照により日付基準で多数のファクターを算出する設計。注釈に設計方針・定数を記載（実装途中ファイルの一部が提示）。
-
-### Changed
-- ログ出力の標準化
-  - ログは stdout に出力するよう統一（cron 等で stdout/stderr をまとめてリダイレクトしやすくするため）。
-
-- 起動スクリプトのプロセス初動
-  - run_execution/run_monitoring は起動直後にプロセス優先度を "high" に設定するよう共通化（set_process_priority 呼び出し）。
-
-- DB パス／環境の扱い
-  - 実行エンジンは KABUSYS_ENV に応じて paper_trading 用 DB と本番 DB を選択する（分離）。一方、監視は環境にかかわらず本番 sqlite_path を使用することを明記。
-
-### Fixed / Robustness improvements
-- .env パーサーの堅牢化（config.py）
-  - export プレフィックス対応、クォート内のバックスラッシュエスケープ処理、インラインコメントの扱いなどに対応し、実運用での多様な .env 記述に耐えるよう改善。
-
-- ログディレクトリ作成失敗時のフォールバック（logging_setup.py）
-  - ディレクトリ作成失敗時はファイルハンドラをスキップしてコンソールのみで動作するように変更。ハンドラの二重設定を防ぐため既存ハンドラのクローズ/削除処理を追加。
-
-- プロセス優先度設定の例外処理（process_priority.py）
-  - 権限不足や未実装メソッドに対して警告を出して処理を継続するように修正し、クロスプラットフォームでの安全性を向上。
-
-- run_monitoring のポーリング間隔設定の堅牢化
-  - 環境変数 MONITOR_POLL_INTERVAL の不正値（0、負数、非整数）を検出してデフォルトにフォールバックするログ出力を追加。
-
-- 各種 DB 初期化の防御的実装
-  - init_monitoring_db を呼び出して監視テーブルの存在を保証（冪等）。run_execution は paper_trading モードでも監視テーブルが存在することを保証するために呼び出す。
-
-### Notes / Implementation details
-- 多くのモジュールは「外部 API への直接アクセスなし」に設計されており、本番取引ロジックと分析・テスト用ロジックを分離する方針が取られている（例: research は DuckDB の価格テーブルのみ参照、paper_trading では専用 SQLite を使用）。
-- 設定自動読み込みは、プロジェクトルート検出に失敗した場合や KABUSYS_DISABLE_AUTO_ENV_LOAD が設定されている場合はスキップされる。
-- Portfolio や Position sizing のアルゴリズムはドキュメント（PortfolioConstruction.md, StrategyModel.md 等）に基づく旨の注釈があり、将来的な拡張（銘柄別 lot_size、フォールバック価格など）に備えた TODO コメントが含まれている。
-- research/factor_research.py はファイル末尾で実装途上に見える箇所があるため、ファクター計算の完全実装は今後の作業が必要。
-
-### Security
-- 初期リリースでは特にセキュリティ修正は記録なし。環境変数にトークン/パスワードを保持するため .env の取り扱い（絶対に Git にコミットしない等）を README に明記することを推奨。
-
----
-
-将来的にはリリースごとに実際のコミット・チケットに基づいて CHANGELOG を更新してください。必要であれば、各ファイルごとの詳細な変更点や懸念点（例えば position_sizing の価格欠損時の挙動や paper_trading の検証閾値の調整提案など）についても追記できます。必要であればその点も反映して更新します。
+<!--
+フォーマット参考:
+https://keepachangelog.com/ja/1.0.0/
+-->
