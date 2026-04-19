@@ -20,6 +20,7 @@ from kabusys.strategy.signal_generator import (
     _compute_momentum_score,
     _compute_value_score,
     _compute_volatility_score,
+    _fetch_gap_ratios,
     _is_bear_regime,
     _sigmoid,
     generate_signals,
@@ -755,3 +756,56 @@ def test_is_bear_regime_exactly_min_samples(conn):
         [TARGET_DATE, -0.3, "bear"],
     )
     assert _is_bear_regime(conn, TARGET_DATE) is True
+
+
+# ---------------------------------------------------------------------------
+# _fetch_gap_ratios
+# ---------------------------------------------------------------------------
+
+_PREV_DATE = date(2020, 5, 29)  # TARGET_DATE の直前営業日
+
+
+def test_fetch_gap_ratios_gap_up(conn):
+    """ギャップアップ時に正の比率が返る"""
+    # prev: close=1000, target: open=1061 → gap = 0.061
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [_PREV_DATE, "A", 990.0, 1010.0, 985.0, 1000.0, 1_000_000, 5e8],
+    )
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "A", 1061.0, 1080.0, 1060.0, 1070.0, 1_000_000, 5e8],
+    )
+    result = _fetch_gap_ratios(conn, ["A"], TARGET_DATE)
+    assert "A" in result
+    assert result["A"] == pytest.approx(0.061, rel=1e-4)
+
+
+def test_fetch_gap_ratios_missing_data_returns_empty(conn):
+    """target_date のデータなし → {} を返す（BUY 許可側）"""
+    result = _fetch_gap_ratios(conn, ["A"], TARGET_DATE)
+    assert result == {}
+
+
+def test_fetch_gap_ratios_empty_codes(conn):
+    """codes が空リスト → {} を返す"""
+    result = _fetch_gap_ratios(conn, [], TARGET_DATE)
+    assert result == {}
+
+
+def test_fetch_gap_ratios_zero_prev_close_excluded(conn):
+    """前日 close = 0 の銘柄はゼロ除算防止のため結果から除外される"""
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [_PREV_DATE, "A", 0.0, 0.0, 0.0, 0.0, 0, 0],
+    )
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "A", 100.0, 110.0, 95.0, 105.0, 1_000_000, 5e8],
+    )
+    result = _fetch_gap_ratios(conn, ["A"], TARGET_DATE)
+    assert "A" not in result

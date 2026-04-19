@@ -46,6 +46,8 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
 
 _DEFAULT_THRESHOLD: float = 0.60  # BUY シグナル閾値
 _STOP_LOSS_RATE: float = -0.08  # ストップロス閾値（Section 5.2）
+_GAP_UP_THRESHOLD: float = 0.05  # gap_ratio > 0.05 → BUY 抑制（超過のみ）
+_GAP_DOWN_THRESHOLD: float = -0.03  # gap_ratio <= -0.03 → BUY 抑制（境界値含む）
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +142,38 @@ def _is_breadth_stop(
     if row is None:
         return False
     return bool(row[0])
+
+
+def _fetch_gap_ratios(
+    conn: duckdb.DuckDBPyConnection,
+    codes: list[str],
+    target_date: date,
+) -> dict[str, float]:
+    """target_date の open / 前日 close - 1.0 を銘柄ごとに返す。
+
+    戻り値: {code: gap_ratio} — データ欠損銘柄はキーなし（BUY 許可・安全側）。
+    前日は target_date より小さい最大日付を使用する。
+    """
+    if not codes:
+        return {}
+    rows = conn.execute(
+        """
+        SELECT t.code,
+               CAST(t.open AS DOUBLE) / CAST(p.close AS DOUBLE) - 1.0
+        FROM prices_daily t
+        JOIN prices_daily p
+          ON p.code = t.code
+         AND p.date = (
+             SELECT MAX(date) FROM prices_daily
+             WHERE code = t.code AND date < ?
+         )
+        WHERE t.date = ?
+          AND t.code = ANY(?)
+          AND CAST(p.close AS DOUBLE) > 0
+        """,
+        [target_date, target_date, codes],
+    ).fetchall()
+    return {code: ratio for code, ratio in rows}
 
 
 # ---------------------------------------------------------------------------
