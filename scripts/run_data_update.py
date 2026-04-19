@@ -40,9 +40,12 @@ def main() -> None:
         if max_date_row and max_date_row[0]:
             target_date = max_date_row[0]
             breadth_result = calc_and_save_breadth(conn, target_date)
-            logger.info(
-                "breadth 計算完了: date=%s result=%d", target_date, breadth_result
-            )
+            if breadth_result == 1:
+                logger.info("breadth 挿入完了: date=%s", target_date)
+            else:
+                logger.info(
+                    "breadth スキップ（既存 or データ不足）: date=%s", target_date
+                )
         else:
             logger.warning("breadth 計算スキップ: prices_daily にデータなし")
     except Exception:
