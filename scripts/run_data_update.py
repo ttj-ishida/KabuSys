@@ -33,8 +33,9 @@ def main() -> None:
         else:
             logger.info("ETL 完了")
 
-        # ETL で挿入された最新日付の翌日を target_date として breadth を計算
-        # （prices_daily の date < target_date = 当日以前のデータを使用）
+        # ETL で挿入された最新日付を target_date として breadth を計算
+        # （内部計算は WHERE date < target_date のため前日以前のデータを使用し、
+        #   計算結果は market_breadth.date = target_date（当日）として保存する）
         max_date_row = conn.execute("SELECT MAX(date) FROM prices_daily").fetchone()
         if max_date_row and max_date_row[0]:
             target_date = max_date_row[0]
