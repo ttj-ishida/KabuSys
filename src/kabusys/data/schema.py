@@ -198,6 +198,17 @@ CREATE TABLE IF NOT EXISTS market_regime (
 )
 """
 
+_MARKET_BREADTH = """
+CREATE TABLE IF NOT EXISTS market_breadth (
+    date                DATE    PRIMARY KEY,
+    adv_decline_ratio   DOUBLE  NOT NULL,
+    ma25_above_pct      DOUBLE  NOT NULL,
+    new_high_low_ratio  DOUBLE,
+    breadth_stop        BOOLEAN NOT NULL,
+    created_at          TIMESTAMP DEFAULT current_timestamp
+)
+"""
+
 # ---- Execution Layer -------------------------------------------------------
 
 _SIGNALS = """
@@ -328,6 +339,7 @@ _ALL_DDL: list[str] = [
     _FEATURES,
     _AI_SCORES,
     _MARKET_REGIME,
+    _MARKET_BREADTH,  # 追加
     # Execution
     _SIGNALS,
     _SIGNAL_QUEUE,
