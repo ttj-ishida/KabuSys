@@ -488,3 +488,148 @@ def test_db_write_failure(conn):
         "SELECT COUNT(*) FROM market_regime WHERE date = ?", [TARGET_DATE]
     ).fetchone()[0]
     assert count == 0
+
+
+# ---------------------------------------------------------------------------
+# breadth 補正テスト（Issue #173）
+# ---------------------------------------------------------------------------
+
+
+def _insert_market_breadth(conn, d: date, adv_decline_ratio: float) -> None:
+    """market_breadth テーブルに1行挿入するヘルパー。"""
+    conn.execute(
+        "INSERT INTO market_breadth "
+        "(date, adv_decline_ratio, ma25_above_pct, breadth_stop) "
+        "VALUES (?, ?, 0.5, False)",
+        [d, adv_decline_ratio],
+    )
+
+
+def test_breadth_correction_low_adv_decline(conn):
+    """騰落レシオ < 80 → raw_score が -0.2 補正される → regime_label = bear。
+
+    設定: 1321 の MA比率=1.0（raw_score寄与=0）、マクロ=0.0
+    補正前 raw_score = 0.0
+    補正後 raw_score = -0.2 → regime_label = 'bear'
+    """
+    from unittest.mock import patch
+
+    from kabusys.ai.regime_detector import score_regime
+
+    _insert_prices_uniform(conn, "1321", 199, 100.0, TARGET_DATE)
+    _insert_price(conn, "1321", TARGET_DATE - timedelta(days=1), 100.0)
+
+    _insert_market_breadth(conn, TARGET_DATE, adv_decline_ratio=70.0)
+
+    with patch("kabusys.ai.regime_detector._call_openai_api") as mock_api:
+        mock_api.return_value = _make_macro_response(0.0)
+        score_regime(conn, TARGET_DATE, api_key="test-key")
+
+    row = conn.execute(
+        "SELECT regime_score, regime_label FROM market_regime WHERE date = ?",
+        [TARGET_DATE],
+    ).fetchone()
+    assert row is not None
+    assert row[1] == "bear", f"Expected bear but got {row[1]}"
+    assert row[0] <= -0.2, f"Expected regime_score <= -0.2 but got {row[0]}"
+
+
+def test_breadth_correction_high_adv_decline(conn):
+    """騰落レシオ > 120 → raw_score が +0.1 補正される。
+
+    設定: 1321 の MA比率=1.0、マクロ=0.1
+    補正前 raw_score = 0.7*0*10 + 0.3*0.1 = 0.03
+    補正後 raw_score = 0.13 → regime_label = neutral（閾値 0.2 未満）
+    """
+    from unittest.mock import patch
+
+    from kabusys.ai.regime_detector import score_regime
+
+    _insert_prices_uniform(conn, "1321", 199, 100.0, TARGET_DATE)
+    _insert_price(conn, "1321", TARGET_DATE - timedelta(days=1), 100.0)
+
+    _insert_market_breadth(conn, TARGET_DATE, adv_decline_ratio=130.0)
+
+    with patch("kabusys.ai.regime_detector._call_openai_api") as mock_api:
+        mock_api.return_value = _make_macro_response(0.1)
+        score_regime(conn, TARGET_DATE, api_key="test-key")
+
+    row = conn.execute(
+        "SELECT regime_score FROM market_regime WHERE date = ?",
+        [TARGET_DATE],
+    ).fetchone()
+    assert row is not None
+    assert row[0] >= 0.1, f"Expected regime_score >= 0.1 but got {row[0]}"
+
+
+def test_breadth_correction_neutral(conn):
+    """騰落レシオ 80〜120 → 補正なし（raw_score に変化なし）。"""
+    from unittest.mock import patch
+
+    from kabusys.ai.regime_detector import score_regime
+
+    _insert_prices_uniform(conn, "1321", 199, 100.0, TARGET_DATE)
+    _insert_price(conn, "1321", TARGET_DATE - timedelta(days=1), 100.0)
+
+    _insert_market_breadth(conn, TARGET_DATE, adv_decline_ratio=100.0)
+
+    with patch("kabusys.ai.regime_detector._call_openai_api") as mock_api:
+        mock_api.return_value = _make_macro_response(0.0)
+        score_regime(conn, TARGET_DATE, api_key="test-key")
+
+    row = conn.execute(
+        "SELECT regime_score FROM market_regime WHERE date = ?",
+        [TARGET_DATE],
+    ).fetchone()
+    assert row is not None
+    assert abs(row[0]) < 0.01, f"Expected ~0.0 but got {row[0]}"
+
+
+def test_breadth_missing_no_correction(conn):
+    """market_breadth にデータなし → 既存ロジックのみで正常動作（補正なし）。"""
+    from unittest.mock import patch
+
+    from kabusys.ai.regime_detector import score_regime
+
+    _insert_prices_uniform(conn, "1321", 199, 100.0, TARGET_DATE)
+    _insert_price(conn, "1321", TARGET_DATE - timedelta(days=1), 100.0)
+    # market_breadth に何も挿入しない
+
+    with patch("kabusys.ai.regime_detector._call_openai_api") as mock_api:
+        mock_api.return_value = _make_macro_response(0.0)
+        result = score_regime(conn, TARGET_DATE, api_key="test-key")
+
+    assert result == 1
+    row = conn.execute(
+        "SELECT regime_score FROM market_regime WHERE date = ?",
+        [TARGET_DATE],
+    ).fetchone()
+    assert row is not None
+    assert abs(row[0]) < 0.01
+
+
+def test_regime_clips_to_range(conn):
+    """breadth 補正後も regime_score が [-1.0, 1.0] に収まる。
+
+    1321 大幅上昇（MA比率=1.2）+ マクロ最大(1.0) + 騰落レシオ>120(+0.1補正)
+    → raw_score が 1.0 を超えるがクリップされる。
+    """
+    from unittest.mock import patch
+
+    from kabusys.ai.regime_detector import score_regime
+
+    _insert_prices_uniform(conn, "1321", 199, 100.0, TARGET_DATE)
+    _insert_price(conn, "1321", TARGET_DATE - timedelta(days=1), 120.0)
+
+    _insert_market_breadth(conn, TARGET_DATE, adv_decline_ratio=150.0)
+
+    with patch("kabusys.ai.regime_detector._call_openai_api") as mock_api:
+        mock_api.return_value = _make_macro_response(1.0)
+        score_regime(conn, TARGET_DATE, api_key="test-key")
+
+    row = conn.execute(
+        "SELECT regime_score FROM market_regime WHERE date = ?",
+        [TARGET_DATE],
+    ).fetchone()
+    assert row is not None
+    assert -1.0 <= row[0] <= 1.0, f"regime_score={row[0]} が範囲外"
