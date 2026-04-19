@@ -257,7 +257,13 @@ def calc_and_save_breadth(
                 (date, adv_decline_ratio, ma25_above_pct, new_high_low_ratio, breadth_stop)
             VALUES (?, ?, ?, ?, ?)
             """,
-            [target_date, adv_decline_ratio, ma25_above_pct, new_high_low_ratio, breadth_stop],
+            [
+                target_date,
+                adv_decline_ratio,
+                ma25_above_pct,
+                new_high_low_ratio,
+                breadth_stop,
+            ],
         )
         conn.execute("COMMIT")
     except Exception:

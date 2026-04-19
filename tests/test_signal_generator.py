@@ -123,7 +123,9 @@ def test_breadth_stop_skips_buy_signals(conn):
         "SELECT side FROM signals WHERE date = ?", [TARGET_DATE]
     ).fetchall()
     buy_signals = [r for r in rows if r[0] == "buy"]
-    assert len(buy_signals) == 0, f"breadth_stop=True なのに BUY が生成された: {len(buy_signals)} 件"
+    assert len(buy_signals) == 0, (
+        f"breadth_stop=True なのに BUY が生成された: {len(buy_signals)} 件"
+    )
 
 
 def test_breadth_stop_false_allows_buy(conn):

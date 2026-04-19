@@ -156,9 +156,7 @@ def test_adv_decline_ratio_no_declines(conn):
     assert abs(row[0] - 200.0) < 1e-9
 
 
-def _insert_price_per_stock_trend(
-    conn, code: str, dates: list, *, up: bool
-) -> None:
+def _insert_price_per_stock_trend(conn, code: str, dates: list, *, up: bool) -> None:
     """up=True なら上昇トレンド、False なら下落トレンドで挿入。"""
     for i, d in enumerate(dates):
         close = 100.0 + i if up else max(100.0 - i * 0.5, 1.0)

@@ -333,9 +333,7 @@ def generate_signals(
         "SELECT code, ai_score FROM ai_scores WHERE date = ?",
         [target_date],
     ).fetchall()
-    ai_map: dict[str, dict] = {
-        code: {"ai_score": ai} for code, ai in ai_rows
-    }
+    ai_map: dict[str, dict] = {code: {"ai_score": ai} for code, ai in ai_rows}
 
     # 3. Bear レジーム判定（market_regime テーブルから取得）
     regime_is_bear = _is_bear_regime(conn, target_date)
