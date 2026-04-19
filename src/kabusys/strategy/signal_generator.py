@@ -46,9 +46,6 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
 
 _DEFAULT_THRESHOLD: float = 0.60  # BUY シグナル閾値
 _STOP_LOSS_RATE: float = -0.08  # ストップロス閾値（Section 5.2）
-_BEAR_MIN_SAMPLES: int = (
-    3  # Bear 判定に必要な最小サンプル数（不足時は Bear とみなさない）
-)
 
 
 # ---------------------------------------------------------------------------
@@ -110,21 +107,39 @@ def _compute_liquidity_score(feat: dict[str, Any]) -> float | None:
     return _sigmoid(feat.get("volume_ratio"))
 
 
-def _is_bear_regime(ai_map: dict[str, dict[str, Any]]) -> bool:
-    """AI スコアのレジームスコアを集計し、Bear 相場か否かを判定する。
+def _is_bear_regime(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+) -> bool:
+    """market_regime テーブルの regime_label を参照し、Bear 相場か否かを判定する。
 
-    市場全体のレジームスコア平均が負の場合を Bear 相場とみなす。
-    ai_scores が未登録、またはサンプル数が _BEAR_MIN_SAMPLES 未満の場合は
-    Bear とみなさない（サンプル不足での誤判定を防ぐ）。
+    データが存在しない場合は False（安全側：BUY を許可）を返す。
     """
-    scores = [
-        v["regime_score"]
-        for v in ai_map.values()
-        if v.get("regime_score") is not None and math.isfinite(v["regime_score"])
-    ]
-    if len(scores) < _BEAR_MIN_SAMPLES:
+    row = conn.execute(
+        "SELECT regime_label FROM market_regime WHERE date = ?",
+        [target_date],
+    ).fetchone()
+    if row is None:
         return False
-    return sum(scores) / len(scores) < 0.0
+    return row[0] == "bear"
+
+
+def _is_breadth_stop(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+) -> bool:
+    """market_breadth.breadth_stop フラグを返す。
+
+    breadth_stop=True の場合、25日MA上銘柄比率が 35% 未満であり新規 BUY を停止する。
+    データが存在しない場合は False（安全側：BUY を許可）を返す。
+    """
+    row = conn.execute(
+        "SELECT breadth_stop FROM market_breadth WHERE date = ?",
+        [target_date],
+    ).fetchone()
+    if row is None:
+        return False
+    return bool(row[0])
 
 
 # ---------------------------------------------------------------------------
@@ -313,20 +328,28 @@ def generate_signals(
             target_date,
         )
 
-    # 2. AI スコア読み込み（未登録の場合は空辞書）
+    # 2. AI スコア読み込み（センチメントスコアのみ使用）
     ai_rows = conn.execute(
-        "SELECT code, ai_score, regime_score FROM ai_scores WHERE date = ?",
+        "SELECT code, ai_score FROM ai_scores WHERE date = ?",
         [target_date],
     ).fetchall()
     ai_map: dict[str, dict] = {
-        code: {"ai_score": ai, "regime_score": reg} for code, ai, reg in ai_rows
+        code: {"ai_score": ai} for code, ai in ai_rows
     }
 
-    # 3. Bear レジーム判定（Section 5.1）
-    regime_is_bear = _is_bear_regime(ai_map)
+    # 3. Bear レジーム判定（market_regime テーブルから取得）
+    regime_is_bear = _is_bear_regime(conn, target_date)
     if regime_is_bear:
         logger.info(
             "generate_signals: Bear レジーム検知 — BUY シグナル抑制 date=%s",
+            target_date,
+        )
+
+    # 3b. breadth_stop 判定（25日MA上銘柄比率 < 35% で BUY 全件停止）
+    breadth_stop = _is_breadth_stop(conn, target_date)
+    if breadth_stop:
+        logger.warning(
+            "generate_signals: breadth_stop=True — 25日MA上銘柄比率 < 35%% のため BUY を全件スキップ date=%s",
             target_date,
         )
 
@@ -357,9 +380,9 @@ def generate_signals(
     scored.sort(key=lambda r: r["score"], reverse=True)
     score_map: dict[str, float] = {r["code"]: r["score"] for r in scored}
 
-    # 6. BUY シグナル生成（Bear レジームでは抑制）
+    # 6. BUY シグナル生成（Bear レジームまたは breadth_stop では抑制）
     buy_signals: list[dict] = []
-    if not regime_is_bear:
+    if not regime_is_bear and not breadth_stop:
         for rank, r in enumerate(scored, 1):
             if r["score"] >= threshold:
                 buy_signals.append(
