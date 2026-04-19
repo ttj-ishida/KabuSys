@@ -1,201 +1,238 @@
-KabuSys — 日本株自動売買システム（README）
-=================================
+# KabuSys
 
-概要
-----
-KabuSys は日本株向けの自動売買・リサーチ基盤の一部を構成する Python パッケージ群です。本リポジトリには以下の主要機能があります。
+日本株向けの自動売買システム（ライブラリ + 起動スクリプト群）
 
-- 実行エンジン（ExecutionEngine）の起動スクリプト（本番 / ペーパートレード切替）
-- 監視モジュール（SystemMonitor / TradeMonitor / RiskMonitor）とポーリングエンジン
-- Kill Switch（閾値超過時の自動停止）とアラート連携（LINE 等の設定に対応）
-- ポートフォリオ構築（候補選定、重み付け、ポジションサイズ計算、セクター制約）
-- 研究用モジュール（ファクター計算、特徴量探索、IC 計算）
-- AI を使ったニュースセンチメント（OpenAI API によるスコアリング）および市場レジーム判定
-- 各種ユーティリティ（ログ設定、プロセス優先度設定、設定ウィザード、設定検証）
-- ペーパートレード検証レポート生成スクリプト
-
-この README はコードベースに含まれる主要スクリプト・設定の使い方とディレクトリ構成をまとめたものです。
-
-主な機能一覧
--------------
-- 実行エンジン起動: run_execution.py
-  - KABUSYS_ENV に応じて本番または paper_trading（MockBroker）を自動切替
-  - Paper trading は本番 DB と分離（data/paper_trading.db を使用）
-- 監視プロセス起動: run_monitoring.py
-  - SystemMonitor を定期ポーリングしてシステム指標を SQLite に保存
-  - MONITOR_POLL_INTERVAL でポーリング間隔を変更可能（デフォルト 60 秒）
-- 監視エンジン: MonitoringEngine（各モニタを束ねてアラート / Kill Switch を評価）
-- Kill Switch: 閾値到達時に data/kill.flag を作成して ExecutionEngine を停止
-- リサーチ: ファクター計算（momentum/value/volatility）、forward returns、IC、統計要約
-- AI モジュール:
-  - kabusys.ai.news_nlp: raw_news を OpenAI に送って銘柄別センチメントを ai_scores に書き込み
-  - kabusys.ai.regime_detector: ETF の MA と LLM によるマクロセンチメントを合成して市場レジーム判定
-- ツール:
-  - 設定ウィザード: kabusys.config_setup（.env の対話式生成）
-  - 設定検証: kabusys.validate_config（.env / config/*.yaml / パス検証）
-  - レポート: kabusys.tools.paper_verification_report（ペーパートレード検証レポート）
-
-必要条件（代表）
-----------------
-（実行環境によって変わります。最低限の依存として以下を想定）
-- Python 3.9+
-- duckdb
-- psutil
-- openai（AI 機能を使う場合）
-- PyYAML（config 検証で YAML の中身を確認したい場合）
-- （標準ライブラリ）sqlite3 等
-
-セットアップ手順
-----------------
-1. リポジトリをクローンして作業ディレクトリに入る。
-
-2. 仮想環境を作成して有効化（例）:
-   - python -m venv .venv
-   - source .venv/bin/activate  (Windows: .venv\Scripts\activate)
-
-3. 必要パッケージをインストール（例）:
-   - pip install duckdb psutil openai PyYAML
-   - （要件ファイルがある場合はそれを使ってください）
-
-4. 対話式 .env 作成（推奨）:
-   - python -m kabusys.config_setup
-   - ウィザードが .env を生成します。既存の .env があれば読み込み・更新します。
-   - 重要: .env は Git にコミットしないでください（認証情報を含むため）。
-
-5. 設定検証（必須項目が揃っているか確認）:
-   - python -m kabusys.validate_config
-   - 警告も厳密に扱う場合: python -m kabusys.validate_config --strict
-
-環境変数（主要）
-----------------
-主な環境変数とデフォルト値（重要なもの）:
-
-- KABUSYS_ENV (development | paper_trading | live) — デフォルト: development
-  - paper_trading: MockBroker を使用し DB を分離
-  - live: 実際の発注を行う想定（注意して使用）
-- JQUANTS_REFRESH_TOKEN — 必須（J-Quants API 用）
-- KABU_API_PASSWORD — 必須（kabuステーション API 用）
-- KABU_API_BASE_URL — デフォルト: http://localhost:18080/kabusapi
-- OPENAI_API_KEY — OpenAI を使う機能で必要
-- PAPER_FILL_MODE — paper_trading 時の約定モード（instant|partial|never|reject）デフォルト: instant
-- PAPER_TRADING_SQLITE_PATH — デフォルト: data/paper_trading.db
-- DUCKDB_PATH — デフォルト: data/kabusys.duckdb
-- SQLITE_PATH — デフォルト: data/monitoring.db  （Monitoring 用 SQLite）
-- LOG_LEVEL — デフォルト: INFO
-- LOG_DIR — ログ出力先（デフォルト logs/）
-- MONITOR_POLL_INTERVAL — run_monitoring のポーリング間隔（秒、デフォルト 60）
-- KILL_FLAG_CLEAR_ON_START — 本番で kill.flag を自動クリアするか（0/1、デフォルト 0）
-- KABUSYS_DISABLE_AUTO_ENV_LOAD — 1 にすると自動で .env を読み込まない
-
-使い方（起動方法とツール）
---------------------------
-
-1) 設定ウィザード（.env を生成）
-   - python -m kabusys.config_setup
-   - 生成後は python -m kabusys.validate_config で検証
-
-2) ExecutionEngine（取引エンジン）を起動
-   - 本番（KABUSYS_ENV=live）:
-     - export KABUSYS_ENV=live
-     - python -m kabusys.run_execution
-   - ペーパートレード（MockBroker、データを data/paper_trading.db に保存）:
-     - export KABUSYS_ENV=paper_trading
-     - python -m kabusys.run_execution
-   - 実行スクリプトはデーモン化は行いません。PID ファイル（data/execution.pid）や停止フラグ（data/stop_requested.flag）を扱います。
-
-3) Monitoring（監視プロセス）を起動
-   - デフォルト 60 秒間隔で SystemMonitor をポーリングし monitoring DB（SQLITE_PATH）に記録します:
-     - MONITOR_POLL_INTERVAL=30 python -m kabusys.run_monitoring
-   - 監視は本番 sqlite_path を常に使用します（KABUSYS_ENV に依存せず本番用の監視 DB を使う設計）。
-
-4) 設定検証
-   - python -m kabusys.validate_config
-   - --strict オプションで警告も FAIL 扱いにできます
-
-5) Paper Trading 検証レポート生成
-   - python -m kabusys.tools.paper_verification_report --from 2026-04-01 --to 2026-04-11
-   - --db で明示的に DB パスを指定可能。環境変数 PAPER_TRADING_SQLITE_PATH も使用できます。
-
-停止・Kill 動作
----------------
-- 手動で ExecutionEngine を停止したい場合:
-  - kill switch を発動させたい/自動停止したい場合は KillSwitch が data/kill.flag を作成します（監視結果に応じて自動で書き込まれる）。ExecutionEngine 起動時 / 実行中はこの flag の存在をチェックして停止処理を行います。
-- 起動スクリプトを安全に停止するには:
-  - run_monitoring.py / run_execution.py は data/stop_requested.flag を検知すると自ら終了します。停止したい場合はこのファイルを作成してください。
-  - stop フラグの位置: プロジェクトルート/data/stop_requested.flag
-
-ログ
-----
-- ログはデフォルトで logs/<app_name>.log に日次ローテーションで保存されます（30日保持）。
-- コンソールには stdout 経由で出力されます。
-- ログレベルは LOG_LEVEL 環境変数または setup_logging の引数で変更可能。
-
-ディレクトリ構成（主要ファイル）
--------------------------------
-以下は主要なディレクトリ / ファイルの抜粋（src/kabusys 以下）:
-
-- src/kabusys/
-  - __init__.py
-  - config.py                      — 環境変数 / Settings 管理、自動 .env ロード機能
-  - config_setup.py                — 対話式 .env ウィザード
-  - validate_config.py             — 設定検証 CLI
-  - run_execution.py               — ExecutionEngine 起動スクリプト
-  - run_monitoring.py              — SystemMonitor ポーリング起動スクリプト
-  - execution/                      — 実行（注文・ブローカー・リスク等）関連
-    - execution_engine.py
-    - order_manager.py
-    - order_repository.py
-    - reconciler.py
-    - risk_manager.py
-    - broker_factory.py
-  - monitoring/
-    - monitoring_db.py             — SQLite 永続化層（system_status, trade_logs, positions, risk_logs, dashboard）
-    - system_monitor.py
-    - trade_monitor.py
-    - risk_monitor.py
-    - kill_switch.py
-    - monitoring_engine.py
-    - alert_manager.py
-  - portfolio/
-    - portfolio_builder.py
-    - position_sizing.py
-    - risk_adjustment.py
-  - research/
-    - factor_research.py
-    - feature_exploration.py
-  - ai/
-    - news_nlp.py                   — OpenAI を用いたニュースセンチメント
-    - regime_detector.py            — MA と LLM を合成した市場レジーム判定
-  - tools/
-    - paper_verification_report.py  — ペーパートレード検証レポート生成
-  - data/                           — 実行時生成ファイル（デフォルト）
-    - monitoring.db (SQLITE_PATH)
-    - paper_trading.db (PAPER_TRADING_SQLITE_PATH)
-    - kabusys.duckdb (DUCKDB_PATH)
-    - execution.pid
-    - kill.flag
-    - stop_requested.flag
-  - logs/                           — ログ出力先（デフォルト）
-
-設計上の注意点・運用上のポイント
---------------------------------
-- .env の自動読み込み: config.py はプロジェクトルート（.git か pyproject.toml を探索）を基に .env, .env.local を自動読み込みします。自動読み込みを無効化するには KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください。
-- Paper trading は本番 DB と完全に分離されます。KABUSYS_ENV=paper_trading を指定すると paper_sqlite_path（デフォルト data/paper_trading.db）を使用します。
-- AI 機能を使用する際は OPENAI_API_KEY を必ず設定してください。ない場合は該当機能が例外を投げます（明示的にチェック）。
-- 監視/実行プロセスは stop_requested.flag を検知して安全に終了するため、外部からの停止はそのフラグ作成を推奨します。
-- Monitoring モジュールは監視指標を常に本番用 sqlite_path に記録します（監視は環境に依存しない設計）。
-- ログディレクトリ作成に失敗してもコンソールログのみで継続するように設計されています。
-
-トラブルシューティング（よくある問題）
-----------------------------------------
-- .env に必須値 (JQUANTS_REFRESH_TOKEN や KABU_API_PASSWORD) がない場合、Settings のプロパティ参照時に ValueError が発生します。config_setup と validate_config を利用して事前確認してください。
-- OpenAI API で RateLimitError 等が発生する場合、news_nlp と regime_detector はリトライロジックを持っていますが、API キー/プランの見直しをしてください。
-- DuckDB / SQLite のファイルパスが存在しないディレクトリにある場合、validate_config が警告を出します。起動時にディレクトリを自動作成することもありますが、明示的に作成して権限を確認してください。
-
-ライセンス・貢献
-----------------
-（必要に応じてプロジェクトのライセンス・貢献手順をここに記載してください）
+このリポジトリは、シグナル生成、ポートフォリオ構築、発注エンジン（ExecutionEngine）、監視（Monitoring）、
+AI を用いたニュース評価・レジーム判定、研究用ファクター計算等を含む総合的な自動売買プラットフォームの一部です。
 
 ---
 
-この README はコード内の docstring と実装から主要機能・運用方法を抜粋してまとめたものです。より詳細な内部実装や API の仕様は各モジュールの docstring を参照してください。必要であれば各サブモジュールごとの使い方マニュアルも作成できます。
+## 主な概要
+
+- モジュール設計により「発注ロジック」と「監視/記録」を分離。
+- Paper Trading（ペーパートレード）と Live（本番）を環境変数で切替可能。
+- DuckDB を用いた研究用データ分析、SQLite を用いた監視・取引ログ永続化。
+- OpenAI を利用したニュースのセンチメント評価や市場レジーム判定（任意）。
+- 監視モジュールがドローダウンや滞留注文などを検知すると kill flag を書き込み、ExecutionEngine を安全停止させる仕組みを持つ。
+
+---
+
+## 機能一覧
+
+- 起動スクリプト
+  - run_execution.py: ExecutionEngine を起動（KABUSYS_ENV により paper_trading 用 DB と MockBroker を使用）
+  - run_monitoring.py: SystemMonitor のポーリングループを起動（監視ログの記録）
+- 設定管理 / ツール
+  - config_setup.py: 対話的に .env を生成 / 更新するウィザード
+  - validate_config.py: .env と config/*.yaml の整合性チェック（--strict オプションあり）
+- 監視（monitoring）
+  - system_monitor: システムリソース・データ鮮度・実プロセス存在チェック
+  - trade_monitor: 発注ログの整合性チェック（滞留注文・約定異常など）
+  - risk_monitor: ドローダウン・ポジション上限監視
+  - kill_switch: 条件を満たした際に data/kill.flag を書き込む
+  - monitoring_db: SQLite による監視ログ保存（テーブルの初期化・マイグレーション含む）
+  - monitoring_engine: 各モニタを束ねるポーリングエンジン
+- 発注関連（execution）
+  - BrokerClientFactory / ExecutionEngine / OrderManager / Reconciler / RiskManager（設定に基づくリスク制御）
+  - ペーパートレード用に本番 DB と分離された data/paper_trading.db を使用可能
+- ポートフォリオ構築（portfolio）
+  - 候補選定、ウェイト計算、リスク調整（セクターキャップ、レジーム乗数）、ポジションサイズ決定（単元丸め等）
+- 研究（research）
+  - factor_research: モメンタム / ボラティリティ / バリュー等のファクター計算（DuckDB 上で実行）
+  - feature_exploration: 将来リターン、IC（Information Coefficient）、統計サマリー等
+- AI（任意）
+  - ai.news_nlp: OpenAI を使った銘柄ごとのニュースセンチメント集計と ai_scores への書き込み
+  - ai.regime_detector: ETF MA とマクロニュースを統合した市場レジーム判定
+- ユーティリティ
+  - logging_setup: 統一的なログ設定（stdout + 日次ローテーションファイル）
+  - process_priority: プラットフォーム差分を吸収したプロセス優先度 / CPU affinity 設定
+- ツール
+  - tools.paper_verification_report: ペーパートレード DB を解析して検証レポートを生成
+
+---
+
+## 必要条件（推奨）
+
+- Python 3.10 以上（型ヒントの union 演算子 (|) を使用）
+- 必要パッケージ（代表）
+  - duckdb
+  - psutil
+  - openai（AI 機能を使う場合）
+  - PyYAML（validate_config で YAML 検証を行う場合に推奨）
+- SQLite（Python に標準搭載）
+- ネットワーク（本番 API や OpenAI を使用する場合）
+
+インストール例（仮に requirements.txt がある場合）:
+  python -m venv .venv
+  source .venv/bin/activate
+  python -m pip install -r requirements.txt
+
+特定パッケージを個別に入れる場合:
+  python -m pip install duckdb psutil openai pyyaml
+
+---
+
+## セットアップ手順
+
+1. リポジトリをクローンして仮想環境を作成・有効化
+   - python -m venv .venv
+   - source .venv/bin/activate  (Windows: .venv\Scripts\activate)
+
+2. 依存パッケージをインストール
+   - python -m pip install duckdb psutil openai pyyaml
+
+3. .env の作成（対話式ウィザード推奨）
+   - python -m kabusys.config_setup
+   - ウィザードで必要な値（J-Quants トークン、kabu API パスワード、KABUSYS_ENV など）を入力
+
+4. 設定検証
+   - python -m kabusys.validate_config
+   - 本番準備時は --strict を付けて警告も失敗扱いにする:
+     python -m kabusys.validate_config --strict
+
+5. デフォルトのデータディレクトリ作成（必要な場合）
+   - mkdir -p data logs
+
+注意:
+- 自動的に .env を読み込む仕組みが入っています（プロジェクトルートに .env / .env.local があれば読み込み）。
+- 環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定すると自動ロードを無効化できます（テスト用途）。
+
+---
+
+## 主要な環境変数
+
+必須（主要なもの）
+- JQUANTS_REFRESH_TOKEN — J-Quants API 用
+- KABU_API_PASSWORD — kabuステーション API 用
+
+運用系
+- KABUSYS_ENV — 実行環境 (development | paper_trading | live)
+  - paper_trading の場合、発注は MockBroker を使い paper_sqlite_path に記録
+- LOG_LEVEL — ログレベル（例: INFO）
+- DUCKDB_PATH — DuckDB ファイル（デフォルト: data/kabusys.duckdb）
+- SQLITE_PATH — 監視用 SQLite（デフォルト: data/monitoring.db）
+- PAPER_TRADING_SQLITE_PATH — ペーパートレード専用 SQLite（デフォルト: data/paper_trading.db）
+- OPENAI_API_KEY — OpenAI を使う機能で必要
+- MONITOR_POLL_INTERVAL — run_monitoring のポーリング間隔（秒、デフォルト 60）
+- KILL_FLAG_CLEAR_ON_START — Execution 起動時に kill.flag を自動クリアするか（0/1）
+
+---
+
+## 使い方
+
+### 1) .env の準備
+- 対話式:
+  python -m kabusys.config_setup
+- あるいは .env を手動作成（.env.example を参照して値を埋める）
+
+### 2) 設定検証
+  python -m kabusys.validate_config
+  # 本番チェック:
+  python -m kabusys.validate_config --strict
+
+### 3) ExecutionEngine（発注エンジン）の起動
+- 通常起動:
+  python -m kabusys.run_execution
+- 仕様:
+  - KABUSYS_ENV=paper_trading の場合、MockBrokerClient を使用して data/paper_trading.db に記録し、本番 DB と分離します。
+  - 起動時に data/stop_requested.flag が存在すると起動を中止します。
+  - 実行中に同フラグを置くことで停止を促すことができます。
+  - 起動時に PID を data/execution.pid に書きます。
+
+### 4) Monitoring（監視）の起動
+  python -m kabusys.run_monitoring
+- 設定:
+  - 環境変数 MONITOR_POLL_INTERVAL でポーリング間隔を秒で変更可能（デフォルト 60）。
+  - 監視は環境にかかわらず本番 sqlite_path を使用して監視ログを記録します（監視データは常に本番 DB を想定）。
+  - data/stop_requested.flag の検出でループを安全終了します。
+
+例: ポーリングを30秒にする
+  MONITOR_POLL_INTERVAL=30 python -m kabusys.run_monitoring
+
+### 5) Paper Trading 検証レポート生成
+  python -m kabusys.tools.paper_verification_report --from 2026-04-01 --to 2026-04-11
+- デフォルト DB: data/paper_trading.db（PAPER_TRADING_SQLITE_PATH 環境変数で上書き可）
+- 出力: 稼働率、注文成功率、送信率、レイテンシ統計、PASS/FAIL 判定
+
+### 6) AI 機能
+- OpenAI API キーが必要（OPENAI_API_KEY 環境変数または関数引数で渡す）
+- ニューススコアリング:
+  - kabusys.ai.news_nlp.score_news(conn, target_date, api_key=None)
+  - DuckDB 接続を渡し、ai_scores テーブルに書き込みます
+- レジーム判定:
+  - kabusys.ai.regime_detector.score_regime(conn, target_date, api_key=None)
+
+注意:
+- AI 呼び出しは外部 API に依存するため、失敗時は安全にフォールバックする設計ですが、API キーは必要です。
+
+---
+
+## 開発・テスト向けメモ
+
+- ログ設定: 各スクリプトは kabusys.utils.logging_setup.setup_logging を呼び出します。ログは stdout と logs/<app_name>.log に出力されます（logs ディレクトリを作ること）。
+- プロセス優先度: 起動スクリプトは最初に set_process_priority("high") を呼びます（psutil の権限がない場合は警告を出してスキップ）。
+- .env 自動読込: プロジェクトルート（.git または pyproject.toml を探索）を見つけると自動的に .env / .env.local を読み込みます。テスト時は KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定して無効化可。
+
+---
+
+## ディレクトリ構成（主要ファイル）
+
+src/kabusys
+- __init__.py
+- config.py                     — 環境変数 / 設定読み込みロジック
+- config_setup.py               — .env 対話ウィザード
+- validate_config.py            — 設定検証 CLI
+- run_execution.py              — ExecutionEngine 起動スクリプト
+- run_monitoring.py             — SystemMonitor 起動スクリプト
+
+subpackages:
+- ai/
+  - news_nlp.py                 — ニュースセンチメント（OpenAI）
+  - regime_detector.py          — 市場レジーム判定（OpenAI + MA）
+- monitoring/
+  - monitoring_db.py            — SQLite のテーブル初期化 / ラッパー
+  - system_monitor.py           — システム・データ鮮度監視
+  - trade_monitor.py            — 発注ログ監視（滞留・約定異常 等）  ※（ファイル内で参照）
+  - risk_monitor.py             — ドローダウン / ポジション上限監視
+  - kill_switch.py              — kill.flag の作成/クリア
+  - alert_manager.py            — 通知（LINE 等）を行う想定の管理クラス
+  - monitoring_engine.py        — 各モニタの統合ポーリング
+- portfolio/
+  - portfolio_builder.py        — 候補選定 / 重み計算
+  - position_sizing.py          — 発注株数計算（単元丸め・aggregate cap）
+  - risk_adjustment.py          — セクターキャップ・レジーム乗数
+- research/
+  - factor_research.py          — Momentum / Volatility / Value ファクター計算
+  - feature_exploration.py      — 将来リターン, IC, 統計サマリー
+- tools/
+  - paper_verification_report.py — ペーパートレード検証レポート
+- utils/
+  - logging_setup.py            — ログ設定ユーティリティ
+  - process_priority.py         — プロセス優先度 / CPU affinity
+- monitoring、execution、data などの補助モジュール群（発注系モジュールは execution 下に分離）
+
+データ / ログ（デフォルト）
+- data/
+  - monitoring.db               — 監視用 SQLite（デフォルト）
+  - paper_trading.db            — ペーパートレード用 SQLite（paper_trading 時）
+  - kill.flag                   — Kill Switch が発動した理由を保存
+  - stop_requested.flag         — 外部からプロセス停止を要求するためのフラグ
+  - execution.pid               — ExecutionEngine の PID
+- logs/
+  - execution.log
+  - monitoring.log
+  - その他アプリログ
+
+---
+
+## 注意事項 / 運用上のヒント
+
+- 本番運用時は KABUSYS_ENV=live を使用し、LINE 通知や各種監視設定（しきい値）を入念に確認してください。
+- 本番環境で KILL_FLAG_CLEAR_ON_START=1 を設定すると、起動時に kill.flag が自動でクリアされます。誤った自動クリアは危険なので本番では 0 を推奨します。
+- .env は機密情報を含むため、絶対にバージョン管理にコミットしないでください。
+- OpenAI を利用する機能は API 負荷やコストに注意し、実行頻度やバッチサイズを運用に合わせて調整してください。
+- DuckDB/SQLite のバックアップ・スナップショットを定期的に取得してください。
+
+---
+
+この README はコードベース（src/kabusys 内）に基づいて作成しました。追加の実装（broker クライアント、ExecutionEngine の詳細、TradeMonitor 実装など）に応じて、本ドキュメントを更新してください。必要であれば各モジュールの API 例や具体的な運用手順を追記します。
