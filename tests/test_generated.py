@@ -1,4 +1,3 @@
-
 import os
 
 # disable auto env load before importing module
@@ -6,6 +5,7 @@ os.environ["KABUSYS_DISABLE_AUTO_ENV_LOAD"] = "1"
 import importlib
 
 from kabusys import config as cfg
+
 importlib.reload(cfg)
 
 
@@ -41,12 +41,12 @@ def test_parse_env_line_inline_comment_and_unquoted():
 def test_load_env_file_override_and_protected(tmp_path, monkeypatch):
     envfile = tmp_path / ".env_test"
     envfile.write_text(
-        '\n'.join(
+        "\n".join(
             [
                 "A=1",
                 "B=2",
                 "C='quoted\\'value'",
-                'D="escaped\\\"x"',
+                'D="escaped\\"x"',
             ]
         )
     )
