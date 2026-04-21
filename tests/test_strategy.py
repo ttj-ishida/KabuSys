@@ -909,6 +909,35 @@ def test_calc_sector_strengths_no_20d_data(conn):
     assert sector_map.get("A") == "Tech"
 
 
+def test_calc_sector_strengths_multi_sector_insufficient_history(conn):
+    """複数セクターが存在しても distinct 日数が 21 未満ならフィルタ無効
+    （21日未満の場合 MIN(date) が最古日を返し ret=0 になることで誤分類が
+    発生しないよう HAVING COUNT(*) = 21 で排除されることを確認）"""
+    # 2セクター・5日分のデータ（21日には満たない）
+    for sector, code in [("Tech", "T1"), ("Food", "F1")]:
+        conn.execute("INSERT INTO stocks (code, sector) VALUES (?, ?)", [code, sector])
+    # 5営業日分の価格を挿入（TARGET_DATE から 4 日前まで）
+    base = _dt.date(2024, 1, 10)  # TARGET_DATE = 2024-01-10
+    prices = [
+        _dt.date(2024, 1, 6),
+        _dt.date(2024, 1, 7),
+        _dt.date(2024, 1, 8),
+        _dt.date(2024, 1, 9),
+        base,
+    ]
+    for d in prices:
+        for code, close in [("T1", 1100.0), ("F1", 900.0)]:
+            conn.execute(
+                "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [d, code, close, close, close, close, 1_000_000, 5e8],
+            )
+    top, bottom, sector_map = _calc_sector_strengths(conn, base)
+    # 21 日分の履歴がないのでフィルタ無効
+    assert top == frozenset(), "21日未満のデータでは top は空であるべき"
+    assert bottom == frozenset(), "21日未満のデータでは bottom は空であるべき"
+
+
 def test_calc_sector_strengths_unknown_sector_excluded(conn):
     """sector=NULL の銘柄は sector_map に含まれない（安全側）"""
     _insert_sector_test_data(

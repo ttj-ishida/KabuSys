@@ -231,7 +231,7 @@ def _calc_sector_strengths(
             ORDER BY date DESC LIMIT 21
         ),
         date_20d AS (
-            SELECT MIN(date) AS date FROM last_21
+            SELECT MIN(date) AS date FROM last_21 HAVING COUNT(*) = 21
         )
         SELECT
             s.sector,
