@@ -234,7 +234,7 @@ def _calc_sector_strengths(
             SELECT MIN(date) AS date FROM last_21 HAVING COUNT(*) = 21
         )
         SELECT
-            s.sector,
+            TRIM(s.sector) AS sector,
             AVG(CAST(cur.close AS DOUBLE) / CAST(prev.close AS DOUBLE) - 1.0) AS ret
         FROM stocks s
         JOIN prices_daily cur
@@ -245,8 +245,8 @@ def _calc_sector_strengths(
         WHERE NULLIF(TRIM(s.sector), '') IS NOT NULL
           AND CAST(cur.close AS DOUBLE) > 0
           AND CAST(prev.close AS DOUBLE) > 0
-        GROUP BY s.sector
-        ORDER BY ret DESC, s.sector ASC
+        GROUP BY TRIM(s.sector)
+        ORDER BY ret DESC, sector ASC
         """,
         [target_date, target_date],
     ).fetchall()
