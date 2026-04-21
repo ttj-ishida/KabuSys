@@ -426,7 +426,9 @@ def generate_signals(
     buy_signals: list[dict] = []
     if not regime_is_bear and not breadth_stop:
         # 3c. ギャップ比率を一括取得（BUY 生成が必要な場合のみ実行）
-        gap_ratios = _fetch_gap_ratios(conn, [r["code"] for r in scored], target_date)
+        gap_ratios = _fetch_gap_ratios(
+            conn, [r["code"] for r in scored if r["score"] >= threshold], target_date
+        )
         gap_suppressed = 0
         for rank, r in enumerate(scored, 1):
             if r["score"] < threshold:
@@ -434,7 +436,7 @@ def generate_signals(
             gap = gap_ratios.get(r["code"])
             if gap is not None and (
                 gap > _GAP_UP_THRESHOLD + _GAP_THRESHOLD_EPSILON
-                or gap <= _GAP_DOWN_THRESHOLD
+                or gap <= _GAP_DOWN_THRESHOLD + _GAP_THRESHOLD_EPSILON
             ):
                 logger.debug(
                     "gap filter: %s gap=%.2f%% — BUY を抑制 date=%s",
