@@ -10,7 +10,7 @@ features テーブルの正規化済みファクターと ai_scores を統合し
   3. 各銘柄のコンポーネントスコア（momentum / value / volatility / liquidity）を計算
   4. final_score = 重み付き合算（StrategyModel.md Section 4.1）
   5. Bear レジームフィルタ（Bear 相場では BUY シグナルを抑制）
-  5b. breadth_stop フィルタ・セクター相対強弱フィルタ（個別銘柄 BUY 抑制 / スコア補正）
+  3c. セクター相対強弱フィルタ（breadth_stop と同タイミングで計算。Step 4 でスコア補正、Step 6 で BUY 抑制）
   6. threshold を超えた銘柄に BUY シグナルを生成
   7. 保有ポジションのエグジット条件を判定し SELL シグナルを生成
   8. signals テーブルへ書き込む（冪等）
@@ -246,7 +246,7 @@ def _calc_sector_strengths(
           AND CAST(cur.close AS DOUBLE) > 0
           AND CAST(prev.close AS DOUBLE) > 0
         GROUP BY s.sector
-        ORDER BY ret DESC
+        ORDER BY ret DESC, s.sector ASC
         """,
         [target_date, target_date],
     ).fetchall()
@@ -272,7 +272,14 @@ def _calc_sector_strengths(
         return frozenset(), frozenset(), sector_map
 
     logger.info(
-        "_calc_sector_strengths: top=%s bottom=%s date=%s",
+        "_calc_sector_strengths: top=%d bottom=%d (total=%d) date=%s",
+        len(top_sectors),
+        len(bottom_sectors),
+        n,
+        target_date,
+    )
+    logger.debug(
+        "_calc_sector_strengths: top_sectors=%s bottom_sectors=%s date=%s",
         sorted(top_sectors),
         sorted(bottom_sectors),
         target_date,

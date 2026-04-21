@@ -1095,7 +1095,8 @@ def test_sector_filter_skipped_in_bear(conn):
 
 def test_sector_sell_not_affected(conn):
     """SELL シグナルはセクターフィルタの対象外"""
-    # Retail は bottom セクター
+    # 2 セクター: Tech(top +10%), Food(bottom -5%)
+    # A は Tech（top セクター）だが open position でストップロス水準 → SELL が生成されること
     _insert_sector_test_data(
         conn,
         [
