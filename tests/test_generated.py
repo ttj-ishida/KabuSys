@@ -1,10 +1,5 @@
-
 import os
-import json
 import math
-import sqlite3
-from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -14,7 +9,6 @@ os.environ.setdefault("KABUSYS_DISABLE_AUTO_ENV_LOAD", "1")
 
 # インポート（テスト対象モジュール）
 from kabusys.run_monitoring import _get_poll_interval
-from kabusys import portfolio as portfolio_pkg
 from kabusys.portfolio.portfolio_builder import (
     select_candidates,
     calc_equal_weights,
@@ -29,11 +23,10 @@ from kabusys.config import (
     _parse_env_line,
     _load_env_file,
     Settings,
-    _find_project_root,
 )
+from kabusys.research.feature_exploration import calc_ic, rank
 
 # process_priority のテストでモックするためインポート
-import kabusys.utils.process_priority as process_priority
 
 
 # -----------------------
@@ -60,7 +53,9 @@ def test_get_poll_interval_invalid_nonint(monkeypatch, caplog):
     val = _get_poll_interval()
     assert val == 60
     # 警告ログが出ていること
-    assert any("MONITOR_POLL_INTERVAL の値が不正" in rec.message for rec in caplog.records)
+    assert any(
+        "MONITOR_POLL_INTERVAL の値が不正" in rec.message for rec in caplog.records
+    )
 
 
 def test_get_poll_interval_zero_or_negative(monkeypatch):
@@ -92,7 +87,7 @@ def test_parse_env_line_quoted_and_escaped():
     line2 = 'FOO="a=b # not comment"  # trailing comment'
     k2, v2 = _parse_env_line(line2)
     assert k2 == "FOO"
-    assert v2 == 'a=b # not comment'
+    assert v2 == "a=b # not comment"
 
 
 def test_load_env_file_override_and_protected(tmp_path, monkeypatch):
@@ -259,10 +254,10 @@ def test_calc_position_sizes_equal_and_aggregate_scaling():
         allocation_method="equal",
         lot_size=100,
     )
-    # each alloc = pv * 0.5 * max_utilization (0.7) = 1_000_000 * 0.5 * 0.7 = 350_000
-    # per stock base_shares = floor(350_000 / 1000) = 350 => round down to lot 100 -> 300
-    assert sizes["AAA"] == 300
-    assert sizes["BBB"] == 300
+    # available_cash = 200_000 が制約: per stock = 200_000 / 2 = 100_000
+    # shares = floor(100_000 / 1000) = 100 → 100株（1単元）
+    assert sizes["AAA"] == 100
+    assert sizes["BBB"] == 100
 
     # If available_cash smaller than total cost, aggregate scaling should reduce sizes
     small_cash = 100_000.0
@@ -305,7 +300,6 @@ def test_calc_position_sizes_risk_based_and_price_missing(caplog):
 # -----------------------
 # feature_exploration.rank / calc_ic
 # -----------------------
-from kabusys.feature_exploration import rank, calc_ic
 
 
 def test_rank_with_ties():
