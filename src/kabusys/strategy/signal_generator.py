@@ -153,11 +153,15 @@ def _fetch_gap_ratios(
 
     戻り値: {code: gap_ratio} — データ欠損銘柄はキーなし（BUY 許可・安全側）。
     前日は target_date より小さい最大日付を使用する。
+
+    Note: DuckDB の list 型パラメータバインド（ANY(?)）はバージョン間で不安定なため
+          IN (?, ?, ...) プレースホルダーを使用する（news_nlp.py と同方針）。
     """
     if not codes:
         return {}
+    placeholders = ", ".join("?" * len(codes))
     rows = conn.execute(
-        """
+        f"""
         SELECT t.code,
                CAST(t.open AS DOUBLE) / CAST(p.close AS DOUBLE) - 1.0
         FROM prices_daily t
@@ -168,10 +172,11 @@ def _fetch_gap_ratios(
              WHERE code = t.code AND date < ?
          )
         WHERE t.date = ?
-          AND t.code = ANY(?)
+          AND t.code IN ({placeholders})
+          AND t.open IS NOT NULL
           AND CAST(p.close AS DOUBLE) > 0
         """,
-        [target_date, target_date, codes],
+        [target_date, target_date, *codes],
     ).fetchall()
     return {code: ratio for code, ratio in rows}
 
