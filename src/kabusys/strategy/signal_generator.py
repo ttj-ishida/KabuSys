@@ -7,11 +7,12 @@ features テーブルの正規化済みファクターと ai_scores を統合し
 シグナル生成フロー:
   1. features テーブルから正規化済みファクターを読み込む
   2. ai_scores テーブルから AI スコア・レジームスコアを読み込む
-  3. 各銘柄のコンポーネントスコア（momentum / value / volatility / liquidity）を計算
-  4. final_score = 重み付き合算（StrategyModel.md Section 4.1）
-  5. Bear レジームフィルタ（Bear 相場では BUY シグナルを抑制）
-  3c. セクター相対強弱フィルタ（breadth_stop と同タイミングで計算。Step 4 でスコア補正、Step 6 で BUY 抑制）
-  6. threshold を超えた銘柄に BUY シグナルを生成
+  3. Bear レジームフィルタの判定（Bear 相場では BUY シグナルを生成しない）
+  3b. breadth_stop フィルタの判定（25日MA上銘柄比率 35%未満は全銘柄 BUY 停止）
+  3c. セクター相対強弱の算出（Bear / breadth_stop 時はスキップ）
+  4. 各銘柄のコンポーネントスコアを計算し final_score を算出（上位セクター銘柄は +0.03 ブースト）
+  5. スコア降順ソート
+  6. BUY シグナル生成（ギャップフィルタ・下位セクター銘柄の抑制を含む）
   7. 保有ポジションのエグジット条件を判定し SELL シグナルを生成
   8. signals テーブルへ書き込む（冪等）
 
