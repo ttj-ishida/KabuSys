@@ -48,6 +48,10 @@ _DEFAULT_THRESHOLD: float = 0.60  # BUY シグナル閾値
 _STOP_LOSS_RATE: float = -0.08  # ストップロス閾値（Section 5.2）
 _GAP_UP_THRESHOLD: float = 0.05  # gap_ratio > 0.05 → BUY 抑制（超過のみ）
 _GAP_DOWN_THRESHOLD: float = -0.03  # gap_ratio <= -0.03 → BUY 抑制（境界値含む）
+# IEEE754 double では 1050/1000 - 1 = 0.050000000000000044 となり _GAP_UP_THRESHOLD を
+# 超えてしまうため、ε を加算して境界ジャスト（+5.0% ちょうど）を正しく許可する。
+# 最小価格刻み 0.0001 円 / 1000 円株 = 1e-7 よりも十分小さい値を使用。
+_GAP_THRESHOLD_EPSILON: float = 1e-9
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +178,7 @@ def _fetch_gap_ratios(
         WHERE t.date = ?
           AND t.code IN ({placeholders})
           AND t.open IS NOT NULL
+          AND CAST(t.open AS DOUBLE) > 0
           AND CAST(p.close AS DOUBLE) > 0
         """,
         [target_date, target_date, *codes],
@@ -417,27 +422,35 @@ def generate_signals(
     scored.sort(key=lambda r: r["score"], reverse=True)
     score_map: dict[str, float] = {r["code"]: r["score"] for r in scored}
 
-    # 3c. ギャップ比率を一括取得（scored 確定後・BUY 生成前）
-    gap_ratios = _fetch_gap_ratios(conn, [r["code"] for r in scored], target_date)
-
     # 6. BUY シグナル生成（Bear レジームまたは breadth_stop では抑制）
     buy_signals: list[dict] = []
     if not regime_is_bear and not breadth_stop:
+        # 3c. ギャップ比率を一括取得（BUY 生成が必要な場合のみ実行）
+        gap_ratios = _fetch_gap_ratios(conn, [r["code"] for r in scored], target_date)
+        gap_suppressed = 0
         for rank, r in enumerate(scored, 1):
             if r["score"] < threshold:
                 continue
             gap = gap_ratios.get(r["code"])
             if gap is not None and (
-                gap > _GAP_UP_THRESHOLD or gap <= _GAP_DOWN_THRESHOLD
+                gap > _GAP_UP_THRESHOLD + _GAP_THRESHOLD_EPSILON
+                or gap <= _GAP_DOWN_THRESHOLD
             ):
-                logger.info(
+                logger.debug(
                     "gap filter: %s gap=%.2f%% — BUY を抑制 date=%s",
                     r["code"],
                     gap * 100,
                     target_date,
                 )
+                gap_suppressed += 1
                 continue
             buy_signals.append({"code": r["code"], "score": r["score"], "rank": rank})
+        if gap_suppressed:
+            logger.info(
+                "generate_signals: gap filter — %d 銘柄を抑制 date=%s",
+                gap_suppressed,
+                target_date,
+            )
 
     # 7. SELL シグナル生成（エグジット条件）
     sell_signals = _generate_sell_signals(conn, target_date, score_map, threshold)

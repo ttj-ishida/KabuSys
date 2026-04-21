@@ -811,6 +811,22 @@ def test_fetch_gap_ratios_zero_prev_close_excluded(conn):
     assert "A" not in result
 
 
+def test_fetch_gap_ratios_zero_open_excluded(conn):
+    """当日 open = 0 の銘柄はデータ異常として結果から除外される"""
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [_PREV_DATE, "A", 990.0, 1010.0, 985.0, 1000.0, 1_000_000, 5e8],
+    )
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "A", 0.0, 0.0, 0.0, 0.0, 0, 0],
+    )
+    result = _fetch_gap_ratios(conn, ["A"], TARGET_DATE)
+    assert "A" not in result
+
+
 # ---------------------------------------------------------------------------
 # generate_signals — ギャップフィルタ統合テスト
 # ---------------------------------------------------------------------------
@@ -862,7 +878,7 @@ def test_gap_down_at_boundary_suppresses_buy(conn):
 
 
 def test_gap_up_at_threshold_allows_buy(conn):
-    """ギャップアップ +4.9%（閾値 5% 未満）では BUY が許可される"""
+    """ギャップアップちょうど +5.0%（超ではない）では BUY が許可される"""
     _insert_price_history(conn, [("A", 1000.0, 6e8)])
     build_features(conn, TARGET_DATE)
     conn.execute(
@@ -870,10 +886,11 @@ def test_gap_up_at_threshold_allows_buy(conn):
         "WHERE code = 'A' AND date = ?",
         [TARGET_DATE],
     )
-    # open = 1049.0 → gap = 1049/1000 - 1 = 0.049（5% 未満 → 許可）
-    # 注: 1050/1000 - 1 は浮動小数点で 0.05 を超えるため 1049 を使用
+    # open = 1050.0 → gap = 1050/1000 - 1 = 0.05（ちょうど +5%、超ではない → 許可）
+    # IEEE754 では 1050.0/1000.0 - 1.0 = 0.050000000000000044 となるが
+    # _GAP_THRESHOLD_EPSILON = 1e-9 を加算した比較で正しく「許可」と判定される
     conn.execute(
-        "UPDATE prices_daily SET open = 1049.0 WHERE date = ? AND code = 'A'",
+        "UPDATE prices_daily SET open = 1050.0 WHERE date = ? AND code = 'A'",
         [TARGET_DATE],
     )
     generate_signals(conn, TARGET_DATE, threshold=0.5)
