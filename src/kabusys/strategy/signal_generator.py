@@ -48,9 +48,13 @@ _DEFAULT_THRESHOLD: float = 0.60  # BUY シグナル閾値
 _STOP_LOSS_RATE: float = -0.08  # ストップロス閾値（Section 5.2）
 _GAP_UP_THRESHOLD: float = 0.05  # gap_ratio > 0.05 → BUY 抑制（超過のみ）
 _GAP_DOWN_THRESHOLD: float = -0.03  # gap_ratio <= -0.03 → BUY 抑制（境界値含む）
-# IEEE754 double では 1050/1000 - 1 = 0.050000000000000044 となり _GAP_UP_THRESHOLD を
-# 超えてしまうため、ε を加算して境界ジャスト（+5.0% ちょうど）を正しく許可する。
-# 最小価格刻み 0.0001 円 / 1000 円株 = 1e-7 よりも十分小さい値を使用。
+# 二進浮動小数点の丸め誤差を吸収するための微小量。
+# 上側 (gap-up): gap > _GAP_UP_THRESHOLD + ε
+#   → 境界ちょうど（+5.0%）や誤差で僅かに下回る値を「許可」。
+#     例: 1050/1000 - 1 = 0.050000000000000044 (IEEE754) が誤って抑制されるのを防ぐ。
+# 下側 (gap-down): gap <= _GAP_DOWN_THRESHOLD + ε
+#   → 境界ちょうど（-3.0%）を「抑制」し、誤差で僅かに上振れた値も安全側で抑制。
+#     例: 970/1000 - 1 = -0.030000000000000044 が誤って許可されるのを防ぐ。
 _GAP_THRESHOLD_EPSILON: float = 1e-9
 
 
