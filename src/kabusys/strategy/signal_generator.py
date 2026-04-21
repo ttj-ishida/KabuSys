@@ -493,11 +493,11 @@ def generate_signals(
     top_sectors: frozenset[str] = frozenset()
     bottom_sectors: frozenset[str] = frozenset()
     sector_map: dict[str, str] = {}
+    boosted_count = 0
     if not regime_is_bear and not breadth_stop:
         top_sectors, bottom_sectors, sector_map = _calc_sector_strengths(
             conn, target_date
         )
-        boosted_count = 0
 
     # 4. 各銘柄の final_score 計算（Section 4.1）
     scored: list[dict[str, Any]] = []

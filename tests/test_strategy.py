@@ -1018,7 +1018,8 @@ def test_sector_boost_pushes_score_above_threshold(conn):
 
 def test_sector_unknown_not_affected(conn):
     """セクター未登録銘柄はブーストも抑制もされない"""
-    # 4 セクター: Tech(top), Food(middle), Energy(middle), Retail(bottom)
+    # 2 セクター: Tech(top +10%), Food(bottom -5%)
+    # X は stocks に登録しない（sector 不明） → sector_map に含まれない
     _insert_sector_test_data(
         conn,
         [
@@ -1028,16 +1029,13 @@ def test_sector_unknown_not_affected(conn):
             ("U2", "Food", 950.0, 1000.0),
         ],
     )
-    # X は stocks に登録しない（sector 不明） → sector_map に含まれない
     # X の prices_daily だけ追加
-    import datetime as _dt2
-
     biz_dates: list[date] = []
     d = TARGET_DATE
     while len(biz_dates) < 21:
         if d.weekday() < 5:
             biz_dates.append(d)
-        d = d - _dt2.timedelta(days=1)
+        d = d - _dt.timedelta(days=1)
     for d2 in biz_dates:
         conn.execute(
             "INSERT INTO prices_daily "
