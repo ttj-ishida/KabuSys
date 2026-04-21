@@ -1,87 +1,96 @@
-# CHANGELOG
+CHANGELOG
+=========
 
-すべての注目すべき変更履歴をこのファイルに記録します。  
-フォーマットは Keep a Changelog に準拠します。  
+すべての変更は Keep a Changelog 準拠の形式で記載しています。  
+バージョン番号はパッケージの __version__ に合わせています。
 
-## [Unreleased]
+Unreleased
+----------
 
-## [0.1.0] - 2026-04-21
-初回リリース。日本株自動売買システム (KabuSys) の基本コンポーネントを実装しました。
+- なし
 
-### 追加 (Added)
-- 全体
-  - パッケージ初期版を追加。バージョンは `kabusys.__version__ = "0.1.0"`。
-  - プロジェクトルート検出ロジックを実装し、.env 自動ロードの基盤を追加（`.env` / `.env.local` を優先順で読み込み、OS 環境変数を保護）。
-  - 環境変数ファイルの柔軟なパーサーを実装（`export` プレフィックス、シングル/ダブルクォート、エスケープ、インラインコメント処理に対応）。
+[0.1.0] - 2026-04-21
+--------------------
 
-- 設定関連
-  - Settings クラス (`src/kabusys/config.py`) を実装し、アプリケーション設定（J-Quants トークン、kabu API パスワード、DB パス、PID ファイル、監視閾値、環境判定など）を環境変数から取得可能に。
-  - `settings` インスタンスをエクスポート。
+Added
+- 起動スクリプト / 実行系
+  - run_execution.py を追加。ExecutionEngine を起動する CLI/スクリプトを実装。
+    - KABUSYS_ENV=paper_trading の場合は paper_trading 用の専用 SQLite（data/paper_trading.db）を使用し、本番 DB と分離。
+    - BrokerClientFactory を用いたブローカークライアント生成、OrderRepository/OrderManager/RiskManager/Reconciler の組み立て、スレッドでのエンジン実行と stop フラグ監視を実装。
+    - 起動時にプロセス優先度を "high" に設定する処理を導入。
+    - 起動時に監視テーブルが存在することを保証する init_monitoring_db 呼び出しを追加（冪等）。
+    - 停止フラグ・PID ファイルの扱いを追加。
 
-- 開発/運用支援 CLI
-  - 環境設定ウィザード `config_setup.py` を追加：
-    - 対話式で `.env` を作成・更新できるウィザード（シークレット入力マスク、選択肢、デフォルトのサポート）。
-    - `.env` 書き込みテンプレートを提供。
-  - 設定検証 CLI `validate_config.py` を追加：
-    - 必須環境変数のチェック、KABUSYS_ENV/LOG_LEVEL の妥当性検証、DB パスの親ディレクトリ検査、config/*.yaml の存在・パース検証（PyYAML 未導入時は警告）。
-    - `--strict` オプションで警告を失敗扱いにできる。
+- 監視系
+  - run_monitoring.py を追加。SystemMonitor のポーリングループを起動するスクリプトを実装。
+    - MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒）。不正な値は警告を出してデフォルトにフォールバック。
+    - 監視は環境設定にかかわらず本番 sqlite_path を使用する（監視 DB 用）。
+    - stop フラグ検知でループを穏やかに終了し、例外発生時は例外情報をログに残して次ポーリングへ継続。
 
-- 実行スクリプト / デーモン
-  - 実行エンジン起動スクリプト `run_execution.py` を追加：
-    - `KABUSYS_ENV=paper_trading` のときは Paper Trading 用 SQLite（`PAPER_TRADING_SQLITE_PATH` / `data/paper_trading.db`）を使用し、本番 DB から完全に分離。
-    - BrokerClient の生成は `BrokerClientFactory.create(settings)` に委譲。
-    - OrderRepository、OrderManager、RiskManager（`RiskConfig` デフォルト値を含む）、Reconciler、ExecutionEngine を組み立ててデーモンとして実行。
-    - 停止フラグ（data/stop_requested.flag）および実行 PID ファイル（data/execution.pid）による制御をサポート。
-  - 監視ループ起動スクリプト `run_monitoring.py` を追加：
-    - `SystemMonitor` を初期化しポーリングループを起動。ポーリング間隔は環境変数 `MONITOR_POLL_INTERVAL`（デフォルト 60 秒）で上書き可。
-    - 監視は KABUSYS_ENV にかかわらず本番用 `sqlite_path` を使用して監視テーブルを管理。
-    - 停止フラグの検知でループ終了、KeyboardInterrupt ハンドリングを実装。
+- 設定・環境変数管理
+  - config.py を追加。.env 自動読み込み、環境変数の抽象化を提供する Settings を実装。
+    - プロジェクトルートの自動検出（.git / pyproject.toml 基準）により、CWD に依存しない .env 自動ロードを実現。
+    - .env の高度なパース（export プレフィックス、クォート内エスケープ、インラインコメント扱い）をサポート。
+    - 自動ロードを KABUSYS_DISABLE_AUTO_ENV_LOAD で無効化可能。
+    - 必須環境変数取得ヘルパー（_require）、各種設定プロパティ（DB パス、PID/kill flag、しきい値、paper_trading 関連）を実装。
+    - PAPER_FILL_MODE 等の入力検証を実装（不正値は ValueError）。
 
-- 監視 / DB 初期化
-  - 監視用 DB 初期化ユーティリティ `init_monitoring_db` を参照実装（各起動スクリプトで冪等に呼び出して監視テーブルの存在を保証）。
+  - config_setup.py を追加。対話式の .env 作成・更新ウィザードを提供。
+    - シークレット入力はマスク表示、既存 .env の読み込み・利用、確認プロンプトと .env 書き出し機能を実装。
 
-- ロギング / プロセス管理ユーティリティ
-  - 統一ログ設定ユーティリティ `utils/logging_setup.py` を追加：
-    - ルートロガーに StreamHandler (stdout) と TimedRotatingFileHandler（日次・30世代保持）を設定。
-    - ログレベルおよびログディレクトリの解決順を実装。ログディレクトリ作成失敗時はファイル出力をスキップして stdout のみで継続。
-  - プロセス優先度/CPU affinity ユーティリティ `utils/process_priority.py` を追加：
-    - Windows と POSIX を吸収して `set_process_priority("high"|"normal"|"low")`、`set_cpu_affinity(n)` を提供。
-    - 権限不足等で設定できない場合は警告を出し安全にフォールバック。
+  - validate_config.py を追加。起動前に .env と config/*.yaml の妥当性検証を行う CLI を実装。
+    - 必須環境変数の存在チェック、KABUSYS_ENV / LOG_LEVEL の妥当性チェック、DB パス親ディレクトリ存在チェック、config/*.yaml の存在確認と PyYAML を利用したパース検証（PyYAML 未インストール時は警告）。
+    - KABUSYS_ENV=live 時の追加ガード（LINE 通知設定や Kill Switch の自動クリア設定に関する警告）。
+    - --strict オプションで警告を FAIL として扱うモードを実装。
 
-- ポートフォリオ構築
-  - `portfolio` パッケージを追加（純粋関数群、DB 非依存、メモリ内計算）：
-    - `portfolio_builder.py`：
-      - 候補抽出 select_candidates、等金額 calc_equal_weights、スコア加重 calc_score_weights（スコアが全て 0 の場合等金額にフォールバック）。
-    - `risk_adjustment.py`：
-      - セクター集中制限 apply_sector_cap（当日売却予定銘柄の除外、"unknown" セクターは適用除外）。
-      - レジーム乗数 calc_regime_multiplier（bull/neutral/bear に対する乗数、未知値は警告のうえ 1.0 フォールバック）。
-    - `position_sizing.py`：
-      - 各配分方式（risk_based / equal / score）に対応した株数計算（単元株丸め、per-stock 上限、aggregate cap スケーリング、cost_buffer による保守的見積り、残差に基づくロット追加配分）。
-    - package export を設定 (`portfolio.__init__`)。
+- ポートフォリオ構築ライブラリ
+  - portfolio モジュールを追加（純粋関数群、メモリ内計算）。
+    - portfolio_builder.py: シグナル選定 select_candidates、等金額/スコア加重の重み計算 calc_equal_weights / calc_score_weights。
+      - score が全て 0 の場合は等金額配分にフォールバックし警告を出力。
+    - risk_adjustment.py: セクター集中制限 apply_sector_cap、レジームに基づく乗数 calc_regime_multiplier（bull/neutral/bear マップ）。不明レジームは 1.0 でフォールバックし警告。
+    - position_sizing.py: position size 計算 calc_position_sizes（risk_based / equal / score の allocation_method をサポート）。単元株（lot_size）丸め、per-position 上限・aggregate cap、cost_buffer を使った保守的推定、スケールダウンと残余の分配ロジックを実装。
 
-- リサーチ / ファクター
-  - `research/factor_research.py` を追加（ファクター計算の基礎実装）：
-    - モメンタム、移動平均乖離、ATR、流動性等の計算方針と定数を定義（DuckDB への依存を想定）。
-    - P95 計算やスキャン窓などのユーティリティを実装（実装はモジュール内で継続的に拡張予定）。
+- ユーティリティ
+  - utils/logging_setup.py: 統一的なログ設定ユーティリティを実装。
+    - stdout に出す StreamHandler（stdout）と日次ローテーションの TimedRotatingFileHandler（logs/<app_name>.log、30 日保持）をルートロガーへ設定。
+    - 既存ハンドラのクリーンアップ、ログディレクトリ作成失敗時のフォールバック動作、LOG_LEVEL / LOG_DIR の解決順を実装。
+  - utils/process_priority.py: プラットフォーム差分を吸収したプロセス優先度設定と CPU affinity 設定関数を実装。
+    - Windows / POSIX（Linux/Mac/FreeBSD）向けの優先度マッピング、psutil を用いた実装。権限不足や未対応 OS 時は警告を出してスキップ。
 
 - ツール
-  - `tools/paper_verification_report.py` を追加：
-    - Paper Trading 用 SQLite（`PAPER_TRADING_SQLITE_PATH`）から各種指標（稼働率、注文成功率、送信率、P95 レイテンシ）を集計してレポート出力。
-    - Pass/Fail 基準値を定義（稼働率 >= 99%、注文成功率 >= 90% など）。
-    - 日付フィルタ（--from / --to）、--db オプションに対応。
+  - tools/paper_verification_report.py を追加。Paper Trading の検証レポートを生成する CLI を実装。
+    - system_status / trade_logs / risk_logs から稼働率、注文成功率、送信率、レイテンシ（avg/max/P95）などを集計し表示。
+    - 閾値（稼働率 99%、成立率 90%、送信率 95%、P95 レイテンシ 200 ms）による PASS/FAIL 判定を実装。
+    - 日付フィルタ (--from / --to)、DB パスの上書き (--db) をサポート。
 
-### 変更 (Changed)
-- なし（初回リリースのため既存機能の変更履歴はなし）。
+- 研究用機能（下準備）
+  - research/factor_research.py を追加（未完の箇所あり）。
+    - DuckDB を使用したファクター計算のための設計と定数、calc_momentum などの実装方針を追加（prices_daily / raw_financials 参照、結果は (date, code) ベースの dict リストで返す仕様）。
 
-### 修正 (Fixed)
-- なし（初回リリース）。
+Changed
+- ログ出力の標準化
+  - すべての起動スクリプト/コンポーネントから utils.logging_setup.setup_logging を呼ぶ想定に統一。ログファイル名は app_name により分離（例: execution.log, monitoring.log）。
 
-### 注意事項 / 運用メモ
-- .env 自動読み込みはデフォルトで有効。自動読み込みを無効化するには環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定してください（テスト等で使用）。
-- Paper Trading 環境は本番 SQLite と分離されています。運用時に誤って本番 DB を上書きしないよう `KABUSYS_ENV` と `PAPER_TRADING_SQLITE_PATH` の設定を確認してください。
-- run_monitoring は監視 DB に本番 `SQLITE_PATH` を使用します（監視情報は本番環境での一元管理を想定）。これは設計上の意図であるため、必要に応じて設定を変更してください。
-- プロセス優先度設定や CPU affinity の操作は権限のある環境でのみ成功します。失敗した場合は警告ログが出力され、処理は継続されます。
+- DB/分析インフラの分離
+  - 実行系は paper_trading モード時に paper_trading 専用 SQLite を使用する一方、監視系は環境にかかわらず本番 monitoring.db（settings.sqlite_path）を参照する設計とした（監視データは本番 DB に記録）。
 
----
+Fixed
+- 環境変数パースの堅牢化
+  - .env パーサで export プレフィックス、クォート内のバックスラッシュエスケープ、インラインコメントの処理を正しく扱うようにし、誤った .env の読み込みを抑制。
 
-将来のリリースでは、ファクター計算の全面実装、ExecutionEngine / Broker 周りの詳細実装、テストカバレッジと CI ワークフロー、ドキュメントの追加を予定しています。
+- MONITOR_POLL_INTERVAL の安全化
+  - run_monitoring のポーリング間隔取得で 0 以下や非整数が渡された場合に警告を出しデフォルトへフォールバック（time.sleep に渡して ValueError が出るのを防止）。
+
+- position_sizing の aggregate cap スケーリングの精緻化
+  - cost_buffer を考慮したコスト見積り、残余現金を利用した lot_size 単位の追加配分ロジックを実装し、スケール後の丸め誤差を改善。
+
+Security
+- シークレットの取り扱い
+  - config_setup の UI でシークレット項目はマスク表示。README などで .env を Git にコミットしないよう注意喚起（.env ファイルヘッダにも明記）。
+
+Notes / Other
+- 多くの箇所でエラーハンドリングとフォールバック（ファイル作成失敗時、psutil の権限不足、PyYAML 未インストール等）を想定し、起動継続可能な設計としています。
+- research/factor_research.py は途中までの実装（calc_momentum の冒頭まで）です。完全なファクター計算ロジックの実装は今後のリリースで追加予定です。
+
+Acknowledgements
+- 本リリースで導入した各 CLI やユーティリティは、ローカル開発・ペーパートレード・本番のそれぞれの運用モードを考慮して設計されています。今後はテスト補強、ドキュメント追加、欠損データに対するフォールバックロジック（例: 価格フェイルオーバー）等を進める予定です。
