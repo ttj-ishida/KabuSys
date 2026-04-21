@@ -7,10 +7,12 @@ features テーブルの正規化済みファクターと ai_scores を統合し
 シグナル生成フロー:
   1. features テーブルから正規化済みファクターを読み込む
   2. ai_scores テーブルから AI スコア・レジームスコアを読み込む
-  3. 各銘柄のコンポーネントスコア（momentum / value / volatility / liquidity）を計算
-  4. final_score = 重み付き合算（StrategyModel.md Section 4.1）
-  5. Bear レジームフィルタ（Bear 相場では BUY シグナルを抑制）
-  6. threshold を超えた銘柄に BUY シグナルを生成
+  3. Bear レジームフィルタの判定（Bear 相場では BUY シグナルを生成しない）
+  3b. breadth_stop フィルタの判定（25日MA上銘柄比率 35%未満は全銘柄 BUY 停止）
+  3c. セクター相対強弱の算出（Bear / breadth_stop 時はスキップ）
+  4. 各銘柄のコンポーネントスコアを計算し final_score を算出（上位セクター銘柄は +0.03 ブースト）
+  5. スコア降順ソート
+  6. BUY シグナル生成（ギャップフィルタ・下位セクター銘柄の抑制を含む）
   7. 保有ポジションのエグジット条件を判定し SELL シグナルを生成
   8. signals テーブルへ書き込む（冪等）
 
@@ -56,6 +58,8 @@ _GAP_DOWN_THRESHOLD: float = -0.03  # gap_ratio <= -0.03 → BUY 抑制（境界
 #   → 境界ちょうど（-3.0%）を「抑制」し、誤差で僅かに上振れた値も安全側で抑制。
 #     例: 970/1000 - 1 = -0.030000000000000044 が誤って許可されるのを防ぐ。
 _GAP_THRESHOLD_EPSILON: float = 1e-9
+_SECTOR_BOOST: float = 0.03  # 上位 _SECTOR_QUARTILE セクター銘柄への final_score 加算量
+_SECTOR_QUARTILE: float = 0.25  # 上位・下位の区切り割合（各 ceil(N×0.25) セクター）
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +192,99 @@ def _fetch_gap_ratios(
         [target_date, target_date, *codes],
     ).fetchall()
     return {code: ratio for code, ratio in rows}
+
+
+def _calc_sector_strengths(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+) -> tuple[frozenset[str], frozenset[str], dict[str, str]]:
+    """セクター20営業日リターンを算出し、上位・下位セクターと銘柄→セクターマップを返す。
+
+    stocks テーブルの全銘柄 × prices_daily で等加重セクターリターンを計算し、
+    上位 _SECTOR_QUARTILE / 下位 _SECTOR_QUARTILE のセクターを分類する。
+
+    データ欠損・セクター未登録銘柄は安全側（BUY 許可・スコアブーストなし）に倒す。
+
+    Returns:
+        (top_sectors, bottom_sectors, sector_map)
+        - top_sectors:    上位 _SECTOR_QUARTILE セクター名の frozenset
+        - bottom_sectors: 下位 _SECTOR_QUARTILE セクター名の frozenset
+        - sector_map:     {code: sector}（NULL/空文字のセクターは除外）
+
+    Note: 有効セクターが1つの場合は top と bottom が同一になるためフィルタ無効。
+    """
+    # sector_map を取得（NULL / 空白のみは除外）
+    sector_rows = conn.execute(
+        "SELECT code, NULLIF(TRIM(sector), '') FROM stocks"
+    ).fetchall()
+    sector_map: dict[str, str] = {code: sec for code, sec in sector_rows if sec}
+
+    if not sector_map:
+        return frozenset(), frozenset(), {}
+
+    # セクター別20営業日等加重リターンを算出
+    # biz_dates: prices_daily の distinct date を降順番号付け（rn=1=target_date, rn=21=20営業日前）
+    rows = conn.execute(
+        """
+        WITH last_21 AS (
+            SELECT DISTINCT date FROM prices_daily WHERE date <= ?
+            ORDER BY date DESC LIMIT 21
+        ),
+        date_20d AS (
+            SELECT MIN(date) AS date FROM last_21 HAVING COUNT(*) = 21
+        )
+        SELECT
+            TRIM(s.sector) AS sector,
+            AVG(CAST(cur.close AS DOUBLE) / CAST(prev.close AS DOUBLE) - 1.0) AS ret
+        FROM stocks s
+        JOIN prices_daily cur
+          ON cur.code = s.code AND cur.date = ?
+        JOIN prices_daily prev
+          ON prev.code = s.code
+         AND prev.date = (SELECT date FROM date_20d)
+        WHERE NULLIF(TRIM(s.sector), '') IS NOT NULL
+          AND CAST(cur.close AS DOUBLE) > 0
+          AND CAST(prev.close AS DOUBLE) > 0
+        GROUP BY TRIM(s.sector)
+        ORDER BY ret DESC, sector ASC
+        """,
+        [target_date, target_date],
+    ).fetchall()
+
+    if not rows:
+        return frozenset(), frozenset(), sector_map
+
+    n = len(rows)
+    top_n = max(1, math.ceil(n * _SECTOR_QUARTILE))
+    bottom_n = max(1, math.ceil(n * _SECTOR_QUARTILE))
+
+    top_sectors = frozenset(s for s, _ in rows[:top_n])
+    bottom_sectors = frozenset(s for s, _ in rows[-bottom_n:])
+
+    # オーバーラップ（n=1 など top と bottom が同一セクターを含む）→ 両方空
+    if top_sectors & bottom_sectors:
+        logger.debug(
+            "_calc_sector_strengths: top/bottom オーバーラップ（セクター数=%d）"
+            " — フィルタ無効 date=%s",
+            n,
+            target_date,
+        )
+        return frozenset(), frozenset(), sector_map
+
+    logger.info(
+        "_calc_sector_strengths: top=%d bottom=%d (total=%d) date=%s",
+        len(top_sectors),
+        len(bottom_sectors),
+        n,
+        target_date,
+    )
+    logger.debug(
+        "_calc_sector_strengths: top_sectors=%s bottom_sectors=%s date=%s",
+        sorted(top_sectors),
+        sorted(bottom_sectors),
+        target_date,
+    )
+    return top_sectors, bottom_sectors, sector_map
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +496,16 @@ def generate_signals(
             target_date,
         )
 
+    # 3c. セクター強弱分類（Bear レジーム / breadth_stop では BUY 不要なためスキップ）
+    top_sectors: frozenset[str] = frozenset()
+    bottom_sectors: frozenset[str] = frozenset()
+    sector_map: dict[str, str] = {}
+    boosted_count = 0
+    if not regime_is_bear and not breadth_stop:
+        top_sectors, bottom_sectors, sector_map = _calc_sector_strengths(
+            conn, target_date
+        )
+
     # 4. 各銘柄の final_score 計算（Section 4.1）
     scored: list[dict[str, Any]] = []
     for feat in features:
@@ -420,7 +527,28 @@ def generate_signals(
             + weights["liquidity"] * (s_liq if s_liq is not None else 0.5)
             + weights["news"] * (s_news if s_news is not None else 0.5)
         )
+        # セクター強弱スコア補正（上位セクターは +_SECTOR_BOOST）
+        sector = sector_map.get(code, "")
+        if sector and sector in top_sectors:
+            old_score = final_score
+            final_score += _SECTOR_BOOST
+            logger.debug(
+                "sector boost: %s sector=%s score %.4f→%.4f date=%s",
+                code,
+                sector,
+                old_score,
+                final_score,
+                target_date,
+            )
+            boosted_count += 1
         scored.append({"code": code, "score": final_score})
+
+    if not regime_is_bear and not breadth_stop and boosted_count:
+        logger.info(
+            "generate_signals: sector boost — %d 銘柄をスコアブースト date=%s",
+            boosted_count,
+            target_date,
+        )
 
     # 5. スコア降順でランク付け
     scored.sort(key=lambda r: r["score"], reverse=True)
@@ -434,6 +562,7 @@ def generate_signals(
             conn, [r["code"] for r in scored if r["score"] >= threshold], target_date
         )
         gap_suppressed = 0
+        sector_suppressed = 0
         for rank, r in enumerate(scored, 1):
             if r["score"] < threshold:
                 continue
@@ -450,11 +579,28 @@ def generate_signals(
                 )
                 gap_suppressed += 1
                 continue
+            # セクター下位フィルタ
+            sector = sector_map.get(r["code"], "")
+            if sector and sector in bottom_sectors:
+                logger.debug(
+                    "sector filter: %s sector=%s — BUY を抑制 date=%s",
+                    r["code"],
+                    sector,
+                    target_date,
+                )
+                sector_suppressed += 1
+                continue
             buy_signals.append({"code": r["code"], "score": r["score"], "rank": rank})
         if gap_suppressed:
             logger.info(
                 "generate_signals: gap filter — %d 銘柄を抑制 date=%s",
                 gap_suppressed,
+                target_date,
+            )
+        if sector_suppressed:
+            logger.info(
+                "generate_signals: sector filter — %d 銘柄を下位セクターで抑制 date=%s",
+                sector_suppressed,
                 target_date,
             )
 
