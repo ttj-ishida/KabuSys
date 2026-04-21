@@ -20,6 +20,7 @@ from kabusys.strategy.signal_generator import (
     _compute_momentum_score,
     _compute_value_score,
     _compute_volatility_score,
+    _fetch_gap_ratios,
     _is_bear_regime,
     _sigmoid,
     generate_signals,
@@ -755,3 +756,210 @@ def test_is_bear_regime_exactly_min_samples(conn):
         [TARGET_DATE, -0.3, "bear"],
     )
     assert _is_bear_regime(conn, TARGET_DATE) is True
+
+
+# ---------------------------------------------------------------------------
+# _fetch_gap_ratios
+# ---------------------------------------------------------------------------
+
+_PREV_DATE = date(2020, 5, 29)  # TARGET_DATE の直前営業日
+
+
+def test_fetch_gap_ratios_gap_up(conn):
+    """ギャップアップ時に正の比率が返る"""
+    # prev: close=1000, target: open=1061 → gap = 0.061
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [_PREV_DATE, "A", 990.0, 1010.0, 985.0, 1000.0, 1_000_000, 5e8],
+    )
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "A", 1061.0, 1080.0, 1060.0, 1070.0, 1_000_000, 5e8],
+    )
+    result = _fetch_gap_ratios(conn, ["A"], TARGET_DATE)
+    assert "A" in result
+    assert result["A"] == pytest.approx(0.061, rel=1e-4)
+
+
+def test_fetch_gap_ratios_missing_data_returns_empty(conn):
+    """target_date のデータなし → {} を返す（BUY 許可側）"""
+    result = _fetch_gap_ratios(conn, ["A"], TARGET_DATE)
+    assert result == {}
+
+
+def test_fetch_gap_ratios_empty_codes(conn):
+    """codes が空リスト → {} を返す"""
+    result = _fetch_gap_ratios(conn, [], TARGET_DATE)
+    assert result == {}
+
+
+def test_fetch_gap_ratios_zero_prev_close_excluded(conn):
+    """前日 close = 0 の銘柄はゼロ除算防止のため結果から除外される"""
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [_PREV_DATE, "A", 0.0, 0.0, 0.0, 0.0, 0, 0],
+    )
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "A", 100.0, 110.0, 95.0, 105.0, 1_000_000, 5e8],
+    )
+    result = _fetch_gap_ratios(conn, ["A"], TARGET_DATE)
+    assert "A" not in result
+
+
+def test_fetch_gap_ratios_zero_open_excluded(conn):
+    """当日 open = 0 の銘柄はデータ異常として結果から除外される"""
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [_PREV_DATE, "A", 990.0, 1010.0, 985.0, 1000.0, 1_000_000, 5e8],
+    )
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "A", 0.0, 0.0, 0.0, 0.0, 0, 0],
+    )
+    result = _fetch_gap_ratios(conn, ["A"], TARGET_DATE)
+    assert "A" not in result
+
+
+# ---------------------------------------------------------------------------
+# generate_signals — ギャップフィルタ統合テスト
+# ---------------------------------------------------------------------------
+
+
+def test_gap_up_suppresses_buy(conn):
+    """ギャップアップ過大（+5.1%）で BUY が抑制される"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8), ("B", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    # A に高スコアを設定（BUY 候補）
+    conn.execute(
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 "
+        "WHERE code = 'A' AND date = ?",
+        [TARGET_DATE],
+    )
+    # A の当日 open を前日終値 (1000) 比 +5.1% に設定
+    # _insert_price_history が open=close*0.99=990 で挿入しているので UPDATE で上書き
+    conn.execute(
+        "UPDATE prices_daily SET open = 1051.0 WHERE date = ? AND code = 'A'",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.5)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    # BUY 抑制・ポジションなし → シグナルなし
+    assert row is None
+
+
+def test_gap_down_at_boundary_suppresses_buy(conn):
+    """ギャップダウン -3.0%（境界値：以下に含む）で BUY が抑制される"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    conn.execute(
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 "
+        "WHERE code = 'A' AND date = ?",
+        [TARGET_DATE],
+    )
+    # open = 970.0 → gap = 970/1000 - 1 = -0.03（ちょうど -3%、以下に含む → 抑制）
+    conn.execute(
+        "UPDATE prices_daily SET open = 970.0 WHERE date = ? AND code = 'A'",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.5)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    assert row is None
+
+
+def test_gap_up_at_threshold_allows_buy(conn):
+    """ギャップアップちょうど +5.0%（超ではない）では BUY が許可される"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    conn.execute(
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 "
+        "WHERE code = 'A' AND date = ?",
+        [TARGET_DATE],
+    )
+    # open = 1050.0 → gap = 1050/1000 - 1 = 0.05（ちょうど +5%、超ではない → 許可）
+    # IEEE754 では 1050.0/1000.0 - 1.0 = 0.050000000000000044 となるが
+    # _GAP_THRESHOLD_EPSILON = 1e-9 を加算した比較で正しく「許可」と判定される
+    conn.execute(
+        "UPDATE prices_daily SET open = 1050.0 WHERE date = ? AND code = 'A'",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.5)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    assert row is not None and row[0] == "buy"
+
+
+def test_gap_down_just_above_threshold_allows_buy(conn):
+    """ギャップダウン -2.9%（閾値より上）では BUY が許可される"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    conn.execute(
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 "
+        "WHERE code = 'A' AND date = ?",
+        [TARGET_DATE],
+    )
+    # open = 971.0 → gap = 971/1000 - 1 = -0.029 > -0.03 → 許可
+    conn.execute(
+        "UPDATE prices_daily SET open = 971.0 WHERE date = ? AND code = 'A'",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.5)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    assert row is not None and row[0] == "buy"
+
+
+def test_gap_missing_prev_data_allows_buy(conn):
+    """前日データなし（gap_ratios にキーなし）→ BUY 許可（安全側）"""
+    # prices_daily に TARGET_DATE の 1 行だけ挿入（前日なし）
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "A", 1000.0, 1020.0, 990.0, 1010.0, 1_000_000, 5e8],
+    )
+    # features に直接挿入（build_features は価格履歴が必要なためスキップ）
+    conn.execute(
+        "INSERT INTO features "
+        "(date, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev) "
+        "VALUES (?, 'A', 3.0, 3.0, NULL, NULL, NULL, NULL)",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.5)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    assert row is not None and row[0] == "buy"
+
+
+def test_sell_not_affected_by_gap(conn):
+    """ギャップ過大でも SELL シグナルは通常通り生成される（SELL は対象外）"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    # avg_price=1100、終値=1000 → pnl=-9.1% → stop-loss 発動
+    conn.execute(
+        "INSERT INTO positions (date, code, position_size, avg_price, market_value) "
+        "VALUES (?, 'A', 100, 1100.0, 110000.0)",
+        [TARGET_DATE],
+    )
+    # ギャップアップ過大を設定（BUY 候補なら抑制されるが、SELL は影響を受けない）
+    conn.execute(
+        "UPDATE prices_daily SET open = 1061.0 WHERE date = ? AND code = 'A'",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.5)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    assert row is not None and row[0] == "sell"

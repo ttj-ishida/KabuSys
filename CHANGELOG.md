@@ -1,109 +1,113 @@
-# Changelog
+# CHANGELOG
 
-すべての変更は [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) 準拠で記載しています。
-
-なお、本記録は与えられたコードベースから振る舞い・追加機能を推測して作成しています。
+すべての変更は [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) の形式に従います。  
+このファイルはリポジトリ内の現行コードベースから推測して作成しています。
 
 ## [Unreleased]
+（未リリースの変更はここに記載します）
 
-特になし。
-
-## [0.1.0] - 2026-04-19
+## [0.1.0] - 2026-04-21
+初回リリース。本リリースでは自動売買システム KabuSys のコアユーティリティ、起動スクリプト、構成管理、ポートフォリオ構築、検証ツールなどを実装しました。
 
 ### Added
-- 全体
-  - 初回リリース。日本株自動売買フレームワーク「KabuSys」の基礎機能群を追加。
-  - パッケージバージョンを `__version__ = "0.1.0"` として定義。
+- 基本版パッケージとメタ情報
+  - パッケージ初期化とバージョン情報を追加（kabusys.__version__ = "0.1.0"）。
 
-- 起動スクリプト / デーモン
-  - run_monitoring.py
-    - SystemMonitor のポーリングループ起動スクリプトを追加。
-    - 環境変数 `MONITOR_POLL_INTERVAL`（デフォルト 60 秒）によりポーリング間隔を上書き可能。
-    - 停止制御にプロジェクトの data/stop_requested.flag ファイルを監視。
-    - Monitoring は実行環境にかかわらず本番用の sqlite_path を使用する仕様を実装。
-    - 起動時にプロセス優先度を "high" に設定。
-    - SQLite / DuckDB 接続の初期化と適切なクローズ処理を実装。
-    - 監視処理中の例外を捕捉してログに出力し、次ポーリングへ継続。
-
+- 起動スクリプト
   - run_execution.py
-    - ExecutionEngine 起動スクリプトを追加。
-    - `KABUSYS_ENV=paper_trading` の場合、MockBrokerClient を使用し paper_trading 用 DB（`data/paper_trading.db`）に完全分離して記録する挙動を実装。
-    - 停止フラグ（data/stop_requested.flag）や実行 PID ファイルの取り扱いを実装。
-    - 起動時にプロセス優先度を "high" に設定。
-    - ExecutionEngine をデーモン・スレッドで起動し、停止フラグに応じて安全に停止。
+    - ExecutionEngine を起動するための CLI スクリプトを追加。
+    - KABUSYS_ENV が `paper_trading` の場合、専用のペーパートレード用 SQLite（デフォルト: data/paper_trading.db）を使用し、本番 DB と完全分離する挙動を実装。
+    - BrokerClientFactory を用いたブローカークライアント生成、OrderRepository/OrderManager/ RiskManager/Reconciler の組み立て、ExecutionEngine の起動制御（スレッド実行・停止フラグ監視）を実装。
+    - 起動時にプロセス優先度を "high" に設定する処理を追加。
+    - 停止フラグ（data/stop_requested.flag）や pid ファイル管理（data/execution.pid）に対応。
 
-- 設定管理
+  - run_monitoring.py
+    - SystemMonitor をポーリングで定期実行する起動スクリプトを追加。
+    - 環境変数 MONITOR_POLL_INTERVAL によるポーリング間隔のオーバーライド（デフォルト 60 秒、無効値はデフォルトにフォールバック）。
+    - Monitoring は環境設定に関わらず本番 sqlite_path を使用する設計（監視データは環境を跨いで本番 DB に記録される）。
+    - 起動時にプロセス優先度を "high" に設定、停止フラグの検出でループ終了、例外時のログ出力とリトライを実装。
+
+- 設定（環境変数・ファイル）管理
   - config.py
-    - 環境変数管理用 Settings クラスを追加。
-    - .env 自動読み込み機能を実装（`.env` と `.env.local`、OS 環境変数の保護を考慮）。
-    - .env のパース実装を強化（export プレフィックス、クォート値のエスケープ、インラインコメントの処理など）。
-    - 各種設定プロパティを提供（J-Quants / kabuステーション / DB パス / PID / 監視閾値 / 環境種別判定 等）。
-    - `paper_fill_mode` の値検証と `paper_sqlite_path` の分離を実装。
+    - .env 自動読込機能を追加（プロジェクトルートを .git / pyproject.toml で検出）。
+    - 読み込み優先順位: OS 環境変数 > .env.local > .env。
+    - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動ロード無効化対応（テスト用）。
+    - .env パース処理を実装（export プレフィックス対応、シングル/ダブルクォート・バックスラッシュエスケープ、インラインコメント処理等）。
+    - Settings クラスを追加し、主要な設定プロパティを環境変数から取得（J-Quants / kabu API / DB パス / PID ファイル / 監視閾値 / 環境判定等）。
+    - PAPER_FILL_MODE の妥当性チェック（instant/partial/never/reject）を追加。
+    - env 値（KABUSYS_ENV, LOG_LEVEL）の妥当性検証を実装。
+    - settings = Settings() をモジュールレベルで提供。
 
   - config_setup.py
     - 対話式 .env 作成・更新ウィザードを追加。
-    - 主要設定項目（KABUSYS_ENV, JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD 等）をユーザに入力させ `.env` を生成。
-    - 既存 .env の読み込み・既存値の再利用機能、シークレット値のマスク表示を実装。
-    - 書き込みフォーマットで .env のテンプレート出力を実装。
+    - 入力補助、既存 .env の読み込み、シークレット項目のマスク表示、確認プロンプト、.env 書き込み機能を実装。
+    - デフォルト値・選択肢・説明付きの複数項目をサポート（KABUSYS_ENV、JQUANTS_REFRESH_TOKEN、KABU_API_PASSWORD、DB パス、LOG_LEVEL、KILL_FLAG_CLEAR_ON_START 等）。
 
   - validate_config.py
-    - 起動前の設定検証 CLI を追加（env の必須項目チェック、KABUSYS_ENV の妥当性、DB パスの親ディレクトリ存在チェック、config/*.yaml の存在・パースチェック）。
-    - `--strict` オプションにより警告も FAIL 扱いで終了可能。
-    - PyYAML 未導入時の警告、ライブ環境向けの追加ガード（LINE 通知設定、KILL_FLAG_CLEAR_ON_START の注意喚起）を実装。
+    - 起動前の設定検証 CLI を追加。
+    - 必須環境変数チェック、KABUSYS_ENV/LOG_LEVEL の妥当性、DB パスの親ディレクトリ存在チェック、config/*.yaml の存在・パースチェック（PyYAML がない場合は警告でスキップ）、KABUSYS_ENV=live 時の追加ガード（LINE 通知設定や Kill Flag 設定の注意喚起）を実装。
+    - --strict オプションで警告を FAIL 扱いにする機能を追加。
 
-- ロギング / プロセス制御ユーティリティ
+- ロギング・プロセス制御ユーティリティ
   - utils/logging_setup.py
-    - 統一的なログ初期化関数 `setup_logging()` を追加。
-    - コンソール出力は stdout を使用、ファイル出力は日次ローテーション（TimedRotatingFileHandler）で 30 日分保持。
-    - ログレベル・ログディレクトリの解決順を実装（引数 > 環境変数 > デフォルト）。
-    - ログディレクトリ作成失敗時にはファイル出力をスキップし、コンソール出力のみで継続。
+    - 統一的なログ初期化関数 setup_logging を追加。
+    - StreamHandler（stdout）と TimedRotatingFileHandler（日次ローテーション、デフォルト logs/、30日保持）をルートロガーに設定。
+    - ログディレクトリ作成失敗時はファイル出力をスキップしてコンソールのみで継続するフォールバック処理を実装。
+    - ログレベル解決順（明示引数 > 環境変数 > デフォルト）を実装。
 
   - utils/process_priority.py
-    - クロスプラットフォーム（Windows / POSIX）でのプロセス優先度設定 `set_process_priority()` を追加。
-    - CPU アフィニティ固定用 `set_cpu_affinity()` を追加（利用可能コア数を考慮）。
-    - アクセス権限不足や未対応 OS を考慮しエラーを抑制して安全にスキップする実装。
+    - クロスプラットフォーム（Windows / POSIX）でプロセス優先度を設定するユーティリティを追加。
+    - CPU affinity を最初 N コアに固定する set_cpu_affinity を追加（エラーは警告で無視）。
+    - 権限不足や未対応環境時の安全なフォールバック（警告ログ）を実装。
 
 - ポートフォリオ構築（純粋関数群）
   - portfolio/portfolio_builder.py
-    - シグナル選定関数 `select_candidates()` を追加（スコア降順、同点は signal_rank でブレーク）。
-    - 重み計算 `calc_equal_weights()`（等金額）と `calc_score_weights()`（スコア正規化、全スコア0時は等分へフォールバック）を追加。
+    - シグナル選定（select_candidates）、等配分重み（calc_equal_weights）、スコア加重（calc_score_weights）を追加。
+    - スコアが全て 0 の場合等、警告して等配分にフォールバック。
 
   - portfolio/risk_adjustment.py
-    - セクター集中防止の `apply_sector_cap()` を追加（既存ポジションからセクター別エクスポージャー算出、閾値超過セクターの候補除外）。
-    - 市場レジームに応じた投下資金乗数を返す `calc_regime_multiplier()` を追加（bull/neutral/bear とフォールバック挙動を実装）。
+    - セクター集中制限を適用する apply_sector_cap を追加（当日売却予定銘柄を除外、"unknown" セクターは制限除外）。
+    - 市場レジームに基づく資金乗数 calc_regime_multiplier を追加（bull/neutral/bear、未知レジームは警告の上 1.0 にフォールバック）。
 
   - portfolio/position_sizing.py
-    - 発注株数算出 `calc_position_sizes()` を追加。
-    - allocation_method により "risk_based" / "equal" / "score" をサポート。
-    - 単元株（lot_size）丸め、1銘柄上限・aggregate cap（利用可能現金にスケールダウン）を実装。
-    - cost_buffer を考慮した保守的なコスト見積りと残差の lot_size 単位での再配分ロジックを実装。
+    - 発注株数計算 calc_position_sizes を追加。
+    - allocation_method に応じた計算（risk_based, equal, score）をサポート。
+    - 単元株（lot_size）丸め、1銘柄上限、aggregate cap（available_cash を超える場合のスケーリング）、cost_buffer（保守的見積）や残差配分ロジックを実装。
+    - 価格欠損時のスキップやログ出力などの安全措置を実装。
 
-  - portfolio/__init__.py で上記関数群をエクスポート。
+  - portfolio/__init__.py によるエクスポートを追加。
 
-- リサーチ（ファクター算出）骨子
-  - research/factor_research.py
-    - DuckDB を用いたファクター計算モジュールの骨子を追加（モメンタム、MA200、ATR、流動性、財務指標などの設計・定数定義）。
-    - 関数インターフェース（calc_momentum 等）を用意。今後 DuckDB SQL と組み合わせて実装拡張する設計。
-
-- ツール
+- ペーパートレード検証ツール
   - tools/paper_verification_report.py
-    - Paper Trading の検証レポート生成スクリプトを追加。
-    - SQLite（paper_trading.db）を参照し、稼働率、注文成功率、送信率、レイテンシ（平均/最大/P95）などを算出して標準出力にレポート化。
-    - 基準値（稼働率 99%、成立率 90%、送信率 95%、P95 レイテンシ 200ms）に基づいた PASS/FAIL 判定を実装。
-    - コマンドライン引数で期間（--from / --to）と DB パス（--db）を指定可能。
+    - ペーパートレード用 SQLite から稼働率・注文成功率・送信率・レイテンシ等を集計して標準出力でレポートを出力するスクリプトを追加。
+    - デフォルト閾値（稼働率 99%、注文成功率 90%、送信率 95%、P95 レイテンシ 200 ms）を定義し PASS/FAIL 判定を行う。
+    - 日付フィルタ、DB パス指定オプション（--from, --to, --db）をサポート。
+    - latency の P95 計算、欠損データへの N/A 表示や SQL 実行エラー時の保護処理を実装。
+
+- 研究用ファクター計算（骨格）
+  - research/factor_research.py
+    - DuckDB を用いた定量ファクター群（Momentum/Value/Volatility/Liquidity）計算モジュールの骨格を追加。各種窓長や計算方針の定数を定義。
+    - 関数 calc_momentum の docstring と設計方針の一部を追加（実装継続予定）。
+
+- データベース初期化
+  - 監視用 DB 初期化関数 init_monitoring_db を参照して、起動時に監視テーブルの存在を保証する呼び出しを実装（monitoring 側に実装されていることを前提）。
 
 ### Changed
-- （初回リリースのため該当なし）
+- （初版のため特筆すべき「変更」はありません。設計上の重要点を記載）
+  - .env の自動読み込みはプロジェクトルートを基準に行い、OS の既存環境変数は保護される（.env/.env.local による上書き制御）。
+  - logging_setup は stdout を StreamHandler に使用する設計（stderr ではなく stdout を用いることでジョブスケジューラ等での出力リダイレクトを容易にする）。
 
 ### Fixed
-- （初回リリースのため該当なし）
+- （初版のため既存バグ修正の履歴はありませんが、堅牢化のための例外処理やフォールバック動作を各所に実装）
+  - ログディレクトリ作成失敗やファイルハンドラ生成失敗時にプロセスが停止しないようフォールバック（コンソールのみ）を追加。
+  - .env パース時のクォート内エスケープとインラインコメント、export プレフィックスなどを正しく処理するよう改善。
 
-### Notes
-- 環境変数の自動読み込みはプロジェクトルート（.git または pyproject.toml を基準）を探索して行うため、配布後やテスト時に動作しない場合は `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定して自動読み込みを無効化できます。
-- ロギングは stdout を標準出力に使用するため、cron やスケジューラから起動した際のログリダイレクト設定に配慮してください。
-- run_execution/run_monitoring といった長時間稼働プロセスはプロセス優先度設定や停止フラグの存在に依存するため、本番導入時は `data/` ディレクトリ周りの権限・運用フローを整備してください。
-- 一部モジュール（ExecutionEngine、SystemMonitor、monitoring_db 等）は本記録の対象コードで参照されており、別モジュールとして実装されることを想定しています。
+### Security
+- 機密情報の取り扱いに関する配慮
+  - config_setup の対話入力ではシークレット項目をマスク表示。
+  - .env を生成するテンプレート内に「.env は絶対に Git にコミットしないこと」との注意書きを明記。
 
 ---
 
-（終わり）
+注:
+- 本 CHANGELOG はソースコードからの推測に基づき作成されています。実際の変更履歴や運用上の決定と異なる可能性があります。必要に応じて修正・追記してください。
