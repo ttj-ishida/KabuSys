@@ -46,6 +46,16 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
 
 _DEFAULT_THRESHOLD: float = 0.60  # BUY シグナル閾値
 _STOP_LOSS_RATE: float = -0.08  # ストップロス閾値（Section 5.2）
+_GAP_UP_THRESHOLD: float = 0.05  # gap_ratio > 0.05 → BUY 抑制（超過のみ）
+_GAP_DOWN_THRESHOLD: float = -0.03  # gap_ratio <= -0.03 → BUY 抑制（境界値含む）
+# 二進浮動小数点の丸め誤差を吸収するための微小量。
+# 上側 (gap-up): gap > _GAP_UP_THRESHOLD + ε
+#   → 境界ちょうど（+5.0%）や誤差で僅かに下回る値を「許可」。
+#     例: 1050/1000 - 1 = 0.050000000000000044 (IEEE754) が誤って抑制されるのを防ぐ。
+# 下側 (gap-down): gap <= _GAP_DOWN_THRESHOLD + ε
+#   → 境界ちょうど（-3.0%）を「抑制」し、誤差で僅かに上振れた値も安全側で抑制。
+#     例: 970/1000 - 1 = -0.030000000000000044 が誤って許可されるのを防ぐ。
+_GAP_THRESHOLD_EPSILON: float = 1e-9
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +150,44 @@ def _is_breadth_stop(
     if row is None:
         return False
     return bool(row[0])
+
+
+def _fetch_gap_ratios(
+    conn: duckdb.DuckDBPyConnection,
+    codes: list[str],
+    target_date: date,
+) -> dict[str, float]:
+    """target_date の open / 前日 close - 1.0 を銘柄ごとに返す。
+
+    戻り値: {code: gap_ratio} — データ欠損銘柄はキーなし（BUY 許可・安全側）。
+    前日は target_date より小さい最大日付を使用する。
+
+    Note: DuckDB の list 型パラメータバインド（ANY(?)）はバージョン間で不安定なため
+          IN (?, ?, ...) プレースホルダーを使用する（news_nlp.py と同方針）。
+    """
+    if not codes:
+        return {}
+    placeholders = ", ".join("?" * len(codes))
+    rows = conn.execute(
+        f"""
+        SELECT t.code,
+               CAST(t.open AS DOUBLE) / CAST(p.close AS DOUBLE) - 1.0
+        FROM prices_daily t
+        JOIN prices_daily p
+          ON p.code = t.code
+         AND p.date = (
+             SELECT MAX(date) FROM prices_daily
+             WHERE code = t.code AND date < ?
+         )
+        WHERE t.date = ?
+          AND t.code IN ({placeholders})
+          AND t.open IS NOT NULL
+          AND CAST(t.open AS DOUBLE) > 0
+          AND CAST(p.close AS DOUBLE) > 0
+        """,
+        [target_date, target_date, *codes],
+    ).fetchall()
+    return {code: ratio for code, ratio in rows}
 
 
 # ---------------------------------------------------------------------------
@@ -381,11 +429,34 @@ def generate_signals(
     # 6. BUY シグナル生成（Bear レジームまたは breadth_stop では抑制）
     buy_signals: list[dict] = []
     if not regime_is_bear and not breadth_stop:
+        # 3c. ギャップ比率を一括取得（BUY 生成が必要な場合のみ実行）
+        gap_ratios = _fetch_gap_ratios(
+            conn, [r["code"] for r in scored if r["score"] >= threshold], target_date
+        )
+        gap_suppressed = 0
         for rank, r in enumerate(scored, 1):
-            if r["score"] >= threshold:
-                buy_signals.append(
-                    {"code": r["code"], "score": r["score"], "rank": rank}
+            if r["score"] < threshold:
+                continue
+            gap = gap_ratios.get(r["code"])
+            if gap is not None and (
+                gap > _GAP_UP_THRESHOLD + _GAP_THRESHOLD_EPSILON
+                or gap <= _GAP_DOWN_THRESHOLD + _GAP_THRESHOLD_EPSILON
+            ):
+                logger.debug(
+                    "gap filter: %s gap=%.2f%% — BUY を抑制 date=%s",
+                    r["code"],
+                    gap * 100,
+                    target_date,
                 )
+                gap_suppressed += 1
+                continue
+            buy_signals.append({"code": r["code"], "score": r["score"], "rank": rank})
+        if gap_suppressed:
+            logger.info(
+                "generate_signals: gap filter — %d 銘柄を抑制 date=%s",
+                gap_suppressed,
+                target_date,
+            )
 
     # 7. SELL シグナル生成（エグジット条件）
     sell_signals = _generate_sell_signals(conn, target_date, score_map, threshold)
