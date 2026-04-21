@@ -1,7 +1,5 @@
 
 import os
-from pathlib import Path
-import tempfile
 
 # disable auto env load before importing module
 os.environ["KABUSYS_DISABLE_AUTO_ENV_LOAD"] = "1"
@@ -62,5 +60,6 @@ def test_load_env_file_override_and_protected(tmp_path, monkeypatch):
     # override True should overwrite non-protected; but protected prevents overwrite
     monkeypatch.setenv("B", "old_b")
     cfg._load_env_file(envfile, override=True, protected=protected_keys)
-    # B is protected (exists in protected_keys), so should remain old_b
-    assert os.environ.get("B") == "old_b"
+    # B was set AFTER protected_keys was captured → not in protected_keys
+    # override=True なので B はファイルの値 "2" で上書きされる
+    assert os.environ.get("B") == "2"
