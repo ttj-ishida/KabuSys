@@ -417,14 +417,27 @@ def generate_signals(
     scored.sort(key=lambda r: r["score"], reverse=True)
     score_map: dict[str, float] = {r["code"]: r["score"] for r in scored}
 
+    # 3c. ギャップ比率を一括取得（scored 確定後・BUY 生成前）
+    gap_ratios = _fetch_gap_ratios(conn, [r["code"] for r in scored], target_date)
+
     # 6. BUY シグナル生成（Bear レジームまたは breadth_stop では抑制）
     buy_signals: list[dict] = []
     if not regime_is_bear and not breadth_stop:
         for rank, r in enumerate(scored, 1):
-            if r["score"] >= threshold:
-                buy_signals.append(
-                    {"code": r["code"], "score": r["score"], "rank": rank}
+            if r["score"] < threshold:
+                continue
+            gap = gap_ratios.get(r["code"])
+            if gap is not None and (
+                gap > _GAP_UP_THRESHOLD or gap <= _GAP_DOWN_THRESHOLD
+            ):
+                logger.info(
+                    "gap filter: %s gap=%.2f%% — BUY を抑制 date=%s",
+                    r["code"],
+                    gap * 100,
+                    target_date,
                 )
+                continue
+            buy_signals.append({"code": r["code"], "score": r["score"], "rank": rank})
 
     # 7. SELL シグナル生成（エグジット条件）
     sell_signals = _generate_sell_signals(conn, target_date, score_map, threshold)
