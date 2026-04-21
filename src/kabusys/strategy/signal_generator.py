@@ -226,13 +226,12 @@ def _calc_sector_strengths(
     # biz_dates: prices_daily の distinct date を降順番号付け（rn=1=target_date, rn=21=20営業日前）
     rows = conn.execute(
         """
-        WITH biz_dates AS (
-            SELECT date,
-                   ROW_NUMBER() OVER (ORDER BY date DESC) AS rn
-            FROM (SELECT DISTINCT date FROM prices_daily WHERE date <= ?)
+        WITH last_21 AS (
+            SELECT DISTINCT date FROM prices_daily WHERE date <= ?
+            ORDER BY date DESC LIMIT 21
         ),
         date_20d AS (
-            SELECT date FROM biz_dates WHERE rn = 21
+            SELECT MIN(date) AS date FROM last_21
         )
         SELECT
             s.sector,
