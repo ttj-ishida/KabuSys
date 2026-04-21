@@ -5,6 +5,7 @@ feature_engineering と signal_generator の動作を検証する。
 """
 
 import datetime
+import datetime as _dt
 from datetime import date
 
 import duckdb
@@ -16,6 +17,7 @@ from kabusys.strategy.feature_engineering import (
     build_features,
 )
 from kabusys.strategy.signal_generator import (
+    _calc_sector_strengths,
     _compute_liquidity_score,
     _compute_momentum_score,
     _compute_value_score,
@@ -761,6 +763,180 @@ def test_is_bear_regime_exactly_min_samples(conn):
 # ---------------------------------------------------------------------------
 # _fetch_gap_ratios
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# セクター強弱テスト用ヘルパー
+# ---------------------------------------------------------------------------
+
+
+def _insert_sector_test_data(
+    conn: duckdb.DuckDBPyConnection,
+    sector_data: list[tuple[str, str, float, float]],
+    target_date: date = TARGET_DATE,
+) -> None:
+    """セクター強弱テスト用: stocks と prices_daily の最小セットを挿入する。
+
+    Args:
+        sector_data: [(code, sector, close_today, close_20d_ago), ...]
+                     sector が空文字の場合は stocks に挿入しない。
+        target_date: シグナル生成対象日（デフォルト TARGET_DATE）。
+    """
+    # 21 営業日分の日付を降順で生成（rn=1=target_date, rn=21=20営業日前）
+    biz_dates: list[date] = []
+    d = target_date
+    while len(biz_dates) < 21:
+        if d.weekday() < 5:
+            biz_dates.append(d)
+        d = d - _dt.timedelta(days=1)
+    date_20d = biz_dates[20]  # 20 営業日前の日付
+
+    for code, sector, close_today, close_20d_ago in sector_data:
+        if sector:
+            conn.execute(
+                "INSERT INTO stocks (code, sector) VALUES (?, ?)",
+                [code, sector],
+            )
+        # target_date の価格
+        conn.execute(
+            "INSERT INTO prices_daily "
+            "(date, code, open, high, low, close, volume, turnover) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                target_date,
+                code,
+                close_today,
+                close_today,
+                close_today,
+                close_today,
+                1_000_000,
+                5e8,
+            ],
+        )
+        # 20 営業日前の価格
+        conn.execute(
+            "INSERT INTO prices_daily "
+            "(date, code, open, high, low, close, volume, turnover) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                date_20d,
+                code,
+                close_20d_ago,
+                close_20d_ago,
+                close_20d_ago,
+                close_20d_ago,
+                1_000_000,
+                5e8,
+            ],
+        )
+        # 中間日付を埋める（biz_dates[1..19]、rn=2..20 が存在するために必要）
+        for mid_d in biz_dates[1:20]:
+            conn.execute(
+                "INSERT INTO prices_daily "
+                "(date, code, open, high, low, close, volume, turnover) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    mid_d,
+                    code,
+                    close_today,
+                    close_today,
+                    close_today,
+                    close_today,
+                    1_000_000,
+                    5e8,
+                ],
+            )
+
+
+# ---------------------------------------------------------------------------
+# _calc_sector_strengths 単体テスト
+# ---------------------------------------------------------------------------
+
+
+def test_calc_sector_strengths_basic(conn):
+    """4セクター正常ケース: top/bottom 各1セクターが正しく分類される"""
+    # セクターリターン: Tech=+10%, Food=+5%, Energy=+2%, Retail=-5%
+    # → top={Tech}, bottom={Retail}
+    _insert_sector_test_data(
+        conn,
+        [
+            ("T1", "Tech", 1100.0, 1000.0),  # +10%
+            ("T2", "Tech", 1100.0, 1000.0),
+            ("F1", "Food", 1050.0, 1000.0),  # +5%
+            ("E1", "Energy", 1020.0, 1000.0),  # +2%
+            ("R1", "Retail", 950.0, 1000.0),  # -5%
+        ],
+    )
+    top, bottom, sector_map = _calc_sector_strengths(conn, TARGET_DATE)
+    assert "Tech" in top
+    assert "Retail" in bottom
+    assert "Food" not in top and "Food" not in bottom
+    assert "Energy" not in top and "Energy" not in bottom
+    # sector_map に全銘柄が含まれる
+    assert sector_map["T1"] == "Tech"
+    assert sector_map["R1"] == "Retail"
+
+
+def test_calc_sector_strengths_single_sector(conn):
+    """有効セクターが1つ → top と bottom が同一 → 両方 frozenset() を返す"""
+    _insert_sector_test_data(
+        conn,
+        [
+            ("A1", "Tech", 1100.0, 1000.0),
+            ("A2", "Tech", 1200.0, 1000.0),
+        ],
+    )
+    top, bottom, sector_map = _calc_sector_strengths(conn, TARGET_DATE)
+    assert top == frozenset()
+    assert bottom == frozenset()
+    # sector_map は正常に返る
+    assert sector_map["A1"] == "Tech"
+
+
+def test_calc_sector_strengths_no_20d_data(conn):
+    """20営業日前のデータがない → rows 空 → (frozenset, frozenset, map) を返す"""
+    # prices_daily に1日分しか入れない（21日分の distinct date がない）
+    conn.execute("INSERT INTO stocks (code, sector) VALUES (?, ?)", ["A", "Tech"])
+    conn.execute(
+        "INSERT INTO prices_daily "
+        "(date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "A", 1000.0, 1000.0, 1000.0, 1000.0, 1_000_000, 5e8],
+    )
+    top, bottom, sector_map = _calc_sector_strengths(conn, TARGET_DATE)
+    assert top == frozenset()
+    assert bottom == frozenset()
+    # sector_map は取得できる
+    assert sector_map.get("A") == "Tech"
+
+
+def test_calc_sector_strengths_unknown_sector_excluded(conn):
+    """sector=NULL の銘柄は sector_map に含まれない（安全側）"""
+    _insert_sector_test_data(
+        conn,
+        [
+            ("A", "Tech", 1100.0, 1000.0),
+            ("B", "Food", 950.0, 1000.0),
+        ],
+    )
+    # sector なし銘柄（stocks に挿入しない → sector_map に含まれない）
+    conn.execute(
+        "INSERT INTO prices_daily "
+        "(date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "C", 1050.0, 1050.0, 1050.0, 1050.0, 1_000_000, 5e8],
+    )
+    top, bottom, sector_map = _calc_sector_strengths(conn, TARGET_DATE)
+    assert "C" not in sector_map
+    assert "A" in sector_map
+
+
+def test_calc_sector_strengths_empty_stocks(conn):
+    """stocks テーブルが空 → (frozenset, frozenset, {}) を返す"""
+    top, bottom, sector_map = _calc_sector_strengths(conn, TARGET_DATE)
+    assert top == frozenset()
+    assert bottom == frozenset()
+    assert sector_map == {}
+
 
 _PREV_DATE = date(2020, 5, 29)  # TARGET_DATE の直前営業日
 

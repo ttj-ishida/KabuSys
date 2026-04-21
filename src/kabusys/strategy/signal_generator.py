@@ -56,6 +56,8 @@ _GAP_DOWN_THRESHOLD: float = -0.03  # gap_ratio <= -0.03 → BUY 抑制（境界
 #   → 境界ちょうど（-3.0%）を「抑制」し、誤差で僅かに上振れた値も安全側で抑制。
 #     例: 970/1000 - 1 = -0.030000000000000044 が誤って許可されるのを防ぐ。
 _GAP_THRESHOLD_EPSILON: float = 1e-9
+_SECTOR_BOOST: float = 0.03  # 上位 _SECTOR_QUARTILE セクター銘柄への final_score 加算量
+_SECTOR_QUARTILE: float = 0.25  # 上位・下位の区切り割合（各 ceil(N×0.25) セクター）
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +190,93 @@ def _fetch_gap_ratios(
         [target_date, target_date, *codes],
     ).fetchall()
     return {code: ratio for code, ratio in rows}
+
+
+def _calc_sector_strengths(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+) -> tuple[frozenset[str], frozenset[str], dict[str, str]]:
+    """セクター20営業日リターンを算出し、上位・下位セクターと銘柄→セクターマップを返す。
+
+    stocks テーブルの全銘柄 × prices_daily で等加重セクターリターンを計算し、
+    上位 _SECTOR_QUARTILE / 下位 _SECTOR_QUARTILE のセクターを分類する。
+
+    データ欠損・セクター未登録銘柄は安全側（BUY 許可・スコアブーストなし）に倒す。
+
+    Returns:
+        (top_sectors, bottom_sectors, sector_map)
+        - top_sectors:    上位 _SECTOR_QUARTILE セクター名の frozenset
+        - bottom_sectors: 下位 _SECTOR_QUARTILE セクター名の frozenset
+        - sector_map:     {code: sector}（NULL/空文字のセクターは除外）
+
+    Note: 有効セクターが1つの場合は top と bottom が同一になるためフィルタ無効。
+    """
+    # sector_map を取得（NULL / 空白のみは除外）
+    sector_rows = conn.execute(
+        "SELECT code, NULLIF(TRIM(sector), '') FROM stocks"
+    ).fetchall()
+    sector_map: dict[str, str] = {code: sec for code, sec in sector_rows if sec}
+
+    if not sector_map:
+        return frozenset(), frozenset(), {}
+
+    # セクター別20営業日等加重リターンを算出
+    # biz_dates: prices_daily の distinct date を降順番号付け（rn=1=target_date, rn=21=20営業日前）
+    rows = conn.execute(
+        """
+        WITH biz_dates AS (
+            SELECT date,
+                   ROW_NUMBER() OVER (ORDER BY date DESC) AS rn
+            FROM (SELECT DISTINCT date FROM prices_daily WHERE date <= ?)
+        ),
+        date_20d AS (
+            SELECT date FROM biz_dates WHERE rn = 21
+        )
+        SELECT
+            s.sector,
+            AVG(CAST(cur.close AS DOUBLE) / CAST(prev.close AS DOUBLE) - 1.0) AS ret
+        FROM stocks s
+        JOIN prices_daily cur
+          ON cur.code = s.code AND cur.date = ?
+        JOIN prices_daily prev
+          ON prev.code = s.code
+         AND prev.date = (SELECT date FROM date_20d)
+        WHERE NULLIF(TRIM(s.sector), '') IS NOT NULL
+          AND CAST(cur.close AS DOUBLE) > 0
+          AND CAST(prev.close AS DOUBLE) > 0
+        GROUP BY s.sector
+        ORDER BY ret DESC
+        """,
+        [target_date, target_date],
+    ).fetchall()
+
+    if not rows:
+        return frozenset(), frozenset(), sector_map
+
+    n = len(rows)
+    top_n = max(1, math.ceil(n * _SECTOR_QUARTILE))
+    bottom_n = max(1, math.ceil(n * _SECTOR_QUARTILE))
+
+    top_sectors = frozenset(s for s, _ in rows[:top_n])
+    bottom_sectors = frozenset(s for s, _ in rows[-bottom_n:])
+
+    # オーバーラップ（n=1 など top と bottom が同一セクターを含む）→ 両方空
+    if top_sectors & bottom_sectors:
+        logger.debug(
+            "_calc_sector_strengths: top/bottom オーバーラップ（セクター数=%d）"
+            " — フィルタ無効 date=%s",
+            n,
+            target_date,
+        )
+        return frozenset(), frozenset(), sector_map
+
+    logger.info(
+        "_calc_sector_strengths: top=%s bottom=%s date=%s",
+        sorted(top_sectors),
+        sorted(bottom_sectors),
+        target_date,
+    )
+    return top_sectors, bottom_sectors, sector_map
 
 
 # ---------------------------------------------------------------------------
