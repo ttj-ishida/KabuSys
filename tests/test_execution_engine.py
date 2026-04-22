@@ -466,3 +466,22 @@ class TestPositionEntriesOnFill:
             "SELECT entry_date FROM position_entries WHERE code = '7777'"
         ).fetchall()
         assert len(rows) == 1, "ON CONFLICT DO NOTHING により重複挿入されないこと"
+
+    def test_sell_signal_updates_sell_date(self, sqlite_conn, duckdb_conn):
+        """SELL 発注成功 → position_entries の sell_date が更新される。"""
+        duckdb_conn.execute(
+            "INSERT INTO position_entries (code, entry_date) VALUES ('6666', ?)",
+            [TARGET_DATE],
+        )
+        _insert_signal(duckdb_conn, "6666", side="sell")
+        _insert_target(duckdb_conn, "6666", qty=100, price=1000.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        row = duckdb_conn.execute(
+            "SELECT sell_date FROM position_entries WHERE code = '6666'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] == TARGET_DATE, "SELL 発注後に sell_date が設定されるべき"
