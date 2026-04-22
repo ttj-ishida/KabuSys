@@ -1,100 +1,108 @@
-# CHANGELOG
+CHANGELOG
+=========
 
-すべての重要な変更はこのファイルに記録します。  
-フォーマットは「Keep a Changelog」（https://keepachangelog.com/）に準拠します。
+すべての変更は Keep a Changelog の形式に準拠して記載しています。
 
-現在のリリース: 0.1.0
+[Unreleased]
+------------
 
-## [Unreleased]
+- （現時点のコードベースは初回リリース相当のため未リリースの差分はありません）
 
-## [0.1.0] - 2026-04-22
-初回リリース。日本株自動売買フレームワーク「KabuSys」の基本機能を実装しました。
+[0.1.0] - 2026-04-22
+-------------------
 
-### Added
-- パッケージ初期化
-  - バージョン番号を `src/kabusys/__init__.py` にて `0.1.0` として設定。
+Added
+- 実行スクリプトを追加
+  - run_execution.py
+    - ExecutionEngine の起動スクリプトを提供。プロセス優先度を "high" に設定して起動する。
+    - KABUSYS_ENV が paper_trading の場合は paper_trading 用の SQLite（デフォルト: data/paper_trading.db）を使用し本番 DB と分離。MockBrokerClient を利用する想定（BrokerClientFactory 経由）。
+    - init_monitoring_db により監視テーブルの存在を保証。
+    - Engine を別スレッドで実行し、プロジェクトルートの data/stop_requested.flag により安全に停止できる。実行時に実行 PID を data/execution.pid に保存する仕組みを想定。
+  - run_monitoring.py
+    - SystemMonitor のポーリングループ起動スクリプトを提供。デフォルトのポーリング間隔は 60 秒。
+    - 環境変数 MONITOR_POLL_INTERVAL でポーリング間隔を上書き可能（不正値は警告を出してデフォルトにフォールバック）。
+    - 監視は環境にかかわらず本番の sqlite_path を使用する設計（monitoring 用 DB 初期化を実行）。
+    - stop フラグでループを終了し、例外発生時はログ出力して次ポーリングに備える。
 
-- 環境変数 / 設定関連
-  - Settings クラスを実装（src/kabusys/config.py）。
-    - 環境変数から各種設定値（J-Quants トークン、kabu API パスワード、DB パス、PID/Kill flag パス、閾値など）を取得。
-    - 環境値のバリデーション（KABUSYS_ENV、LOG_LEVEL、PAPER_FILL_MODE の妥当性チェック）。
-    - .env 自動読み込み機能を実装（プロジェクトルート検出: .git または pyproject.toml を基準）。
-    - OS 環境変数を保護する override/protected のロード動作を実装。
-    - 自動ロードを無効化する `KABUSYS_DISABLE_AUTO_ENV_LOAD` オプションを追加。
+- 設定・環境変数管理
+  - config.py
+    - プロジェクトルート（.git または pyproject.toml）を基準に .env を自動読み込み（.env, .env.local の優先順）。自動読み込みは KABUSYS_DISABLE_AUTO_ENV_LOAD で無効化可能。
+    - .env パーサを実装:
+      - export KEY=val 形式に対応
+      - シングル/ダブルクォートの値内でのバックスラッシュエスケープ処理を考慮
+      - クォートなし値のインラインコメント判定は直前が空白/タブのときのみコメントとみなすなど堅牢化
+    - Settings クラスを提供（各種環境変数の取得・バリデーションメソッドを備える）
+      - J-Quants / kabu API / LINE / DB パス / 監視しきい値 / ログ設定等のプロパティを提供
+      - KABUSYS_ENV、LOG_LEVEL、PAPER_FILL_MODE 等の妥当性チェックを実装
+    - settings = Settings() のシングルトンを公開
 
-  - .env パーサー実装（クォートやエスケープ、コメント処理に対応）。
-  - 対話式ウィザード `config_setup` を追加（src/kabusys/config_setup.py）。
-    - .env の初期作成／更新を対話式で支援（--env-file オプション）。
-    - J-Quants / kabu / DB / LINE / ログレベル / Kill Switch など主要項目を網羅。
-    - シークレット項目は表示時にマスク表示。生成される .env に注意書きを出力。
+  - config_setup.py
+    - 対話式ウィザードで .env の作成・更新を支援する CLI を追加
+    - 各項目の説明、デフォルト、選択肢、シークレット表示（マスク）に対応し、最終確認後に .env を書き出す
+    - .env の既存値読み込み・上書きルールをサポート
 
-  - 設定検証 CLI `validate_config` を追加（src/kabusys/validate_config.py）。
-    - .env と config/*.yaml の事前チェック。必須環境変数未設定はエラー、プレースホルダ値や不正値は警告。
-    - --strict オプションで警告を失敗扱いにできる。
-    - PyYAML 未インストール時は YAML 内容検証をスキップし、警告を出力。
-    - config ファイルが見つからない場合に生成スクリプトの案内を表示。
+  - validate_config.py
+    - 起動前に .env および config/*.yaml の設定を検証する CLI を追加
+    - 必須環境変数の未設定チェック、KABUSYS_ENV/LOG_LEVEL の検証、DB パスの親ディレクトリ存在チェック、PyYAML があれば YAML のパース検証を行う
+    - --strict オプションで警告も FAIL 扱いにできる
+    - live 環境時の追加ガード（LINE 通知設定、KILL_FLAG_CLEAR_ON_START の危険性）を実装
 
-- 実行エントリ（起動スクリプト）
-  - Execution エンジン起動スクリプト `run_execution` を追加（src/kabusys/run_execution.py）。
-    - process priority 設定、PID ファイル管理、stop フラグ検知。
-    - paper_trading 環境時は専用 SQLite を使用し、本番 DB と分離。
-    - DuckDB を分析用 DB として使用。
-    - デーモンスレッドで ExecutionEngine を起動し、停止フラグで安全に停止。
+- ロギング / プロセス制御ユーティリティ
+  - utils/logging_setup.py
+    - ルートロガーに StreamHandler（stdout）と TimedRotatingFileHandler（日次ローテーション、30日保存）を設定するユーティリティを追加
+    - ログディレクトリ作成失敗時はファイル出力をスキップしてコンソールログのみで継続
+    - ログレベル・ログディレクトリの解決ルール（引数 > 環境変数 > デフォルト）を提供
+  - utils/process_priority.py
+    - psutil を用いて Windows / POSIX（Linux/Mac/FreeBSD）間の差分を吸収するプロセス優先度設定を実装
+    - CPU affinity を最初の N コアに固定する set_cpu_affinity を追加
+    - 権限不足や未対応 OS の場合は警告を出して安全にスキップ
 
-  - Monitoring ポーリングループ `run_monitoring` を追加（src/kabusys/run_monitoring.py）。
-    - MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き（デフォルト 60 秒、無効値はデフォルトにフォールバック）。
-    - 監視は KABUSYS_ENV にかかわらず本番 sqlite_path を使用。
+- ポートフォリオ構成 / リスク調整 / 口数決定（純粋関数群）
+  - portfolio/portfolio_builder.py
+    - select_candidates: BUY シグナルをスコア降順でソートし上位 N を選択
+    - calc_equal_weights: 等金額配分（1/N）
+    - calc_score_weights: スコア比率で正規化。全スコアが 0 の場合は等配分にフォールバックして WARNING を出力
+  - portfolio/risk_adjustment.py
+    - apply_sector_cap: 既存保有のセクター比率が閾値を超える場合、新規候補を除外（"unknown" セクターは除外対象にしない）
+    - calc_regime_multiplier: market regime に応じた投下資金乗数を返す（"bull"=1.0, "neutral"=0.7, "bear"=0.3）、未知レジームは 1.0 にフォールバックして WARNING
+  - portfolio/position_sizing.py
+    - calc_position_sizes: allocation_method ("risk_based" / "equal" / "score") に応じた発注株数算出を実装
+      - risk_based: 許容リスク率・損切り率に基づくロット算出
+      - equal/score: 重み・max_utilization 等に基づく算出
+      - 単元株（lot_size）で丸め、1 銘柄上限および全体の aggregate cap（available_cash）超過時のスケーリング、cost_buffer を考慮した保守的推定、端数配分の再割当てロジックを実装
+      - 価格欠損時のスキップやログ出力に対応
 
-- Execution エンジンコア
-  - ExecutionEngine 実装（src/kabusys/execution/execution_engine.py）。
-    - シグナル読み込み（DuckDB）、Gate（リスク）チェック、発注フロー、WebSocket push ドレイン、セッション制御（8:50-9:10 シグナル、9:10-15:30 ドレイン）を実装。
-    - kill.flag 検出時の振る舞い（起動拒否または自動クリアは KILL_FLAG_CLEAR_ON_START で制御）。
-    - PID ファイル書き込み／削除の管理。
-    - WebSocket push を別スレッドで受信し、_push_queue に積んで同期処理を行う。
-    - 発注時の監視DBへのログ書き出し（監視 DB が渡された場合）。
-    - position_entries の追記／更新（次取引日での fill_date を記録）。
+- リサーチ（ファクター算出）スケルトン
+  - research/factor_research.py
+    - モメンタム等ファクター計算用の定数・関数群を追加（DuckDB 接続を想定した設計）
+    - calc_momentum の実装開始（prices_daily を参照して 1M/3M/6M リターンや MA200 乖離率を計算する方針）。（ファイル末尾で実装途中に見切れている箇所あり）
 
-- 注文管理 / 再整合
-  - OrderRecord（状態遷移ロジック）を実装（src/kabusys/execution/order_record.py）。
-    - 状態列挙 OrderState と許可遷移テーブル、InvalidStateTransitionError を定義。
-    - transition_to により状態遷移と付随フィールド（broker_order_id、filled_qty 等）を安全に更新。
+- Paper Trading 検証ツール
+  - tools/paper_verification_report.py
+    - ペーパートレード用 SQLite を集計して検証レポート（稼働率、注文成功率、送信率、レイテンシ指標（P95）など）を生成する CLI を追加
+    - デフォルトしきい値（稼働率 99%、成立率 90%、送信率 95%、P95 レイテンシ 200ms）を持ち、Pass/Fail 判定を出力
+    - 日付フィルタ、DB パスの CLI オプションをサポート
+    - P95（95パーセンタイル）の算出ロジックを実装
 
-  - OrderManager 実装（src/kabusys/execution/order_manager.py）。
-    - create_order: signal_id 重複チェック（DB とレコードレベル両方）、client_order_id は uuid4。
-    - send_order: 2相永続化フロー（OrderSent を先に永続化 → broker 呼び出し → broker_order_id 永続化 → OrderAccepted へ遷移）。
-      - OrderRejectedError / OrderSentPendingError の扱いを明確化。OrderSentPendingError は broker_order_id を保存して再スロー。
-      - クラッシュ耐性（途中クラッシュ時に Reconciliation で回復可能となる設計）。
-    - sync_order: broker 側ステータス照合による同期（部分約定更新の差分反映、OrderSent→Filled のケースで OrderAccepted を経由して遷移）。
-    - cancel_order: 終端状態のキャンセル不許可チェック、broker_order_id があれば broker API を呼びキャンセルし DB を更新。
+- パッケージ情報
+  - __init__.py にて __version__ = "0.1.0" を設定し、主要サブパッケージを __all__ で公開
 
-  - Reconciler / RiskManager / OrderRepository などコンポーネントを統合する設計（実装ファイルは参照）。
+Changed
+- 初回リリースのため該当なし
 
-- ブローカークライアント（kabu）
-  - KabuStationClient を実装（src/kabusys/execution/kabu_client.py）。
-    - httpx を用いた同期 REST クライアント実装、トークン管理（遅延取得と 401 リトライ）。
-    - レスポンス JSON パースエラー / タイムアウト / ネットワークエラーを BrokerAPIError に変換。
-    - 429 は RateLimitError として扱う。
-    - WebSocket 経由の push を想定した stream_push 呼び出し（存在しない場合は WebSocket スレッドをスキップ）。
+Fixed
+- 初回リリースのため該当なし
 
-- 監視 / DB 初期化
-  - monitoring_db 初期化関数を呼び出すフローを追加（起動スクリプトと run_execution/run_monitoring で使用）。
+Deprecated
+- 該当なし
 
-- ロギング・プロセス優先度ユーティリティ（参照）
-  - setup_logging と set_process_priority を起動時に呼び出す設計（外部モジュールから導入）。
+Removed
+- 該当なし
 
-### Changed
-- （初回リリースのため該当なし）
+Security
+- 該当なし
 
-### Fixed
-- （初回リリースのため該当なし）
-
-### Notes / 仕様上の注意
-- .env の自動読み込みはプロジェクトルートが特定できない場合はスキップされます（パッケージ配布後の環境でも CWD に依存しない設計）。
-- PyYAML が未インストールでも validate_config は実行可能だが、YAML 内容検証はスキップされ警告が出ます。
-- ExecutionEngine のセッションタイミング（シグナル/ドレイン）は現行実装に従い固定されている（テスト時は直接メソッド呼び出しで代替可能）。
-- PAPER_TRADING 時は paper 用 SQLite を使用して本番 DB とデータ分離を行う設計。
-- kill.flag の挙動は設定（KILL_FLAG_CLEAR_ON_START）により起動時に自動クリアされる可能性があるため、本番では 0 を推奨。
-
---- 
-
-将来的な変更はこのファイルに追記してください。
+Notes
+- calc_momentum（factor_research.py） は実装が途中の箇所が見られます。今後のリリースでファクター計算ロジックの完成を予定しています。
+- run_monitoring/run_execution はローカルファイル（data ディレクトリ内）の存在・パーミッション等に依存するため、運用時は .env の設定・ディレクトリ作成を事前に行ってください（config_setup と validate_config を推奨）。
+- ログディレクトリ作成やプロセス優先度設定は権限が不足していると失敗することがあります。いずれも失敗した場合は警告ログを出し、処理は継続されます。
