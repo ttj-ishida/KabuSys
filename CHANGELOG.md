@@ -1,72 +1,109 @@
-# CHANGELOG
+# Changelog
 
-すべての変更は Keep a Changelog の形式に従います。  
-このファイルは、リポジトリ内のソースコードの内容から推測して作成した変更履歴です。
+すべての重要な変更は Keep a Changelog の形式に従って記載しています。  
+このファイルはコードベースから推測して作成したリリースノートです。
+
+全般的な注意:
+- 本リポジトリはバージョン 0.1.0（初回リリース）相当の機能を含みます。
+- 環境変数の自動読み込みはデフォルトで有効（KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で無効化可能）。
+- DuckDB と SQLite を併用し、paper_trading 時は SQLite を分離して使用します。
+
+## [Unreleased]
+
+### 追加
+- CLI / ツール
+  - `python -m kabusys.config_setup` : 対話式ウィザードで .env を作成 / 更新する CLI を追加。
+    - 複数の設定項目（KABUSYS_ENV, JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD, DUCKDB_PATH, SQLITE_PATH, LINE_* 等）を対話的に設定可能。
+    - シークレット項目はマスク表示。既存 .env を読み込んで Enter で既存値を再利用可能。
+    - 生成される .env に関する注意コメントを出力（.env を Git にコミットしないよう注意喚起）。
+  - `python -m kabusys.validate_config` : 起動前に .env と config/*.yaml の設定不備を検出するバリデータを追加。
+    - `--strict` オプションで警告も失敗扱いにできる。
+    - 必須環境変数（例: JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD）の未設定チェック、プレースホルダの検出を実装。
+    - KABUSYS_ENV / LOG_LEVEL の妥当性チェック、DUCKDB_PATH / SQLITE_PATH の親ディレクトリ存在チェック、config/*.yaml の存在 & PyYAML によるパース検証（PyYAML 未インストール時はスキップ）を実装。
+    - KABUSYS_ENV=live のときの追加ガード（LINE 通知設定、KILL_FLAG_CLEAR_ON_START の危険値警告）を実装。
+
+- 設定管理
+  - Settings クラスを導入して環境変数を一元管理（プロパティアクセス）。
+    - 必須環境変数は _require() で検査し、未設定時は ValueError を送出。
+    - 自動 .env 読み込み:
+      - プロジェクトルートは .git または pyproject.toml を上位ディレクトリから探索して決定（__file__ 基準で探索）。
+      - 読み込み順: OS 環境変数 > .env.local > .env。既存 OS 環境変数は保護（上書きされない）。
+      - .env のパースは複雑なケース（export 形式、シングル/ダブルクォート、バックスラッシュエスケープ、インラインコメント扱い）をサポート。
+  - 各種プロパティを提供:
+    - API トークン / パスワード、KABU_API_BASE_URL、LINE 設定、DB パス（duckdb / sqlite / paper_trading の分離）、PID / kill flag パス、閾値（CPU/MEM/DISK）、環境 / ログレベル検証、paper_fill_mode の検証など。
+
+- 実行スクリプト
+  - `run_execution.py` : ExecutionEngine を起動するエントリポイントを追加。
+    - プロセス優先度設定、PID ファイル管理、stop フラグ検出、paper_trading 時の専用 SQLite 使用（本番 DB と分離）を実装。
+    - duckdb と sqlite の接続初期化、監視 DB テーブルの初期化を行う。
+  - `run_monitoring.py` : SystemMonitor のポーリングループを起動するスクリプトを追加。
+    - ポーリング間隔を MONITOR_POLL_INTERVAL で上書き可能（デフォルト 60 秒）。
+    - 監視は環境にかかわらず本番 sqlite_path を使用。
+
+- 発注実装（Execution）
+  - OrderRecord / OrderState
+    - 注文状態を列挙する OrderState と、許可される状態遷移を明確化。
+    - OrderRecord dataclass に状態遷移メソッド transition_to を実装。無効遷移は InvalidStateTransitionError を送出。
+  - OrderRepository（DB 操作）と組み合わせる OrderManager を実装
+    - create_order: signal_id の重複チェック（DB の部分ユニークインデックス考慮）と client_order_id の UUID4 発番。重複時は DuplicateOrderError を送出。
+    - send_order: 2 相永続化戦略（OrderSent に永続化 → broker 呼び出し → broker_order_id を先に保存 → OrderAccepted に遷移）でクラッシュ時の回復性を高める設計。
+      - OrderRejectedError を受けた場合は Rejected に遷移。
+      - OrderSentPendingError（注文番号は発行されたが約定しないケース）は broker_order_id を保存して例外を伝播（Reconciliation 対象）。
+    - sync_order: broker の状態照会によりローカル状態を同期。部分約定進捗の更新と不整合回復ロジックを実装。
+    - cancel_order: キャンセル不可能な状態のチェック（終端状態の扱い）と broker API 呼び出し、Cancelled への遷移。
+  - ExecutionEngine
+    - シグナルを DuckDB から読み込み、Gate1（シグナルレベル）、Gate2（エグゼキューションレベル／レート制限、リトライ最大3回、CB 判定）を通じて発注を実行。
+    - シグナル処理期間（デフォルト 8:50-9:10）と push ドレインループ（9:10-15:30）のセッションロジックを実装。
+    - WebSocket (kabu push) を別スレッドで受け取り _push_queue に投入、ドレイン時に sync_order を呼び出す。
+    - Gate3（ポートフォリオ指標に基づくドローダウン監視）で NG の場合は kill_switch を発動し、active 注文をキャンセル。
+    - kill_switch は全アクティブ注文のキャンセル（例外ハンドリングで継続）と全ループ停止を行う。
+    - 発注の監視ログ（latency 等）を monitoring DB に記録するフックを持つ（監視 DB が提供されている場合）。
+    - position_entries の記録（BUY のみ、fill_date は翌営業日）や SELL の売却更新を実装。DuckDB を使用して next_trading_day を参照。
+
+- Broker / KabuStation クライアント
+  - KabuStationClient を実装（httpx を利用する同期クライアント）。
+    - トークン取得の遅延初期化と 401 に対する自動再取得（1 回リトライ）を実装。
+    - レスポンス JSON パース失敗 / ネットワークエラー / タイムアウトを BrokerAPIError にラップ。
+    - 429 は RateLimitError にマッピング。
+    - kabu の注文状態コードを内部状態文字列 ("open", "partial", "filled", "cancelled", "rejected") にマッピング。
+    - 将来的な async 化を容易にする設計（内部で httpx.Client を使用）。
+
+- 監視（Monitoring）
+  - monitoring_db の初期化ユーティリティ（init_monitoring_db）を利用し、実行前に監視テーブルを保証。
+
+- ユーティリティ
+  - ロギング初期化（setup_logging）やプロセス優先度変更（set_process_priority）を利用。
+
+### 変更
+- .env パーサーの挙動を明確化
+  - export プレフィックスのサポート、引用符付き値内のバックスラッシュエスケープ、インラインコメントの扱い（非引用値では '#' の直前が空白/タブであればコメントとみなす）などを扱う実装により既存 .env の柔軟なパースをサポート。
+
+### 修正（挙動設計）
+- send_order のクラッシュ耐性向上
+  - broker 呼び出し前に OrderSent を永続化し、broker が発行する order_id を先に保存することで、途中クラッシュ時に Reconciliation が broker 情報をもとに状態を回復できるようにした。
+- cancel のルール
+  - Filled をキャンセル不可として扱う（ポジション追跡上はアクティブだがキャンセル不可能のための扱いを明確化）。
 
 ## [0.1.0] - 2026-04-22
 
-### 追加 (Added)
-- 全体
-  - 初回公開相当の機能群を追加。自動売買システム「KabuSys」のコアユーティリティ、起動スクリプト、ポートフォリオ構築ロジック、検証ツール等を含む。
-  - パッケージメタ情報にバージョン `0.1.0` を設定。
+最初のパブリック相当リリース（コードベースから推測）。上記の主要機能群を含む。
 
-- 起動/サービス
-  - run_monitoring スクリプトを追加。SystemMonitor のポーリングループ起動、停止フラグ検出、MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒）。
-  - run_execution スクリプトを追加。ExecutionEngine を起動・監視し、Paper Trading モード時は専用の SQLite（data/paper_trading.db）を使用して本番 DB と完全分離。
-  - PID / stop フラグ管理に対応（data/*.pid / stop_requested.flag ファイルを使用）。
+- 基本機能
+  - 環境設定の自動読み込み / 対話式ウィザード / 設定バリデーション CLI を実装。
+  - ExecutionEngine / OrderManager / OrderRecord による発注フローと状態管理。
+  - KabuStation REST クライアント（トークン管理・エラーラッピング）。
+  - 監視ループ（run_monitoring）と実行スクリプト（run_execution）。
+  - DuckDB / SQLite を用いたデータ保存と paper_trading 用 DB の分離。
+  - kill flag / PID ファイル管理とプロセス優先度設定。
+  - 監視 DB への発注イベント記録や position_entries への記録処理。
 
-- 設定管理
-  - Settings クラスを追加し、環境変数からアプリ設定を一元取得。
-  - 自動 .env ロード機能を追加（プロジェクトルート探索により .env / .env.local を読み込み、OS 環境変数は保護する）。
-  - 新しい設定プロパティを追加: PAPER_FILL_MODE（Paper Trading の成行/部分約定挙動）、PAPER_TRADING_SQLITE_PATH、PID/KILL フラグ関連設定、CPU/MEM/DISK 閾値、環境種別判定（is_live/is_paper/is_dev）など。
+- ドキュメント・注意
+  - .env の取り扱いに関する注意（.env を Git にコミットしない等）をウィザードで明示。
 
-- 設定補助ツール
-  - config_setup CLI を追加。対話式ウィザードで .env を作成・更新する機能を提供（入力補助、シークレットマスキング、保存時確認）。
-  - validate_config CLI を追加。環境変数・config/*.yaml の存在・簡易検証を実行。--strict オプションで警告を失敗扱いにできる。PyYAML の有無を考慮したパース検出。
-
-- ロギング / プロセス管理
-  - 統一ロギングセットアップ関数 setup_logging を追加。stdout 出力（StreamHandler）と日次ローテーションによるファイル出力（TimedRotatingFileHandler）をルートロガーに構成。ログディレクトリは環境変数で上書き可能。
-  - set_process_priority / set_cpu_affinity を提供する process_priority ユーティリティを追加。Windows/Linux/macOS の差分を吸収してプロセス優先度や CPU affinity を設定可能（権限不足時は警告でスキップ）。
-
-- ポートフォリオ構築
-  - portfolio モジュールを追加:
-    - portfolio_builder: 候補選定（select_candidates）、等配分/スコア加重（calc_equal_weights / calc_score_weights）。
-    - risk_adjustment: セクター集中排除（apply_sector_cap）、市場レジームに応じた投下資金乗数（calc_regime_multiplier）。
-    - position_sizing: 各銘柄の発注株数算出（calc_position_sizes）。risk_based / equal / score の配分方式をサポートし、単元株丸め、個別上限、aggregate スケーリング（available_cash に合わせたスケールダウン）を実装。
-
-- 検証レポート
-  - tools/paper_verification_report を追加。Paper Trading の SQLite ログから稼働率、注文成功率、送信率、レイテンシ（平均/最大/P95）等を集計して人間向けレポートを出力。閾値判定で PASS/FAIL を示す。
-
-- リサーチ
-  - research/factor_research のファイルを追加（ファクター計算の設計と一部定数を実装）。DuckDB 経由で価格・財務テーブルを参照してファクターを計算する方針。
-
-### 変更 (Changed)
-- DB 接続方針
-  - 監視（monitoring）は KABUSYS_ENV にかかわらず production 用 sqlite_path を使用する旨を明示。paper_trading モードでは execution が別 DB を選択する設計に分離。
-
-- .env 読み込みロジック
-  - .env のパース機能を強化（export キーワード対応、シングル/ダブルクォート内のバックスラッシュエスケープ処理、インラインコメントのハンドリング等）。プロジェクトルート判定は .git / pyproject.toml の存在で行うためパッケージ配布後も安定動作。
-
-- ログ出力
-  - stdout を標準のログストリームに使用（stderr ではなく stdout）し、ジョブスケジューラからのリダイレクトを考慮。
-
-### 修正 (Fixed)
-- 設定検証の堅牢性
-  - validate_config で PyYAML 未導入時は YAML 検証をスキップして警告するようにし、パース失敗時はエラーとして報告する挙動を実装。
-  - .env 読み込み時にファイル読み込み失敗が発生した場合に警告を出して処理継続するよう保護。
-
-- 実行時安定化
-  - run_monitoring のポーリング間隔を環境変数（MONITOR_POLL_INTERVAL）で上書き可能にし、不正な値（0 以下や非数）の場合にデフォルトへフォールバックして例外発生を防止。
-  - run_execution の起動ループで stop フラグ検出時にエンジンを安全に停止する処理を追加。
-
-### 注意点 (Notes)
-- Paper Trading（KABUSYS_ENV=paper_trading）は production DB と完全に分離されるように設計されています。Paper 用 DB のパスは PAPER_TRADING_SQLITE_PATH（または Settings.paper_sqlite_path）で設定できます。
-- process_priority や CPU affinity の設定は OS/権限に依存します。設定に失敗した場合は警告ロギングが出力され、処理は継続されます。
-- portfolio / position_sizing のアルゴリズムは現時点で単元（lot_size）を全銘柄共通で扱う仕様です。将来的に銘柄別単元対応の拡張を想定しています（TODO コメントあり）。
-
-### セキュリティ (Security)
-- .env ファイルは機密情報を含むため、生成した .env を Git にコミットしない旨の注記を config_setup に明示。
+### 既知の制限（推測）
+- config/*.yaml の細かいバリデーションは PyYAML がないとスキップされる（validate_config で警告）。
+- 一部外部依存（httpx, websocket, duckdb, PyYAML 等）が必要。実行環境により追加パッケージのインストールが必要。
 
 ---
 
-If you expect additional historical releases, or want Unreleased / future notes added,教えてください。
+この CHANGELOG はコードベースの内容から推測して作成しています。追加の履歴情報（過去の変更ログ、リリース日、影響範囲の詳細等）があれば、より正確に更新できます。
