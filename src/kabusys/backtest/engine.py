@@ -408,7 +408,9 @@ def run_backtest(
             simulator.mark_to_market(trading_day, close_prices)
 
             # Step 4: 翌日用シグナル生成（bt_conn の positions を読んで SELL 判定）
-            generate_signals(bt_conn, target_date=trading_day, event_dates=event_dates or {})
+            generate_signals(
+                bt_conn, target_date=trading_day, event_dates=event_dates or {}
+            )
 
             # Step 5: ポートフォリオ構築（Phase 5 モジュール使用）
             buy_signals, sell_signals = _read_day_signals(bt_conn, trading_day)
@@ -473,7 +475,9 @@ def run_backtest(
                 {
                     "code": code,
                     "side": "buy",
-                    "shares": max(0, (int(shares * sm_map.get(code, 1.0)) // lot_size) * lot_size),
+                    "shares": max(
+                        0, (int(shares * sm_map.get(code, 1.0)) // lot_size) * lot_size
+                    ),
                 }
                 for code, shares in sized.items()
                 if shares > 0 and code not in sell_codes

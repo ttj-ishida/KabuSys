@@ -46,11 +46,15 @@ def load_event_dates(md_path: str | Path) -> dict[date, str]:
                     logger.warning(
                         "load_event_dates: 日付 %s が複数イベントに登録されています "
                         "('%s' → '%s')。後者で上書きします。",
-                        d, result[d], current_event,
+                        d,
+                        result[d],
+                        current_event,
                     )
                 result[d] = current_event
             except ValueError:
-                logger.debug("load_event_dates: 不正な日付 '%s'—スキップ", m_date.group(1))
+                logger.debug(
+                    "load_event_dates: 不正な日付 '%s'—スキップ", m_date.group(1)
+                )
 
     logger.info("load_event_dates: %d 件のイベント日を読み込み: %s", len(result), path)
     return result

@@ -44,7 +44,8 @@ def mon_conn():
 
 def _sig(conn, code: str, side: str = "buy"):
     conn.execute(
-        "INSERT INTO signals (date, code, side, score, signal_rank) VALUES (?, ?, ?, ?, ?)", [TARGET_DATE, code, side, 0.8, 1]
+        "INSERT INTO signals (date, code, side, score, signal_rank) VALUES (?, ?, ?, ?, ?)",
+        [TARGET_DATE, code, side, 0.8, 1],
     )
 
 
