@@ -312,7 +312,7 @@ def run_backtest(
     risk_pct: float = 0.005,
     stop_loss_pct: float = 0.08,
     lot_size: int = 100,
-    event_dates: dict | None = None,  # ← 追加
+    event_dates: dict[date, str] | None = None,
 ) -> BacktestResult:
     """バックテストを実行し結果を返す。
 
@@ -330,6 +330,8 @@ def run_backtest(
         risk_pct:          1トレード許容リスク率（risk_based 時、デフォルト 0.5%）。
         stop_loss_pct:     損切り率（株数計算用、risk_based 時、デフォルト 8%）。
         lot_size:          単元株数（デフォルト 100）。日本株の標準単元。
+        event_dates:       {event_date: event_name} のイベント日辞書。翌営業日がイベント日の
+                           場合、BUY サイズを 50% に縮小する。None は空辞書と同義。
 
     Returns:
         BacktestResult（history, trades, metrics）。
