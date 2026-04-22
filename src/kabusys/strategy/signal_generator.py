@@ -395,6 +395,13 @@ def _generate_sell_signals(
       - トレーリングストップ（直近最高値から -10%）
       - 時間決済（保有 60 営業日超過）
 
+    Args:
+        conn:        DuckDB 接続。
+        target_date: シグナル生成対象日。
+        score_map:   {code: final_score} の辞書。
+        threshold:   BUY/SELL 判定の閾値。
+        is_bear:     True のとき最低保有日数チェックをスキップする（Bear レジーム例外）。
+
     Returns:
         [{"code": str, "score": float, "reason": str}, ...] のリスト。
     """
@@ -475,7 +482,13 @@ def _generate_sell_signals(
             continue
 
         # 最低保有日数チェック（Bear レジーム時はスキップ）
-        if not is_bear:
+        if is_bear:
+            logger.debug(
+                "_generate_sell_signals: Bear レジームのため最低保有日数チェックをスキップ: %s date=%s",
+                code,
+                target_date,
+            )
+        else:
             held = _held_days(conn, code, target_date)
             if held is not None and held < _MIN_HOLDING_DAYS:
                 logger.debug(
