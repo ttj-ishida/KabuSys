@@ -196,14 +196,21 @@ def _write_position_entries(
                 [trade.code, trading_day],
             )
         elif trade.side == "sell":
-            conn.execute(
+            result = conn.execute(
                 """
                 UPDATE position_entries
                 SET sell_date = ?
                 WHERE code = ? AND sell_date IS NULL
+                RETURNING code
                 """,
                 [trading_day, trade.code],
-            )
+            ).fetchall()
+            if not result:
+                logger.debug(
+                    "_write_position_entries: SELL for %s matched no open position_entries row date=%s",
+                    trade.code,
+                    trading_day,
+                )
 
 
 def _read_day_signals(
