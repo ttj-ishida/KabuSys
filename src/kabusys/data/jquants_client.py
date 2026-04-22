@@ -332,6 +332,8 @@ def fetch_earnings_calendar(
         params["dateFrom"] = date_from.strftime("%Y%m%d")
     if date_to:
         params["dateTo"] = date_to.strftime("%Y%m%d")
+    # 注: /equities/earnings-calendar は 30日以内の窓であればページネーションなしで全件返す。
+    # 30日超の範囲を指定する場合は pagination_key ループを追加すること。
     data = _request("/equities/earnings-calendar", params=params, id_token=id_token)
     records = data.get("earningsCalendar", [])
     logger.info("fetch_earnings_calendar: %d レコード取得", len(records))

@@ -57,15 +57,17 @@ class ETLResult:
     """ETL実行結果を格納するデータクラス。
 
     Attributes:
-        target_date:       ETL対象日。
-        prices_fetched:    取得した株価レコード数。
-        prices_saved:      DBに保存した株価レコード数。
-        financials_fetched: 取得した財務レコード数。
-        financials_saved:  DBに保存した財務レコード数。
-        calendar_fetched:  取得したカレンダーレコード数。
-        calendar_saved:    DBに保存したカレンダーレコード数。
-        quality_issues:    品質チェックで検出された問題のリスト。
-        errors:            処理中に発生したエラーの概要メッセージのリスト。
+        target_date:                 ETL対象日。
+        prices_fetched:              取得した株価レコード数。
+        prices_saved:                DBに保存した株価レコード数。
+        financials_fetched:          取得した財務レコード数。
+        financials_saved:            DBに保存した財務レコード数。
+        calendar_fetched:            取得したカレンダーレコード数。
+        calendar_saved:              DBに保存したカレンダーレコード数。
+        earnings_calendar_fetched:   取得した決算カレンダーレコード数。
+        earnings_calendar_saved:     DBに保存を試みた決算カレンダーレコード数。
+        quality_issues:              品質チェックで検出された問題のリスト。
+        errors:                      処理中に発生したエラーの概要メッセージのリスト。
     """
 
     target_date: date
@@ -420,7 +422,8 @@ def run_daily_etl(
       1. 市場カレンダーETL（lookahead_days 先まで取得）
       2. 株価日足ETL（差分更新 + backfill）
       3. 財務データETL（差分更新 + backfill）
-      4. 品質チェック（オプション）
+      4. 決算カレンダーETL（翌30日分を先読み取得・冪等保存）
+      5. 品質チェック（オプション）
 
     Args:
         conn:                    DuckDB 接続。
@@ -505,6 +508,7 @@ def run_daily_etl(
         "prices fetched=%d saved=%d "
         "financials fetched=%d saved=%d "
         "calendar fetched=%d saved=%d "
+        "earnings_calendar fetched=%d saved=%d "
         "quality_issues=%d errors=%d",
         today,
         result.prices_fetched,
@@ -513,6 +517,8 @@ def run_daily_etl(
         result.financials_saved,
         result.calendar_fetched,
         result.calendar_saved,
+        result.earnings_calendar_fetched,
+        result.earnings_calendar_saved,
         len(result.quality_issues),
         len(result.errors),
     )
