@@ -59,3 +59,18 @@ def test_load_event_dates_ignores_malformed_lines(tmp_path):
     result = load_event_dates(md)
     assert date(2026, 2, 1) in result
     assert len(result) == 1
+
+
+def test_load_event_dates_duplicate_date_last_wins(tmp_path):
+    """同一日が複数イベントに登録された場合、後のセクションで上書きされる。"""
+    from kabusys.data.event_calendar import load_event_dates
+
+    md = tmp_path / "dup.md"
+    md.write_text(
+        "### FOMC\n- 2026-03-19\n\n### 日銀決定会合\n- 2026-03-19\n",
+        encoding="utf-8",
+    )
+    result = load_event_dates(md)
+    assert date(2026, 3, 19) in result
+    assert len(result) == 1
+    assert result[date(2026, 3, 19)] == "日銀決定会合"
