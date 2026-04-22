@@ -213,11 +213,12 @@ CREATE TABLE IF NOT EXISTS market_breadth (
 
 _SIGNALS = """
 CREATE TABLE IF NOT EXISTS signals (
-    date         DATE        NOT NULL,
-    code         VARCHAR     NOT NULL,
-    side         VARCHAR     NOT NULL CHECK (side IN ('buy', 'sell')),
-    score        DOUBLE,
-    signal_rank  INTEGER,
+    date             DATE        NOT NULL,
+    code             VARCHAR     NOT NULL,
+    side             VARCHAR     NOT NULL CHECK (side IN ('buy', 'sell')),
+    score            DOUBLE,
+    signal_rank      INTEGER,
+    size_multiplier  DOUBLE      NOT NULL DEFAULT 1.0,
     PRIMARY KEY (date, code, side)
 )
 """
@@ -299,6 +300,15 @@ CREATE TABLE IF NOT EXISTS position_entries (
 )
 """
 
+_EARNINGS_CALENDAR = """
+CREATE TABLE IF NOT EXISTS earnings_calendar (
+    code              VARCHAR   NOT NULL,
+    announcement_date DATE      NOT NULL,
+    fetched_at        TIMESTAMP NOT NULL DEFAULT current_timestamp,
+    PRIMARY KEY (code, announcement_date)
+)
+"""
+
 _PORTFOLIO_PERFORMANCE = """
 CREATE TABLE IF NOT EXISTS portfolio_performance (
     date            DATE        NOT NULL PRIMARY KEY,
@@ -358,6 +368,7 @@ _ALL_DDL: list[str] = [
     _TRADES,
     _POSITIONS,
     _POSITION_ENTRIES,
+    _EARNINGS_CALENDAR,
     _PORTFOLIO_PERFORMANCE,
 ]
 
