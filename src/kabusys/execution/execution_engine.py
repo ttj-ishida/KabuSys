@@ -17,6 +17,7 @@ from pathlib import Path
 
 import duckdb
 
+from kabusys.data.calendar_management import next_trading_day
 from kabusys.execution.broker_api import BrokerAPIProtocol, OrderSentPendingError
 
 # DuplicateOrderError は _process_signals() (Task 7) で使用
@@ -140,6 +141,7 @@ class ExecutionEngine:
             t0 = _time_module.perf_counter()
             latency_ms: float | None = None
             _order_sent = False
+            _order_pending = False
             try:
                 self._order_manager.send_order(record.client_order_id)
                 latency_ms = (_time_module.perf_counter() - t0) * 1000
@@ -154,14 +156,19 @@ class ExecutionEngine:
                 latency_ms = (_time_module.perf_counter() - t0) * 1000
                 self._risk_manager.record_api_success()
                 _order_sent = True
+                _order_pending = True
                 logger.info("発注保留（pending）: signal_id=%s", signal_id)
             except Exception as exc:
                 self._risk_manager.record_api_error()
                 logger.error("発注失敗: signal_id=%s: %s", signal_id, exc)
 
             # position_entries に約定を記録（最低保有日数・再エントリー制限用）
+            # fill_date: 発注当日の翌営業日（バックテストと整合させるため）
+            # BUY pending も記録する（発注確約済みとして扱う。キャンセル時はリコンシリエーションで回収）
+            # SELL pending は記録しない（保有中のポジションのクローズ確定前のため）
             if _order_sent:
                 try:
+                    fill_date = next_trading_day(self._duckdb_conn, self._config.target_date)
                     if side == "buy":
                         self._duckdb_conn.execute(
                             """
@@ -169,16 +176,22 @@ class ExecutionEngine:
                             VALUES (?, ?)
                             ON CONFLICT DO NOTHING
                             """,
-                            [code, self._config.target_date],
+                            [code, fill_date],
                         )
-                    elif side == "sell":
+                    elif side == "sell" and not _order_pending:
                         self._duckdb_conn.execute(
                             """
                             UPDATE position_entries
                             SET sell_date = ?
-                            WHERE code = ? AND sell_date IS NULL
+                            WHERE (code, entry_date) IN (
+                                SELECT code, entry_date
+                                FROM position_entries
+                                WHERE code = ? AND sell_date IS NULL
+                                ORDER BY entry_date ASC
+                                LIMIT 1
+                            )
                             """,
-                            [self._config.target_date, code],
+                            [fill_date, code],
                         )
                 except Exception as _pe_exc:
                     logger.warning(
