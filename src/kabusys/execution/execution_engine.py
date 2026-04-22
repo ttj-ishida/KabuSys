@@ -88,8 +88,23 @@ class ExecutionEngine:
 
             code: str = sig["code"]
             side: str = sig["side"]
-            qty: int = sig["qty"]
+            raw_qty: int = sig["qty"]
             price: float = sig["price"]
+
+            # BUY のみ size_multiplier を適用（SELL は保有株数を売るため縮小しない）
+            if side == "buy":
+                sm: float = sig.get("size_multiplier", 1.0)
+                qty: int = max(0, (int(raw_qty * sm) // 100) * 100)
+                if qty <= 0:
+                    logger.info(
+                        "size_multiplier 適用後 qty=0 のためスキップ: code=%s sm=%.2f",
+                        code,
+                        sm,
+                    )
+                    continue
+            else:
+                qty = raw_qty
+
             signal_id = f"{self._config.target_date.isoformat()}_{code}_{side}"
             order_value = price * qty
 
@@ -386,7 +401,8 @@ class ExecutionEngine:
         """DuckDB から今日のシグナルを portfolio_targets と JOIN して返す。"""
         rows = self._duckdb_conn.execute(
             """
-            SELECT s.code, s.side, pt.target_size AS qty, pt.entry_price AS price
+            SELECT s.code, s.side, pt.target_size AS qty, pt.entry_price AS price,
+                   COALESCE(s.size_multiplier, 1.0) AS size_multiplier
             FROM signals s
             JOIN portfolio_targets pt ON s.date = pt.date AND s.code = pt.code
             WHERE s.date = ?
@@ -395,6 +411,12 @@ class ExecutionEngine:
             [self._config.target_date],
         ).fetchall()
         return [
-            {"code": r[0], "side": r[1], "qty": int(r[2]), "price": float(r[3])}
+            {
+                "code": r[0],
+                "side": r[1],
+                "qty": int(r[2]),
+                "price": float(r[3]),
+                "size_multiplier": float(r[4]),
+            }
             for r in rows
         ]

@@ -73,7 +73,7 @@ def sqlite_conn():
 def duckdb_conn():
     conn = duckdb.connect(":memory:")
     conn.execute("""
-        CREATE TABLE signals (date DATE, code VARCHAR, side VARCHAR, score FLOAT, signal_rank INTEGER)
+        CREATE TABLE signals (date DATE, code VARCHAR, side VARCHAR, score FLOAT, signal_rank INTEGER, size_multiplier DOUBLE NOT NULL DEFAULT 1.0)
     """)
     conn.execute("""
         CREATE TABLE portfolio_targets (date DATE, code VARCHAR, target_size INTEGER, entry_price FLOAT)
