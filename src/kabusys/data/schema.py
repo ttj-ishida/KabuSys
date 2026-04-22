@@ -324,6 +324,7 @@ _INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_trades_order_id ON trades(order_id)",
     "CREATE INDEX IF NOT EXISTS idx_news_symbols_code ON news_symbols(code)",
     "CREATE INDEX IF NOT EXISTS idx_raw_news_datetime ON raw_news(datetime)",
+    "CREATE INDEX IF NOT EXISTS idx_position_entries_code_sell ON position_entries(code, sell_date)",
 ]
 
 # ---------------------------------------------------------------------------

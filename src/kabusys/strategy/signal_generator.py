@@ -31,6 +31,8 @@ from typing import Any
 
 import duckdb
 
+from kabusys.data.calendar_management import get_trading_days, next_trading_day
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -60,6 +62,8 @@ _GAP_DOWN_THRESHOLD: float = -0.03  # gap_ratio <= -0.03 → BUY 抑制（境界
 _GAP_THRESHOLD_EPSILON: float = 1e-9
 _SECTOR_BOOST: float = 0.03  # 上位 _SECTOR_QUARTILE セクター銘柄への final_score 加算量
 _SECTOR_QUARTILE: float = 0.25  # 上位・下位の区切り割合（各 ceil(N×0.25) セクター）
+_MIN_HOLDING_DAYS: int = 5   # BUY 後この営業日数を経過するまで非ストップロス SELL を抑制
+_REENTRY_COOLDOWN_DAYS: int = 5  # SELL 後この営業日数を経過するまで同一銘柄の BUY を禁止
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +292,58 @@ def _calc_sector_strengths(
 
 
 # ---------------------------------------------------------------------------
+# 保有日数 / 再エントリー制限ヘルパー
+# ---------------------------------------------------------------------------
+
+
+def _held_days(
+    conn: duckdb.DuckDBPyConnection,
+    code: str,
+    target_date: date,
+) -> int | None:
+    """position_entries から最新の未クローズ entry_date を取得し、
+    entry_date 〜 target_date の営業日数を返す（entry_date 当日 = 0）。
+    レコードなし → None（チェックスキップ・安全側）。
+    """
+    row = conn.execute(
+        """
+        SELECT entry_date FROM position_entries
+        WHERE code = ? AND sell_date IS NULL
+        ORDER BY entry_date DESC LIMIT 1
+        """,
+        [code],
+    ).fetchone()
+    if row is None:
+        return None
+    entry_date = row[0] if isinstance(row[0], date) else date.fromisoformat(str(row[0]))
+    days = get_trading_days(conn, entry_date, target_date)
+    return len(days) - 1  # 0 = entry 当日、5 = 5営業日後
+
+
+def _is_reentry_blocked(
+    conn: duckdb.DuckDBPyConnection,
+    code: str,
+    target_date: date,
+) -> bool:
+    """最新の sell_date から target_date までの営業日数が _REENTRY_COOLDOWN_DAYS 未満なら True。
+    sell_date が NULL またはレコードなしは False（制限なし）。
+    """
+    row = conn.execute(
+        """
+        SELECT sell_date FROM position_entries
+        WHERE code = ? AND sell_date IS NOT NULL
+        ORDER BY sell_date DESC LIMIT 1
+        """,
+        [code],
+    ).fetchone()
+    if row is None or row[0] is None:
+        return False
+    sell_date = row[0] if isinstance(row[0], date) else date.fromisoformat(str(row[0]))
+    days = get_trading_days(conn, sell_date, target_date)
+    return (len(days) - 1) < _REENTRY_COOLDOWN_DAYS
+
+
+# ---------------------------------------------------------------------------
 # 売りシグナル生成（エグジット判定）
 # ---------------------------------------------------------------------------
 
@@ -364,7 +420,7 @@ def _generate_sell_signals(
             )
         final_score = score_map.get(code, 0.0)
 
-        # 1. ストップロス（最優先）
+        # 1. ストップロス（最優先・保有日数チェックをスキップ）
         pnl_rate = (close - avg_price) / avg_price
         if pnl_rate <= _STOP_LOSS_RATE:
             sell_signals.append(
@@ -373,6 +429,18 @@ def _generate_sell_signals(
                     "score": final_score,
                     "reason": "stop_loss",
                 }
+            )
+            continue
+
+        # 最低保有日数チェック（stop_loss 以外の SELL を抑制）
+        held = _held_days(conn, code, target_date)
+        if held is not None and held < _MIN_HOLDING_DAYS:
+            logger.debug(
+                "_generate_sell_signals: %s 保有 %d 営業日（最低 %d 日）— SELL 抑制 date=%s",
+                code,
+                held,
+                _MIN_HOLDING_DAYS,
+                target_date,
             )
             continue
 
@@ -563,6 +631,7 @@ def generate_signals(
         )
         gap_suppressed = 0
         sector_suppressed = 0
+        reentry_suppressed = 0
         for rank, r in enumerate(scored, 1):
             if r["score"] < threshold:
                 continue
@@ -590,6 +659,13 @@ def generate_signals(
                 )
                 sector_suppressed += 1
                 continue
+            # 再エントリー制限チェック
+            if _is_reentry_blocked(conn, r["code"], target_date):
+                logger.debug(
+                    "reentry blocked: %s — date=%s", r["code"], target_date
+                )
+                reentry_suppressed += 1
+                continue
             buy_signals.append({"code": r["code"], "score": r["score"], "rank": rank})
         if gap_suppressed:
             logger.info(
@@ -601,6 +677,12 @@ def generate_signals(
             logger.info(
                 "generate_signals: sector filter — %d 銘柄を下位セクターで抑制 date=%s",
                 sector_suppressed,
+                target_date,
+            )
+        if reentry_suppressed:
+            logger.info(
+                "generate_signals: reentry block — %d 銘柄を再エントリー制限で抑制 date=%s",
+                reentry_suppressed,
                 target_date,
             )
 
