@@ -75,6 +75,8 @@ class ETLResult:
     financials_saved: int = 0
     calendar_fetched: int = 0
     calendar_saved: int = 0
+    earnings_calendar_fetched: int = 0
+    earnings_calendar_saved: int = 0
     quality_issues: list[quality.QualityIssue] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -471,7 +473,21 @@ def run_daily_etl(
         logger.exception("run_financials_etl 失敗")
         result.errors.append("run_financials_etl 失敗")
 
-    # 4. 品質チェック
+    # 4. 決算カレンダー（翌30日分を先読み取得・冪等保存）
+    try:
+        ec_records = jq.fetch_earnings_calendar(
+            id_token=id_token,
+            date_from=today,
+            date_to=today + timedelta(days=30),
+        )
+        ec_saved = jq.save_earnings_calendar(conn, ec_records)
+        result.earnings_calendar_fetched = len(ec_records)
+        result.earnings_calendar_saved = ec_saved
+    except Exception as exc:
+        result.errors.append(f"earnings_calendar: {exc}")
+        logger.warning("決算カレンダー取得失敗（ETL継続）: %s", exc)
+
+    # 5. 品質チェック
     if run_quality_checks:
         try:
             result.quality_issues = quality.run_all_checks(

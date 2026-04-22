@@ -312,6 +312,73 @@ def fetch_financial_statements(
     return result
 
 
+def fetch_earnings_calendar(
+    id_token: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> list[dict[str, Any]]:
+    """決算発表予定カレンダーを取得する（/equities/earnings-calendar）。
+
+    Args:
+        id_token:  認証トークン。省略時はキャッシュを使用。
+        date_from: 取得開始日。
+        date_to:   取得終了日。
+
+    Returns:
+        決算カレンダーレコードのリスト。各要素は {"Code": str, "Date": "YYYYMMDD"} を含む。
+    """
+    params: dict[str, str] = {}
+    if date_from:
+        params["dateFrom"] = date_from.strftime("%Y%m%d")
+    if date_to:
+        params["dateTo"] = date_to.strftime("%Y%m%d")
+    data = _request("/equities/earnings-calendar", params=params, id_token=id_token)
+    records = data.get("earningsCalendar", [])
+    logger.info("fetch_earnings_calendar: %d レコード取得", len(records))
+    return records
+
+
+def save_earnings_calendar(
+    conn: duckdb.DuckDBPyConnection,
+    records: list[dict[str, Any]],
+) -> int:
+    """決算カレンダーを earnings_calendar テーブルへ冪等保存する。
+
+    Args:
+        conn:    DuckDB 接続。
+        records: fetch_earnings_calendar() の戻り値。
+
+    Returns:
+        保存を試みたレコード数（スキップ分を除く）。
+    """
+    rows: list[tuple] = []
+    for r in records:
+        code = r.get("Code", "")
+        date_str = r.get("Date", "")
+        if not code or not date_str:
+            continue
+        try:
+            ann_date = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
+        except (ValueError, IndexError):
+            logger.warning("save_earnings_calendar: 不正な日付フォーマット '%s'—スキップ", date_str)
+            continue
+        rows.append((code, ann_date))
+
+    if not rows:
+        return 0
+
+    conn.executemany(
+        """
+        INSERT INTO earnings_calendar (code, announcement_date)
+        VALUES (?, ?)
+        ON CONFLICT DO NOTHING
+        """,
+        rows,
+    )
+    logger.info("save_earnings_calendar: %d 件を earnings_calendar に保存", len(rows))
+    return len(rows)
+
+
 def fetch_market_calendar(
     id_token: str | None = None,
     holiday_division: str | None = None,
