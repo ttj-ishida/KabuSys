@@ -18,6 +18,7 @@ from kabusys.monitoring.monitoring_db import MonitoringDB
 
 
 TARGET_DATE = date(2026, 3, 29)
+FILL_DATE = date(2026, 3, 30)  # next_trading_day(TARGET_DATE) — 月曜
 
 
 def _make_engine(
@@ -435,7 +436,7 @@ class TestPositionEntriesOnFill:
             "SELECT entry_date FROM position_entries WHERE code = '9999'"
         ).fetchone()
         assert row is not None, "BUY 発注後に position_entries が挿入されるべき"
-        assert row[0] == TARGET_DATE
+        assert row[0] == FILL_DATE, "entry_date は約定日（翌営業日）であるべき"
 
     def test_buy_signal_pending_inserts_position_entry(self, sqlite_conn, duckdb_conn):
         """BUY 発注保留（OrderSentPendingError）でも position_entries に entry_date が挿入される。"""
@@ -450,7 +451,7 @@ class TestPositionEntriesOnFill:
             "SELECT entry_date FROM position_entries WHERE code = '8888'"
         ).fetchone()
         assert row is not None, "発注保留（pending）後も position_entries が挿入されるべき"
-        assert row[0] == TARGET_DATE
+        assert row[0] == FILL_DATE, "entry_date は約定日（翌営業日）であるべき"
 
     def test_buy_signal_idempotent(self, sqlite_conn, duckdb_conn):
         """同一 code/date の BUY を2回処理しても position_entries は1行のみ（冪等性）。"""
@@ -484,7 +485,26 @@ class TestPositionEntriesOnFill:
             "SELECT sell_date FROM position_entries WHERE code = '6666'"
         ).fetchone()
         assert row is not None
-        assert row[0] == TARGET_DATE, "SELL 発注後に sell_date が設定されるべき"
+        assert row[0] == FILL_DATE, "sell_date は約定日（翌営業日）であるべき"
+
+    def test_sell_signal_pending_does_not_update_sell_date(self, sqlite_conn, duckdb_conn):
+        """SELL 発注保留（pending）では sell_date を書かない（ポジションはまだ保有中）。"""
+        duckdb_conn.execute(
+            "INSERT INTO position_entries (code, entry_date) VALUES ('5555', ?)",
+            [TARGET_DATE],
+        )
+        _insert_signal(duckdb_conn, "5555", side="sell")
+        _insert_target(duckdb_conn, "5555", qty=100, price=1000.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        row = duckdb_conn.execute(
+            "SELECT sell_date FROM position_entries WHERE code = '5555'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] is None, "SELL pending では sell_date は NULL のままであるべき"
 
     def test_size_multiplier_applied_to_buy_qty(self, sqlite_conn, duckdb_conn):
         """size_multiplier=0.5 のシグナルは発注数量が半減する。"""

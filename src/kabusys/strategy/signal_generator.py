@@ -316,6 +316,8 @@ def _held_days(
     if row is None:
         return None
     entry_date = row[0] if isinstance(row[0], date) else date.fromisoformat(str(row[0]))
+    if entry_date > target_date:
+        return 0
     days = get_trading_days(conn, entry_date, target_date)
     return len(days) - 1  # 0 = entry 当日、5 = 5営業日後
 
