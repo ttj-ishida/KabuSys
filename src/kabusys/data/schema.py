@@ -290,6 +290,15 @@ CREATE TABLE IF NOT EXISTS positions (
 )
 """
 
+_POSITION_ENTRIES = """
+CREATE TABLE IF NOT EXISTS position_entries (
+    code        VARCHAR  NOT NULL,
+    entry_date  DATE     NOT NULL,
+    sell_date   DATE,
+    PRIMARY KEY (code, entry_date)
+)
+"""
+
 _PORTFOLIO_PERFORMANCE = """
 CREATE TABLE IF NOT EXISTS portfolio_performance (
     date            DATE        NOT NULL PRIMARY KEY,
@@ -347,6 +356,7 @@ _ALL_DDL: list[str] = [
     _ORDERS,
     _TRADES,
     _POSITIONS,
+    _POSITION_ENTRIES,
     _PORTFOLIO_PERFORMANCE,
 ]
 
