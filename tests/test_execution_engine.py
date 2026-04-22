@@ -41,7 +41,7 @@ def _make_engine(
 
 def _insert_signal(conn, code: str, side: str = "buy", score: float = 0.8):
     conn.execute(
-        "INSERT INTO signals VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO signals (date, code, side, score, signal_rank) VALUES (?, ?, ?, ?, ?)",
         [TARGET_DATE, code, side, score, 1],
     )
 
