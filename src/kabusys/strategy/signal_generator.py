@@ -379,6 +379,7 @@ def _generate_sell_signals(
     target_date: date,
     score_map: dict[str, float],
     threshold: float,
+    is_bear: bool = False,
 ) -> list[dict[str, Any]]:
     """保有ポジションに対してエグジット条件を判定し、SELL シグナルを返す。
 
@@ -469,17 +470,18 @@ def _generate_sell_signals(
             )
             continue
 
-        # 最低保有日数チェック（stop_loss 以外の SELL を抑制）
-        held = _held_days(conn, code, target_date)
-        if held is not None and held < _MIN_HOLDING_DAYS:
-            logger.debug(
-                "_generate_sell_signals: %s 保有 %d 営業日（最低 %d 日）— SELL 抑制 date=%s",
-                code,
-                held,
-                _MIN_HOLDING_DAYS,
-                target_date,
-            )
-            continue
+        # 最低保有日数チェック（Bear レジーム時はスキップ）
+        if not is_bear:
+            held = _held_days(conn, code, target_date)
+            if held is not None and held < _MIN_HOLDING_DAYS:
+                logger.debug(
+                    "_generate_sell_signals: %s 保有 %d 営業日（最低 %d 日）— SELL 抑制 date=%s",
+                    code,
+                    held,
+                    _MIN_HOLDING_DAYS,
+                    target_date,
+                )
+                continue
 
         # 2. スコア低下
         if final_score < threshold:
@@ -746,7 +748,9 @@ def generate_signals(
             )
 
     # 7. SELL シグナル生成（エグジット条件）
-    sell_signals = _generate_sell_signals(conn, target_date, score_map, threshold)
+    sell_signals = _generate_sell_signals(
+        conn, target_date, score_map, threshold, is_bear=regime_is_bear
+    )
 
     # SELL 対象銘柄は BUY から除外し、ランクを連番で再付与（SELL 優先ポリシー）
     sell_codes = {s["code"] for s in sell_signals}

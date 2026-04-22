@@ -486,6 +486,41 @@ class TestEarningsAvoidance:
         assert any(r[0] == code for r in sell_rows), "決算前は強制 SELL"
 
 
+class TestMinHoldingDaysBearException:
+    """Bear レジーム移行時は最低保有日数チェックをスキップして即 SELL する。"""
+
+    def test_score_drop_sell_allowed_in_bear_regime_within_5_days(self, conn):
+        from datetime import timedelta
+        from kabusys.strategy.signal_generator import generate_signals
+
+        base = date(2026, 4, 1)
+        biz_days = [base + timedelta(days=i) for i in range(4)]
+        _insert_calendar_days(conn, biz_days)
+
+        entry_date = biz_days[0]
+        target_date = biz_days[2]  # 2営業日後（通常は SELL 抑制されるはず）
+
+        code = "5001"
+        _insert_feature(conn, code, target_date, high_score=False)  # score_drop
+        _insert_price(conn, code, target_date, close=1000.0)
+        _insert_position(conn, code, target_date, avg_price=1000.0)
+        _insert_position_entry(conn, code, entry_date)
+
+        # Bear レジームを設定
+        conn.execute(
+            "INSERT INTO market_regime (date, regime_score, regime_label) VALUES (?, -1.0, 'bear')",
+            [target_date],
+        )
+
+        generate_signals(conn, target_date)
+
+        sell_rows = conn.execute(
+            "SELECT code FROM signals WHERE date = ? AND side = 'sell'",
+            [target_date],
+        ).fetchall()
+        assert any(r[0] == code for r in sell_rows), "Bear レジームは保有日数スキップで SELL"
+
+
 class TestEventSizeMultiplier:
     """主要イベント前は size_multiplier=0.5 が付与される。"""
 
