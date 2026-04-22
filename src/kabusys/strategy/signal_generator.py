@@ -507,7 +507,7 @@ def generate_signals(
     target_date: date,
     threshold: float = _DEFAULT_THRESHOLD,
     weights: dict[str, float] | None = None,
-    event_dates: dict[date, str] | None = None,  # ← 追加
+    event_dates: dict[date, str] | None = None,
 ) -> int:
     """features テーブルを読み込み、売買シグナルを生成して signals テーブルへ書き込む。
 
@@ -518,6 +518,8 @@ def generate_signals(
         target_date: シグナル生成日。
         threshold:   BUY シグナル生成の final_score 閾値（デフォルト 0.60）。
         weights:     ファクター重みの辞書（デフォルトは StrategyModel.md Section 4.1 の値）。
+        event_dates: {event_date: event_name} の辞書。翌営業日がイベント日の場合、
+                     BUY の size_multiplier を 0.5 に縮小する。省略時はイベントなし扱い。
 
     Returns:
         signals テーブルへ書き込んだシグナル数（BUY + SELL の合計）。
