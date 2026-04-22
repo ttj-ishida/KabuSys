@@ -69,8 +69,13 @@
 | シグナル生成（day T） | `date < T` の価格・特徴量 | `generate_signals()` の SQL が `WHERE date = T` でバインド |
 | SELL 判定（day T） | `date <= T` の prices_daily | `_generate_sell_signals()` の SQL が `WHERE date <= T` でバインド |
 | 約定（day T+1） | day T+1 の始値 | シグナルは常に翌営業日の始値で執行 |
+| 最低保有日数判定（day T） | `position_entries.entry_date` | バックテスト用インメモリ DB で管理（本番と同一ロジック） |
+| 再エントリー制限判定（day T） | `position_entries.sell_date` | 同上 |
+| 決算回避判定（day T） | `earnings_calendar.announcement_date` | インメモリ DB にコピー済み |
 
 さらに、インメモリ DB には `end_date` 以降のデータを含まないため、物理的に未来参照が不可能。
+
+`position_entries` テーブルはバックテスト開始時に空で初期化され、`simulator.py` が BUY/SELL 約定のたびに書き込む。`earnings_calendar` は本番 DB から `end_date` までのデータをコピーして使用する。
 
 ### 4.3 スリッページと手数料の厳密なモデリング
 
@@ -133,7 +138,7 @@ python -m kabusys.backtest.run \
     --db path/to/kabusys.duckdb
 ```
 
-**前提条件**: 指定 DB ファイルに `prices_daily`, `features`, `ai_scores`, `market_regime`, `market_calendar` が入力済みであること。
+**前提条件**: 指定 DB ファイルに `prices_daily`, `features`, `ai_scores`, `market_regime`, `market_calendar`, `earnings_calendar` が入力済みであること。`position_entries` はバックテスト開始時に自動で空テーブルとして初期化される。
 
 ---
 
