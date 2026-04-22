@@ -450,7 +450,9 @@ class TestPositionEntriesOnFill:
         row = duckdb_conn.execute(
             "SELECT entry_date FROM position_entries WHERE code = '8888'"
         ).fetchone()
-        assert row is not None, "発注保留（pending）後も position_entries が挿入されるべき"
+        assert row is not None, (
+            "発注保留（pending）後も position_entries が挿入されるべき"
+        )
         assert row[0] == FILL_DATE, "entry_date は約定日（翌営業日）であるべき"
 
     def test_buy_signal_idempotent(self, sqlite_conn, duckdb_conn):
@@ -487,7 +489,9 @@ class TestPositionEntriesOnFill:
         assert row is not None
         assert row[0] == FILL_DATE, "sell_date は約定日（翌営業日）であるべき"
 
-    def test_sell_signal_pending_does_not_update_sell_date(self, sqlite_conn, duckdb_conn):
+    def test_sell_signal_pending_does_not_update_sell_date(
+        self, sqlite_conn, duckdb_conn
+    ):
         """SELL 発注保留（pending）では sell_date を書かない（ポジションはまだ保有中）。"""
         duckdb_conn.execute(
             "INSERT INTO position_entries (code, entry_date) VALUES ('5555', ?)",
@@ -522,7 +526,9 @@ class TestPositionEntriesOnFill:
         # 発注された注文の qty が 100 (= 200 * 0.5) であること
         orders = engine._repo.list_active()
         assert len(orders) == 1, "発注が1件あるべき"
-        assert orders[0].qty == 100, f"size_multiplier=0.5 適用後 qty=100 であるべき、実際={orders[0].qty}"
+        assert orders[0].qty == 100, (
+            f"size_multiplier=0.5 適用後 qty=100 であるべき、実際={orders[0].qty}"
+        )
 
     def test_size_multiplier_fractional_floors_to_lot(self, sqlite_conn, duckdb_conn):
         """size_multiplier 適用後に端数が切り捨てられ、ロット単位に丸められる。"""
@@ -540,7 +546,9 @@ class TestPositionEntriesOnFill:
         # 発注された注文の qty が 100 (= floor(250 * 0.5 / 100) * 100) であること
         orders = engine._repo.list_active()
         assert len(orders) == 1, "発注が1件あるべき"
-        assert orders[0].qty == 100, f"端数切り捨て後 qty=100 であるべき、実際={orders[0].qty}"
+        assert orders[0].qty == 100, (
+            f"端数切り捨て後 qty=100 であるべき、実際={orders[0].qty}"
+        )
 
     def test_size_multiplier_zero_skips_order(self, sqlite_conn, duckdb_conn):
         """size_multiplier 適用後 qty=0 の場合は発注をスキップする。"""

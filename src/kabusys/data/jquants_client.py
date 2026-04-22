@@ -362,7 +362,9 @@ def save_earnings_calendar(
         try:
             ann_date = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
         except (ValueError, IndexError):
-            logger.warning("save_earnings_calendar: 不正な日付フォーマット '%s'—スキップ", date_str)
+            logger.warning(
+                "save_earnings_calendar: 不正な日付フォーマット '%s'—スキップ", date_str
+            )
             continue
         rows.append((code, ann_date))
 
