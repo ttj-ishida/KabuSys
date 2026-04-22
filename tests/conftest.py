@@ -78,6 +78,14 @@ def duckdb_conn():
     conn.execute("""
         CREATE TABLE portfolio_targets (date DATE, code VARCHAR, target_size INTEGER, entry_price FLOAT)
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS position_entries (
+            code        VARCHAR  NOT NULL,
+            entry_date  DATE     NOT NULL,
+            sell_date   DATE,
+            PRIMARY KEY (code, entry_date)
+        )
+    """)
     yield conn
     conn.close()
 

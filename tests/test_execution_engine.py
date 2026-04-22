@@ -417,3 +417,52 @@ class TestKillFlagPolling:
         assert flag_path.exists()
         # PID ファイルは書き込まれていない（検査が PID 書き込みより先のため）
         assert not pid_file.exists()
+
+
+class TestPositionEntriesOnFill:
+    """BUY/SELL 発注成功時に position_entries が記録される。"""
+
+    def test_buy_signal_inserts_position_entry(self, sqlite_conn, duckdb_conn):
+        """BUY 発注成功 → position_entries に entry_date が挿入される。"""
+        _insert_signal(duckdb_conn, "9999", side="buy")
+        _insert_target(duckdb_conn, "9999", qty=100, price=1000.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        row = duckdb_conn.execute(
+            "SELECT entry_date FROM position_entries WHERE code = '9999'"
+        ).fetchone()
+        assert row is not None, "BUY 発注後に position_entries が挿入されるべき"
+        assert row[0] == TARGET_DATE
+
+    def test_buy_signal_pending_inserts_position_entry(self, sqlite_conn, duckdb_conn):
+        """BUY 発注保留（OrderSentPendingError）でも position_entries に entry_date が挿入される。"""
+        _insert_signal(duckdb_conn, "8888", side="buy")
+        _insert_target(duckdb_conn, "8888", qty=100, price=1000.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        row = duckdb_conn.execute(
+            "SELECT entry_date FROM position_entries WHERE code = '8888'"
+        ).fetchone()
+        assert row is not None, "発注保留（pending）後も position_entries が挿入されるべき"
+        assert row[0] == TARGET_DATE
+
+    def test_buy_signal_idempotent(self, sqlite_conn, duckdb_conn):
+        """同一 code/date の BUY を2回処理しても position_entries は1行のみ（冪等性）。"""
+        _insert_signal(duckdb_conn, "7777", side="buy")
+        _insert_target(duckdb_conn, "7777", qty=100, price=1000.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+        engine._process_signals()  # 2回目: DuplicateOrderError でスキップされるが position_entries は変わらない
+
+        rows = duckdb_conn.execute(
+            "SELECT entry_date FROM position_entries WHERE code = '7777'"
+        ).fetchall()
+        assert len(rows) == 1, "ON CONFLICT DO NOTHING により重複挿入されないこと"

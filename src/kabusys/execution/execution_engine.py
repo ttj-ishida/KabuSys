@@ -139,10 +139,12 @@ class ExecutionEngine:
 
             t0 = _time_module.perf_counter()
             latency_ms: float | None = None
+            _order_sent = False
             try:
                 self._order_manager.send_order(record.client_order_id)
                 latency_ms = (_time_module.perf_counter() - t0) * 1000
                 self._risk_manager.record_api_success()
+                _order_sent = True
                 logger.info(
                     "発注成功: signal_id=%s, client_order_id=%s",
                     signal_id,
@@ -151,10 +153,37 @@ class ExecutionEngine:
             except OrderSentPendingError:
                 latency_ms = (_time_module.perf_counter() - t0) * 1000
                 self._risk_manager.record_api_success()
+                _order_sent = True
                 logger.info("発注保留（pending）: signal_id=%s", signal_id)
             except Exception as exc:
                 self._risk_manager.record_api_error()
                 logger.error("発注失敗: signal_id=%s: %s", signal_id, exc)
+
+            # position_entries に約定を記録（最低保有日数・再エントリー制限用）
+            if _order_sent:
+                try:
+                    if side == "buy":
+                        self._duckdb_conn.execute(
+                            """
+                            INSERT INTO position_entries (code, entry_date)
+                            VALUES (?, ?)
+                            ON CONFLICT DO NOTHING
+                            """,
+                            [code, self._config.target_date],
+                        )
+                    elif side == "sell":
+                        self._duckdb_conn.execute(
+                            """
+                            UPDATE position_entries
+                            SET sell_date = ?
+                            WHERE code = ? AND sell_date IS NULL
+                            """,
+                            [self._config.target_date, code],
+                        )
+                except Exception as _pe_exc:
+                    logger.warning(
+                        "position_entries 書き込み失敗（発注フローは継続）: %s", _pe_exc
+                    )
 
             if latency_ms is not None and self._monitoring_db is not None:
                 try:
