@@ -31,7 +31,7 @@ from typing import Any
 
 import duckdb
 
-from kabusys.data.calendar_management import get_trading_days
+from kabusys.data.calendar_management import get_trading_days, next_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -343,6 +343,32 @@ def _is_reentry_blocked(
     return (len(days) - 1) < _REENTRY_COOLDOWN_DAYS
 
 
+def _has_upcoming_earnings(
+    conn: duckdb.DuckDBPyConnection,
+    code: str,
+    target_date: date,
+) -> bool:
+    """翌営業日が earnings_calendar の announcement_date に登録されている銘柄なら True。"""
+    next_day = next_trading_day(conn, target_date)
+    row = conn.execute(
+        "SELECT 1 FROM earnings_calendar WHERE code = ? AND announcement_date = ?",
+        [code, next_day],
+    ).fetchone()
+    return row is not None
+
+
+def _get_event_size_multiplier(
+    event_dates: dict[date, str],
+    target_date: date,
+    conn: duckdb.DuckDBPyConnection,
+) -> float:
+    """翌営業日が event_dates に含まれる場合 0.5、それ以外は 1.0 を返す。"""
+    if not event_dates:
+        return 1.0
+    next_day = next_trading_day(conn, target_date)
+    return 0.5 if next_day in event_dates else 1.0
+
+
 # ---------------------------------------------------------------------------
 # 売りシグナル生成（エグジット判定）
 # ---------------------------------------------------------------------------
@@ -432,6 +458,17 @@ def _generate_sell_signals(
             )
             continue
 
+        # 決算回避 SELL（翌営業日が決算日 → 最低保有日数を問わず即 SELL）
+        if _has_upcoming_earnings(conn, code, target_date):
+            sell_signals.append(
+                {
+                    "code": code,
+                    "score": final_score,
+                    "reason": "earnings_avoidance",
+                }
+            )
+            continue
+
         # 最低保有日数チェック（stop_loss 以外の SELL を抑制）
         held = _held_days(conn, code, target_date)
         if held is not None and held < _MIN_HOLDING_DAYS:
@@ -470,6 +507,7 @@ def generate_signals(
     target_date: date,
     threshold: float = _DEFAULT_THRESHOLD,
     weights: dict[str, float] | None = None,
+    event_dates: dict[date, str] | None = None,  # ← 追加
 ) -> int:
     """features テーブルを読み込み、売買シグナルを生成して signals テーブルへ書き込む。
 
@@ -514,6 +552,9 @@ def generate_signals(
     elif not math.isclose(total_w, 1.0):
         merged_weights = {k: v / total_w for k, v in merged_weights.items()}
     weights = merged_weights
+
+    event_dates = event_dates or {}
+    size_multiplier = _get_event_size_multiplier(event_dates, target_date, conn)
 
     # 1. features 読み込み
     feat_rows = conn.execute(
@@ -632,6 +673,7 @@ def generate_signals(
         gap_suppressed = 0
         sector_suppressed = 0
         reentry_suppressed = 0
+        earnings_suppressed = 0
         for rank, r in enumerate(scored, 1):
             if r["score"] < threshold:
                 continue
@@ -666,6 +708,15 @@ def generate_signals(
                 )
                 reentry_suppressed += 1
                 continue
+            # 決算回避フィルタ（翌営業日が決算日の銘柄は BUY 抑制）
+            if _has_upcoming_earnings(conn, r["code"], target_date):
+                logger.debug(
+                    "earnings filter: %s — 翌営業日決算のため BUY 抑制 date=%s",
+                    r["code"],
+                    target_date,
+                )
+                earnings_suppressed += 1
+                continue
             buy_signals.append({"code": r["code"], "score": r["score"], "rank": rank})
         if gap_suppressed:
             logger.info(
@@ -685,6 +736,12 @@ def generate_signals(
                 reentry_suppressed,
                 target_date,
             )
+        if earnings_suppressed:
+            logger.info(
+                "generate_signals: earnings filter — %d 銘柄を決算回避で抑制 date=%s",
+                earnings_suppressed,
+                target_date,
+            )
 
     # 7. SELL シグナル生成（エグジット条件）
     sell_signals = _generate_sell_signals(conn, target_date, score_map, threshold)
@@ -697,14 +754,18 @@ def generate_signals(
         b["rank"] = i
 
     # 8. signals テーブルへ日付単位の置換（トランザクション＋バルク挿入で原子性を保証）
-    buy_params = [(target_date, r["code"], r["score"], r["rank"]) for r in buy_signals]
+    buy_params = [
+        (target_date, r["code"], r["score"], r["rank"], size_multiplier)
+        for r in buy_signals
+    ]
     sell_params = [(target_date, r["code"], r["score"]) for r in sell_signals]
     conn.execute("BEGIN")
     try:
         conn.execute("DELETE FROM signals WHERE date = ?", [target_date])
         if buy_params:
             conn.executemany(
-                "INSERT INTO signals (date, code, side, score, signal_rank) VALUES (?, ?, 'buy', ?, ?)",
+                "INSERT INTO signals (date, code, side, score, signal_rank, size_multiplier) "
+                "VALUES (?, ?, 'buy', ?, ?, ?)",
                 buy_params,
             )
         if sell_params:

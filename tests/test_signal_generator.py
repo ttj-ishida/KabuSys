@@ -393,3 +393,150 @@ class TestReentryRestriction:
             [target_date],
         ).fetchall()
         assert any(r[0] == code for r in buy_rows), "sell_date=NULL は BUY 許可"
+
+
+# ---------------------------------------------------------------------------
+# Task 8: 決算回避・イベントサイズ縮小
+# ---------------------------------------------------------------------------
+
+
+def _insert_earnings(conn, code: str, ann_date: date) -> None:
+    conn.execute(
+        "INSERT INTO earnings_calendar (code, announcement_date) VALUES (?, ?)",
+        [code, ann_date],
+    )
+
+
+class TestEarningsAvoidance:
+    """翌営業日が決算日の銘柄は BUY 抑制 + 保有分は SELL 強制。"""
+
+    def test_buy_suppressed_when_earnings_next_day(self, conn):
+        from datetime import timedelta
+        from kabusys.strategy.signal_generator import generate_signals
+
+        base = date(2026, 4, 1)
+        biz_days = [base + timedelta(days=i) for i in range(3)]
+        _insert_calendar_days(conn, biz_days)
+
+        target_date = biz_days[0]
+        next_day = biz_days[1]
+        code = "3001"
+
+        _insert_feature(conn, code, target_date, high_score=True)
+        _insert_price(conn, code, target_date, close=1000.0, open_=1000.0)
+        _insert_price(conn, code, base - timedelta(days=1), close=1000.0)
+        _insert_earnings(conn, code, next_day)  # 翌営業日が決算
+
+        generate_signals(conn, target_date)
+
+        buy_rows = conn.execute(
+            "SELECT code FROM signals WHERE date = ? AND side = 'buy'",
+            [target_date],
+        ).fetchall()
+        assert not any(r[0] == code for r in buy_rows), "決算翌日の銘柄は BUY 抑制"
+
+    def test_buy_allowed_when_no_upcoming_earnings(self, conn):
+        from datetime import timedelta
+        from kabusys.strategy.signal_generator import generate_signals
+
+        base = date(2026, 4, 1)
+        biz_days = [base + timedelta(days=i) for i in range(3)]
+        _insert_calendar_days(conn, biz_days)
+
+        target_date = biz_days[0]
+        code = "3002"
+
+        _insert_feature(conn, code, target_date, high_score=True)
+        _insert_price(conn, code, target_date, close=1000.0, open_=1000.0)
+        _insert_price(conn, code, base - timedelta(days=1), close=1000.0)
+        # earnings_calendar に登録なし
+
+        generate_signals(conn, target_date)
+
+        buy_rows = conn.execute(
+            "SELECT code FROM signals WHERE date = ? AND side = 'buy'",
+            [target_date],
+        ).fetchall()
+        assert any(r[0] == code for r in buy_rows), "決算なしは BUY 許可"
+
+    def test_sell_forced_when_earnings_next_day(self, conn):
+        from datetime import timedelta
+        from kabusys.strategy.signal_generator import generate_signals
+
+        base = date(2026, 4, 1)
+        biz_days = [base + timedelta(days=i) for i in range(3)]
+        _insert_calendar_days(conn, biz_days)
+
+        target_date = biz_days[0]
+        next_day = biz_days[1]
+        code = "3003"
+
+        # 高スコア（score_drop SELL は発生しない）
+        _insert_feature(conn, code, target_date, high_score=True)
+        _insert_price(conn, code, target_date, close=1000.0, open_=1000.0)
+        _insert_position(conn, code, target_date, avg_price=950.0)  # 保有中
+        _insert_earnings(conn, code, next_day)
+
+        generate_signals(conn, target_date)
+
+        sell_rows = conn.execute(
+            "SELECT code FROM signals WHERE date = ? AND side = 'sell'",
+            [target_date],
+        ).fetchall()
+        assert any(r[0] == code for r in sell_rows), "決算前は強制 SELL"
+
+
+class TestEventSizeMultiplier:
+    """主要イベント前は size_multiplier=0.5 が付与される。"""
+
+    def test_size_multiplier_half_on_event_day(self, conn):
+        from datetime import timedelta
+        from kabusys.strategy.signal_generator import generate_signals
+
+        base = date(2026, 4, 1)
+        biz_days = [base + timedelta(days=i) for i in range(3)]
+        _insert_calendar_days(conn, biz_days)
+
+        target_date = biz_days[0]
+        next_day = biz_days[1]
+        code = "4001"
+
+        _insert_feature(conn, code, target_date, high_score=True)
+        _insert_price(conn, code, target_date, close=1000.0, open_=1000.0)
+        _insert_price(conn, code, base - timedelta(days=1), close=1000.0)
+
+        # イベント日を next_day に設定
+        event_dates = {next_day: "FOMC"}
+
+        generate_signals(conn, target_date, event_dates=event_dates)
+
+        row = conn.execute(
+            "SELECT size_multiplier FROM signals WHERE date = ? AND code = ? AND side = 'buy'",
+            [target_date, code],
+        ).fetchone()
+        assert row is not None
+        assert abs(row[0] - 0.5) < 1e-9, f"size_multiplier は 0.5 のはず: {row[0]}"
+
+    def test_size_multiplier_one_when_no_event(self, conn):
+        from datetime import timedelta
+        from kabusys.strategy.signal_generator import generate_signals
+
+        base = date(2026, 4, 1)
+        biz_days = [base + timedelta(days=i) for i in range(3)]
+        _insert_calendar_days(conn, biz_days)
+
+        target_date = biz_days[0]
+        code = "4002"
+
+        _insert_feature(conn, code, target_date, high_score=True)
+        _insert_price(conn, code, target_date, close=1000.0, open_=1000.0)
+        _insert_price(conn, code, base - timedelta(days=1), close=1000.0)
+
+        generate_signals(conn, target_date, event_dates={})
+
+        row = conn.execute(
+            "SELECT size_multiplier FROM signals WHERE date = ? AND code = ? AND side = 'buy'",
+            [target_date, code],
+        ).fetchone()
+        assert row is not None
+        assert abs(row[0] - 1.0) < 1e-9
