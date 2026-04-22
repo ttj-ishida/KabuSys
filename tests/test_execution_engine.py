@@ -504,6 +504,24 @@ class TestPositionEntriesOnFill:
         assert len(orders) == 1, "発注が1件あるべき"
         assert orders[0].qty == 100, f"size_multiplier=0.5 適用後 qty=100 であるべき、実際={orders[0].qty}"
 
+    def test_size_multiplier_fractional_floors_to_lot(self, sqlite_conn, duckdb_conn):
+        """size_multiplier 適用後に端数が切り捨てられ、ロット単位に丸められる。"""
+        # target_size=250, size_multiplier=0.5 → raw=125 → floor to 100
+        duckdb_conn.execute(
+            "INSERT INTO signals (date, code, side, score, signal_rank, size_multiplier) VALUES (?, ?, ?, ?, ?, ?)",
+            [TARGET_DATE, "5555", "buy", 0.8, 1, 0.5],
+        )
+        _insert_target(duckdb_conn, "5555", qty=250, price=1000.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        # 発注された注文の qty が 100 (= floor(250 * 0.5 / 100) * 100) であること
+        orders = engine._repo.list_active()
+        assert len(orders) == 1, "発注が1件あるべき"
+        assert orders[0].qty == 100, f"端数切り捨て後 qty=100 であるべき、実際={orders[0].qty}"
+
     def test_size_multiplier_zero_skips_order(self, sqlite_conn, duckdb_conn):
         """size_multiplier 適用後 qty=0 の場合は発注をスキップする。"""
         # target_size=50, size_multiplier=0.0 → qty=0 → スキップ
