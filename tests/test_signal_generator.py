@@ -170,6 +170,7 @@ def test_breadth_stop_bear_regime_both_block_buy(conn):
 # Task 2: 最低保有日数 / 再エントリー制限
 # ---------------------------------------------------------------------------
 
+
 def _insert_position(conn, code: str, d: date, avg_price: float = 1000.0) -> None:
     conn.execute(
         "INSERT INTO positions (date, code, position_size, avg_price) VALUES (?, ?, 100, ?)",
@@ -177,16 +178,16 @@ def _insert_position(conn, code: str, d: date, avg_price: float = 1000.0) -> Non
     )
 
 
-def _insert_position_entry(
-    conn, code: str, entry_date: date, sell_date=None
-) -> None:
+def _insert_position_entry(conn, code: str, entry_date: date, sell_date=None) -> None:
     conn.execute(
         "INSERT INTO position_entries (code, entry_date, sell_date) VALUES (?, ?, ?)",
         [code, entry_date, sell_date],
     )
 
 
-def _insert_price(conn, code: str, d: date, close: float = 1000.0, open_: float = 1000.0) -> None:
+def _insert_price(
+    conn, code: str, d: date, close: float = 1000.0, open_: float = 1000.0
+) -> None:
     conn.execute(
         "INSERT INTO prices_daily (date, code, open, high, low, close, volume) "
         "VALUES (?, ?, ?, ?, ?, ?, 1000000)",
@@ -244,7 +245,7 @@ class TestMinHoldingDays:
         biz_days = [base + timedelta(days=i) for i in range(7)]
         _insert_calendar_days(conn, biz_days)
 
-        entry_date = biz_days[0]   # 4/1
+        entry_date = biz_days[0]  # 4/1
         target_date = biz_days[5]  # 4/6 (5営業日後)
 
         code = "1002"
@@ -321,7 +322,7 @@ class TestReentryRestriction:
         biz_days = [base + timedelta(days=i) for i in range(5)]
         _insert_calendar_days(conn, biz_days)
 
-        sell_date = biz_days[0]   # 4/1 に SELL
+        sell_date = biz_days[0]  # 4/1 に SELL
         target_date = biz_days[3]  # 4/4 (3営業日後)
 
         code = "2001"

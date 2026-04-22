@@ -450,7 +450,9 @@ class TestPositionEntriesOnFill:
         row = duckdb_conn.execute(
             "SELECT entry_date FROM position_entries WHERE code = '8888'"
         ).fetchone()
-        assert row is not None, "発注保留（pending）後も position_entries が挿入されるべき"
+        assert row is not None, (
+            "発注保留（pending）後も position_entries が挿入されるべき"
+        )
         assert row[0] == FILL_DATE, "entry_date は約定日（翌営業日）であるべき"
 
     def test_buy_signal_idempotent(self, sqlite_conn, duckdb_conn):
@@ -487,7 +489,9 @@ class TestPositionEntriesOnFill:
         assert row is not None
         assert row[0] == FILL_DATE, "sell_date は約定日（翌営業日）であるべき"
 
-    def test_sell_signal_pending_does_not_update_sell_date(self, sqlite_conn, duckdb_conn):
+    def test_sell_signal_pending_does_not_update_sell_date(
+        self, sqlite_conn, duckdb_conn
+    ):
         """SELL 発注保留（pending）では sell_date を書かない（ポジションはまだ保有中）。"""
         duckdb_conn.execute(
             "INSERT INTO position_entries (code, entry_date) VALUES ('5555', ?)",

@@ -168,7 +168,9 @@ class ExecutionEngine:
             # SELL pending は記録しない（保有中のポジションのクローズ確定前のため）
             if _order_sent:
                 try:
-                    fill_date = next_trading_day(self._duckdb_conn, self._config.target_date)
+                    fill_date = next_trading_day(
+                        self._duckdb_conn, self._config.target_date
+                    )
                     if side == "buy":
                         self._duckdb_conn.execute(
                             """

@@ -935,9 +935,7 @@ def test_position_entries_sell_date_updated(conn):
     bt_conn = init_schema(":memory:")
 
     # まず BUY
-    buy_trades = [
-        TradeRecord(date(2026, 4, 1), "1001", "buy", 100, 1000.0, 55.0, None)
-    ]
+    buy_trades = [TradeRecord(date(2026, 4, 1), "1001", "buy", 100, 1000.0, 55.0, None)]
     _write_position_entries(bt_conn, buy_trades, date(2026, 4, 1))
 
     # 次に SELL

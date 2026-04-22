@@ -62,8 +62,10 @@ _GAP_DOWN_THRESHOLD: float = -0.03  # gap_ratio <= -0.03 → BUY 抑制（境界
 _GAP_THRESHOLD_EPSILON: float = 1e-9
 _SECTOR_BOOST: float = 0.03  # 上位 _SECTOR_QUARTILE セクター銘柄への final_score 加算量
 _SECTOR_QUARTILE: float = 0.25  # 上位・下位の区切り割合（各 ceil(N×0.25) セクター）
-_MIN_HOLDING_DAYS: int = 5   # BUY 後この営業日数を経過するまで非ストップロス SELL を抑制
-_REENTRY_COOLDOWN_DAYS: int = 5  # SELL 後この営業日数を経過するまで同一銘柄の BUY を禁止
+_MIN_HOLDING_DAYS: int = 5  # BUY 後この営業日数を経過するまで非ストップロス SELL を抑制
+_REENTRY_COOLDOWN_DAYS: int = (
+    5  # SELL 後この営業日数を経過するまで同一銘柄の BUY を禁止
+)
 
 
 # ---------------------------------------------------------------------------
@@ -663,9 +665,7 @@ def generate_signals(
                 continue
             # 再エントリー制限チェック
             if _is_reentry_blocked(conn, r["code"], target_date):
-                logger.debug(
-                    "reentry blocked: %s — date=%s", r["code"], target_date
-                )
+                logger.debug("reentry blocked: %s — date=%s", r["code"], target_date)
                 reentry_suppressed += 1
                 continue
             buy_signals.append({"code": r["code"], "score": r["score"], "rank": rank})
