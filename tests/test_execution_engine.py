@@ -42,7 +42,7 @@ def _make_engine(
 
 def _insert_signal(conn, code: str, side: str = "buy", score: float = 0.8):
     conn.execute(
-        "INSERT INTO signals VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO signals (date, code, side, score, signal_rank) VALUES (?, ?, ?, ?, ?)",
         [TARGET_DATE, code, side, score, 1],
     )
 
@@ -509,3 +509,60 @@ class TestPositionEntriesOnFill:
         ).fetchone()
         assert row is not None
         assert row[0] is None, "SELL pending では sell_date は NULL のままであるべき"
+
+    def test_size_multiplier_applied_to_buy_qty(self, sqlite_conn, duckdb_conn):
+        """size_multiplier=0.5 のシグナルは発注数量が半減する。"""
+        # target_size=200, size_multiplier=0.5 → expected qty = 100
+        duckdb_conn.execute(
+            "INSERT INTO signals (date, code, side, score, signal_rank, size_multiplier) VALUES (?, ?, ?, ?, ?, ?)",
+            [TARGET_DATE, "3333", "buy", 0.8, 1, 0.5],
+        )
+        _insert_target(duckdb_conn, "3333", qty=200, price=1000.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        # 発注された注文の qty が 100 (= 200 * 0.5) であること
+        orders = engine._repo.list_active()
+        assert len(orders) == 1, "発注が1件あるべき"
+        assert orders[0].qty == 100, (
+            f"size_multiplier=0.5 適用後 qty=100 であるべき、実際={orders[0].qty}"
+        )
+
+    def test_size_multiplier_fractional_floors_to_lot(self, sqlite_conn, duckdb_conn):
+        """size_multiplier 適用後に端数が切り捨てられ、ロット単位に丸められる。"""
+        # target_size=250, size_multiplier=0.5 → raw=125 → floor to 100
+        duckdb_conn.execute(
+            "INSERT INTO signals (date, code, side, score, signal_rank, size_multiplier) VALUES (?, ?, ?, ?, ?, ?)",
+            [TARGET_DATE, "5555", "buy", 0.8, 1, 0.5],
+        )
+        _insert_target(duckdb_conn, "5555", qty=250, price=1000.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        # 発注された注文の qty が 100 (= floor(250 * 0.5 / 100) * 100) であること
+        orders = engine._repo.list_active()
+        assert len(orders) == 1, "発注が1件あるべき"
+        assert orders[0].qty == 100, (
+            f"端数切り捨て後 qty=100 であるべき、実際={orders[0].qty}"
+        )
+
+    def test_size_multiplier_zero_skips_order(self, sqlite_conn, duckdb_conn):
+        """size_multiplier 適用後 qty=0 の場合は発注をスキップする。"""
+        # target_size=50, size_multiplier=0.0 → qty=0 → スキップ
+        duckdb_conn.execute(
+            "INSERT INTO signals (date, code, side, score, signal_rank, size_multiplier) VALUES (?, ?, ?, ?, ?, ?)",
+            [TARGET_DATE, "4444", "buy", 0.8, 1, 0.0],
+        )
+        _insert_target(duckdb_conn, "4444", qty=50, price=1000.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        # 発注がスキップされて注文が0件であること
+        orders = engine._repo.list_active()
+        assert len(orders) == 0, "size_multiplier=0.0 適用後は発注がスキップされるべき"

@@ -57,15 +57,17 @@ class ETLResult:
     """ETL実行結果を格納するデータクラス。
 
     Attributes:
-        target_date:       ETL対象日。
-        prices_fetched:    取得した株価レコード数。
-        prices_saved:      DBに保存した株価レコード数。
-        financials_fetched: 取得した財務レコード数。
-        financials_saved:  DBに保存した財務レコード数。
-        calendar_fetched:  取得したカレンダーレコード数。
-        calendar_saved:    DBに保存したカレンダーレコード数。
-        quality_issues:    品質チェックで検出された問題のリスト。
-        errors:            処理中に発生したエラーの概要メッセージのリスト。
+        target_date:                 ETL対象日。
+        prices_fetched:              取得した株価レコード数。
+        prices_saved:                DBに保存した株価レコード数。
+        financials_fetched:          取得した財務レコード数。
+        financials_saved:            DBに保存した財務レコード数。
+        calendar_fetched:            取得したカレンダーレコード数。
+        calendar_saved:              DBに保存したカレンダーレコード数。
+        earnings_calendar_fetched:   取得した決算カレンダーレコード数。
+        earnings_calendar_saved:     DBに保存を試みた決算カレンダーレコード数。
+        quality_issues:              品質チェックで検出された問題のリスト。
+        errors:                      処理中に発生したエラーの概要メッセージのリスト。
     """
 
     target_date: date
@@ -75,6 +77,8 @@ class ETLResult:
     financials_saved: int = 0
     calendar_fetched: int = 0
     calendar_saved: int = 0
+    earnings_calendar_fetched: int = 0
+    earnings_calendar_saved: int = 0
     quality_issues: list[quality.QualityIssue] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -418,7 +422,8 @@ def run_daily_etl(
       1. 市場カレンダーETL（lookahead_days 先まで取得）
       2. 株価日足ETL（差分更新 + backfill）
       3. 財務データETL（差分更新 + backfill）
-      4. 品質チェック（オプション）
+      4. 決算カレンダーETL（翌30日分を先読み取得・冪等保存）
+      5. 品質チェック（オプション）
 
     Args:
         conn:                    DuckDB 接続。
@@ -471,7 +476,21 @@ def run_daily_etl(
         logger.exception("run_financials_etl 失敗")
         result.errors.append("run_financials_etl 失敗")
 
-    # 4. 品質チェック
+    # 4. 決算カレンダー（翌30日分を先読み取得・冪等保存）
+    try:
+        ec_records = jq.fetch_earnings_calendar(
+            id_token=id_token,
+            date_from=today,
+            date_to=today + timedelta(days=30),
+        )
+        ec_saved = jq.save_earnings_calendar(conn, ec_records)
+        result.earnings_calendar_fetched = len(ec_records)
+        result.earnings_calendar_saved = ec_saved
+    except Exception as exc:
+        result.errors.append(f"earnings_calendar: {exc}")
+        logger.warning("決算カレンダー取得失敗（ETL継続）: %s", exc)
+
+    # 5. 品質チェック
     if run_quality_checks:
         try:
             result.quality_issues = quality.run_all_checks(
@@ -489,6 +508,7 @@ def run_daily_etl(
         "prices fetched=%d saved=%d "
         "financials fetched=%d saved=%d "
         "calendar fetched=%d saved=%d "
+        "earnings_calendar fetched=%d saved=%d "
         "quality_issues=%d errors=%d",
         today,
         result.prices_fetched,
@@ -497,6 +517,8 @@ def run_daily_etl(
         result.financials_saved,
         result.calendar_fetched,
         result.calendar_saved,
+        result.earnings_calendar_fetched,
+        result.earnings_calendar_saved,
         len(result.quality_issues),
         len(result.errors),
     )
