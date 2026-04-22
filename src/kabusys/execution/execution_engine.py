@@ -182,17 +182,8 @@ class ExecutionEngine:
                         )
                     elif side == "sell" and not _order_pending:
                         self._duckdb_conn.execute(
-                            """
-                            UPDATE position_entries
-                            SET sell_date = ?
-                            WHERE (code, entry_date) IN (
-                                SELECT code, entry_date
-                                FROM position_entries
-                                WHERE code = ? AND sell_date IS NULL
-                                ORDER BY entry_date ASC
-                                LIMIT 1
-                            )
-                            """,
+                            "UPDATE position_entries SET sell_date = ? "
+                            "WHERE code = ? AND sell_date IS NULL",
                             [fill_date, code],
                         )
                 except Exception as _pe_exc:

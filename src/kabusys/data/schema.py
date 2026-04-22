@@ -325,6 +325,16 @@ _INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_news_symbols_code ON news_symbols(code)",
     "CREATE INDEX IF NOT EXISTS idx_raw_news_datetime ON raw_news(datetime)",
     "CREATE INDEX IF NOT EXISTS idx_position_entries_code_sell ON position_entries(code, sell_date)",
+    "CREATE INDEX IF NOT EXISTS idx_position_entries_code_entry ON position_entries(code, entry_date)",
+]
+
+# ---------------------------------------------------------------------------
+# スキーママイグレーション（既存 DB への後付けカラム追加）
+# ---------------------------------------------------------------------------
+
+_MIGRATIONS: list[str] = [
+    # v0.x → v0.y: signals に size_multiplier を追加
+    "ALTER TABLE signals ADD COLUMN size_multiplier DOUBLE NOT NULL DEFAULT 1.0",
 ]
 
 # ---------------------------------------------------------------------------
@@ -396,6 +406,15 @@ def init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection:
         except Exception as rb_exc:
             logger.warning("init_schema: ROLLBACK failed: %s", rb_exc)
         raise
+
+    # マイグレーション（既存 DB への後付けカラム追加）
+    # ALTER TABLE は IF NOT EXISTS 非サポートのため、失敗時は既存カラムとみなしてスキップ
+    for migration in _MIGRATIONS:
+        try:
+            conn.execute(migration)
+        except Exception:
+            pass
+
     return conn
 
 
