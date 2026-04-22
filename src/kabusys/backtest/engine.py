@@ -174,6 +174,38 @@ def _write_positions(
         )
 
 
+def _write_position_entries(
+    conn: duckdb.DuckDBPyConnection,
+    trades: list[TradeRecord],
+    trading_day: date,
+) -> None:
+    """当日の約定を position_entries テーブルに反映する。
+
+    BUY 約定 → (code, entry_date) を INSERT（重複は無視）。
+    SELL 約定 → 最新の未クローズレコードの sell_date を UPDATE。
+    """
+    today_trades = [t for t in trades if t.date == trading_day]
+    for trade in today_trades:
+        if trade.side == "buy":
+            conn.execute(
+                """
+                INSERT INTO position_entries (code, entry_date)
+                VALUES (?, ?)
+                ON CONFLICT DO NOTHING
+                """,
+                [trade.code, trading_day],
+            )
+        elif trade.side == "sell":
+            conn.execute(
+                """
+                UPDATE position_entries
+                SET sell_date = ?
+                WHERE code = ? AND sell_date IS NULL
+                """,
+                [trading_day, trade.code],
+            )
+
+
 def _read_day_signals(
     conn: duckdb.DuckDBPyConnection,
     trading_day: date,
@@ -330,6 +362,9 @@ def run_backtest(
                 trading_day,
                 lot_size=lot_size,
             )
+
+            # position_entries テーブルに約定を反映（最低保有日数・再エントリー制限用）
+            _write_position_entries(bt_conn, simulator.trades, trading_day)
 
             # Step 2: positions テーブルに書き戻し（generate_signals の SELL 判定に必要）
             _write_positions(

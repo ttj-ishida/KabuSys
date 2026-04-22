@@ -895,3 +895,59 @@ def test_run_backtest_cli_params(conn):
     )
 
     assert isinstance(result, BacktestResult)
+
+
+def test_position_entries_written_on_buy(conn):
+    """バックテストで BUY 約定後に position_entries が記録される。"""
+    from kabusys.backtest.engine import _write_position_entries
+    from kabusys.backtest.simulator import TradeRecord
+    from kabusys.data.schema import init_schema
+
+    bt_conn = init_schema(":memory:")
+    trades = [
+        TradeRecord(
+            date=date(2026, 4, 1),
+            code="1001",
+            side="buy",
+            shares=100,
+            price=1000.0,
+            commission=55.0,
+            realized_pnl=None,
+        )
+    ]
+    _write_position_entries(bt_conn, trades, date(2026, 4, 1))
+
+    row = bt_conn.execute(
+        "SELECT entry_date, sell_date FROM position_entries WHERE code = '1001'"
+    ).fetchone()
+    assert row is not None
+    assert str(row[0]) == "2026-04-01"
+    assert row[1] is None
+    bt_conn.close()
+
+
+def test_position_entries_sell_date_updated(conn):
+    """バックテストで SELL 約定後に position_entries.sell_date が更新される。"""
+    from kabusys.backtest.engine import _write_position_entries
+    from kabusys.backtest.simulator import TradeRecord
+    from kabusys.data.schema import init_schema
+
+    bt_conn = init_schema(":memory:")
+
+    # まず BUY
+    buy_trades = [
+        TradeRecord(date(2026, 4, 1), "1001", "buy", 100, 1000.0, 55.0, None)
+    ]
+    _write_position_entries(bt_conn, buy_trades, date(2026, 4, 1))
+
+    # 次に SELL
+    sell_trades = [
+        TradeRecord(date(2026, 4, 5), "1001", "sell", 100, 1050.0, 57.0, 4443.0)
+    ]
+    _write_position_entries(bt_conn, sell_trades, date(2026, 4, 5))
+
+    row = bt_conn.execute(
+        "SELECT entry_date, sell_date FROM position_entries WHERE code = '1001'"
+    ).fetchone()
+    assert str(row[1]) == "2026-04-05"
+    bt_conn.close()
