@@ -31,7 +31,7 @@ from typing import Any
 
 import duckdb
 
-from kabusys.data.calendar_management import get_trading_days, next_trading_day
+from kabusys.data.calendar_management import get_trading_days
 
 logger = logging.getLogger(__name__)
 
