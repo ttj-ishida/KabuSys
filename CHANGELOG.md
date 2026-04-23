@@ -1,90 +1,97 @@
 # CHANGELOG
 
-すべての注目すべき変更点を記録します。本ファイルは "Keep a Changelog" の形式に準拠します。
+すべての変更は Keep a Changelog の形式に準拠します。  
+主要なカテゴリ: Added, Changed, Fixed, Removed, Security。
 
-- 該当リポジトリの初回公開/機能実装に基づき、コードベースから推測した変更履歴を記載しています。
-- 日付は本ファイル生成日: 2026-04-23
-
-## [Unreleased]
-
-（現時点で未リリースの変更はありません）
-
-## [0.1.0] - 2026-04-23
+## Unreleased
 
 ### Added
-- 初回リリース: KabuSys 日本株自動売買システムの基本モジュール群を追加。
-- 環境設定 / 管理
-  - 自動 .env ロード機能を追加（プロジェクトルート（.git または pyproject.toml）を基準に探索）。
-  - .env ファイルの読み込みロジックを実装（export 形式、引用符、エスケープ、インラインコメント対応）。
-  - KABUSYS_DISABLE_AUTO_ENV_LOAD によって自動読み込みを無効化可能。
-  - Settings クラスを実装。環境変数からアプリ設定を取得するプロパティ群（トークン類、DB パス、ログレベル、環境種別、閾値など）。
-  - PAPER_FILL_MODE の検証（"instant" / "partial" / "never" / "reject"）。
-- 設定ウィザード CLI
-  - `kabusys.config_setup` モジュールに対話式ウィザードを実装。
-  - シークレット項目はマスク表示、選択肢・デフォルト値のサポート、既存 .env 読み込みと Enter による再利用、.env へのテンプレート出力機能を提供。
-  - 出力される .env にはコミットしてはいけない旨の注記を含むテンプレートを作成。
-- 設定検証 CLI
-  - `kabusys.validate_config` モジュールに設定検証コマンドを実装。
-  - 必須環境変数チェック（JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD 等）、プレースホルダ検出、KABUSYS_ENV / LOG_LEVEL の妥当性判定、DB パス親ディレクトリ存在確認、config/*.yaml の存在確認と PyYAML によるパース検証（PyYAML 不在時は警告でスキップ）。
-  - `--strict` フラグにより警告も失敗扱いで exit(1) とするモードを追加。
-  - KABUSYS_ENV=live 時の追加ガード（LINE トークンや KILL_FLAG_CLEAR_ON_START の警告）。
-- 実行コンポーネント（Execution）
-  - ExecutionEngine を実装。シグナル駆動の発注ループ（シグナル処理時間帯 / push ドレインループ / セッション管理）。
-  - run_execution スクリプト（PID ファイル管理、kill.flag の検査・handling、paper_trading の専用 SQLite を使用する分離）。
-  - Broker クライアント工場（BrokerClientFactory を想定）を用いたブローカー抽象化。
-  - WebSocket push の受信スレッド実装（push を Queue に投入してドレイン処理）。
-  - 発注フローでの Gate チェック（Gate1: シグナルレベル、Gate2: 実行レベル/レート制御、Gate3: ドローダウン監視）を組み込み、Gate3 NG で kill_switch を実行。
-  - position_entries の DuckDB への書き込み（発注成功時に fill_date を記録。BUY / SELL の扱いを分離）。
-  - PID ファイル書き込みと起動時の kill.flag 挙動（KILL_FLAG_CLEAR_ON_START による自動クリアを考慮）。
-- 注文管理
-  - OrderRecord データモデルと OrderState 列挙型を実装（状態遷移の許可表を定義）。
-  - OrderRecord.transition_to による状態遷移検証（不正遷移は例外 InvalidStateTransitionError）。
-  - OrderManager を実装（create_order / send_order / sync_order / cancel_order）。OrderRecord（純粋ロジック）と OrderRepository（SQLite）を組み合わせる設計。
-  - create_order: signal_id に対する重複 active 注文検出で DuplicateOrderError を投げる。DB の部分ユニークインデックス違反を DuplicateOrderError に変換。
-  - send_order: クラッシュ耐性のため 2 相永続化パターンを採用（OrderSent を永続化 → broker 呼び出し → broker_order_id を永続化 → OrderAccepted に遷移）。OrderRejectedError / OrderSentPendingError の扱いを明確化。
-  - sync_order: broker 側の状態に同期。部分約定の量や平均価格のみの更新も考慮。
-  - cancel_order: 終端状態ではキャンセル不可とする検証を実装し、broker API 呼び出しでキャンセル処理を行う。
-- ブローカー実装（kabu station）
-  - KabuStationClient を実装（httpx 同期クライアント、websocket 経由の push 支援）。
-  - トークン取得の遅延初期化、401 受信時のトークン再取得と 1 回リトライ、HTTP エラーを BrokerAPIError / RateLimitError に変換。
-  - kabu station のステータスコード → 内部ステータスマップを定義（open / partial / filled / cancelled / rejected）。
-- 監視（Monitoring）
-  - run_monitoring スクリプトにより SystemMonitor のポーリングループを提供。
-  - MONITOR_POLL_INTERVAL 環境変数での上書きをサポート（不正値はデフォルト 60 秒にフォールバックし、警告を出力）。
-  - Monitoring は KABUSYS_ENV にかかわらず本番 sqlite_path を使用する旨を実装。
-  - 停止フラグ（stop_requested.flag）の検知でループを終了。
-- DB 初期化/接続
-  - monitoring 用 SQLite DB の初期化（init_monitoring_db）を各スクリプトで使用。
-  - DuckDB 接続を分析用 DB として使用。
-- ロギング / プロセス優先度
-  - 起動時にアプリケーション名を渡して setup_logging を呼び出す慣習を導入。
-  - set_process_priority("high") を実行開始時に呼び出し、実行プロセスの優先度設定を試みる設計。
+- run_monitoring 起動スクリプトを追加
+  - MONITOR_POLL_INTERVAL 環境変数でポーリング間隔をオーバーライド可能（デフォルト 60 秒）。
+  - 停止制御はリポジトリ直下の data/stop_requested.flag ファイルで行う。
+  - Monitoring は KABUSYS_ENV に関係なく本番用 sqlite_path を使用する設計。
+  - 監視ループ内で monitor.check_once() の例外を捕捉してログ出力し、ループ継続する耐障害性を確保。
+
+- run_execution 起動スクリプトを追加
+  - KABUSYS_ENV=paper_trading の場合は MockBrokerClient（BrokerClientFactory 経由）を利用し、data/paper_trading.db を専用 DB として使用して本番 DB と分離。
+  - 実行エンジンは別スレッドで run_session を起動し、停止フラグ（data/stop_requested.flag）を検知して安全に停止する。
+  - 起動時にプロセス優先度を high に設定（set_process_priority を使用）。
+  - PID ファイル管理（data/execution.pid）に対応。
+
+- 設定管理（kabusys.config）
+  - .env 自動読み込み機構を追加（プロジェクトルートの検出: .git または pyproject.toml）。
+  - .env/.env.local の読み込み順と上書きルールを実装（OS 環境変数は protected）。
+  - KABUSYS_DISABLE_AUTO_ENV_LOAD により自動読み込みを無効化するオプションを追加。
+  - export プレフィックス対応、クォート文字列（シングル/ダブル）のバックスラッシュエスケープ処理、インラインコメントの取り扱いなど堅牢な .env パーサを実装。
+  - Settings クラスで各種設定値をプロパティ化（J-Quants、kabuAPI、LINE、DB パス、監視閾値、環境種別バリデーション等）。
+  - PAPER_FILL_MODE のバリデーション（有効値: instant/partial/never/reject）を追加。
+
+- 設定ウィザード CLI（kabusys.config_setup）を追加
+  - 対話式で .env を作成・更新するウィザードを実装。既存値の読み込み・マスク表示・選択肢サポート・保存確認を提供。
+
+- 設定検証 CLI（kabusys.validate_config）を追加
+  - 必須環境変数チェック、KABUSYS_ENV/LOG_LEVEL の検証、DB パスの親ディレクトリ存在チェック、config/*.yaml の存在確認および PyYAML を利用したパース検証（PyYAML 未インストール時はスキップ）。
+  - KABUSYS_ENV=live 時の追加ガード（LINE 設定チェック、KILL_FLAG_CLEAR_ON_START の警告）。
+  - --strict オプションで警告を FAIL 扱いにできる。
+
+- ロギングユーティリティ（kabusys.utils.logging_setup）を追加
+  - StreamHandler（stdout）と日次ローテーションの TimedRotatingFileHandler をルートロガーに設定。
+  - 既存ハンドラをクリアして二重設定を防止。
+  - ログディレクトリ作成失敗時はファイル出力をスキップしてコンソール出力のみで継続するフォールバックを実装。
+
+- プロセス優先度・CPU 設定ユーティリティ（kabusys.utils.process_priority）を追加
+  - Windows / POSIX（Linux, macOS, FreeBSD）差分を吸収してプロセス優先度を設定。
+  - set_cpu_affinity による CPU affinity 設定を実装（存在しない/許可されない場合は警告を出してスキップ）。
+
+- ポートフォリオ構築モジュール（kabusys.portfolio）を追加
+  - 銘柄選定: select_candidates（スコア降順＋タイブレーク）、等分配・スコア加重の重み計算 (calc_equal_weights, calc_score_weights)。
+  - セクター集中制限: apply_sector_cap（既存保有のセクターエクスポージャを計算し上限超過セクターの候補を除外）。
+  - レジーム乗数: calc_regime_multiplier（bull/neutral/bear に基づく乗数、未知レジームはフォールバック）。
+  - 株数決定: calc_position_sizes (risk_based / equal / score)、単元株丸め、aggregate cap（利用可能現金に応じたスケーリング）、cost_buffer を用いた保守的コスト見積りを実装。
+
+- Paper Trading 検証レポートツール（kabusys.tools.paper_verification_report）を追加
+  - データベース（PAPER_TRADING_SQLITE_PATH）から各種指標（稼働率 / 注文成功率 / 送信率 / レイテンシ（avg,max,P95） / リスク却下数）を集計し、閾値に基づいて PASS/FAIL 判定する CLI を実装。
+  - --from/--to/--db オプションをサポート。
+
+- research/factor_research（ファクター計算基盤）を追加（モジュール実装の開始）
+  - Momentum などのファクター計算を行う設計骨子を含む（calc_momentum の実装着手）。
 
 ### Changed
-- （初回リリースのため過去との差分なし）
+- ログ出力の標準出力を stdout に統一（stderr ではなく）。cron 等でのリダイレクト運用を意識した設計。
+- logging_setup が既存ハンドラを一旦 flush/close の上で削除するように変更、複数回呼び出してもハンドラが重複しないようにした。
+- DB 初期化 (init_monitoring_db) を呼び出す場所を run_execution/run_monitoring の起動処理に移動し、監視テーブルが存在することを起動時に保証（冪等性を重視）。
 
-### Fixed / Reliability improvements
-- .env パーサーの堅牢化: export プレフィックス対応、クォート内のバックスラッシュエスケープ処理、コメント取り扱いの改善。
-- validate_config:
-  - YAML パーサ（PyYAML）が未インストールの場合のフォールバック（警告表示 + パーススキップ）。
-  - DB パスの親ディレクトリが存在しない場合は警告（起動時に自動作成される可能性がある旨を記載）。
-  - KABUSYS_ENV=live の際に追加の安全確認（LINE 通知設定や KILL_FLAG_CLEAR_ON_START の警告）。
-- OrderManager.send_order: クラッシュや broker の中間状態に対する堅牢性向上（broker_order_id を早期に永続化して Reconciliation を支援）。
-- ExecutionEngine:
-  - kill.flag 存在時の起動拒否/自動クリアの挙動を明示（KILL_FLAG_CLEAR_ON_START の考慮）。
-  - WebSocket が未サポートの broker に対しては警告を出してスレッドをスキップ。
-- Monitoring: MONITOR_POLL_INTERVAL が不正な整数（0 以下や非整数）の場合のフォールバックと警告を追加。
+### Fixed
+- .env パーサのコメント/引用処理を堅牢化し、export プレフィックスやエスケープされたクォートに対応して誤読を防止。
+- process_priority の設定が失敗した場合に例外でプロセスを終了させないよう、例外を捕捉してログ警告に変換するよう修正。
 
-### Security
-- .env を絶対に Git にコミットしない旨を .env テンプレートに明記。
-- シークレット項目は対話時にマスク表示。
-
-### Notes / Known limitations
-- KabuStationClient は現時点で同期 HTTP クライアント (httpx.Client) を使用。将来的に非同期化するときは httpx.AsyncClient に差し替え可能な設計。
-- 一部モジュール（OrderRepository 等）の詳細実装はこの差分に含まれないが、OrderManager / ExecutionEngine はそれらを前提に動作する設計になっている。
-- config/*.yaml の検証は PyYAML が存在する場合のみ実行される（パーサが無ければファイル存在チェックのみ）。
-- 一部のエラー・例外は呼び出し元で適切にハンドルすることを期待している（例: BrokerAPIError など）。
+### Removed
+- なし（現時点で明示的な削除は無し）。
 
 ---
 
-本 CHANGELOG はコードベースからの推測に基づいて作成しています。実際のリリースノート作成時は、コミット履歴やリリース管理（タグ・Issue・PR）と照らし合わせて調整してください。
+## [0.1.0] - 2026-04-23
+
+最初の公開リリース。以下の主要機能を含む初期セット。
+
+### Added
+- コア機能
+  - 自動売買システムの構成モジュール群（execution / monitoring / portfolio / research / utils / tools）。
+  - 実行エンジン（ExecutionEngine）起動スクリプト、監視エージェント起動スクリプト。
+  - 設定管理とウィザード（.env の対話式生成、Settings クラス）。
+  - 設定検証ツール（validate_config）。
+  - ロギング・プロセス制御用ユーティリティ（logging_setup, process_priority）。
+  - ポートフォリオ構築・リスク調整・ポジションサイズ算出ロジック。
+  - Paper Trading 用の検証レポート生成ツール。
+  - パッケージバージョン定義 (__version__ = "0.1.0")。
+
+### Changed
+- 初期リリースのため特記事項なし。
+
+### Fixed
+- 初期リリースのため特記事項なし。
+
+---
+
+注記:
+- CHANGELOG はソースコードの実装内容から推測して作成されています。実際のコミット履歴やリリースノートが存在する場合はそれに合わせて調整してください。
