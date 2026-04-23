@@ -1,84 +1,77 @@
-CHANGELOG
-=========
+# CHANGELOG
 
-すべての変更は「Keep a Changelog」仕様に準拠して記載しています。  
-バージョン番号は src/kabusys/__init__.py の __version__ と整合しています。
+すべての変更は Keep a Changelog 準拠で記載しています。  
+フォーマット: https://keepachangelog.com/ja/1.0.0/
 
-[Unreleased]
--------------
+## [0.1.0] - 2026-04-23
+初回リリース（推測）。日本株自動売買システム「KabuSys」の基本的な実行／監視／設定ツール群、ポートフォリオ構築ロジック、ユーティリティ、ペーパートレード検証ツール、および研究用ファクタ計算モジュールの骨組みを追加。
 
-- なし
+### Added
+- 起動スクリプトを追加
+  - run_execution.py: ExecutionEngine を起動する CLI。KABUSYS_ENV=paper_trading 時は MockBrokerClient を使用し、paper_trading 用 SQLite（data/paper_trading.db）で本番 DB と分離して動作する。
+  - run_monitoring.py: システム監視ポーリングループ起動スクリプト。MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を指定可能（デフォルト 60 秒）。停止フラグファイル（data/stop_requested.flag）の検出でループを終了。
+- 設定管理
+  - src/kabusys/config.py: .env / .env.local の自動読み込み機能（KABUSYS_DISABLE_AUTO_ENV_LOAD による無効化可）、Settings クラス（環境変数の型チェック・デフォルトを含むプロパティ群）を追加。
+  - src/kabusys/config_setup.py: .env を対話的に作成・更新するウィザード CLI を追加。
+  - src/kabusys/validate_config.py: .env と config/*.yaml の事前検証 CLI を追加（--strict で警告を失敗扱いにできる）。
+- ポートフォリオ構築（純関数）
+  - src/kabusys/portfolio/portfolio_builder.py: 銘柄候補選定（select_candidates）、等金額配分（calc_equal_weights）、スコア加重配分（calc_score_weights）。
+  - src/kabusys/portfolio/position_sizing.py: 株数決定ロジック（calc_position_sizes）。risk_based / equal / score の配分方法、単元株丸め、aggregate cap によるスケールダウンを実装。
+  - src/kabusys/portfolio/risk_adjustment.py: セクター集中制限（apply_sector_cap）、市場レジームに応じた乗数（calc_regime_multiplier）。
+- 監視・実行周辺
+  - monitoring_db/init, SystemMonitor（参照しているが実装ファイルは別）を呼び出す起動フローを追加。監視は本番 sqlite_path を環境にかかわらず使用する設計。
+  - execution 側で BrokerClientFactory, ExecutionEngine, OrderManager, OrderRepository, Reconciler, RiskManager を組み合わせてセッション実行を行うフローを追加。
+- ツール
+  - src/kabusys/tools/paper_verification_report.py: ペーパートレード用 SQLite を解析し、稼働率、注文成功率、送信率、レイテンシ（P95 など）を計算して PASS/FAIL 判定を行うレポート生成スクリプトを追加。閾値（稼働率 99%、成立率 90%、送信率 95%、P95 latency 200 ms）を定義。
+- ユーティリティ
+  - src/kabusys/utils/logging_setup.py: ルートロガーに StreamHandler（stdout）と TimedRotatingFileHandler（日次・30日分保存）を設定する共通ユーティリティを追加。ログディレクトリ作成失敗時はファイル出力をスキップしてコンソール出力のみで継続。
+  - src/kabusys/utils/process_priority.py: クロスプラットフォームなプロセス優先度設定（Windows の優先度クラス、POSIX の nice 値）と CPU affinity 設定ユーティリティを追加。権限不足や未対応 OS の場合はスキップして警告出力。
+- 研究用ファクター計算
+  - src/kabusys/research/factor_research.py: DuckDB の prices_daily/raw_financials を使ったモメンタム／ボラティリティ等のファクター計算モジュールの骨組み（モメンタム計算など）を追加（設計方針、定数、関数インターフェースを含む）。
+- パッケージ情報
+  - src/kabusys/__init__.py: バージョンを "__version__ = '0.1.0'" として追加。
 
-[0.1.0] - 2026-04-23
---------------------
+### Changed
+- ログ出力の統一
+  - すべての起動スクリプトで setup_logging(app_name=...) を呼び出す前提となるログ設定を導入し、ログ出力のフォーマット・ローテーションを標準化。
+- 環境変数の読み込み優先度
+  - OS 環境変数 > .env.local > .env の順でロードする挙動を仕様化。既存環境変数を保護するため protected セットを導入。
 
-Added
-- 初期リリース: KabuSys 自動売買フレームワークの基本コンポーネントを追加。
-  - 実行スクリプト
-    - python -m kabusys.run_execution: ExecutionEngine を起動するスクリプトを追加。
-      - シグナル処理（8:50-9:10）と push ドレイン（9:10-15:30）を実装。
-      - PID ファイル管理、停止フラグ（data/stop_requested.flag）検出、kill_switch による全注文キャンセル機能を実装。
-      - paper_trading 環境では専用 SQLite（PAPER_TRADING_SQLITE_PATH／data/paper_trading.db）を使用して本番 DB と分離。
-    - python -m kabusys.run_monitoring: SystemMonitor ポーリングループの起動スクリプトを追加。
-      - MONITOR_POLL_INTERVAL でポーリング間隔を変更可能（デフォルト 60 秒）。
-      - 監視は KABUSYS_ENV にかかわらず本番 sqlite_path を使用。
-  - 環境設定関連
-    - python -m kabusys.config_setup: 対話式 .env 作成/更新ウィザードを追加。
-      - J-Quants トークン、kabu API パスワード、DB パス、LINE 通知設定等の項目を対話的に設定可能。
-      - シークレット項目は表示時にマスク。保存時は .env を生成。
-    - python -m kabusys.validate_config: 起動前に .env と config/*.yaml を検証する CLI を追加。
-      - --strict モードで警告を失敗扱いにできる。
-      - PyYAML が未インストールでも存在チェックは行い、パースはスキップする旨を警告。
-  - 設定管理
-    - kabusys.config: 自動 .env 読み込み（OS 環境変数 > .env.local > .env）、.env パーサー、Settings クラスを追加。
-      - .env パーサーは export プレフィックス、シングル/ダブルクォート、バックスラッシュエスケープ、インラインコメントを考慮して扱う。
-      - KABUSYS_DISABLE_AUTO_ENV_LOAD=1 により自動ロードを無効化可能。
-      - Settings に各種プロパティ（トークン、パスワード、DB パス、PID/KILL フラグ設定、閾値、env/log_level の検証等）を実装。
-  - 発注/実行系
-    - OrderRecord: 注文状態のデータモデルと状態遷移ロジックを実装（純粋なビジネスロジック、DB 不依存）。
-      - 状態列挙 OrderState と許可遷移テーブルを定義。InvalidStateTransitionError を定義。
-    - OrderManager: OrderRecord と OrderRepository を組み合わせた外向き API を実装。
-      - create_order: signal_id の重複チェック（部分ユニーク制約／DB 制約を考慮）。
-      - send_order: broker 呼び出し前に OrderSent を永続化し、broker_order_id を先に保存する 2 段階永続化パターンを採用してリカバリを容易に。
-        - OrderRejectedError、OrderSentPendingError の扱いを区別。
-      - sync_order: broker 側の状態を照合してローカル状態を同期。部分約定の進行に対しては差分更新を行う。
-      - cancel_order: キャンセル不能状態の判定、必要に応じて broker API を呼んで Cancelled に遷移。
-    - ExecutionEngine: Signal Queue Pull 型発注エンジンを実装。
-      - Gate 1（シグナルレベル）/ Gate 2（発注レベル・レート制御）/ Gate 3（ドローダウン監視）により多段リスク検査を実施。
-      - size_multiplier 適用（BUY のみ）や qty の 100 株刻み切捨て処理を実装。
-      - 発注レイテンシ測定、監視 DB へのトレードイベント記録（MonitoringDB が提供されている場合）。
-      - WebSocket push 受信を別スレッドで行い、push を _push_queue に入れてドレイン処理で同期処理を実行。
-      - 再調整（Reconciler）を起動時に実行できるオプションをサポートし、結果をログ出力。
-  - Broker / kabu クライアント
-    - KabuStationClient: kabu ステーション REST API クライアントを実装（httpx 同期 client）。
-      - トークン取得の遅延初期化、自動再取得（401 発生時のリトライ）を実装。
-      - レスポンス JSON パース失敗やタイムアウト／ネットワークエラーを BrokerAPIError 等に変換。
-      - 429 を RateLimitError にマッピング。
-      - 将来的な非同期対応を見据えた実装（httpx.AsyncClient への切替が可能な設計）。
-  - 監視・DB 初期化
-    - monitoring_db.init_monitoring_db を使用して SQLite の監視テーブルを冪等に初期化する処理を追加。
-  - ユーティリティ
-    - logging_setup と process_priority のユーティリティを各スクリプトで利用（起動時にログ設定・プロセス優先度設定を実行）。
+### Fixed / Hardened
+- MONITOR_POLL_INTERVAL の安全な扱い
+  - run_monitoring のポーリング間隔を MONITOR_POLL_INTERVAL（環境変数）で上書き可能にし、不正値（0 以下や非数）の場合は警告を出してデフォルト（60 秒）にフォールバックするように実装。
+- 起動時のプロセス優先度設定を開始時点で行う
+  - run_execution / run_monitoring の冒頭で set_process_priority("high") を呼び出し、重要プロセスとして優先度を上げる設計に変更。権限不足や未対応 OS は警告で継続。
+- DB 分離の明確化
+  - 実行エンジンは paper_trading 環境時に PAPER_TRADING_SQLITE_PATH（data/paper_trading.db をデフォルト）を使用して本番 DB と完全に分離するように実装。
+  - 監視は環境に関係なく monitoring 用 sqlite_path（Settings.sqlite_path）で動作するように明示。
+- ログハンドラ作成の頑健性
+  - ログディレクトリの作成失敗またはファイルハンドラ作成失敗時は、ファイル出力を無効化して StreamHandler のみで継続し、エラーにより起動不能にならないように対処。
+- .env パーサの強化
+  - export プレフィックスやシングル／ダブルクォート内のエスケープ、行内コメントの扱いなどをサポートする .env パーサが追加され、より実用的な .env 読み込みを実現。
+- process_priority / cpu_affinity の失敗安全化
+  - 権限がない場合や未対応の OS での呼び出しを捕捉して警告を出し、プロセスの実行を妨げないように実装。
 
-Changed
-- なし（初期リリース）
+### Documentation / CLI
+- 設定ウィザード（config_setup）と検証ツール（validate_config）の追加により、初期セットアップと起動前チェックが容易に。
+- paper_verification_report による定量的なペーパートレード検証フローを提供（コマンドライン引数で期間指定可）。
 
-Fixed
-- .env パーサーの堅牢化:
-  - export プレフィックス、クォート内のバックスラッシュエスケープ処理、クォートなしのインラインコメントルール（直前が空白/タブのみコメントとみなす）に対応。
-- send_order の永続化シーケンスを設計し、クラッシュ時に OrderSent や broker_order_id が残るケースでも Reconciliation で復元可能に改善。
-- run_monitoring: MONITOR_POLL_INTERVAL の不正値（0 以下や非整数）を検出してデフォルトにフォールバックし、time.sleep の ValueError 回避。
+### Notes / Known issues / TODO
+- factor_research.calc_momentum の実装はファイル末尾で途中（コメント末尾のコード切れ）となっており、完全実装は未完。研究用ファクター群は設計・骨子が含まれるが、追加実装／テストが必要。
+- risk_adjustment.apply_sector_cap: price が欠損（0.0）の場合にエクスポージャーが過少見積になる旨の TODO があり、フォールバック価格（前日終値等）を用いる改善が検討されている。
+- paper_fill_mode の設定は検証（有効値チェック）を行うが、ペーパーブローカーの実装（MockBrokerClient）における細かな挙動は別途確認が必要。
+- 一部のモジュール（monitoring_db の実装、SystemMonitor、ExecutionEngine の内部実装、BrokerClientFactory 等）はこの一覧から参照されているが、CHANGELOG のソースに含まれたコード断片からは詳細を推測できないため、実装依存の振る舞いについては別途確認が必要。
 
-Security
-- なし
+### Security
+- .env ファイルは機密情報（API トークン・パスワード等）を含むため「絶対に Git にコミットしない」旨の注意文を config_setup に明記。
+- 設定検証時にプレースホルダ値（your_value や _here で終わる値）を検出して警告する機能を追加。
 
-Notes
-- config/*.yaml の検証は PyYAML がインストールされている場合にパースチェックを行う。未インストール時はパースチェックをスキップして警告を出す設計。
-- 設定ウィザードは生成した .env を Git 管理下に絶対にコミットしないように注意喚起するヘッダを出力する。
-- ExecutionEngine の一部挙動（時間判定・push ドレイン・kill.flag の扱い等）はテストしやすさを考慮して設計されている（ユニットテスト時は内部メソッドを直接呼べる）。
+---
 
-今後の改善案（参考）
-- 非同期化（httpx.AsyncClient / asyncio）対応による WebSocket / API 呼び出しの最適化。
-- Reconciler の更なる堅牢化と監視メトリクスの拡充。
-- 設定検証の強化（YAML スキーマ検証、環境変数の型チェック、自動修正提案）。
-- テスト用に KabuStationClient のモック/ベンチマークを提供。
+今後のリリースでは以下を想定しています（優先度高）:
+- factor_research の完全実装・単体テスト整備
+- monitoring_db / SystemMonitor / ExecutionEngine 等のエンドツーエンドテスト
+- ペーパーブローカーの振る舞いを明文化しテストで検証
+- 単体テスト・型チェック（mypy）・CI/CD ワークフローの整備
+
+（この CHANGELOG は、提供されたコードベースの内容から推測して作成しています。実際のコミット履歴やリリースノートと差分がある可能性があります。）
