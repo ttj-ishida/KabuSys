@@ -1,69 +1,131 @@
-# Changelog
+Keep a Changelog
+=================
 
-すべての注目すべき変更はこのファイルで管理します。  
-フォーマットは「Keep a Changelog」に準拠します。
+すべての重要な変更をこのファイルに記録します。フォーマットは「Keep a Changelog」に準拠します。
 
-## [0.1.0] - 2026-04-23
+v0.1.0 - 2026-04-23
+-------------------
 
-### Added（追加）
-- 設定検証 CLI: `kabusys.validate_config` モジュールを追加。
-  - .env と config/*.yaml の存在・基本整合性を起動前に検出。
-  - --strict オプションで警告を FAIL（exit(1)）扱いにできる。
-  - 必須環境変数の未設定チェック、プレースホルダ値チェック、KABUSYS_ENV/LOG_LEVEL の妥当性チェック、DB パスの親ディレクトリ確認、PyYAML がない場合の YAML 検証スキップ等を実装。
-  - KABUSYS_ENV=live のときに追加のガードチェック（LINE 通知設定、KILL_FLAG_CLEAR_ON_START 等）を実行。
+初回リリース。KabuSys 自動売買基盤のコアユーティリティ・実行スクリプト・ポートフォリオ構築ロジック・運用ツール群を含みます。
 
-- 環境設定ウィザード CLI: `kabusys.config_setup` を追加。
-  - 対話式で .env を初期作成/更新するウィザード。
-  - シークレット値は表示時にマスク、選択肢・デフォルト表示、既存値の読み込み、キャンセル時の挙動を実装。
-  - .env 書き込みテンプレート（コメント付き）を生成。
+Added
+- 基本パッケージ情報
+  - パッケージバージョンを src/kabusys/__init__.py にて 0.1.0 として追加。
 
-- 環境変数/設定管理: `kabusys.config.Settings` と自動ロード機能を追加。
-  - プロジェクトルートを .git または pyproject.toml から探索して .env/.env.local を自動読み込み（環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD で無効化可能）。
-  - .env のパーサは export 形式対応、クォート文字内のエスケープ処理、インラインコメント処理等をサポート。
-  - .env 読み込み時の override/protected（OS 環境変数の保護）挙動を実装。
-  - 各種プロパティを提供（J-Quants トークン、kabu API パスワード、DB パス、paper_trading 用 SQLite パス、PID/kill flag パス、閾値、env/log_level の厳密チェックなど）。
+- 起動スクリプト
+  - run_monitoring.py
+    - SystemMonitor ポーリングループ起動スクリプトを追加。
+    - 環境変数 MONITOR_POLL_INTERVAL でポーリング間隔を上書き可能（デフォルト 60 秒）。
+    - 停止はプロジェクト data/stop_requested.flag によるフラグで制御。
+    - Monitoring は KABUSYS_ENV に関わらず本番 sqlite_path を使用する挙動。
+    - DB 初期化（init_monitoring_db）と duckdb 接続を行う。例外はログ出力して継続。
+    - 起動時にプロセス優先度を "high" に設定（utils.process_priority を使用）。
 
-- 実行系と監視のエントリスクリプトを追加:
-  - `kabusys.run_execution` — ExecutionEngine の起動スクリプト（プロセス優先度設定、PID/stop フラグ、DB 接続、paper_trading 時の DB 分離など）。
-  - `kabusys.run_monitoring` — SystemMonitor のポーリングループ用スクリプト（MONITOR_POLL_INTERVAL で間隔指定、監視は常に本番 sqlite_path を使用）。
+  - run_execution.py
+    - ExecutionEngine 起動スクリプトを追加。
+    - KABUSYS_ENV=paper_trading の場合は専用の paper_trading DB（デフォルト: data/paper_trading.db）を使用し、本番 DB と分離。
+    - BrokerClientFactory 経由でブローカークライアントを生成し、OrderRepository、OrderManager、RiskManager、Reconciler、ExecutionEngine を組み立てて実行。
+    - エンジンはスレッドで起動され、stop flag（data/stop_requested.flag）で停止可能。PID ファイル管理あり。
+    - RiskManager に初期設定（max_position_pct、max_utilization、rate_limit_per_sec 等）のデフォルトを設定。
 
-- 発注周りのコアロジックを追加（execution パッケージ）:
-  - OrderRecord（状態機械モデル）: 状態列挙 OrderState、許可遷移定義、InvalidStateTransitionError、transition_to メソッド（更新時刻の自動更新、オプションフィールド更新）を実装。
-  - OrderManager: create/send/sync/cancel の外向け API を実装。DuplicateOrder のチェック、2相永続化を意識した send_order のフロー、OrderSentPending の取扱い、sync_order による broker 照合ロジック等を実装。
-  - OrderRepository（呼び出し元で使用）と組み合わせる設計。
-  - ExecutionEngine: シグナル処理（8:50–9:10）と push ドレイン（9:10–15:30）を含むセッション実行フロー。Gate1/2/3 によるリスクチェック、kill_switch による全 active 注文キャンセル、WebSocket push の受信→同期処理、position_entries への書き込み、監視 DB へのイベント記録連携などを実装。
+- 環境設定管理
+  - config.py
+    - .env 自動読み込みロジック（プロジェクトルートを .git または pyproject.toml から探索）。
+    - .env / .env.local の読み込み順序と保護（OS 環境変数の保護機能）。
+    - .env 行パーサーがクォート、エスケープ、export KEY=val 形式、インラインコメントをサポート。
+    - 各種設定プロパティ（DB パス、PID/kill flag パス、閾値等）を Settings クラスとして提供。
+    - PAPER_FILL_MODE（instant/partial/never/reject）など Paper Trading 向け設定をバリデーション。
+    - KABUSYS_DISABLE_AUTO_ENV_LOAD による自動読み込み無効化に対応。
 
-- ブローカークライアント: `kabusys.execution.kabu_client.KabuStationClient` を追加。
-  - httpx を用いた同期 REST クライアント。
-  - トークン取得の遅延初期化・401 リトライ機構、HTTP エラーやタイムアウトを BrokerAPIError / RateLimitError 等に変換。
-  - JSON パース失敗のハンドリング。
-  - WebSocket(push) を受けるための流れ（stream_push を持つ broker に依存）に対応するための基盤を提供。
+  - config_setup.py
+    - 対話式ウィザードで .env を生成・更新する CLI を追加（項目の定義と保存ロジックを含む）。
+    - 秘匿項目はマスク表示、選択肢・デフォルト提示、既存 .env の読み込みに対応。
+    - 保存前に確認プロンプトを表示。
 
-- 監視 DB 初期化 / SystemMonitor 等の連携コード追加（run_monitoring/run_execution から利用）。
+  - validate_config.py
+    - 起動前に .env や config/*.yaml の不備を検出する CLI を追加。
+    - 必須環境変数チェック、KABUSYS_ENV 値チェック、LOG_LEVEL チェック、DB パス親ディレクトリチェック、YAML ファイル存在・パース検証（PyYAML があれば実施）、本番環境向け追加警告等を実装。
+    - --strict オプションで警告を FAIL 扱いにできる。
 
-### Changed（変更）
-- .env パース挙動の強化:
-  - クォート内のエスケープ解釈や export プレフィックス対応、インラインコメントの扱いなどをより現実の .env スタイルに近づけている。
+- ログ・プロセス管理ユーティリティ
+  - utils/logging_setup.py
+    - 一貫したログ設定ユーティリティを追加。
+    - stdout への StreamHandler と日次ローテーションする TimedRotatingFileHandler（logs/<app_name>.log）を設定。
+    - LOG_LEVEL / LOG_DIR / 引数経由で設定を解決。ログディレクトリ作成失敗時はファイル出力をスキップして stdout のみで継続。
+    - 既存ハンドラをクリーンに置き換える処理を実装。
 
-- Settings の挙動:
-  - KABUSYS_ENV / LOG_LEVEL / PAPER_FILL_MODE 等の無効値に対して ValueError を投げるようにして入力検証を厳格化。
-  - auto-load の挙動説明を追加（OS 環境変数優先、.env.local は override する）。
+  - utils/process_priority.py
+    - Windows / POSIX（Linux/Mac/FreeBSD）を吸収したプロセス優先度設定と CPU affinity 設定を追加（psutil 使用）。
+    - set_process_priority("high"|"normal"|"low")、set_cpu_affinity(n) を提供。
+    - 権限不足や未対応 OS に対するフォールバックと警告を実装。
 
-- 実行スクリプト共通動作:
-  - プロセス優先度の設定（set_process_priority("high")）を起動時に適用。
-  - PID ファイルの生成/削除、stop_requested.flag による外部停止検出の標準化。
+- ポートフォリオ構築（純粋関数群）
+  - portfolio/portfolio_builder.py
+    - 銘柄選定（select_candidates）と重み計算（calc_equal_weights、calc_score_weights）実装。
+    - calc_score_weights は全スコアがゼロの場合に等金額配分にフォールバックして警告。
 
-### Fixed（修正）
-- DB/発注フローのクラッシュ耐性向上:
-  - send_order における「OrderSent」を先に永続化してから broker 呼び出しを行い、broker_order_id を受け取ったら先に保存するなど、クラッシュ時に状態を復旧しやすくする 2 相的永続化パターンを採用。
-  - sync_order により broker_order_id だけが残ったケースや OrderSent のまま残るケースを reconciliation により回復可能にする。
+  - portfolio/risk_adjustment.py
+    - セクター集中制限の適用（apply_sector_cap）を実装。既存保有のセクター別時価をもとに新規候補を除外。
+    - レジームに応じた投下資金乗数 calc_regime_multiplier を実装（bull/neutral/bear のマッピングとフォールバック）。
 
-### Security（セキュリティ）
-- config_setup の設定表示でシークレット値をマスク表示（"****"）。.env ファイルに関する注意書きを出力（.env は絶対に Git にコミットしないことを明記）。
+  - portfolio/position_sizing.py
+    - position sizing ロジックを実装。allocation_method として "risk_based" / "equal" / "score" をサポート。
+    - 単元株丸め（lot_size）、単銘柄上限、aggregate cap、コストバッファ（手数料・スリッページ見積り）を考慮したスケーリングを実装。
+    - 利用可能現金を超える場合のスケールダウンと残差配分ロジックを実装。
 
-### Notes（補足）
-- 本リリースでは多くの主要コンポーネント（設定管理、対話式ウィザード、設定検証、監視／実行エントリ、発注ロジック、kabu API クライアント）を導入しました。以降のリリースで各コンポーネントの細部（エラーハンドリングの追加の粒度、ユニットテスト、ドキュメント強化、非同期対応など）を継続的に改善予定です。
-- 自動 .env ロードを無効化したい場合は環境変数 KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください。
-- validate_config 実行後は警告・エラー内容に従って設定を見直してください（--strict を CI 等に使うと警告でも失敗にできます）。
+  - portfolio/__init__.py
+    - 上記関数群をパッケージ API として公開。
 
-（初回リリース: バージョン 0.1.0）
+- 運用ツール
+  - tools/paper_verification_report.py
+    - Paper Trading 用検証レポート生成スクリプトを追加。
+    - 各種閾値（稼働率、注文成功率、送信率、P95 レイテンシ）を定め、SQLite の paper_trading DB から統計を集計して PASS/FAIL を判定。
+    - CLI による期間指定（--from/--to）と DB 指定（--db、または環境変数 PAPER_TRADING_SQLITE_PATH）対応。
+    - P95 計算、NULL / テーブル未存在時のフォールバックを実装。
+
+- 研究用モジュール（部分実装）
+  - research/factor_research.py
+    - Momentum/Value/Volatility/Liquidity の計算仕様と計算用ユーティリティを追加（DuckDB 接続を受け取る設計）。
+    - モメンタム計算（calc_momentum）等の関数骨格を含むが、一部実装が継続中（本スナップショットでは未完の箇所あり）。
+
+Changed
+- （初回リリースのため該当なし）
+
+Fixed
+- （初回リリースのため該当なし）
+
+Deprecated
+- （初回リリースのため該当なし）
+
+Removed
+- （初回リリースのため該当なし）
+
+Security
+- 環境変数の取り扱いに注意:
+  - .env は絶対に Git にコミットしないことを README に明記するよう意図（config_setup のヘッダコメント）。
+  - 秘匿値は対話ウィザードでマスク表示するが、保存される .env は平文であることに注意。
+
+Notes / Known limitations
+- research/factor_research.py は本スナップショットで途中まで（未完）です。ファクター計算の完全実装は今後の作業予定。
+- apply_sector_cap の価格欠損（price が 0.0 の場合）によりエクスポージャーが過小推定される旨の TODO コメントあり。将来的にフォールバック価格の導入が想定されている。
+- process_priority の優先度設定は OS 権限に依存し、権限不足時は警告を出してスキップする実装です。
+- logging_setup はログディレクトリ作成に失敗した場合にファイル出力を無効化して続行します（運用環境のディレクトリ権限を事前に確認してください）。
+
+参考: 環境変数・設定キー（主要）
+- KABUSYS_ENV (development | paper_trading | live)
+- JQUANTS_REFRESH_TOKEN, KABU_API_PASSWORD
+- DUCKDB_PATH（デフォルト data/kabusys.duckdb）
+- SQLITE_PATH（デフォルト data/monitoring.db）
+- PAPER_TRADING_SQLITE_PATH（paper_trading 用 DB、デフォルト data/paper_trading.db）
+- MONITOR_POLL_INTERVAL（監視ポーリング間隔）
+- PAPER_FILL_MODE（instant|partial|never|reject）
+- LOG_LEVEL, LOG_DIR
+- KILL_FLAG_CLEAR_ON_START（本番での自動クリアは危険）
+
+------------------------------------
+今後の予定（短期）
+- factor_research の完全実装とテスト追加
+- 単体テスト・統合テストの整備（特に position_sizing や risk_adjustment）
+- ドキュメント（README / 運用手順）およびデプロイ/サービスユニット化のサンプル追加
+
+（以上）
