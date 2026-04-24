@@ -167,11 +167,16 @@ _build_backtest_conn(source_conn, start_date, end_date):
      - features         (同範囲)
      - ai_scores        (同範囲)
      - market_regime    (同範囲)
-     - market_breadth   (同範囲)
      - market_calendar  (全件)
+     - stocks           (全件。セクターフィルタ用)
      - earnings_calendar (end_date までの全件。未来参照防止のため end_date でカット)
   3. インメモリ conn を返す
 ```
+
+> **注意（未対応）**: `market_breadth` はバックテスト用インメモリ DB にコピーされていない。
+> このため `_is_breadth_stop()` は常に `False`（BUY 許可・安全側）を返し、
+> バックテストでは breadth_stop フィルタが機能しない。
+> 対応は別 Issue で実装予定。
 
 ---
 

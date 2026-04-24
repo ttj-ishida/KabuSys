@@ -189,7 +189,7 @@ alloc_i  = 総資産 × weight_i × max_utilization（0.70）
 | 上位25%セクター | `final_score +0.03` のスコア補正 |
 | 中立帯セクター | 補正なし |
 
-判定基準: セクター内銘柄の20営業日リターン中央値を使用してセクターをランキング。
+判定基準: セクター内銘柄の20営業日リターン**等加重平均**を使用してセクターをランキング。
 
 実装モジュール: `src/kabusys/strategy/signal_generator.py`（`generate_signals()` 内のフィルタ処理）
 
