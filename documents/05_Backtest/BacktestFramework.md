@@ -11,6 +11,17 @@
 
 「本番環境（Production）」と「テスト環境（Backtest）」のコードベース（ロジック）を完全に共通化し、バックテストで利益が出たのに本番で損をする「乖離（オーバーフィッティング等）」を最小限にとどめることを目的とする。
 
+**対象戦略**: 日足スイング戦略（想定保有期間: 数営業日〜数週間、最大 60 営業日）。夜間バッチでシグナル生成し翌営業日寄付き執行する設計を前提とする。以下の制御ルールがバックテスト本番で共通適用される。
+
+| 制御ルール | 実装箇所 |
+|-----------|---------|
+| ギャップリスクフィルタ（始値 +5%超 / -3%以下でBUY見送り） | `generate_signals()` |
+| 決算回避（決算前日のBUY禁止・決算前強制SELL） | `generate_signals()` |
+| 主要イベント前BUYサイズ縮小（50%） | `generate_signals()` |
+| セクター相対強弱フィルタ（下位25%セクターBUY禁止） | `generate_signals()` |
+| 最低保有日数（5営業日、ストップロス・決算回避を除く） | `_generate_sell_signals()` |
+| 再エントリー制限（SELL後5営業日同一銘柄BUY禁止） | `generate_signals()` |
+
 ---
 
 ## 2. Research Environment ワークフロー
@@ -138,7 +149,7 @@ python -m kabusys.backtest.run \
     --db path/to/kabusys.duckdb
 ```
 
-**前提条件**: 指定 DB ファイルに `prices_daily`, `features`, `ai_scores`, `market_regime`, `market_calendar`, `earnings_calendar` が入力済みであること。`position_entries` はバックテスト開始時に自動で空テーブルとして初期化される。
+**前提条件**: 指定 DB ファイルに `prices_daily`, `features`, `ai_scores`, `market_regime`, `market_breadth`, `market_calendar`, `earnings_calendar` が入力済みであること。`position_entries` はバックテスト開始時に自動で空テーブルとして初期化される。
 
 ---
 
@@ -152,11 +163,13 @@ python -m kabusys.backtest.run \
 _build_backtest_conn(source_conn, start_date, end_date):
   1. ":memory:" で新規 DuckDB を作成しスキーマを初期化
   2. source_conn から以下のデータをコピー:
-     - prices_daily  (start_date - 300日 〜 end_date)
-     - features      (同範囲)
-     - ai_scores     (同範囲)
-     - market_regime (同範囲)
-     - market_calendar (全件)
+     - prices_daily     (start_date - 300日 〜 end_date)
+     - features         (同範囲)
+     - ai_scores        (同範囲)
+     - market_regime    (同範囲)
+     - market_breadth   (同範囲)
+     - market_calendar  (全件)
+     - earnings_calendar (end_date までの全件。未来参照防止のため end_date でカット)
   3. インメモリ conn を返す
 ```
 

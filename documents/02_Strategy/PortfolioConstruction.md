@@ -167,7 +167,7 @@ alloc_i  = 総資産 × weight_i × max_utilization（0.70）
 
 # 8. セクター制御
 
-セクター集中を防ぐ。
+## 8.1 セクター集中制限（`apply_sector_cap`）
 
 | 制限 | 値 |
 |----|----|
@@ -178,6 +178,20 @@ alloc_i  = 総資産 × weight_i × max_utilization（0.70）
 セクター不明銘柄は制限なし（"unknown" 扱い）。
 
 実装モジュール: `src/kabusys/portfolio/risk_adjustment.py`
+
+## 8.2 セクター相対強弱フィルタ（Issue #172 実装済み）
+
+銘柄選定段階で、弱含みセクターの銘柄を除外する。セクター集中制限（8.1）とは独立して動作する。
+
+| ルール | 内容 |
+|-------|------|
+| 下位25%セクター | 新規 BUY を禁止（SELL は対象外） |
+| 上位25%セクター | `final_score +0.03` のスコア補正 |
+| 中立帯セクター | 補正なし |
+
+判定基準: セクター内銘柄の20営業日リターン中央値を使用してセクターをランキング。
+
+実装モジュール: `src/kabusys/strategy/signal_generator.py`（`generate_signals()` 内のフィルタ処理）
 
 ---
 
