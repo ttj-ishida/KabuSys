@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS raw_prices (
     close       DECIMAL(18,4) CHECK (close >= 0),
     volume      BIGINT        CHECK (volume >= 0),
     turnover    DECIMAL(18,2) CHECK (turnover >= 0),
+    adj_factor  DECIMAL(18,6),
     fetched_at  TIMESTAMP   NOT NULL DEFAULT current_timestamp,
     PRIMARY KEY (date, code)
 )
@@ -319,6 +320,44 @@ CREATE TABLE IF NOT EXISTS portfolio_performance (
 )
 """
 
+# ---- Bootstrap Layer -------------------------------------------------------
+
+_DIVIDENDS = """
+CREATE TABLE IF NOT EXISTS dividends (
+    code         VARCHAR       NOT NULL,
+    pub_date     DATE          NOT NULL,
+    ref_no       VARCHAR       NOT NULL,
+    ex_date      DATE,
+    record_date  DATE,
+    pay_date     DATE,
+    div_rate     DECIMAL(18,4),
+    fetched_at   TIMESTAMP     NOT NULL DEFAULT current_timestamp,
+    PRIMARY KEY (code, pub_date, ref_no)
+)
+"""
+
+_TOPIX_DAILY = """
+CREATE TABLE IF NOT EXISTS topix_daily (
+    date   DATE          NOT NULL PRIMARY KEY,
+    open   DECIMAL(18,4) NOT NULL,
+    high   DECIMAL(18,4) NOT NULL,
+    low    DECIMAL(18,4) NOT NULL,
+    close  DECIMAL(18,4) NOT NULL
+)
+"""
+
+_BOOTSTRAP_LOAD_HISTORY = """
+CREATE TABLE IF NOT EXISTS bootstrap_load_history (
+    file_key   VARCHAR   NOT NULL PRIMARY KEY,
+    endpoint   VARCHAR   NOT NULL,
+    file_name  VARCHAR   NOT NULL,
+    status     VARCHAR   NOT NULL DEFAULT 'pending',
+    row_count  BIGINT,
+    error_msg  VARCHAR,
+    loaded_at  TIMESTAMP
+)
+"""
+
 # ---------------------------------------------------------------------------
 # インデックス定義（頻出クエリパターン: 銘柄×日付範囲スキャン、ステータス検索）
 # ---------------------------------------------------------------------------
@@ -345,6 +384,8 @@ _INDEXES: list[str] = [
 _MIGRATIONS: list[str] = [
     # v0.x → v0.y: signals に size_multiplier を追加
     "ALTER TABLE signals ADD COLUMN size_multiplier DOUBLE NOT NULL DEFAULT 1.0",
+    # v0.x → v0.y: raw_prices に adj_factor を追加
+    "ALTER TABLE raw_prices ADD COLUMN adj_factor DECIMAL(18,6)",
 ]
 
 # ---------------------------------------------------------------------------
@@ -380,6 +421,10 @@ _ALL_DDL: list[str] = [
     _POSITION_ENTRIES,
     _EARNINGS_CALENDAR,
     _PORTFOLIO_PERFORMANCE,
+    # Bootstrap
+    _DIVIDENDS,
+    _TOPIX_DAILY,
+    _BOOTSTRAP_LOAD_HISTORY,
 ]
 
 
