@@ -45,13 +45,17 @@ def _load_risk_config(path: Path, initial_portfolio_value: float) -> RiskConfig:
     try:
         r = data["risk"]
     except (TypeError, KeyError) as exc:
-        raise KeyError(f"risk_config.yaml にトップレベルキー 'risk' がありません: {path}") from exc
+        raise KeyError(
+            f"risk_config.yaml にトップレベルキー 'risk' がありません: {path}"
+        ) from exc
 
     def _get(key: str) -> object:
         try:
             return r[key]
         except KeyError as exc:
-            raise KeyError(f"risk_config.yaml に 'risk.{key}' がありません: {path}") from exc
+            raise KeyError(
+                f"risk_config.yaml に 'risk.{key}' がありません: {path}"
+            ) from exc
 
     max_position_pct = float(_get("max_position_pct"))
     max_utilization = float(_get("max_utilization"))
@@ -66,7 +70,9 @@ def _load_risk_config(path: Path, initial_portfolio_value: float) -> RiskConfig:
         ("max_drawdown", max_drawdown),
     ):
         if not (0 < val <= 1):
-            raise ValueError(f"risk_config.yaml: {name} は (0, 1] の範囲で設定してください（現在値: {val}）: {path}")
+            raise ValueError(
+                f"risk_config.yaml: {name} は (0, 1] の範囲で設定してください（現在値: {val}）: {path}"
+            )
     if max_position_pct > max_utilization:
         raise ValueError(
             f"risk_config.yaml: max_position_pct({max_position_pct}) は"
@@ -136,7 +142,12 @@ def main() -> None:
         cash = broker.get_available_cash()
         positions = broker.get_positions()
         total_assets = cash + sum(_pos_value(p) for p in positions)
-        logger.info("起動時総資産: %.0f 円（現金 %.0f 円 + ポジション %d 件）", total_assets, cash, len(positions))
+        logger.info(
+            "起動時総資産: %.0f 円（現金 %.0f 円 + ポジション %d 件）",
+            total_assets,
+            cash,
+            len(positions),
+        )
 
         # 5. 依存コンポーネント組み立て
         repo = OrderRepository(sqlite_conn)
@@ -144,7 +155,9 @@ def main() -> None:
         risk_manager = RiskManager(
             broker=broker,
             repo=repo,
-            config=_load_risk_config(_RISK_CONFIG, initial_portfolio_value=total_assets),
+            config=_load_risk_config(
+                _RISK_CONFIG, initial_portfolio_value=total_assets
+            ),
         )
         reconciler = Reconciler(broker=broker, repo=repo, order_manager=order_manager)
 

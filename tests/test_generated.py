@@ -1,9 +1,5 @@
-
 import os
 from pathlib import Path
-import tempfile
-import builtins
-import io
 
 import pytest
 
@@ -28,10 +24,12 @@ def test_parse_env_line_quoted_and_escapes():
     line = "S='a\\'b#notcomment'  # trailing comment"
     k, v = _parse_env_line(line)
     assert k == "S"
-    assert v == "a'b#notcomment"  # backslash unescaped and comment inside quotes preserved
+    assert (
+        v == "a'b#notcomment"
+    )  # backslash unescaped and comment inside quotes preserved
 
     # double quotes and escape of double quote
-    line2 = 'D="x\\\"y"'
+    line2 = 'D="x\\"y"'
     k2, v2 = _parse_env_line(line2)
     assert k2 == "D"
     assert v2 == 'x"y'
@@ -46,11 +44,9 @@ def test_parse_env_line_unquoted_inline_comment():
 
 def test_load_env_file_override_and_protected(tmp_path, monkeypatch):
     env_file = tmp_path / ".env.test"
-    env_file.write_text("\n".join([
-        "A=1",
-        "B=2",
-        "C=override_me"
-    ]) + "\n", encoding="utf-8")
+    env_file.write_text(
+        "\n".join(["A=1", "B=2", "C=override_me"]) + "\n", encoding="utf-8"
+    )
 
     # prepare existing os.environ
     monkeypatch.delenv("A", raising=False)

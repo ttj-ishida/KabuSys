@@ -74,6 +74,7 @@ class TestBrokerClientFactory:
 
     def test_live_mode_returns_kabu_station_client(self, monkeypatch):
         from kabusys.execution.kabu_client import KabuStationClient
+
         monkeypatch.setenv("KABUSYS_ENV", "live")
         monkeypatch.setenv("KABU_API_PASSWORD", "test_password")
         monkeypatch.delenv("KABU_TRADE_PASSWORD", raising=False)
@@ -83,6 +84,7 @@ class TestBrokerClientFactory:
 
     def test_live_mode_passes_trade_password_when_set(self, monkeypatch):
         from kabusys.execution.kabu_client import KabuStationClient
+
         monkeypatch.setenv("KABUSYS_ENV", "live")
         monkeypatch.setenv("KABU_API_PASSWORD", "api_pass")
         monkeypatch.setenv("KABU_TRADE_PASSWORD", "trade_pass")
@@ -91,8 +93,11 @@ class TestBrokerClientFactory:
         assert broker._trade_password == "trade_pass"
         broker.close()
 
-    def test_live_mode_falls_back_to_api_password_when_trade_password_not_set(self, monkeypatch):
+    def test_live_mode_falls_back_to_api_password_when_trade_password_not_set(
+        self, monkeypatch
+    ):
         from kabusys.execution.kabu_client import KabuStationClient
+
         monkeypatch.setenv("KABUSYS_ENV", "live")
         monkeypatch.setenv("KABU_API_PASSWORD", "api_pass")
         monkeypatch.delenv("KABU_TRADE_PASSWORD", raising=False)
