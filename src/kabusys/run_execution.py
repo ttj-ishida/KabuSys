@@ -39,7 +39,7 @@ def _load_risk_config(path: Path, initial_portfolio_value: float) -> RiskConfig:
     if not path.exists():
         logger.error(
             "リスク設定ファイルが見つかりません: %s"
-            " → config/risk_config.yaml を作成してください（python -m kabusys.config_setup を参照）",
+            " → git checkout config/risk_config.yaml で復元してください",
             path,
         )
         raise FileNotFoundError(f"リスク設定ファイルが見つかりません: {path}")
