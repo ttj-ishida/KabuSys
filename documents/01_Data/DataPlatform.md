@@ -1,7 +1,7 @@
 # Data Platform (データ・インフラ基盤)
 
 - 対象: 日本株自動売買基盤における全データパイプライン
-- 版数: v1.0 (AI統合・完全分離版)
+- 版数: v1.1 (Bootstrap / Bulk API 追記)
 
 ---
 
@@ -41,13 +41,22 @@
 
 ### 3.1 外部データ (API/RSS等)
 
-| データ               | ソース               | 概要                                       |
-| -------------------- | -------------------- | ------------------------------------------ |
-| 株価（日足）、出来高 | J-Quants             | （OHLCV）                                  |
-| 財務データ           | J-Quants             | 四半期ごとのBS/PLサマリ                    |
-| 銘柄マスタ           | J-Quants             | 銘柄一覧・上場情報、コーポレートアクション |
-| JPXカレンダー        | J-Quants             | 祝日、半日取引、SQ日フラグ                 |
-| ニュース記事         | Yahoo News / 日経 等 | RSSやスクレイピングデータ                  |
+| データ               | ソース                         | 取得方式                  | 概要                                       |
+| -------------------- | ------------------------------ | ------------------------- | ------------------------------------------ |
+| 株価（日足）、出来高 | J-Quants                       | 差分 API / Bulk API       | OHLCV・分割調整係数                        |
+| 財務データ           | J-Quants                       | 差分 API / Bulk API       | 四半期ごとのBS/PLサマリ                    |
+| 銘柄マスタ           | J-Quants                       | 差分 API / Bulk API       | 銘柄一覧・上場情報                         |
+| JPXカレンダー        | J-Quants                       | 差分 API / Bulk API       | 祝日、半日取引、SQ日フラグ                 |
+| 配当情報             | J-Quants Bulk API              | Bulk API のみ             | 配当率・権利落ち日・支払日等               |
+| TOPIX 日足           | J-Quants Bulk API              | Bulk API のみ             | regime_detector の ma200_ratio 算出に使用  |
+| ニュース記事         | Yahoo News / 日経 等           | RSS / スクレイピング      | RSSやスクレイピングデータ                  |
+
+#### J-Quants API 認証方式
+
+| API 種別         | エンドポイント        | 認証ヘッダー                    | 設定キー                  |
+| ---------------- | --------------------- | ------------------------------- | ------------------------- |
+| 通常 API (V1)    | `/v1/*`               | `Authorization: Bearer {token}` | `JQUANTS_REFRESH_TOKEN`   |
+| Bulk Download API | `/v2/bulk/*`         | `x-api-key: {key}`              | `JQUANTS_BULK_API_KEY`    |
 
 ### 3.2 内部生成データ (自システム)
 
@@ -72,9 +81,52 @@ Data Fetch -> [ Raw Layer ] -> Data Cleaning -> [ Processed Layer ] -> Feature G
 - **Idempotency (冪等性)**: データ取得・変換ジョブは一意制約（Unique constraints）により、重複して登録されないように設計する。
 - **差分更新とAPIスロットリング**: J-Quants APIの利用上限（120リクエスト/分）等を超えないようにスロットル制御（Rate-limiting）を設け、効率よく差分のみを取得する。
 
-### 4.2 主要ジョブ
+### 4.2 主要ジョブ（日次差分更新）
 
 - `calendar_update_job`: J-Quants等からJPXカレンダー情報（祝日・SQ日など）を取得し、`market_calendar` テーブルを更新する夜間バッチ処理。
+
+### 4.3 Bootstrap フロー（初回一括投入）
+
+通常の差分更新では非効率な初回環境構築時に、**J-Quants Bulk Download API** を使って大量のヒストリカルデータを一括投入する。
+
+```
+J-Quants Bulk API
+  GET /v2/bulk/list?endpoint=<ep>  → ファイルキー一覧
+  GET /v2/bulk/get?key=<key>       → presigned URL（有効期限5分）
+      ↓ gzip CSV ダウンロード
+  data/bootstrap/raw/<endpoint>/   ← ローカルキャッシュ（再実行時スキップ）
+      ↓ parse & schema validation
+  raw_prices / raw_financials / stocks / market_calendar / dividends / topix_daily
+      ↓ ETL（NOT NULL / 型検証 → ON CONFLICT DO UPDATE）
+  prices_daily / fundamentals
+      ↓ 処理結果記録
+  bootstrap_load_history           ← ファイル単位の処理状態管理
+```
+
+#### 取り込み対象エンドポイント（Phase 1）
+
+| Bulk エンドポイント            | 保存先（Raw）     | 保存先（Processed）   | 備考                       |
+| ------------------------------ | ----------------- | --------------------- | -------------------------- |
+| `/equities/bars/daily`         | `raw_prices`      | `prices_daily`        | AdjFactor を raw に保存    |
+| `/equities/master`             | —                 | `stocks`              | 最新日のみ取得             |
+| `/fins/summary`                | `raw_financials`  | `fundamentals`        | 既存スキーマに対応         |
+| `/markets/calendar`            | —                 | `market_calendar`     | 既存スキーマに対応         |
+| `/fins/dividend`               | —                 | `dividends`（新規）   | 戦略で活用可能             |
+| `/indices/bars/daily/topix`    | —                 | `topix_daily`（新規） | regime_detector が参照     |
+
+#### 冪等性・エラー方針
+
+- `bootstrap_load_history` にファイル単位で `pending / loaded / failed` を記録
+- 再実行時は `loaded` 済みファイルをスキップ
+- 1ファイル失敗でも他ファイルは継続し、エラーをログ記録
+- DuckDB への挿入は `ON CONFLICT DO UPDATE` で常に冪等
+
+#### CLI
+
+```bash
+python -m kabusys.data.bootstrap            # 全エンドポイント
+python -m kabusys.data.bootstrap --dry-run  # ダウンロードせず件数確認のみ
+```
 
 ---
 
@@ -83,7 +135,8 @@ Data Fetch -> [ Raw Layer ] -> Data Cleaning -> [ Processed Layer ] -> Feature G
 外部ソースから取得したデータをそのまま保存する。
 
 - **目的**: パースエラー時の再処理担保、元データの保持
-- **主なテーブル**: `raw_prices`, `raw_financials`, `raw_news`, `raw_executions`
+- **主なテーブル**: `raw_prices`（`adj_factor` 列含む）, `raw_financials`, `raw_news`, `raw_executions`
+- **Bootstrap キャッシュ**: `data/bootstrap/raw/<endpoint>/` に gzip CSV を保存（再ダウンロード防止）
 
 ---
 
