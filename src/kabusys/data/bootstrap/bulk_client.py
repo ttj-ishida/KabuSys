@@ -59,7 +59,10 @@ def get_presigned_url(file_key: str, api_key: str) -> str:
     """GET /v2/bulk/get?key=<key> → presigned URL（有効期限5分）"""
     encoded = urllib.parse.quote(file_key, safe="")
     data = _bulk_get(f"/bulk/get?key={encoded}", api_key, caller="get_presigned_url")
-    return data["url"]
+    try:
+        return data["url"]
+    except KeyError as exc:
+        raise BulkApiError(f"get_presigned_url: response missing 'url' key: {data}") from exc
 
 
 def download_file(presigned_url: str, dest: Path) -> Path:
