@@ -50,6 +50,16 @@ _ITEMS: list[dict] = [
         "description": "  通常はデフォルトのままで可",
     },
     {
+        "key": "KABU_TRADE_PASSWORD",
+        "label": "kabuステーション 取引パスワード（任意）",
+        "secret": True,
+        "optional": True,
+        "description": (
+            "  kabuステーション 取引パスワード（空欄時は API パスワードを流用）\n"
+            "  APIパスワードと同一の場合は空欄でよい"
+        ),
+    },
+    {
         "key": "DUCKDB_PATH",
         "label": "DuckDB ファイルパス",
         "default": "data/kabusys.duckdb",
@@ -127,6 +137,7 @@ def _write_env(path: Path, values: dict[str, str]) -> None:
         "# --- kabuステーション API ---",
         f"KABU_API_PASSWORD={values.get('KABU_API_PASSWORD', '')}",
         f"KABU_API_BASE_URL={values.get('KABU_API_BASE_URL', 'http://localhost:18080/kabusapi')}",
+        f"KABU_TRADE_PASSWORD={values.get('KABU_TRADE_PASSWORD', '')}",
         "",
         "# --- LINE Messaging API (アラート通知用) ---",
         f"LINE_CHANNEL_ACCESS_TOKEN={values.get('LINE_CHANNEL_ACCESS_TOKEN', '')}",
