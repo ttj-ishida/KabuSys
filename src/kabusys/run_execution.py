@@ -36,6 +36,13 @@ logger = logging.getLogger(__name__)
 
 
 def _load_risk_config(path: Path, initial_portfolio_value: float) -> RiskConfig:
+    if not path.exists():
+        logger.error(
+            "リスク設定ファイルが見つかりません: %s"
+            " → config/risk_config.yaml を作成してください（python -m kabusys.config_setup を参照）",
+            path,
+        )
+        raise FileNotFoundError(f"リスク設定ファイルが見つかりません: {path}")
     try:
         with path.open(encoding="utf-8") as f:
             data = yaml.safe_load(f)
