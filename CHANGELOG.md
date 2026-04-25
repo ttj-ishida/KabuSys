@@ -1,117 +1,106 @@
-CHANGELOG
-=========
+Keep a Changelog
+=================
 
-すべての注目すべき変更はこのファイルに記録します。
-フォーマットは「Keep a Changelog」に準拠します。
-（https://keepachangelog.com/ja/1.0.0/）
+このファイルは Keep a Changelog 規約に準拠して作成しています。  
+公開日や変更内容はコードベースから推測して記載しています。
+
+※注意: 以下はソースコードから推測した変更点・機能説明です。実際の変更履歴と差異がある可能性があります。
 
 Unreleased
-----------
-- 現時点で未リリースの変更はありません。
+---------
 
-[0.1.0] - 2026-04-11
+（現在なし）
+
+[0.1.0] - 2026-04-25
 -------------------
-初回公開リリース。
 
 Added
-- パッケージ初期化
-  - kabusys.__version__ = "0.1.0" を追加。
+- 初回リリース (バージョン 0.1.0)
+  - パッケージの基本構成を追加: kabusys モジュール、サブパッケージ（portfolio, execution, monitoring, tools, utils, research 等）を含む。
+  - __version__ を "0.1.0" に設定。
 
-- 起動スクリプト
-  - run_execution.py
-    - ExecutionEngine を起動する CLI スクリプトを追加。
-    - KABUSYS_ENV=paper_trading の場合は MockBrokerClient を使用し、data/paper_trading.db を利用して本番 DB と分離して動作。
-    - 実行時にプロセス優先度を "high" に設定（utils/process_priority を使用）。
-    - 停止フラグ（data/stop_requested.flag）検知による安全停止、PID ファイル管理。
-    - ExecutionEngine の依存コンポーネント（BrokerClientFactory, OrderRepository, OrderManager, RiskManager, Reconciler）を組み立てるロジックを実装。
-
+- 起動スクリプト / デーモン
   - run_monitoring.py
-    - SystemMonitor を定期ポーリングする監視プロセス起動スクリプトを追加。
-    - 環境変数 MONITOR_POLL_INTERVAL でポーリング間隔を上書き可能（デフォルト 60 秒）。
-    - 監視は KABUSYS_ENV にかかわらず本番用 sqlite_path を利用する設計。
-    - 停止フラグ検知・例外ハンドリング・接続クローズ処理を実装。
+    - SystemMonitor のポーリングループ起動スクリプトを追加。
+    - MONITOR_POLL_INTERVAL 環境変数でポーリング間隔を上書き可能（デフォルト 60 秒）。
+    - 停止フラグ (data/stop_requested.flag) を監視して安全にループを終了。
+    - 監視テーブルの初期化（init_monitoring_db）と DuckDB 接続を行う。
+    - 監視は環境に関わらず本番用 sqlite_path を使用する設計。
+  - run_execution.py
+    - ExecutionEngine 起動スクリプトを追加。
+    - KABUSYS_ENV=paper_trading の場合は paper_trading 専用 SQLite（デフォルト: data/paper_trading.db）を利用して本番 DB と分離。Paper 環境では MockBrokerClient を使用する想定（BrokerClientFactory 経由）。
+    - エンジンはスレッドで実行され、停止フラグや PID ファイル (data/execution.pid) を扱う。
+    - 起動時にプロセス優先度を High に設定する。
 
-- 設定・環境変数管理
+- 設定関連
   - config.py
-    - Settings クラスを実装し、アプリケーション設定を環境変数から取得するユーティリティを提供。
-    - .env 自動ロード機能を追加（プロジェクトルートの判定: .git または pyproject.toml を探索）。
-    - 自動ロードは KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で無効化可能。
-    - 必須/デフォルト値、型変換、値のバリデーション（KABUSYS_ENV, LOG_LEVEL, PAPER_FILL_MODE 等）を含むプロパティを定義。
-    - paper_trading 用の独立 DB パス（PAPER_TRADING_SQLITE_PATH）や PID / Kill フラグ等の設定を提供。
-
+    - Settings クラスを提供。環境変数からアプリケーション設定を取得する。
+    - .env 自動読み込み機能を実装（.env / .env.local、OS 環境変数優先）。自動ロードは KABUSYS_DISABLE_AUTO_ENV_LOAD=1 で無効化可能。
+    - .env のパースは quotes, export プレフィックス、インラインコメントの扱い等を考慮した実装。
+    - PAPER_FILL_MODE の検証（instant/partial/never/reject）や各種しきい値（CPU/MEM/DISK）などをプロパティで提供。
+    - env（development / paper_trading / live）やログレベルのバリデーションを行う。
   - config_setup.py
-    - .env を対話式に作成・更新するウィザードを追加。
-    - 各項目の説明・選択肢・シークレット入力対応・既存 .env 読み込み・保存ロジックを実装。
-
+    - 対話式の .env 作成・更新ウィザードを追加。秘密値はマスク表示。
+    - デフォルトテンプレートを .env に書き出す機能を提供。
   - validate_config.py
-    - 起動前に設定不備を検出する CLI を追加。
-    - 必須環境変数チェック、KABUSYS_ENV/LOG_LEVEL の妥当性、DB パス親ディレクトリ存在確認、config/*.yaml の存在・パースチェック（PyYAML が存在する場合）を実施。
-    - --strict オプションで警告も失敗扱いにできる。
+    - 起動前チェック CLI を追加。必須環境変数の存在確認、KABUSYS_ENV/LOG_LEVEL の妥当性、DB パスや config/*.yaml の存在チェックを実施。
+    - PyYAML 未インストール時は YAML の内容検証をスキップし警告。
+    - --strict オプションで警告をエラー扱いにできる。
 
-- ロギング・プロセス管理ユーティリティ
+- ロギング / プロセス管理ユーティリティ
   - utils/logging_setup.py
-    - 統一的なロギング設定関数 setup_logging を追加。
-    - stdout への StreamHandler と 日次ローテーション（TimedRotatingFileHandler）をルートロガーに設定。
-    - ログディレクトリ自動作成、作成失敗時のフォールバック（コンソールのみ）に対応。
-    - LOG_LEVEL / LOG_DIR の解決優先度を実装。
-
+    - setup_logging を追加。stdout への StreamHandler と日次ローテート（TimedRotatingFileHandler、30 日保持）をルートロガーに設定。
+    - LOG_DIR 作成に失敗した場合はファイル出力をスキップしてコンソールのみで継続。
+    - ログレベル解決順を明確化 (引数 > 環境変数 > デフォルト)。
   - utils/process_priority.py
-    - プラットフォーム差異を吸収するプロセス優先度設定関数 set_process_priority と CPU affinity 設定関数 set_cpu_affinity を追加。
-    - Windows / POSIX（Linux, Darwin, FreeBSD）に対応し、psutil を用いて実装。不許可時は警告を出してスキップ。
+    - set_process_priority(level) を追加。Windows と POSIX (Linux/Mac/FreeBSD) を吸収する実装。権限不足や未対応 OS は警告でフォールバック。
+    - set_cpu_affinity(cpu_count) を追加。最初の N コアに固定するユーティリティ。権限不足等は警告でスキップ。
 
-- ポートフォリオ構築（純粋関数群）
+- ポートフォリオ構築
   - portfolio/portfolio_builder.py
-    - シグナル候補の選定 select_candidates、等配分 calc_equal_weights、スコア加重 calc_score_weights を実装。
-    - スコアが全て 0 の場合は等配分にフォールバックする挙動。
-
+    - select_candidates: BUY シグナルをスコア降順にソートして上位 N を返す。
+    - calc_equal_weights: 等金額配分を計算。
+    - calc_score_weights: スコア加重配分。全スコアが 0 の場合は等金額にフォールバックし警告を出す。
   - portfolio/risk_adjustment.py
-    - セクター集中制限を行う apply_sector_cap を実装（sell_codes を考慮、"unknown" セクターは制限対象外）。
-    - 市場レジームに応じた投下資金乗数 calc_regime_multiplier を実装（bull/neutral/bear をサポート、未知レジームは警告の上フォールバック）。
-
+    - apply_sector_cap: セクター集中上限をチェックし、超過セクターの候補を除外する。
+    - calc_regime_multiplier: 市場レジーム ("bull"/"neutral"/"bear") に応じた投下資金乗数を返す。未知レジームは警告の上で 1.0 にフォールバック。
   - portfolio/position_sizing.py
-    - position sizing ロジックを実装（allocation_method: "risk_based" / "equal" / "score" をサポート）。
-    - 単元株（lot_size）丸め、1銘柄上限・aggregate cap（available_cash）に基づくスケーリング、cost_buffer を考慮した保守的見積りを実装。
-    - 価格欠損時のスキップやログ出力を実装。
+    - calc_position_sizes: allocation_method("risk_based"/"equal"/"score") に応じて発注株数を計算。
+    - 単元株（lot_size）で丸め、per-stock 上限・aggregate cap を実装。予算超過時はスケールダウンし、残余を fractional 残差に基づいて再配分するアルゴリズムを搭載。
+    - cost_buffer により手数料・スリッページ分を保守的に見積もる処理を追加。
+    - 将来の拡張（銘柄別 lot_size）用の TODO コメントあり。
 
-- 研究・ファクター計算
+- リサーチ（ファクター）
   - research/factor_research.py
-    - ファクター計算モジュールの骨子を追加。DuckDB 接続を受け prices_daily / raw_financials を参照してモメンタム・ボラティリティ等を計算する設計。
-    - 各種定数（移動平均期間、ATR 日数、スキャンバッファ等）を定義。
-    - （モジュール途中までの実装が含まれる）
+    - Momentum/Value/Volatility/Liquidity を想定したファクター計算モジュールの骨組みを追加。
+    - calc_momentum の実装を開始（関数シグネチャ、定数、設計方針を含む）が、ソースは途中で切れており部分実装の状態。
 
-- モニタリング DB 初期化
-  - monitoring/monitoring_db モジュール（参照箇所あり）を用いて、実行時に監視用テーブルの存在保証を行う（init_monitoring_db を run_* で呼び出し）。
-
-- ツールスクリプト
+- ツール
   - tools/paper_verification_report.py
-    - Paper Trading 用検証レポート生成スクリプトを追加。
-    - 稼働率、注文成功率（fill_rate）、送信率（send_rate）、P95 レイテンシなどを算出し、閾値に基づく PASS/FAIL 判定を行う。
-    - デフォルト閾値: 稼働率 99.0%、fill_rate 90%、send_rate 95%、P95 レイテンシ 200 ms。
-    - --from, --to, --db オプションに対応。PAPER_TRADING_SQLITE_PATH 環境変数を優先。
+    - ペーパートレード検証レポート生成スクリプトを追加。
+    - DB から稼働率、注文成功率、送信率、レイテンシ（P95 等）を集計し PASS/FAIL 判定を行う。
+    - コマンドライン引数 --from / --to / --db をサポート。PAPER_TRADING_SQLITE_PATH 環境変数に対応。
+    - デフォルトの閾値（稼働率 99%、成立率 90%、送信率 95%、P95 200ms）を定義。
 
 Changed
-- ー（初回リリースのため変更履歴はありません）
+- (初回リリースのため変更履歴なし)
 
 Fixed
-- ー（初回リリースのため修正履歴はありません）
+- (初回リリースのため修正履歴なし)
 
-Security
-- ー（初回リリースのためセキュリティ修正はありません）
+Known issues / Notes
+- research/factor_research.calc_momentum はソース途中で切れており、モメンタム計算の完全実装は未完。
+- position_sizing:
+  - lot_size は現在グローバル固定（デフォルト 100）。銘柄別 lot_size 対応は将来的な拡張予定。
+  - open_prices に欠損 (0.0) があるとエクスポージャーが過少見積りされる可能性があり、その対策（前日終値などのフォールバック）は TODO。
+- config の .env 自動ロードはプロジェクトルート検出に依存（.git や pyproject.toml）。配布後や特殊な配置では自動ロードがスキップされる可能性あり。
+- process_priority / set_cpu_affinity は権限や環境に依存するため、AccessDenied 等で失敗した場合は警告を出して安全に継続する。
+- validate_config は PyYAML 非依存設計。PyYAML がない場合は YAML 内容検証はスキップされる（警告）。
+- logging_setup はログディレクトリ作成失敗時にファイル出力を無効化して stdout のみで継続する。
 
-Notes / Usage tips
-- .env 自動ロード
-  - リポジトリのプロジェクトルート（.git または pyproject.toml）が見つかれば .env / .env.local を自動的に読み込みます。OS 環境変数を上書きしない配慮あり。
-  - テスト等で自動ロードを無効にするには KABUSYS_DISABLE_AUTO_ENV_LOAD=1 を設定してください。
+References
+- リポジトリ内の各 CLI スクリプトはモジュールとして直接実行可能（例: python -m kabusys.config_setup, python -m kabusys.validate_config, python -m kabusys.tools.paper_verification_report, python -m kabusys.run_execution, python -m kabusys.run_monitoring）。
 
-- 起動スクリプトの振る舞い
-  - run_monitoring は監視データ保存に settings.sqlite_path（本番用）を使用します。MONITOR_POLL_INTERVAL によりポーリング間隔を設定可能（整数 >= 1、無効値はデフォルト 60 秒にフォールバック）。
-  - run_execution は paper_trading モード時に settings.paper_sqlite_path を使用し、本番 DB と分離します。
+-------------------------------------------------------------------------------
 
-- ログ出力
-  - デフォルトで stdout にログを出力しつつ、logs/<app_name>.log に日次ローテーションで保存します。ログディレクトリ作成に失敗した場合はコンソールのみで継続します。
-
-- プロセス優先度 / CPU affinity
-  - set_process_priority は psutil を用いてプラットフォーム差を吸収して設定しますが、権限不足等で設定できない場合は警告を出してスキップします。
-
-ライセンスおよび貢献
-- 本リポジトリのライセンス情報、貢献方法などはプロジェクトルートの README / LICENSE を参照してください。
+（以上）
