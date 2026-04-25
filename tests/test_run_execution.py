@@ -6,6 +6,7 @@ import pytest
 import yaml as yaml_mod
 
 import kabusys.run_execution as re_mod
+from kabusys.execution.broker_api import Position
 from kabusys.execution.risk_manager import RiskConfig
 from kabusys.run_execution import main
 
@@ -14,6 +15,7 @@ def _run_main(is_paper: bool = False):
     """全依存をモックして main() を実行するヘルパー。"""
     mock_broker = MagicMock()
     mock_broker.get_available_cash.return_value = 10_000_000.0
+    mock_broker.get_positions.return_value = []
     mock_engine = MagicMock()
 
     with (
@@ -30,6 +32,7 @@ def _run_main(is_paper: bool = False):
         patch("kabusys.run_execution.RiskManager"),
         patch("kabusys.run_execution.Reconciler"),
         patch("kabusys.run_execution.ExecutionEngine", return_value=mock_engine),
+        patch("kabusys.run_execution._load_risk_config", return_value=MagicMock()),
     ):
         settings = MagicMock()
         settings.is_paper = is_paper
@@ -60,6 +63,77 @@ class TestRunExecutionMain:
     def test_calls_run_session(self):
         _, _, mock_engine, _ = _run_main()
         mock_engine.run_session.assert_called_once()
+
+    def test_initial_portfolio_value_includes_positions(self):
+        mock_broker = MagicMock()
+        mock_broker.get_available_cash.return_value = 1_000_000.0
+        mock_broker.get_positions.return_value = [
+            Position(code="1234", qty=100, avg_price=2000.0, current_price=2500.0),
+            # 100 * 2500 = 250_000
+        ]
+        mock_engine = MagicMock()
+
+        with (
+            patch("kabusys.run_execution.set_process_priority"),
+            patch("kabusys.run_execution.Settings") as mock_settings_cls,
+            patch("kabusys.run_execution.sqlite3.connect"),
+            patch("kabusys.run_execution.init_monitoring_db"),
+            patch("kabusys.run_execution.duckdb.connect"),
+            patch("kabusys.run_execution.BrokerClientFactory.create", return_value=mock_broker),
+            patch("kabusys.run_execution.OrderRepository"),
+            patch("kabusys.run_execution.OrderManager"),
+            patch("kabusys.run_execution.RiskManager"),
+            patch("kabusys.run_execution.Reconciler"),
+            patch("kabusys.run_execution.ExecutionEngine", return_value=mock_engine),
+            patch("kabusys.run_execution._load_risk_config") as mock_load,
+        ):
+            mock_load.return_value = MagicMock()
+            settings = MagicMock()
+            settings.is_paper = False
+            settings.sqlite_path = Path("/prod.db")
+            settings.duckdb_path = Path("/data.duckdb")
+            mock_settings_cls.return_value = settings
+
+            main()
+
+        # _load_risk_config は total_assets = 1_000_000 + 250_000 = 1_250_000 で呼ばれる
+        mock_load.assert_called_once()
+        assert mock_load.call_args.kwargs["initial_portfolio_value"] == 1_250_000.0
+
+    def test_initial_portfolio_value_fallback_to_avg_price_when_no_current_price(self):
+        mock_broker = MagicMock()
+        mock_broker.get_available_cash.return_value = 500_000.0
+        mock_broker.get_positions.return_value = [
+            Position(code="9999", qty=200, avg_price=1500.0, current_price=None),
+            # current_price=None → avg_price で代替: 200 * 1500 = 300_000
+        ]
+        mock_engine = MagicMock()
+
+        with (
+            patch("kabusys.run_execution.set_process_priority"),
+            patch("kabusys.run_execution.Settings") as mock_settings_cls,
+            patch("kabusys.run_execution.sqlite3.connect"),
+            patch("kabusys.run_execution.init_monitoring_db"),
+            patch("kabusys.run_execution.duckdb.connect"),
+            patch("kabusys.run_execution.BrokerClientFactory.create", return_value=mock_broker),
+            patch("kabusys.run_execution.OrderRepository"),
+            patch("kabusys.run_execution.OrderManager"),
+            patch("kabusys.run_execution.RiskManager"),
+            patch("kabusys.run_execution.Reconciler"),
+            patch("kabusys.run_execution.ExecutionEngine", return_value=mock_engine),
+            patch("kabusys.run_execution._load_risk_config") as mock_load,
+        ):
+            mock_load.return_value = MagicMock()
+            settings = MagicMock()
+            settings.is_paper = False
+            settings.sqlite_path = Path("/prod.db")
+            settings.duckdb_path = Path("/data.duckdb")
+            mock_settings_cls.return_value = settings
+
+            main()
+
+        # total_assets = 500_000 + 300_000 = 800_000
+        assert mock_load.call_args.kwargs["initial_portfolio_value"] == 800_000.0
 
 
 def test_run_execution_stops_on_flag(tmp_path):

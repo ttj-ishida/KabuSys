@@ -70,22 +70,21 @@ def main() -> None:
         # 3. ブローカークライアント
         broker = BrokerClientFactory.create(settings)
 
-        # 4. 依存コンポーネント組み立て
+        # 4. 起動時総資産を計算（現金 + 保有評価額）
+        cash = broker.get_available_cash()
+        positions = broker.get_positions()
+        total_assets = cash + sum(
+            p.qty * (p.current_price if p.current_price is not None else p.avg_price)
+            for p in positions
+        )
+
+        # 5. 依存コンポーネント組み立て
         repo = OrderRepository(sqlite_conn)
         order_manager = OrderManager(broker, repo)
-        # TODO(#189 Task 3): replace inline RiskConfig with _load_risk_config(_RISK_CONFIG, total_assets)
         risk_manager = RiskManager(
             broker=broker,
             repo=repo,
-            config=RiskConfig(
-                max_position_pct=0.20,
-                max_utilization=0.80,
-                rate_limit_per_sec=5,
-                circuit_breaker_errors=10,
-                circuit_breaker_window_sec=60,
-                max_drawdown=0.20,
-                initial_portfolio_value=broker.get_available_cash(),
-            ),
+            config=_load_risk_config(_RISK_CONFIG, initial_portfolio_value=total_assets),
         )
         reconciler = Reconciler(broker=broker, repo=repo, order_manager=order_manager)
 
