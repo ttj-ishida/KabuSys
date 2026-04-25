@@ -50,17 +50,33 @@
 
 Strategy層が生成したシグナルは、実行層（Execution）へ渡る直前および直後に「3段階のガード」を通過しなければならない。
 
+### 設定ファイルからのパラメータ読み込み
+
+リスクパラメータはコードに直書きせず、`config/risk_config.yaml` から起動時に読み込む。実際の現金余力は broker API（kabuステーション API / MockBrokerClient）から取得する。
+
+```python
+# run_execution.py 起動時の初期資産計算
+cash = broker.get_available_cash()
+positions = broker.get_positions()
+initial_portfolio_value = cash + sum(
+    p.qty * (p.current_price if p.current_price is not None else p.avg_price)
+    for p in positions
+)
+```
+
+`initial_portfolio_value` はドローダウン計算の基準値として使用し、現金のみでなく **既存保有を含む総資産** とする。
+
 ### 第1関門: シグナルレベル・ガード（発注前検証）
 - **余力チェック**: 現在の口座買付余力を超過していないか。
 - **重複チェック**: すでに同一銘柄の注文が `OrderAccepted` `OrderSent` 状態で存在しないか（二重発注防止）。
-- **ポジション上限**: すでに最大保有株数、または総資産に対する最大投資比率（10%等）に達していないか。
+- **ポジション上限**: すでに総資産に対する最大投資比率（`max_position_pct`、デフォルト20%）に達していないか。また全体の投下比率が `max_utilization`（デフォルト80%）を超えないか。
 
 ### 第2関門: エグゼキューションレベル・ガード（API送信前制限）
-- **APIレート制限**: kabuステーションの「発注系API: 毎秒5回以内」等の制約を厳守するため、トークンバケツやスロットリングキューを挟む。
-- **暴走防止（サーキットブレーカー）**: 短期間（例: 1分間）に指定回数（例: 10回）連続でエラーが返却された場合、APIキーの失効や取引所側の障害とみなし、システム全体の発注機能を停止させる。
+- **APIレート制限**: kabuステーションの「発注系API: 毎秒 `rate_limit_per_sec` 回以内」制約をトークンバケツで厳守する。
+- **暴走防止（サーキットブレーカー）**: `circuit_breaker_window_sec` 秒以内に `circuit_breaker_errors` 回以上エラーが返却された場合、システム全体の発注機能を停止させる。
 
 ### 第3関門: メトリクスレベル・ガード（発注後監視）
-- ポートフォリオ全体の評価損益（Drawdown）を監視し、想定最大損失（MaxDD等）を超えた場合はすべての未約定注文をキャンセルさせ、保有ポジションを成行で安全にクローズする**キルスイッチ（Kill Switch）**を発動させる。
+- ポートフォリオ全体のドローダウンを監視し、`max_drawdown`（デフォルト20%）を超えた場合は**キルスイッチ（Kill Switch）**を発動させる。
 
 ---
 
@@ -163,13 +179,19 @@ broker API の `OrderStatus.status`（GET /orders レスポンス）から Order
 
 ### 差し替え方法
 
-**推奨: `BrokerClientFactory` を使用（Phase 8〜）**
+**推奨: `BrokerClientFactory` を使用**
 
 ```python
-# KABUSYS_ENV に応じて自動選択（paper_trading / development → MockBrokerClient）
+# KABUSYS_ENV に応じて自動選択
 from kabusys.execution.broker_factory import BrokerClientFactory
 broker = BrokerClientFactory.create(settings)
 ```
+
+| `KABUSYS_ENV` | 使用クライアント | 説明 |
+|---|---|---|
+| `development` | `MockBrokerClient` | ローカル開発・テスト用（発注なし） |
+| `paper_trading` | `MockBrokerClient` | 仮想発注（Paper Trading DB に記録） |
+| `live` | `KabuStationClient` | 実際に kabuステーション API へ発注 |
 
 **直接指定（テスト・開発時）**
 
@@ -177,15 +199,18 @@ broker = BrokerClientFactory.create(settings)
 # 開発・テスト時
 api = create_broker_api(mock=True)
 
-# 本番時
+# 本番時（BrokerClientFactory 経由を推奨）
 api = create_broker_api(mock=False, api_password="...", base_url="http://localhost:18080/kabusapi")
 ```
 
-**Paper Trading 関連環境変数**
+**関連環境変数**
 
 | 環境変数 | デフォルト | 説明 |
 |---|---|---|
-| `KABUSYS_ENV` | `development` | `paper_trading` で Paper Trading モード |
+| `KABUSYS_ENV` | `development` | 実行環境（development / paper_trading / live） |
+| `KABU_API_PASSWORD` | 必須 | kabuステーション API パスワード（live 環境で必須） |
+| `KABU_TRADE_PASSWORD` | 省略可 | kabuステーション 取引パスワード（省略時は `KABU_API_PASSWORD` と同一とみなす） |
+| `KABU_API_BASE_URL` | `http://localhost:18080/kabusapi` | kabuステーション API ベース URL |
 | `PAPER_FILL_MODE` | `instant` | MockBrokerClient の約定方式（instant/partial/never/reject） |
 | `PAPER_TRADING_SQLITE_PATH` | `data/paper_trading.db` | Paper Trading 専用 SQLite DB のパス |
 

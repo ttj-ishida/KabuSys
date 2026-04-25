@@ -138,35 +138,39 @@ ai_overlay:
 
 # 6. risk_config.yaml
 
-リスク管理設定。
+リスク管理設定。`RiskManager` の `RiskConfig` に直接マッピングされる。
 
 ``` yaml
 risk:
 
-  max_position_size: 0.05
+  max_position_pct: 0.20           # 1銘柄最大投資比率（総資産比）
 
-  max_portfolio_exposure: 1.0
+  max_utilization: 0.80            # 全ポジション投下上限（現金最低20%維持）
 
-  max_daily_loss: 0.02
+  rate_limit_per_sec: 5            # API レート制限（毎秒）
 
-  max_drawdown: 0.15
+  circuit_breaker_errors: 10       # サーキットブレーカー発動エラー数上限
 
-position_sizing:
+  circuit_breaker_window_sec: 60   # サーキットブレーカーカウントウィンドウ（秒）
 
-  risk_per_trade: 0.01
-
-  volatility_adjustment: true
+  max_drawdown: 0.20               # キルスイッチ発動ドローダウン閾値
 ```
 
 説明
 
-  key                      description
-  ------------------------ -----------------
-  max_position_size        1銘柄最大比率
-  max_portfolio_exposure   総投資比率
-  max_daily_loss           日次最大損失
-  max_drawdown             最大DD
-  risk_per_trade           1トレードリスク
+  key                        description
+  -------------------------- ---------------------------------
+  max_position_pct           1銘柄最大投資比率（RiskConfig.max_position_pct）
+  max_utilization            全ポジション投下上限（RiskConfig.max_utilization）
+  rate_limit_per_sec         API レート制限・毎秒回数（RiskConfig.rate_limit_per_sec）
+  circuit_breaker_errors     CB発動エラー数上限（RiskConfig.circuit_breaker_errors）
+  circuit_breaker_window_sec CBカウントウィンドウ秒（RiskConfig.circuit_breaker_window_sec）
+  max_drawdown               キルスイッチ発動DD閾値（RiskConfig.max_drawdown）
+
+備考
+
+- `initial_portfolio_value` は起動時に動的計算するため YAML には含めない（`get_available_cash() + 保有評価額`）
+- 旧キー名 `max_position_size` / `max_portfolio_exposure` は廃止。`max_position_pct` / `max_utilization` に統一。
 
 ------------------------------------------------------------------------
 
