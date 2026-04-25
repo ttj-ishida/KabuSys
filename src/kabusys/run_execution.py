@@ -78,6 +78,15 @@ def _load_risk_config(path: Path, initial_portfolio_value: float) -> RiskConfig:
             f"risk_config.yaml: max_position_pct({max_position_pct}) は"
             f" max_utilization({max_utilization}) 以下にしてください: {path}"
         )
+    for name, val in (
+        ("rate_limit_per_sec", rate_limit_per_sec),
+        ("circuit_breaker_errors", circuit_breaker_errors),
+        ("circuit_breaker_window_sec", circuit_breaker_window_sec),
+    ):
+        if val < 1:
+            raise ValueError(
+                f"risk_config.yaml: {name} は 1 以上で設定してください（現在値: {val}）: {path}"
+            )
 
     config = RiskConfig(
         max_position_pct=max_position_pct,
@@ -142,7 +151,7 @@ def main() -> None:
         cash = broker.get_available_cash()
         positions = broker.get_positions()
         total_assets = cash + sum(_pos_value(p) for p in positions)
-        logger.info(
+        logger.debug(
             "起動時総資産: %.0f 円（現金 %.0f 円 + ポジション %d 件）",
             total_assets,
             cash,

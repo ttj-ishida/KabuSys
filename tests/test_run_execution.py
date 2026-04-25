@@ -298,3 +298,37 @@ class TestLoadRiskConfig:
         )
         with pytest.raises(ValueError, match="max_position_pct"):
             re_mod._load_risk_config(p, 0.0)
+
+    def test_rate_limit_per_sec_zero_raises(self, tmp_path):
+        p = self._write_yaml(
+            tmp_path,
+            {
+                "risk": {
+                    "max_position_pct": 0.20,
+                    "max_utilization": 0.80,
+                    "rate_limit_per_sec": 0,
+                    "circuit_breaker_errors": 10,
+                    "circuit_breaker_window_sec": 60,
+                    "max_drawdown": 0.20,
+                }
+            },
+        )
+        with pytest.raises(ValueError, match="rate_limit_per_sec"):
+            re_mod._load_risk_config(p, 0.0)
+
+    def test_circuit_breaker_errors_negative_raises(self, tmp_path):
+        p = self._write_yaml(
+            tmp_path,
+            {
+                "risk": {
+                    "max_position_pct": 0.20,
+                    "max_utilization": 0.80,
+                    "rate_limit_per_sec": 5,
+                    "circuit_breaker_errors": -1,
+                    "circuit_breaker_window_sec": 60,
+                    "max_drawdown": 0.20,
+                }
+            },
+        )
+        with pytest.raises(ValueError, match="circuit_breaker_errors"):
+            re_mod._load_risk_config(p, 0.0)
