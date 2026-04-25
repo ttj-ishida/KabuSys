@@ -38,5 +38,5 @@ jobs:
           git config user.email "bot@example.com"
           git add README.md CHANGELOG.md 2>/dev/null || true
           git diff --cached --quiet && echo "no change" && exit 0
-          git commit -m "AI docs update"
+          git commit -m "AI docs update [skip ci]"
           git push
