@@ -26,9 +26,11 @@ class BrokerClientFactory:
         if settings.is_paper or settings.is_dev:
             return create_broker_api(mock=True, fill_mode=settings.paper_fill_mode)
         if settings.is_live:
-            raise NotImplementedError(
-                "Live broker client (KabuStationClient) は未実装です。"
-                "KABUSYS_ENV=paper_trading または development を使用してください。"
+            return create_broker_api(
+                mock=False,
+                api_password=settings.kabu_api_password,
+                trade_password=settings.kabu_trade_password,
+                base_url=settings.kabu_api_base_url,
             )
         env = settings.env  # 明示評価（未知の env ならここで ValueError）
         raise ValueError(f"未知の KABUSYS_ENV: {env!r}")

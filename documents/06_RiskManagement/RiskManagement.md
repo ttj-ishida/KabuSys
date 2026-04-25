@@ -142,14 +142,20 @@ FOMC・日銀決定会合・米CPI等の主要イベント前後はボラティ�
 
 ## 4.2 ポートフォリオ制限
 
-制限
+以下パラメータは `config/risk_config.yaml` で設定し、`RiskManager` の `RiskConfig` に読み込まれる。
 
-| 項目               | 制限 |
-| ------------------ | ---- |
-| 最大保有銘柄       | 10   |
-| 1銘柄最大比率      | 10%  |
-| 同一セクター       | 30%  |
-| キャッシュ最低比率 | 20%  |
+| 項目                         | 設定値 | 設定キー (`risk_config.yaml`) |
+| ---------------------------- | ------ | ----------------------------- |
+| 1銘柄最大投資比率            | 20%    | `risk.max_position_pct`       |
+| 全ポジション投下上限         | 80%    | `risk.max_utilization`        |
+| キャッシュ最低比率           | 20%    | （`max_utilization` の裏面）  |
+| キルスイッチ発動DD閾値       | 20%    | `risk.max_drawdown`           |
+| API レート制限（毎秒）       | 5      | `risk.rate_limit_per_sec`     |
+| CB発動エラー数上限           | 10     | `risk.circuit_breaker_errors` |
+| CBカウントウィンドウ（秒）   | 60     | `risk.circuit_breaker_window_sec` |
+
+**初期資産（`initial_portfolio_value`）の計算方法:**
+起動時に `get_available_cash() + 保有ポジション評価額` で総資産を算出し、ドローダウン計算の基準値とする。`current_price` 未取得時は `avg_price` でフォールバックする（保守的評価）。
 
 ---
 
@@ -276,11 +282,13 @@ Cancelled
 
 # 10. ドローダウン制御
 
-| ドローダウン | 対応             |
-| ------------ | ---------------- |
-| 5%           | ポジション半減   |
-| 10%          | 新規停止         |
-| 15%          | 全ポジション縮小 |
+`RiskManager.check_metrics()` が `max_drawdown`（デフォルト 20%）超過を検知した場合に `KillSwitch` を発動する。
+
+| ドローダウン                          | 対応                                         |
+| ------------------------------------- | -------------------------------------------- |
+| `max_drawdown` 超過（デフォルト 20%） | キルスイッチ発動・新規発注停止               |
+
+閾値は `config/risk_config.yaml` の `risk.max_drawdown` で設定する。
 
 ---
 
