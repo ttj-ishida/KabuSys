@@ -150,6 +150,10 @@ class Settings:
     def kabu_api_base_url(self) -> str:
         return os.environ.get("KABU_API_BASE_URL", "http://localhost:18080/kabusapi")
 
+    @property
+    def kabu_trade_password(self) -> str | None:
+        return os.environ.get("KABU_TRADE_PASSWORD") or None
+
     # --- LINE Messaging API ---
     @property
     def line_channel_access_token(self) -> str:

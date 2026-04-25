@@ -95,3 +95,17 @@ class TestBrokerClientFactory:
         monkeypatch.setenv("KABUSYS_ENV", "unknown_env")
         with pytest.raises(ValueError):
             BrokerClientFactory.create(Settings())
+
+
+class TestKabuTradePassword:
+    def test_returns_none_when_not_set(self, monkeypatch):
+        monkeypatch.delenv("KABU_TRADE_PASSWORD", raising=False)
+        assert Settings().kabu_trade_password is None
+
+    def test_returns_value_when_set(self, monkeypatch):
+        monkeypatch.setenv("KABU_TRADE_PASSWORD", "secret123")
+        assert Settings().kabu_trade_password == "secret123"
+
+    def test_returns_none_for_empty_string(self, monkeypatch):
+        monkeypatch.setenv("KABU_TRADE_PASSWORD", "")
+        assert Settings().kabu_trade_password is None
