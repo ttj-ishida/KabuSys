@@ -38,6 +38,12 @@ _ITEMS: list[dict] = [
         "description": "  J-Quants API のリフレッシュトークン（必須）",
     },
     {
+        "key": "JQUANTS_BULK_API_KEY",
+        "label": "J-Quants Bulk Download API キー",
+        "secret": True,
+        "description": "  J-Quants ダッシュボード → 設定 → APIキー から取得",
+    },
+    {
         "key": "KABU_API_PASSWORD",
         "label": "kabuステーション API パスワード",
         "secret": True,
@@ -133,6 +139,7 @@ def _write_env(path: Path, values: dict[str, str]) -> None:
         "",
         "# --- J-Quants API ---",
         f"JQUANTS_REFRESH_TOKEN={values.get('JQUANTS_REFRESH_TOKEN', '')}",
+        f"JQUANTS_BULK_API_KEY={values.get('JQUANTS_BULK_API_KEY', '')}",
         "",
         "# --- kabuステーション API ---",
         f"KABU_API_PASSWORD={values.get('KABU_API_PASSWORD', '')}",
