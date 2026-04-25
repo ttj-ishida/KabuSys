@@ -73,6 +73,7 @@ def main() -> None:
         # 4. 依存コンポーネント組み立て
         repo = OrderRepository(sqlite_conn)
         order_manager = OrderManager(broker, repo)
+        # TODO(#189 Task 3): replace inline RiskConfig with _load_risk_config(_RISK_CONFIG, total_assets)
         risk_manager = RiskManager(
             broker=broker,
             repo=repo,

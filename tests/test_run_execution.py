@@ -130,3 +130,8 @@ class TestLoadRiskConfig:
         p = self._write_yaml(tmp_path, {"risk": {"max_position_pct": 0.20}})
         with pytest.raises(KeyError):
             re_mod._load_risk_config(p, 0.0)
+
+    def test_missing_top_level_risk_key_raises(self, tmp_path):
+        p = self._write_yaml(tmp_path, {"other": {}})
+        with pytest.raises(KeyError):
+            re_mod._load_risk_config(p, 0.0)
