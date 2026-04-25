@@ -2,7 +2,11 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+import yaml as yaml_mod
+
 import kabusys.run_execution as re_mod
+from kabusys.execution.risk_manager import RiskConfig
 from kabusys.run_execution import main
 
 
@@ -89,3 +93,40 @@ def test_run_execution_stops_on_flag(tmp_path):
     # フラグが起動前に存在 → エンジンは起動せず早期リターン。stop() は呼ばれない
     mock_engine.run_session.assert_not_called()
     mock_engine.stop.assert_not_called()
+
+
+class TestLoadRiskConfig:
+    def _write_yaml(self, tmp_path, data: dict) -> Path:
+        p = tmp_path / "risk_config.yaml"
+        p.write_text(yaml_mod.dump(data), encoding="utf-8")
+        return p
+
+    def test_loads_all_fields(self, tmp_path):
+        p = self._write_yaml(tmp_path, {
+            "risk": {
+                "max_position_pct": 0.15,
+                "max_utilization": 0.70,
+                "rate_limit_per_sec": 3,
+                "circuit_breaker_errors": 5,
+                "circuit_breaker_window_sec": 30,
+                "max_drawdown": 0.10,
+            }
+        })
+        config = re_mod._load_risk_config(p, initial_portfolio_value=5_000_000.0)
+        assert isinstance(config, RiskConfig)
+        assert config.max_position_pct == 0.15
+        assert config.max_utilization == 0.70
+        assert config.rate_limit_per_sec == 3
+        assert config.circuit_breaker_errors == 5
+        assert config.circuit_breaker_window_sec == 30
+        assert config.max_drawdown == 0.10
+        assert config.initial_portfolio_value == 5_000_000.0
+
+    def test_file_not_found_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            re_mod._load_risk_config(tmp_path / "nonexistent.yaml", 0.0)
+
+    def test_missing_key_raises(self, tmp_path):
+        p = self._write_yaml(tmp_path, {"risk": {"max_position_pct": 0.20}})
+        with pytest.raises(KeyError):
+            re_mod._load_risk_config(p, 0.0)

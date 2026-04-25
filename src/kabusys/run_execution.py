@@ -14,12 +14,14 @@ from datetime import date
 from pathlib import Path
 
 import duckdb
+import yaml
 
 from kabusys.config import Settings
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _STOP_FLAG = _PROJECT_ROOT / "data" / "stop_requested.flag"
 _EXECUTION_PID = _PROJECT_ROOT / "data" / "execution.pid"
+_RISK_CONFIG = _PROJECT_ROOT / "config" / "risk_config.yaml"
 from kabusys.execution.broker_factory import BrokerClientFactory  # noqa: E402
 from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine  # noqa: E402
 from kabusys.execution.order_manager import OrderManager  # noqa: E402
@@ -31,6 +33,21 @@ from kabusys.utils.logging_setup import setup_logging  # noqa: E402
 from kabusys.utils.process_priority import set_process_priority  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+
+def _load_risk_config(path: Path, initial_portfolio_value: float) -> RiskConfig:
+    with path.open(encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    r = data["risk"]
+    return RiskConfig(
+        max_position_pct=r["max_position_pct"],
+        max_utilization=r["max_utilization"],
+        rate_limit_per_sec=r["rate_limit_per_sec"],
+        circuit_breaker_errors=r["circuit_breaker_errors"],
+        circuit_breaker_window_sec=r["circuit_breaker_window_sec"],
+        max_drawdown=r["max_drawdown"],
+        initial_portfolio_value=initial_portfolio_value,
+    )
 
 
 def main() -> None:
