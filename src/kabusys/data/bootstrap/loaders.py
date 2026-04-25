@@ -98,12 +98,12 @@ def load_prices(conn: duckdb.DuckDBPyConnection, csv_path: Path) -> int:
         buf_raw.append((date, code, o, h, lo, c, vol, va, adj, fetched_at))
 
         # prices_daily: NOT NULL OHLCV 必須 / low <= high
-        if None in (o, h, lo, c, vol):
+        if None in (o, h, lo, c, vol) or lo > h:  # type: ignore[operator]
+            if len(buf_raw) >= _CHUNK:
+                _flush()
             continue
-        if lo > h:  # type: ignore[operator]
-            continue
-        buf_proc.append((date, code, o, h, lo, c, vol, va))
 
+        buf_proc.append((date, code, o, h, lo, c, vol, va))
         if len(buf_raw) >= _CHUNK:
             _flush()
 

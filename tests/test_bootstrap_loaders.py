@@ -146,6 +146,8 @@ def test_load_prices_idempotent(conn, tmp_path):
     load_prices(conn, path)
     count = load_prices(conn, path)
     assert conn.execute("SELECT COUNT(*) FROM raw_prices").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM prices_daily").fetchone()[0] == 1
+    assert count == 1
 
 
 # ---------------------------------------------------------------------------
