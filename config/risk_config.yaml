@@ -7,4 +7,3 @@ risk:
   circuit_breaker_errors: 10       # サーキットブレーカー発動エラー数上限
   circuit_breaker_window_sec: 60   # サーキットブレーカーカウントウィンドウ（秒）
   max_drawdown: 0.20               # キルスイッチ発動ドローダウン閾値
-  initial_portfolio_value: 0.0     # セッション開始時の資産評価額
