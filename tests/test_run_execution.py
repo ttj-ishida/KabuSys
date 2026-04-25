@@ -135,6 +135,41 @@ class TestRunExecutionMain:
         # total_assets = 500_000 + 300_000 = 800_000
         assert mock_load.call_args.kwargs["initial_portfolio_value"] == 800_000.0
 
+    def test_initial_portfolio_value_fallback_to_avg_price_when_current_price_is_zero(self):
+        mock_broker = MagicMock()
+        mock_broker.get_available_cash.return_value = 500_000.0
+        mock_broker.get_positions.return_value = [
+            Position(code="8888", qty=100, avg_price=1000.0, current_price=0.0),
+            # current_price=0 → avg_price で代替: 100 * 1000 = 100_000
+        ]
+        mock_engine = MagicMock()
+
+        with (
+            patch("kabusys.run_execution.set_process_priority"),
+            patch("kabusys.run_execution.Settings") as mock_settings_cls,
+            patch("kabusys.run_execution.sqlite3.connect"),
+            patch("kabusys.run_execution.init_monitoring_db"),
+            patch("kabusys.run_execution.duckdb.connect"),
+            patch("kabusys.run_execution.BrokerClientFactory.create", return_value=mock_broker),
+            patch("kabusys.run_execution.OrderRepository"),
+            patch("kabusys.run_execution.OrderManager"),
+            patch("kabusys.run_execution.RiskManager"),
+            patch("kabusys.run_execution.Reconciler"),
+            patch("kabusys.run_execution.ExecutionEngine", return_value=mock_engine),
+            patch("kabusys.run_execution._load_risk_config") as mock_load,
+        ):
+            mock_load.return_value = MagicMock()
+            settings = MagicMock()
+            settings.is_paper = False
+            settings.sqlite_path = Path("/prod.db")
+            settings.duckdb_path = Path("/data.duckdb")
+            mock_settings_cls.return_value = settings
+
+            main()
+
+        # total_assets = 500_000 + 100_000 = 600_000
+        assert mock_load.call_args.kwargs["initial_portfolio_value"] == 600_000.0
+
 
 def test_run_execution_stops_on_flag(tmp_path):
     """停止フラグが事前に存在するとき、エンジンを起動せず終了することを確認する。
@@ -208,4 +243,34 @@ class TestLoadRiskConfig:
     def test_missing_top_level_risk_key_raises(self, tmp_path):
         p = self._write_yaml(tmp_path, {"other": {}})
         with pytest.raises(KeyError):
+            re_mod._load_risk_config(p, 0.0)
+
+    def test_invalid_yaml_raises_value_error(self, tmp_path):
+        p = tmp_path / "bad.yaml"
+        p.write_text("risk: [\ninvalid yaml", encoding="utf-8")
+        with pytest.raises(ValueError, match="パース失敗"):
+            re_mod._load_risk_config(p, 0.0)
+
+    def test_max_position_pct_out_of_range_raises(self, tmp_path):
+        p = self._write_yaml(tmp_path, {"risk": {
+            "max_position_pct": 1.5,  # > 1
+            "max_utilization": 0.80,
+            "rate_limit_per_sec": 5,
+            "circuit_breaker_errors": 10,
+            "circuit_breaker_window_sec": 60,
+            "max_drawdown": 0.20,
+        }})
+        with pytest.raises(ValueError, match="max_position_pct"):
+            re_mod._load_risk_config(p, 0.0)
+
+    def test_max_position_pct_exceeds_max_utilization_raises(self, tmp_path):
+        p = self._write_yaml(tmp_path, {"risk": {
+            "max_position_pct": 0.90,
+            "max_utilization": 0.80,
+            "rate_limit_per_sec": 5,
+            "circuit_breaker_errors": 10,
+            "circuit_breaker_window_sec": 60,
+            "max_drawdown": 0.20,
+        }})
+        with pytest.raises(ValueError, match="max_position_pct"):
             re_mod._load_risk_config(p, 0.0)
