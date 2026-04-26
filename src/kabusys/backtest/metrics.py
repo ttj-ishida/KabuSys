@@ -25,6 +25,10 @@ class BacktestMetrics:
     win_rate: float  # 勝率（0〜1）
     payoff_ratio: float  # ペイオフレシオ（平均利益 / 平均損失）
     total_trades: int  # 全クローズトレード数
+    annual_volatility: float = 0.0  # 年率ボラティリティ
+    calmar_ratio: float = 0.0  # Calmar Ratio = CAGR / Max Drawdown
+    profit_factor: float = 0.0  # Profit Factor = 総利益 / 総損失（絶対値）
+    avg_holding_days: float = 0.0  # 平均保有日数
 
 
 def calc_metrics(
@@ -40,13 +44,19 @@ def calc_metrics(
     Returns:
         BacktestMetrics インスタンス。
     """
+    cagr = _calc_cagr(history)
+    max_dd = _calc_max_drawdown(history)
     return BacktestMetrics(
-        cagr=_calc_cagr(history),
+        cagr=cagr,
         sharpe_ratio=_calc_sharpe(history),
-        max_drawdown=_calc_max_drawdown(history),
+        max_drawdown=max_dd,
         win_rate=_calc_win_rate(trades),
         payoff_ratio=_calc_payoff_ratio(trades),
         total_trades=len([t for t in trades if t.side == "sell"]),
+        annual_volatility=_calc_annual_volatility(history),
+        calmar_ratio=_calc_calmar_ratio(cagr, max_dd),
+        profit_factor=_calc_profit_factor(trades),
+        avg_holding_days=_calc_avg_holding_days(trades),
     )
 
 
@@ -66,7 +76,6 @@ def _calc_cagr(history: list["DailySnapshot"]) -> float:
     final = history[-1].portfolio_value
     if initial <= 0:
         return 0.0
-    # 暦日数から年数を計算（DailySnapshot.date フィールドを使用）
     start_date = history[0].date
     end_date = history[-1].date
     days = (end_date - start_date).days
@@ -135,3 +144,58 @@ def _calc_payoff_ratio(trades: list["TradeRecord"]) -> float:
     if avg_loss == 0:
         return 0.0
     return avg_win / avg_loss
+
+
+def _calc_annual_volatility(history: list["DailySnapshot"]) -> float:
+    """年率ボラティリティ = 日次リターンの標準偏差 × sqrt(252)。"""
+    if len(history) < 2:
+        return 0.0
+    values = [s.portfolio_value for s in history]
+    returns = [
+        (values[i] - values[i - 1]) / values[i - 1]
+        for i in range(1, len(values))
+        if values[i - 1] > 0
+    ]
+    if not returns:
+        return 0.0
+    n = len(returns)
+    mean_r = sum(returns) / n
+    variance = sum((r - mean_r) ** 2 for r in returns) / n
+    return math.sqrt(variance) * math.sqrt(252)
+
+
+def _calc_calmar_ratio(cagr: float, max_drawdown: float) -> float:
+    """Calmar Ratio = CAGR / Max Drawdown。ドローダウンが 0 の場合は 0.0 を返す。"""
+    if max_drawdown <= 0:
+        return 0.0
+    return cagr / max_drawdown
+
+
+def _calc_profit_factor(trades: list["TradeRecord"]) -> float:
+    """Profit Factor = 総利益 / 総損失（絶対値）。損失なしの場合は 0.0 を返す。"""
+    sell_trades = [t for t in trades if t.side == "sell" and t.realized_pnl is not None]
+    total_profit = sum(t.realized_pnl for t in sell_trades if t.realized_pnl > 0)
+    total_loss = abs(sum(t.realized_pnl for t in sell_trades if t.realized_pnl < 0))
+    if total_loss == 0:
+        return 0.0
+    return total_profit / total_loss
+
+
+def _calc_avg_holding_days(trades: list["TradeRecord"]) -> float:
+    """平均保有日数 = BUY-SELL ペアの保有日数の平均。
+
+    TradeRecord の date フィールドを使い、同一 code の BUY→SELL ペアを順番にマッチする。
+    ペアが存在しない場合は 0.0 を返す。
+    """
+    buy_dates: dict[str, list] = {}
+    holding_days: list[float] = []
+    for t in trades:
+        if t.side == "buy":
+            buy_dates.setdefault(t.code, []).append(t.date)
+        elif t.side == "sell" and t.code in buy_dates and buy_dates[t.code]:
+            entry_date = buy_dates[t.code].pop(0)
+            days = (t.date - entry_date).days
+            holding_days.append(float(days))
+    if not holding_days:
+        return 0.0
+    return sum(holding_days) / len(holding_days)
