@@ -8,7 +8,7 @@ import sys
 import urllib.error
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import duckdb
 
@@ -77,8 +77,11 @@ def _safe_errmsg(exc: Exception) -> str:
 
 
 def _safe_filename(file_key: str) -> str | None:
-    """file_key の末尾セグメントを検証してファイル名として返す。'.'/'..' は拒否。"""
-    name = file_key.split("/")[-1] if "/" in file_key else file_key
+    """file_key の末尾セグメントを検証してファイル名として返す。'.'/'..' は拒否。
+
+    S3キーは常に '/' 区切りなので PurePosixPath で正規化する。
+    """
+    name = PurePosixPath(file_key).name
     if not name or name in (".", ".."):
         return None
     return name

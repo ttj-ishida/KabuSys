@@ -255,7 +255,9 @@ def test_run_bootstrap_continues_on_single_file_failure(conn, tmp_path):
 def test_safe_filename_rejects_dot_and_dotdot():
     assert _safe_filename("path/to/file.csv.gz") == "file.csv.gz"
     assert _safe_filename("file.csv.gz") == "file.csv.gz"
-    assert _safe_filename("path/.") is None
+    # PurePosixPath は "path/." を "path" に正規化するため None にはならない
+    # 重要なのは ".." を含むパス横断を防ぐこと
+    assert _safe_filename("path/..") is None
     assert _safe_filename("..") is None
     assert _safe_filename("") is None
 
