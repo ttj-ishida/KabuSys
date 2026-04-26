@@ -156,23 +156,45 @@ def test_status_blocked_signal_queue_zero():
 
 def test_status_ready_with_warnings_job_warning():
     """ジョブが warning → READY_WITH_WARNINGS。"""
-    jobs = [_make_job(name="ai_analysis_job", status="warning")]
+    jobs = [
+        _make_job(name=n, status="warning" if n == "ai_analysis_job" else "success")
+        for n in MANDATORY_JOBS
+    ]
     counts = _make_counts()
     assert _determine_status(jobs, counts) == "READY_WITH_WARNINGS"
 
 
 def test_status_ready_with_warnings_signals_zero():
     """signals == 0（signal_queue > 0）→ READY_WITH_WARNINGS。"""
-    jobs = [_make_job()]
+    jobs = _all_success_jobs()
     counts = _make_counts(signals=0, signal_queue=5)
     assert _determine_status(jobs, counts) == "READY_WITH_WARNINGS"
 
 
 def test_status_ready_with_warnings_job_has_warning_message():
     """ジョブの warnings リストが空でない → READY_WITH_WARNINGS。"""
-    jobs = [_make_job(warnings=["データ件数が少ない"])]
+    jobs = [
+        _make_job(
+            name=n, warnings=["データ件数が少ない"] if n == "data_update_job" else []
+        )
+        for n in MANDATORY_JOBS
+    ]
     counts = _make_counts()
     assert _determine_status(jobs, counts) == "READY_WITH_WARNINGS"
+
+
+def test_status_blocked_mandatory_missing():
+    """必須ジョブが job_results に含まれない（未実行）→ BLOCKED。"""
+    jobs = []  # 必須ジョブが一件もない
+    counts = _make_counts()
+    assert _determine_status(jobs, counts) == "BLOCKED"
+
+
+def test_status_blocked_mandatory_skipped():
+    """必須ジョブが skipped → BLOCKED。"""
+    jobs = [_make_job(name="data_update_job", status="skipped")]
+    counts = _make_counts()
+    assert _determine_status(jobs, counts) == "BLOCKED"
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +239,20 @@ def test_warnings_includes_job_warnings():
     jobs = [_make_job(warnings=["シグナル件数が少ない"])]
     warnings = _generate_warnings(jobs, _make_counts())
     assert "シグナル件数が少ない" in warnings
+
+
+def test_warnings_missing_mandatory_job():
+    """必須ジョブが job_results に含まれない → 警告にジョブ名が含まれる。"""
+    jobs = []
+    warnings = _generate_warnings(jobs, _make_counts())
+    assert any("data_update_job" in w for w in warnings)
+
+
+def test_warnings_skipped_mandatory_job():
+    """必須ジョブが skipped → 警告にジョブ名が含まれる。"""
+    jobs = [_make_job(name="feature_generation_job", status="skipped")]
+    warnings = _generate_warnings(jobs, _make_counts())
+    assert any("feature_generation_job" in w for w in warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +485,22 @@ def test_format_markdown_final_decision_blocked():
     md = format_markdown(report)
     assert "BLOCKED" in md
     assert "自動執行" in md or "執行" in md
+
+
+def test_format_markdown_no_warnings_final_decision_section_number():
+    """警告なしのとき Final Decision は ## 5. になる（章番号が飛ばない）。"""
+    report = _make_report("READY")
+    md = format_markdown(report)
+    assert "## 5. Final Decision" in md
+    assert "## 6. Final Decision" not in md
+
+
+def test_format_markdown_with_warnings_final_decision_section_number():
+    """警告ありのとき Warnings が ## 5.、Final Decision が ## 6. になる。"""
+    report = _make_report("READY_WITH_WARNINGS")
+    md = format_markdown(report)
+    assert "## 5. Warnings" in md
+    assert "## 6. Final Decision" in md
 
 
 # ---------------------------------------------------------------------------

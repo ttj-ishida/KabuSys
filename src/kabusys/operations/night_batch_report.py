@@ -85,7 +85,8 @@ def _determine_status(
     """READY / READY_WITH_WARNINGS / BLOCKED を判定する。
 
     BLOCKED 条件（いずれかが真）:
-      - 必須ジョブのいずれかが failed
+      - 必須ジョブのいずれかが job_results に存在しない（未実行）
+      - 必須ジョブのいずれかが failed または skipped
       - signal_queue == 0
 
     READY_WITH_WARNINGS 条件（BLOCKED でなく、いずれかが真）:
@@ -95,10 +96,17 @@ def _determine_status(
 
     それ以外: READY
     """
-    has_failed_mandatory = any(
-        j.job_name in MANDATORY_JOBS and j.status == "failed" for j in job_results
+    present = {j.job_name for j in job_results}
+    has_missing_mandatory = any(name not in present for name in MANDATORY_JOBS)
+    has_blocked_mandatory = any(
+        j.job_name in MANDATORY_JOBS and j.status in ("failed", "skipped")
+        for j in job_results
     )
-    if has_failed_mandatory or update_counts.signal_queue == 0:
+    if (
+        has_missing_mandatory
+        or has_blocked_mandatory
+        or update_counts.signal_queue == 0
+    ):
         return STATUS_BLOCKED
 
     has_warning_status = any(j.status == "warning" for j in job_results)
@@ -116,9 +124,16 @@ def _generate_warnings(
     """警告メッセージのリストを生成する。"""
     warnings: list[str] = []
 
+    present = {j.job_name for j in job_results}
+    for name in MANDATORY_JOBS:
+        if name not in present:
+            warnings.append(f"必須ジョブが実行されませんでした（未実行）: {name}")
+
     for j in job_results:
-        if j.status == "failed" and j.job_name in MANDATORY_JOBS:
+        if j.job_name in MANDATORY_JOBS and j.status == "failed":
             warnings.append(f"必須ジョブが失敗しました: {j.job_name}")
+        if j.job_name in MANDATORY_JOBS and j.status == "skipped":
+            warnings.append(f"必須ジョブがスキップされました: {j.job_name}")
         if j.status == "warning":
             warnings.append(f"ジョブが警告で完了: {j.job_name}")
         warnings.extend(j.warnings)
@@ -247,12 +262,18 @@ def format_json(report: NightBatchReport) -> str:
 def format_markdown(report: NightBatchReport) -> str:
     """人間向け Markdown レポート文字列を返す。"""
     lines: list[str] = []
+    sec = 0
+
+    def _section(title: str) -> str:
+        nonlocal sec
+        sec += 1
+        return f"## {sec}. {title}"
 
     # 1. Overview
     lines += [
         "# Night Batch Report",
         "",
-        "## 1. Overview",
+        _section("Overview"),
         "",
         "| Item | Value |",
         "|------|-------|",
@@ -265,7 +286,7 @@ def format_markdown(report: NightBatchReport) -> str:
 
     # 2. Job Status
     lines += [
-        "## 2. Job Status",
+        _section("Job Status"),
         "",
         "| ジョブ名 | ステータス | 開始時刻 | 終了時刻 | 実行時間(s) |",
         "|---------|-----------|---------|---------|------------|",
@@ -289,7 +310,7 @@ def format_markdown(report: NightBatchReport) -> str:
     # 3. Update Counts
     uc = report.update_counts
     lines += [
-        "## 3. Update Counts",
+        _section("Update Counts"),
         "",
         "| テーブル | 更新件数 |",
         "|---------|--------|",
@@ -306,7 +327,7 @@ def format_markdown(report: NightBatchReport) -> str:
     # 4. Next Trading Day Preparation
     nd = report.next_day_summary
     lines += [
-        "## 4. Next Trading Day Preparation",
+        _section("Next Trading Day Preparation"),
         "",
         f"対象取引日: **{report.target_date}**",
         "",
@@ -322,15 +343,15 @@ def format_markdown(report: NightBatchReport) -> str:
     # 5. Warnings（ある場合のみ）
     if report.warnings:
         lines += [
-            "## 5. Warnings",
+            _section("Warnings"),
             "",
         ]
         for w in report.warnings:
             lines.append(f"- ⚠️ {w}")
         lines.append("")
 
-    # 6. Final Decision
-    lines += ["## 6. Final Decision", ""]
+    # Final Decision（章番号は警告の有無に応じて 5 or 6）
+    lines += [_section("Final Decision"), ""]
     if report.status == STATUS_READY:
         lines += [
             f"**{STATUS_READY}** — 翌営業日の自動執行を開始できます。",
@@ -367,7 +388,7 @@ def save_report(
     report: NightBatchReport,
     output_dir: Path | str | None = None,
 ) -> Path:
-    """レポートを artifacts/operations/night_batch/{run_date}/ に保存する。
+    """レポートを artifacts/night_batch/{run_date}/ に保存する。
 
     保存ファイル:
         summary.json    全指標 JSON
