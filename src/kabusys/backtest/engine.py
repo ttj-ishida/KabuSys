@@ -153,9 +153,14 @@ def _populate_backtest_breadth(
     from kabusys.data.breadth import calc_and_save_breadth
 
     try:
+        # EXCEPT で既存行をスキップし、未計算日のみ対象にする（再実行コスト削減）
         trading_dates = bt_conn.execute(
-            "SELECT DISTINCT date FROM prices_daily "
-            "WHERE date >= ? AND date <= ? ORDER BY date",
+            """
+            SELECT DISTINCT date FROM prices_daily
+            WHERE date >= ? AND date <= ?
+            EXCEPT SELECT date FROM market_breadth
+            ORDER BY date
+            """,
             [start_date, end_date],
         ).fetchall()
     except Exception as exc:
@@ -165,11 +170,21 @@ def _populate_backtest_breadth(
         )
         return
 
+    processed, failed = 0, 0
     for (d,) in trading_dates:
         try:
-            calc_and_save_breadth(bt_conn, d)
+            if calc_and_save_breadth(bt_conn, d):
+                processed += 1
         except Exception as exc:
+            failed += 1
             logger.warning("_populate_backtest_breadth: date=%s のスキップ: %s", d, exc)
+
+    logger.info(
+        "_populate_backtest_breadth: 完了 対象=%d processed=%d failed=%d",
+        len(trading_dates),
+        processed,
+        failed,
+    )
 
 
 def _fetch_open_prices(
