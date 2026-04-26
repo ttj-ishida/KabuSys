@@ -408,6 +408,8 @@ def save_report(
     """
     base = Path(output_dir) if output_dir else Path("artifacts") / "backtests"
     safe_run_id = re.sub(r"[^A-Za-z0-9._-]", "_", report.meta.run_id)
+    if not safe_run_id:
+        safe_run_id = str(uuid.uuid4())
     run_dir = base / safe_run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 

@@ -633,3 +633,11 @@ def test_calc_monthly_returns_empty():
 
     monthly = _calc_monthly_returns([])
     assert monthly == []
+
+
+def test_sharpe_variance_zero_returns_zero():
+    """history が2日分（returns=1件）で variance=0 のとき Sharpe = 0.0。"""
+    from kabusys.backtest.metrics import _calc_sharpe
+
+    history = _make_history([1_000_000, 1_100_000])
+    assert _calc_sharpe(history) == 0.0

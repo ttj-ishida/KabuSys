@@ -74,6 +74,7 @@ def _calc_cagr(history: list["DailySnapshot"]) -> float:
     """
     if len(history) < 2:
         return 0.0
+    history = sorted(history, key=lambda s: s.date)
     initial = history[0].portfolio_value
     final = history[-1].portfolio_value
     if initial <= 0:
@@ -94,6 +95,7 @@ def _calc_sharpe(history: list["DailySnapshot"]) -> float:
     """
     if len(history) < 2:
         return 0.0
+    history = sorted(history, key=lambda s: s.date)
     values = [s.portfolio_value for s in history]
     returns = [
         (values[i] - values[i - 1]) / values[i - 1]
@@ -105,11 +107,10 @@ def _calc_sharpe(history: list["DailySnapshot"]) -> float:
     n = len(returns)
     mean_r = sum(returns) / n
     variance = sum((r - mean_r) ** 2 for r in returns) / n
-    std_r = math.sqrt(variance)
-    if std_r == 0:
+    if variance <= 0:
         return 0.0
     # 年次化（営業日252日）
-    return (mean_r / std_r) * math.sqrt(252)
+    return (mean_r / math.sqrt(variance)) * math.sqrt(252)
 
 
 def _calc_max_drawdown(history: list["DailySnapshot"]) -> float:
@@ -158,6 +159,7 @@ def _calc_annual_volatility(history: list["DailySnapshot"]) -> float:
     """
     if len(history) < 2:
         return 0.0
+    history = sorted(history, key=lambda s: s.date)
     values = [s.portfolio_value for s in history]
     returns = [
         (values[i] - values[i - 1]) / values[i - 1]
