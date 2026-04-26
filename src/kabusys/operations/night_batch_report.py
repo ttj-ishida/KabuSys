@@ -93,6 +93,7 @@ def _determine_status(
     READY_WITH_WARNINGS 条件（BLOCKED でなく、いずれかが真）:
       - いずれかのジョブが status == "warning"
       - いずれかのジョブの warnings リストが空でない
+      - 非必須ジョブのいずれかが skipped
       - signals == 0
 
     それ以外: READY
@@ -112,7 +113,15 @@ def _determine_status(
 
     has_warning_status = any(j.status == "warning" for j in job_results)
     has_job_warnings = any(j.warnings for j in job_results)
-    if has_warning_status or has_job_warnings or update_counts.signals == 0:
+    has_nonmandatory_skipped = any(
+        j.job_name not in MANDATORY_JOBS and j.status == "skipped" for j in job_results
+    )
+    if (
+        has_warning_status
+        or has_job_warnings
+        or has_nonmandatory_skipped
+        or update_counts.signals == 0
+    ):
         return STATUS_READY_WITH_WARNINGS
 
     return STATUS_READY
@@ -135,6 +144,8 @@ def _generate_warnings(
             warnings.append(f"必須ジョブが失敗しました: {j.job_name}")
         if j.job_name in MANDATORY_JOBS and j.status == "skipped":
             warnings.append(f"必須ジョブがスキップされました: {j.job_name}")
+        if j.job_name not in MANDATORY_JOBS and j.status == "skipped":
+            warnings.append(f"ジョブがスキップされました: {j.job_name}")
         if j.status == "warning":
             warnings.append(f"ジョブが警告で完了: {j.job_name}")
         warnings.extend(j.warnings)

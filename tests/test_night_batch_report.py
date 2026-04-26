@@ -197,6 +197,13 @@ def test_status_blocked_mandatory_skipped():
     assert _determine_status(jobs, counts) == "BLOCKED"
 
 
+def test_status_ready_with_warnings_nonmandatory_skipped():
+    """非必須ジョブが skipped → READY_WITH_WARNINGS。"""
+    jobs = _all_success_jobs() + [_make_job(name="optional_job", status="skipped")]
+    counts = _make_counts()
+    assert _determine_status(jobs, counts) == "READY_WITH_WARNINGS"
+
+
 # ---------------------------------------------------------------------------
 # _generate_warnings
 # ---------------------------------------------------------------------------
@@ -253,6 +260,13 @@ def test_warnings_skipped_mandatory_job():
     jobs = [_make_job(name="feature_generation_job", status="skipped")]
     warnings = _generate_warnings(jobs, _make_counts())
     assert any("feature_generation_job" in w for w in warnings)
+
+
+def test_warnings_skipped_nonmandatory_job():
+    """非必須ジョブが skipped → 警告にジョブ名が含まれる。"""
+    jobs = _all_success_jobs() + [_make_job(name="optional_job", status="skipped")]
+    warnings = _generate_warnings(jobs, _make_counts())
+    assert any("optional_job" in w for w in warnings)
 
 
 # ---------------------------------------------------------------------------

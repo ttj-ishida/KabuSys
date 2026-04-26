@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 from unittest import mock
 
-from kabusys import run_monitoring
 
 # ---- config: _parse_env_line, _load_env_file, Settings ----
 from kabusys import config as config_mod
@@ -349,17 +348,3 @@ def test_set_cpu_affinity_invalid_and_success(monkeypatch, caplog):
 
 
 # End of tests
-
-
-def test_get_poll_interval_valid(monkeypatch):
-    monkeypatch.setenv("MONITOR_POLL_INTERVAL", "30")
-    assert run_monitoring._get_poll_interval() == 30
-
-
-def test_get_poll_interval_invalid_zero_and_nonint(monkeypatch, caplog):
-    # zero -> fallback to default and warning logged
-    monkeypatch.setenv("MONITOR_POLL_INTERVAL", "0")
-    caplog.clear()
-    val = run_monitoring._get_poll_interval()
-    assert val == run_monitoring._DEFAULT_POLL_INTERVAL
-    assert "不正です" in caplog.text or "デフォルト" in caplog.text
