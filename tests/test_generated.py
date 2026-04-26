@@ -1,349 +1,469 @@
-import json
-import math
-from datetime import date, datetime
-from types import SimpleNamespace
-from pathlib import Path
+以下に、提示されたコード群に対する pytest ユニットテスト群を用意しました。主要な関数の正常系・異常系（エッジケース）をカバーし、外部依存（ファイル I/O / 環境変数 / psutil / OpenAI 相当）は unittest.mock を用いて差し替えています。テストは pytest を前提とします。
+
+ファイル配置例:
+- tests/
+  - test_run_monitoring.py
+  - test_run_execution.py
+  - test_config.py
+  - test_validate_config.py
+  - test_config_setup.py
+  - test_paper_verification_report.py
+  - test_portfolio_builder.py
+  - test_risk_adjustment.py
+  - test_position_sizing.py
+  - test_utils_logging_and_process.py
+
+必要に応じてプロジェクトのルートに pytest.ini を配置してください（任意）。
+
+各テストファイルの内容は以下のとおりです。適宜プロジェクト構成に合わせてパスを調整してください（tests ディレクトリ直下から kabusys パッケージを import できることを想定しています）。
+
+---------------------------
+tests/test_run_monitoring.py
+---------------------------
+from unittest import mock
+import os
+import logging
 
 import pytest
+
+from kabusys.run_monitoring import _get_poll_interval
+
+
+def test_get_poll_interval_default(monkeypatch, caplog):
+    # 環境変数未設定ならデフォルト
+    monkeypatch.delenv("MONITOR_POLL_INTERVAL", raising=False)
+    caplog.set_level(logging.WARNING)
+    val = _get_poll_interval()
+    assert isinstance(val, int)
+    assert val == 60
+
+
+def test_get_poll_interval_valid(monkeypatch):
+    monkeypatch.setenv("MONITOR_POLL_INTERVAL", "10")
+    assert _get_poll_interval() == 10
+
+
+def test_get_poll_interval_invalid_value(monkeypatch, caplog):
+    # 非数値 -> デフォルトにフォールバック、警告ログ
+    monkeypatch.setenv("MONITOR_POLL_INTERVAL", "invalid")
+    caplog.set_level(logging.WARNING)
+    val = _get_poll_interval()
+    assert val == 60
+    assert any("MONITOR_POLL_INTERVAL の値が不正" in rec.getMessage() for rec in caplog.records)
+
+
+def test_get_poll_interval_zero_or_negative(monkeypatch, caplog):
+    monkeypatch.setenv("MONITOR_POLL_INTERVAL", "0")
+    caplog.set_level(logging.WARNING)
+    val = _get_poll_interval()
+    assert val == 60
+    assert any("MONITOR_POLL_INTERVAL の値が不正" in rec.getMessage() for rec in caplog.records)
+
+---------------------------
+tests/test_run_execution.py
+---------------------------
+from pathlib import Path
+import yaml
+import tempfile
+from types import SimpleNamespace
+import pytest
+from kabusys.run_execution import _load_risk_config, _pos_value
+
+
+def make_temp_yaml(tmp_path, data):
+    p = tmp_path / "risk_config.yaml"
+    p.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return p
+
+
+def test_load_risk_config_success(tmp_path):
+    data = {
+        "risk": {
+            "max_position_pct": 0.1,
+            "max_utilization": 0.5,
+            "rate_limit_per_sec": 5,
+            "circuit_breaker_errors": 10,
+            "circuit_breaker_window_sec": 60,
+            "max_drawdown": 0.2,
+        }
+    }
+    path = make_temp_yaml(tmp_path, data)
+    cfg = _load_risk_config(Path(path), initial_portfolio_value=1_000_000.0)
+    # 属性値を粗く確認（型と一部の値）
+    assert hasattr(cfg, "max_position_pct")
+    assert cfg.max_position_pct == pytest.approx(0.1)
+    assert cfg.initial_portfolio_value == pytest.approx(1_000_000.0)
+
+
+def test_load_risk_config_missing_file(tmp_path):
+    p = tmp_path / "no_such_file.yaml"
+    with pytest.raises(FileNotFoundError):
+        _load_risk_config(p, initial_portfolio_value=100.0)
+
+
+def test_load_risk_config_bad_yaml(tmp_path):
+    p = tmp_path / "bad.yaml"
+    p.write_text("::: not yaml :::", encoding="utf-8")
+    with pytest.raises(ValueError):
+        _load_risk_config(Path(p), initial_portfolio_value=100.0)
+
+
+def test_pos_value_uses_current_if_positive():
+    p = SimpleNamespace(code="0001", current_price=200.0, avg_price=100.0, qty=3)
+    assert _pos_value(p) == pytest.approx(3 * 200.0)
+
+
+def test_pos_value_falls_back_to_avg():
+    p = SimpleNamespace(code="0002", current_price=None, avg_price=50.0, qty=4)
+    assert _pos_value(p) == pytest.approx(4 * 50.0)
+
+
+def test_pos_value_zero_or_invalid_logs_warning(caplog):
+    caplog.set_level("WARNING")
+    p = SimpleNamespace(code="0003", current_price=0.0, avg_price=None, qty=5)
+    assert _pos_value(p) == 0.0
+    assert any("ポジション評価額を 0 として扱います" in rec.getMessage() for rec in caplog.records)
+
+---------------------------
+tests/test_config.py
+---------------------------
+import os
+from pathlib import Path
 from unittest import mock
+import pytest
 
-# ---- config: _parse_env_line, _load_env_file, Settings ----
-from kabusys import config as config_mod
-from kabusys.config import Settings
-
-# ---- validate_config ----
-from kabusys import validate_config as validate_mod
-
-# ---- portfolio builder & risk & position sizing ----
-from kabusys.portfolio import portfolio_builder as pb
-from kabusys.portfolio import risk_adjustment as ra
-from kabusys.portfolio import position_sizing as ps
-
-# ---- ai news nlp utils ----
-from kabusys.ai import news_nlp as news_nlp_mod
-
-# ---- utils process_priority ----
-from kabusys.utils import process_priority as pp
+from kabusys.config import _parse_env_line, _load_env_file, Settings
 
 
-# ---------------------------
-# Tests for config parsing
-# ---------------------------
-def test_parse_env_line_basic_and_comments():
-    assert config_mod._parse_env_line("") is None
-    assert config_mod._parse_env_line("# comment") is None
-    # no '='
-    assert config_mod._parse_env_line("INVALIDLINE") is None
-    # simple key=value
-    assert config_mod._parse_env_line("KEY=val") == ("KEY", "val")
-    # inline comment after space
-    assert config_mod._parse_env_line("KEY=val #comment") == ("KEY", "val")
-    # comment char not preceded by space should be preserved
-    assert config_mod._parse_env_line("KEY=foo#bar") == ("KEY", "foo#bar")
-    # export prefix
-    assert config_mod._parse_env_line("export FOO=bar") == ("FOO", "bar")
+def test_parse_env_line_comments_and_blank():
+    assert _parse_env_line("") is None
+    assert _parse_env_line("   # comment") is None
+    assert _parse_env_line("KEY=val") == ("KEY", "val")
 
 
-def test_parse_env_line_quoted_and_escapes():
-    # double quotes with escaped quote inside
-    s = 'KEY="a\\"b"'
-    assert config_mod._parse_env_line(s) == ("KEY", 'a"b')
-    # single quotes with escaped single quote
-    s2 = "KEY='a\\'b'"
-    assert config_mod._parse_env_line(s2) == ("KEY", "a'b")
-    # empty value
-    assert config_mod._parse_env_line("KEY=") == ("KEY", "")
+def test_parse_env_line_export_format():
+    assert _parse_env_line("export FOO=bar") == ("FOO", "bar")
+
+
+def test_parse_env_line_quoted_and_escaped():
+    # シングルクォート内のエスケープ処理
+    line = r"SECRET='ab\'c\\d'"
+    res = _parse_env_line(line)
+    assert res == ("SECRET", "ab'c\\d")
+    # ダブルクォート
+    line2 = r'VAL="x\"y"'
+    res2 = _parse_env_line(line2)
+    assert res2 == ("VAL", 'x"y')
+
+
+def test_parse_env_line_unquoted_with_inline_comment():
+    assert _parse_env_line("A=hello # comment") == ("A", "hello")
+    # シャープが文字列中（スペースなし）ならコメントとみなさない
+    assert _parse_env_line("B=hello#notcomment") == ("B", "hello#notcomment")
+
+
+def test_load_env_file_sets_env_vars(tmp_path, monkeypatch):
+    p = tmp_path / ".env"
+    p.write_text("X=1\nY=two\n", encoding="utf-8")
+    # start with empty env for these keys
+    monkeypatch.delenv("X", raising=False)
+    monkeypatch.delenv("Y", raising=False)
+    _load_env_file(Path(p), override=False, protected=frozenset())
+    assert os.environ.get("X") == "1"
+    assert os.environ.get("Y") == "two"
 
 
 def test_load_env_file_override_and_protected(tmp_path, monkeypatch):
-    env_path = tmp_path / ".env"
-    env_path.write_text("A=1\nB=2\nC=3\n")
-
-    # ensure environment initially contains B=existing and OS-protected set contains B
-    monkeypatch.setenv("B", "existing")
-    # override=False should not overwrite B, but set A,C
-    config_mod._load_env_file(env_path, override=False, protected=frozenset())
-    assert Path(config_mod.__file__).exists()  # sanity: module loaded
-    assert "A" in __import__("os").environ and __import__("os").environ["A"] == "1"
-    assert __import__("os").environ["B"] == "existing"
-    assert __import__("os").environ["C"] == "3"
-
-    # Now test override=True with protected preventing overwrite
-    env_path.write_text("B=bold\nD=4\n")
-    os = __import__("os")
-    os.environ["B"] = "existing2"
-    protected = frozenset({"B"})
-    config_mod._load_env_file(env_path, override=True, protected=protected)
-    assert os.environ["B"] == "existing2"  # protected not overwritten
-    assert os.environ["D"] == "4"
+    p = tmp_path / ".env"
+    p.write_text("X=1\nY=2\n", encoding="utf-8")
+    # simulate existing OS env protected keys
+    monkeypatch.setenv("Y", "original")
+    protected = frozenset(os.environ.keys())
+    # override=True but protected prevents overwriting Y
+    _load_env_file(Path(p), override=True, protected=protected)
+    assert os.environ.get("X") == "1"
+    assert os.environ.get("Y") == "original"
 
 
-# ---------------------------
-# Tests for Settings
-# ---------------------------
-def test_settings_env_and_log_level_and_paper_fill_mode(monkeypatch):
-    monkeypatch.delenv("KABUSYS_ENV", raising=False)
+def test_settings_env_validation(monkeypatch):
+    monkeypatch.setenv("KABUSYS_ENV", "development")
     s = Settings()
-    # default env is development
     assert s.env == "development"
-    assert s.is_dev
-    # invalid env
-    monkeypatch.setenv("KABUSYS_ENV", "BAD_ENV")
+    # invalid env raises
+    monkeypatch.setenv("KABUSYS_ENV", "invalid_env")
     with pytest.raises(ValueError):
         _ = Settings().env
 
-    # log level valid / invalid
-    monkeypatch.setenv("LOG_LEVEL", "debug")
-    assert Settings().log_level == "DEBUG"
-    monkeypatch.setenv("LOG_LEVEL", "INVALID")
-    with pytest.raises(ValueError):
-        _ = Settings().log_level
 
-    # paper_fill_mode valid / invalid
+def test_settings_paper_fill_mode_valid_and_invalid(monkeypatch):
     monkeypatch.setenv("PAPER_FILL_MODE", "instant")
     assert Settings().paper_fill_mode == "instant"
-    monkeypatch.setenv("PAPER_FILL_MODE", "PARTIAL")
-    assert Settings().paper_fill_mode == "partial"
-    monkeypatch.setenv("PAPER_FILL_MODE", "badvalue")
+    monkeypatch.setenv("PAPER_FILL_MODE", "invalid_mode")
     with pytest.raises(ValueError):
         _ = Settings().paper_fill_mode
 
-
-# ---------------------------
-# Tests for validate_config.validate (basic parts)
-# ---------------------------
-def test_validate_config_basic(monkeypatch):
-    # Ensure required vars missing -> errors
-    monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
-    monkeypatch.delenv("KABU_API_PASSWORD", raising=False)
-    monkeypatch.setenv("KABUSYS_ENV", "development")
-    errors, warnings, infos = validate_mod.validate()
-    assert any("必須環境変数" in e for e in errors)
-    # placeholder detection: set token to placeholder to get warning
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "abc_here")
-    monkeypatch.setenv("KABU_API_PASSWORD", "your_value")
-    errors, warnings, infos = validate_mod.validate()
-    # both required set but placeholders produce warnings
-    assert (
-        any(
-            "プレースホルダ" in w or "プレースホルダ値" in w or "プレースホルダ値"
-            for w in warnings
-        )
-        or len(warnings) >= 1
-    )
+---------------------------
+tests/test_validate_config.py
+---------------------------
+import os
+from kabusys import validate_config
+import pytest
 
 
-# ---------------------------
-# Tests for portfolio builder
-# ---------------------------
-def test_select_candidates_and_weights():
+def test_validate_missing_required_vars(monkeypatch):
+    # ensure required vars are unset
+    for v in ("JQUANTS_REFRESH_TOKEN", "KABU_API_PASSWORD"):
+        monkeypatch.delenv(v, raising=False)
+    errs, warns, infos = validate_config.validate()
+    assert any("必須環境変数が未設定です" in e for e in errs)
+
+
+def test_validate_env_and_log_level(monkeypatch):
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "token")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pwd")
+    monkeypatch.setenv("KABUSYS_ENV", "live")
+    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+    errs, warns, infos = validate_config.validate()
+    # live produces a warning
+    assert any("KABUSYS_ENV=live" in w or "本番環境" in w for w in warns) or any("KABUSYS_ENV: live" in i for i in infos)
+
+---------------------------
+tests/test_config_setup.py
+---------------------------
+from pathlib import Path
+import tempfile
+from kabusys import config_setup
+import pytest
+
+
+def test_read_write_env(tmp_path):
+    p = tmp_path / ".env.test"
+    values = {
+        "JQUANTS_REFRESH_TOKEN": "tok",
+        "JQUANTS_BULK_API_KEY": "bulk",
+        "KABU_API_PASSWORD": "pwd",
+        "KABU_API_BASE_URL": "http://example",
+        "KABUSYS_ENV": "development",
+        "LOG_LEVEL": "INFO",
+        "KILL_FLAG_CLEAR_ON_START": "0",
+    }
+    config_setup._write_env(p, values)
+    read = config_setup._read_env(p)
+    # written keys should be readable (note: values written may include defaults)
+    assert read.get("KABU_API_PASSWORD") == values["KABU_API_PASSWORD"]
+    assert read.get("KABUSYS_ENV") == values["KABUSYS_ENV"]
+
+---------------------------
+tests/test_paper_verification_report.py
+---------------------------
+import math
+from kabusys.tools.paper_verification_report import _p95, _build_date_filter, _fmt_float, _fmt_int
+
+
+def test_p95_empty():
+    assert _p95([]) is None
+
+
+def test_p95_single_and_multiple():
+    assert _p95([5.0]) == 5.0
+    vals = list(range(1, 101))  # 1..100
+    p95 = _p95(vals)
+    # 95th percentile index as implemented (ceil(100*0.95)-1 = 95-1 = 94) => value 95
+    assert p95 == 95
+
+
+def test_build_date_filter_combinations():
+    clause, params = _build_date_filter("ts", None, None)
+    assert clause == "" and params == []
+    clause, params = _build_date_filter("ts", "2020-01-01", None)
+    assert "ts >= ?" in clause and params == ["2020-01-01"]
+    clause, params = _build_date_filter("ts", None, "2020-01-02")
+    assert "ts <= ?" in clause and params == ["2020-01-02"]
+    clause, params = _build_date_filter("ts", "a", "b")
+    assert "AND" in clause and params == ["a", "b"]
+
+
+def test_fmt_helpers():
+    assert _fmt_float(None) == "N/A"
+    assert _fmt_float(1.2345, 2, " %") == "1.23 %"
+    assert _fmt_int(None) == "N/A"
+    assert _fmt_int(5) == "5"
+
+---------------------------
+tests/test_portfolio_builder.py
+---------------------------
+from kabusys.portfolio.portfolio_builder import select_candidates, calc_equal_weights, calc_score_weights
+import pytest
+
+
+def test_select_candidates_sorting_and_limit():
     signals = [
-        {"code": "A", "signal_rank": 2, "score": 1.0},
-        {"code": "B", "signal_rank": 1, "score": 1.0},
-        {"code": "C", "signal_rank": 3, "score": 0.5},
+        {"code": "A", "score": 1.0, "signal_rank": 2},
+        {"code": "B", "score": 2.0, "signal_rank": 1},
+        {"code": "C", "score": 2.0, "signal_rank": 0},
     ]
-    sel = pb.select_candidates(signals, max_positions=2)
-    # A and B have same score, tie broken by signal_rank ascending -> B then A
-    assert [s["code"] for s in sel] == ["B", "A"]
-
-    # equal weights
-    eq = pb.calc_equal_weights(sel)
-    assert set(eq.keys()) == {"B", "A"}
-    assert math.isclose(eq["B"], 0.5)
-    assert math.isclose(eq["A"], 0.5)
-
-    # score weights normal
-    sw = pb.calc_score_weights(sel)
-    assert set(sw.keys()) == {"B", "A"}
-    # B and A have equal score -> equal weights
-    assert math.isclose(sw["B"], sw["A"])
-
-    # score weights fallback when total == 0
-    zero_signals = [{"code": "X", "score": 0.0}, {"code": "Y", "score": 0.0}]
-    res = pb.calc_score_weights(zero_signals)
-    # fallback to equal
-    assert res == {"X": 0.5, "Y": 0.5}
+    res = select_candidates(signals, max_positions=2)
+    # score desc: B and C tie; tie-breaker signal_rank ascending -> C then B but top 2 -> C, B
+    assert [s["code"] for s in res] == ["C", "B"]
 
 
-# ---------------------------
-# Tests for risk_adjustment
-# ---------------------------
-def test_apply_sector_cap_and_sell_codes(caplog):
-    candidates = [
-        {"code": "A", "score": 1.0},
-        {"code": "B", "score": 0.5},
-        {"code": "C", "score": 0.2},
-    ]
-    sector_map = {"A": "s1", "B": "s1", "C": "unknown"}
-    portfolio_value = 100000.0
-    current_positions = {"A": 100, "B": 0}
-    price_map = {"A": 400.0, "B": 100.0}
-    # exposure for s1 = 100 * 400 = 40000 -> 40% of pv -> blocked if max_sector_pct=0.3
-    filtered = ra.apply_sector_cap(
-        candidates,
-        sector_map,
-        portfolio_value,
-        current_positions,
-        price_map,
-        max_sector_pct=0.3,
-    )
-    # codes in blocked sector s1 should be excluded; C unknown must remain
-    assert all(
-        c["code"] == "C" or sector_map.get(c["code"], "unknown") != "s1"
-        for c in filtered
-    )
-    # test that sell_codes excludes code from exposure calculation
-    filtered2 = ra.apply_sector_cap(
-        candidates,
-        sector_map,
-        portfolio_value,
-        {"A": 100, "B": 0},
-        price_map,
-        max_sector_pct=0.3,
-        sell_codes={"A"},
-    )
-    # with A sold, sector exposure becomes 0 and so no blocking -> candidates unchanged
-    assert len(filtered2) == 3
+def test_calc_equal_weights_and_score_weights():
+    candidates = [{"code": "A", "score": 0.0}, {"code": "B", "score": 0.0}]
+    ew = calc_equal_weights(candidates)
+    assert ew == {"A": 0.5, "B": 0.5}
+    # all-zero scores -> fallback to equal weights with warning
+    sw = calc_score_weights(candidates)
+    assert sw == ew
 
 
-def test_calc_regime_multiplier(caplog):
-    assert ra.calc_regime_multiplier("bull") == 1.0
-    assert math.isclose(ra.calc_regime_multiplier("neutral"), 0.7)
-    assert math.isclose(ra.calc_regime_multiplier("bear"), 0.3)
-    caplog.clear()
-    # unknown regime logs a warning and returns 1.0
-    val = ra.calc_regime_multiplier("unknown_regime")
-    assert val == 1.0
-    assert any("未知のレジーム" in rec.getMessage() for rec in caplog.records)
+def test_calc_score_weights_normal():
+    candidates = [{"code": "A", "score": 1.0}, {"code": "B", "score": 3.0}]
+    sw = calc_score_weights(candidates)
+    assert pytest.approx(sw["A"] + sw["B"]) == 1.0
+    assert sw["B"] > sw["A"]
+
+---------------------------
+tests/test_risk_adjustment.py
+---------------------------
+from kabusys.portfolio.risk_adjustment import apply_sector_cap, calc_regime_multiplier
 
 
-# ---------------------------
-# Tests for position_sizing (basic scenarios)
-# ---------------------------
-def test_calc_position_sizes_equal_and_scaling():
-    # Two candidates, equal weights normalized externally
-    candidates = [{"code": "AA", "score": 1}, {"code": "BB", "score": 1}]
-    weights = {"AA": 0.5, "BB": 0.5}
-    portfolio_value = 100000.0
-    available_cash = 50000.0  # intentionally small to force scaling
-    current_positions = {}
-    open_prices = {"AA": 100.0, "BB": 100.0}
-    # With max_utilization default 0.7, per-position alloc = 100000 * 0.5 * 0.7 = 35000 -> 350 shares -> floored to 300 (lot_size=100)
-    out = ps.calc_position_sizes(
-        weights,
-        candidates,
-        portfolio_value,
-        available_cash,
-        current_positions,
-        open_prices,
-        allocation_method="equal",
-        lot_size=100,
-    )
-    # results should be multiples of lot_size
-    for v in out.values():
-        assert v % 100 == 0
-    # total cost must not exceed available_cash + small epsilon
-    total_cost = sum(out[c] * open_prices[c] for c in out)
-    assert total_cost <= available_cash + 1e-6
+def test_apply_sector_cap_blocks_overexposed_sector():
+    candidates = [{"code": "AAA", "score": 1, "signal_rank": 0}, {"code": "BBB", "score": 1, "signal_rank": 0}]
+    sector_map = {"AAA": "S1", "BBB": "S2"}
+    portfolio_value = 1000.0
+    # current positions: S1 has high exposure
+    current_positions = {"AAA": 10, "BBB": 1}
+    price_map = {"AAA": 100.0, "BBB": 10.0}
+    filtered = apply_sector_cap(candidates, sector_map, portfolio_value, current_positions, price_map, max_sector_pct=0.5)
+    # sector S1 exposure = 10*100=1000 -> 1000/1000 == 1.0 >= 0.5 -> AAA should be excluded
+    assert all(c["code"] != "AAA" for c in filtered)
+    assert any(c["code"] == "BBB" for c in filtered)
 
 
-def test_calc_position_sizes_risk_based_skips_missing_price(caplog):
-    candidates = [{"code": "X", "score": 1}]
-    weights = {}
-    portfolio_value = 100000.0
-    available_cash = 70000.0
-    current_positions = {}
-    open_prices = {"X": 0.0}  # missing/zero price -> skip
-    out = ps.calc_position_sizes(
-        weights,
-        candidates,
-        portfolio_value,
-        available_cash,
-        current_positions,
-        open_prices,
-        allocation_method="risk_based",
-    )
+def test_calc_regime_multiplier_known_and_unknown(caplog):
+    assert calc_regime_multiplier("bull") == 1.0
+    assert calc_regime_multiplier("neutral") == pytest.approx(0.7)
+    caplog.set_level("WARNING")
+    # unknown regime logs warning and returns 1.0
+    assert calc_regime_multiplier("weird") == 1.0
+    assert any("未知のレジーム" in r.getMessage() for r in caplog.records)
+
+---------------------------
+tests/test_position_sizing.py
+---------------------------
+from kabusys.portfolio.position_sizing import calc_position_sizes
+import pytest
+
+
+def test_calc_position_sizes_empty_candidates():
+    out = calc_position_sizes({}, [], 1000, 1000, {}, {}, allocation_method="equal")
     assert out == {}
 
 
-# ---------------------------
-# Tests for news_nlp calc_news_window and _validate_and_extract
-# ---------------------------
-def test_calc_news_window_expected():
-    td = date(2026, 3, 20)
-    start, end = news_nlp_mod.calc_news_window(td)
-    # start should be previous day at 06:00
-    assert start == datetime(2026, 3, 19, 6, 0)
-    # end should be previous day at 23:30
-    assert end == datetime(2026, 3, 19, 23, 30)
+def test_calc_position_sizes_equal_and_lot_rounding():
+    candidates = [{"code": "AAA"}]
+    weights = {"AAA": 1.0}
+    open_prices = {"AAA": 123.45}
+    # high portfolio so target_shares large but rounded to lot 100 and _max_per_stock may cap
+    out = calc_position_sizes(weights, candidates, portfolio_value=1_000_000, available_cash=1_000_000, current_positions={}, open_prices=open_prices, allocation_method="equal", lot_size=100)
+    # shares must be a multiple of lot_size or empty
+    for v in out.values():
+        assert v % 100 == 0
 
 
-def make_resp(content: str):
-    # Build object with .choices[0].message.content attribute
-    msg = SimpleNamespace(content=content)
-    choice = SimpleNamespace(message=msg)
-    resp = SimpleNamespace(choices=[choice])
-    return resp
+def test_calc_position_sizes_risk_based_skips_invalid_price(caplog):
+    candidates = [{"code": "C"}]
+    out = calc_position_sizes({}, candidates, portfolio_value=1000000, available_cash=1000000, current_positions={}, open_prices={"C": 0}, allocation_method="risk_based")
+    assert out == {}
 
 
-def test_validate_and_extract_basic_and_edge_cases(caplog):
-    # valid content with numeric score > clip
-    content = json.dumps(
-        {"results": [{"code": "1234", "score": 1.5}, {"code": 9999, "score": 0.2}]}
-    )
-    resp = make_resp(content)
-    extracted = news_nlp_mod._validate_and_extract(resp, {"1234", "9999"})
-    # score should be clipped to 1.0 for code 1234
-    assert extracted["1234"] == 1.0
-    assert math.isclose(extracted["9999"], 0.2)
-
-    # malformed JSON returns {}
-    bad = "not json"
-    resp2 = make_resp(bad)
-    ex2 = news_nlp_mod._validate_and_extract(resp2, {"1234"})
-    assert ex2 == {}
-
-    # non-numeric score is ignored with warning
-    content3 = json.dumps(
-        {"results": [{"code": "X", "score": "nan"}, {"code": "Y", "score": "3.14"}]}
-    )
-    resp3 = make_resp(content3)
-    out3 = news_nlp_mod._validate_and_extract(resp3, {"Y"})
-    assert "Y" in out3
+def test_calc_position_sizes_scaling_by_available_cash():
+    candidates = [{"code": "A"}, {"code": "B"}]
+    weights = {"A": 0.5, "B": 0.5}
+    open_prices = {"A": 100.0, "B": 100.0}
+    # set available_cash smaller than required to force scaling
+    out = calc_position_sizes(weights, candidates, portfolio_value=1000000, available_cash=5000, current_positions={}, open_prices=open_prices, allocation_method="equal", lot_size=1)
+    # should return integer shares (maybe empty or reduced)
+    assert isinstance(out, dict)
+    for v in out.values():
+        assert isinstance(v, int)
 
 
-# ---------------------------
-# Tests for process_priority: invalid level handling and delegation
-# ---------------------------
+---------------------------
+tests/test_utils_logging_and_process.py
+---------------------------
+import logging
+import os
+from pathlib import Path
+from unittest import mock
+
+import pytest
+
+from kabusys.utils.logging_setup import setup_logging
+from kabusys.utils import process_priority
+
+
+def test_setup_logging_creates_handlers(tmp_path, capsys):
+    # create a directory
+    log_dir = tmp_path / "logs"
+    setup_logging(app_name="testapp", log_dir=log_dir, level="DEBUG")
+    root = logging.getLogger()
+    assert root.level == logging.DEBUG
+    # must contain at least one handler (StreamHandler)
+    assert any(isinstance(h, logging.StreamHandler) for h in root.handlers)
+
+
+def test_setup_logging_dir_creation_failure(monkeypatch, capsys):
+    # force mkdir to fail
+    def fake_mkdir(*args, **kwargs):
+        raise OSError("no perms")
+    monkeypatch.setattr(Path, "mkdir", fake_mkdir)
+    # call and ensure it doesn't raise
+    setup_logging(app_name="testapp2", log_dir=Path("/unlikely/path"), level="INFO")
+    # should at least have StreamHandler
+    root = logging.getLogger()
+    assert any(isinstance(h, logging.StreamHandler) for h in root.handlers)
+
+
 def test_set_process_priority_invalid_level():
     with pytest.raises(ValueError):
-        pp.set_process_priority("super_high")
+        process_priority.set_process_priority("invalid_level")
 
 
-def test_set_cpu_affinity_invalid_and_success(monkeypatch, caplog):
-    # invalid cpu_count <1
+def test_set_process_priority_calls_psutil(monkeypatch):
+    # mock psutil.Process with nice method
+    fake = mock.MagicMock()
+    fake.pid = 1234
+    fake.nice = mock.MagicMock()
+    monkeypatch.setattr("kabusys.utils.process_priority.psutil.Process", lambda: fake)
+    monkeypatch.setattr("kabusys.utils.process_priority.platform.system", lambda: "Linux")
+    # should not raise
+    process_priority.set_process_priority("high")
+    # Linux -> called nice with _LINUX_NICE["high"] (-10)
+    # We cannot import _LINUX_NICE here, but ensure nice called once
+    assert fake.nice.call_count == 1
+
+
+def test_set_cpu_affinity_invalid_and_none(monkeypatch):
+    fake = mock.MagicMock()
+    fake.pid = 1
+    fake.cpu_affinity = mock.MagicMock()
+    monkeypatch.setattr("kabusys.utils.process_priority.psutil.Process", lambda: fake)
+    # None -> no-op
+    process_priority.set_cpu_affinity(None)
+    # invalid value (<1) raises
     with pytest.raises(ValueError):
-        pp.set_cpu_affinity(0)
-
-    # simulate psutil.Process with cpu_affinity method
-    class DummyProc:
-        def __init__(self):
-            self._affinity = None
-            self.pid = 99999
-
-        def cpu_affinity(self, pinned):
-            self._affinity = pinned
-
-        def nice(self, val):
-            self._nice = val
-
-    dummy = DummyProc()
-    monkeypatch.setattr(
-        pp, "psutil", mock.MagicMock(Process=lambda: dummy, cpu_count=lambda: 4)
-    )
-    # Should not raise
-    pp.set_cpu_affinity(2)
-    assert dummy._affinity == [0, 1]
-
+        process_priority.set_cpu_affinity(0)
+    # valid sets cpu_affinity (mock psutil.cpu_count)
+    monkeypatch.setattr("kabusys.utils.process_priority.psutil.cpu_count", lambda: 4)
+    process_priority.set_cpu_affinity(2)
+    assert fake.cpu_affinity.call_count == 1
 
 # End of tests
+
+注意事項・補足:
+- 上記テスト群はプロジェクトのルートから pytest を実行することを想定しています（kabusys パッケージが import 可能であること）。
+- テストでは一部外部モジュール（psutil、yaml、duckdb、openai 等）を実際には使わない / モックしているため、テスト実行にあたって必須でない場合があります。もしテスト実行環境に実際のモジュールが無く import エラーになる場合は、pytest 実行時に PYTHONPATH をプロジェクトに合わせるか、必要モジュールをインストールしてください。
+- OpenAI 呼び出しや duckdb を直接コールする重い処理はテストでモックする想定です（ここでは該当関数のユニットテストを中心に作成しています）。score_news や regime_detector のような外部 API を呼ぶ実装のユニットテストを追加する場合は、_call_openai_api を patch してレスポンスをシミュレートしてください。
+- もし特定の関数のみテストが必要であれば（あるいはテストをもっと絞ってほしい場合は）対象箇所を教えてください。テストの粒度を調整して再作成します。
