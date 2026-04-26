@@ -100,7 +100,10 @@ def run_bootstrap(
     loaded_keys = _loaded_keys(conn)
 
     for endpoint in target_endpoints:
-        loader = _LOADER_MAP[endpoint]
+        loader = _LOADER_MAP.get(endpoint)
+        if loader is None:
+            logger.warning("未知のエンドポイントをスキップ: %s", endpoint)
+            continue
         ep_dir = _endpoint_to_dir(endpoint, raw_dir)
         rows_ep = 0
 
@@ -114,6 +117,9 @@ def run_bootstrap(
 
         for f in files:
             file_key = f.get("key", "")
+            if not file_key:
+                logger.warning("file_key が空のエントリをスキップ: %s", f)
+                continue
             file_name = file_key.split("/")[-1] if "/" in file_key else file_key
             result.total_files += 1
 
