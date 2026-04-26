@@ -141,6 +141,10 @@ class Settings:
     def jquants_refresh_token(self) -> str:
         return _require("JQUANTS_REFRESH_TOKEN")
 
+    @property
+    def jquants_bulk_api_key(self) -> str:
+        return _require("JQUANTS_BULK_API_KEY")
+
     # --- kabuステーション API ---
     @property
     def kabu_api_password(self) -> str:
