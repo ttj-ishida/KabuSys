@@ -8,7 +8,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
 
 # 必須ジョブ一覧（いずれかが failed → BLOCKED）
@@ -165,3 +166,78 @@ def build_report(
         next_day_summary=next_day_summary,
         warnings=warnings,
     )
+
+
+# ---------------------------------------------------------------------------
+# フォーマッター
+# ---------------------------------------------------------------------------
+
+_STATUS_LABEL: dict[str, str] = {
+    "READY": "READY",
+    "READY_WITH_WARNINGS": "READY_WITH_WARNINGS",
+    "BLOCKED": "BLOCKED",
+}
+
+_JOB_STATUS_LABEL: dict[str, str] = {
+    "success": "SUCCESS",
+    "warning": "WARNING",
+    "failed": "FAILED",
+    "skipped": "SKIPPED",
+}
+
+
+def format_cli_summary(report: NightBatchReport) -> str:
+    """CLI 表示用サマリ文字列を返す。"""
+    sep = "=" * 52
+    thin = "-" * 52
+    lines = [
+        f"\n{sep}",
+        f"  Night Batch Report  {report.run_date}",
+        f"  Status : {_STATUS_LABEL.get(report.status, report.status)}",
+        f"  Target : {report.target_date}（翌営業日）",
+        f"{sep}",
+        "  Job Status:",
+    ]
+    for j in report.job_results:
+        label = _JOB_STATUS_LABEL.get(j.status, j.status.upper())
+        lines.append(f"    {j.job_name:<32} {label}  ({j.duration_sec:.1f}s)")
+    lines.append(thin)
+    uc = report.update_counts
+    lines += [
+        "  Update Counts:",
+        f"    prices_daily : {uc.prices_daily:>6}    features     : {uc.features:>6}",
+        f"    news_articles: {uc.news_articles:>6}    ai_scores    : {uc.ai_scores:>6}",
+        f"    fundamentals : {uc.fundamentals:>6}    signals      : {uc.signals:>6}",
+        f"                              signal_queue : {uc.signal_queue:>6}",
+    ]
+    lines.append(thin)
+    nd = report.next_day_summary
+    lines += [
+        f"  Next Trading Day ({report.target_date}):",
+        f"    BUY: {nd.buy_count}  SELL: {nd.sell_count}  "
+        f"Symbols: {nd.target_symbols}  Orders: {nd.expected_orders}",
+    ]
+    if report.warnings:
+        lines.append(thin)
+        lines.append("  Warnings:")
+        for w in report.warnings:
+            lines.append(f"    [!] {w}")
+    lines.append(f"{sep}\n")
+    return "\n".join(lines)
+
+
+def _to_serializable(obj: object) -> object:
+    """dataclass → dict 変換後の datetime を ISO 文字列に変換する。"""
+    if isinstance(obj, dict):
+        return {k: _to_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_serializable(i) for i in obj]
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    return obj
+
+
+def format_json(report: NightBatchReport) -> str:
+    """全指標を含む JSON 文字列を返す。"""
+    data = _to_serializable(asdict(report))
+    return json.dumps(data, ensure_ascii=False, indent=2)

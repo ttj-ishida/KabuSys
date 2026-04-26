@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json as json_mod
 from datetime import date, datetime, timedelta, timezone
 
 from kabusys.operations.night_batch_report import (
@@ -13,6 +14,8 @@ from kabusys.operations.night_batch_report import (
     _determine_status,
     _generate_warnings,
     build_report,
+    format_cli_summary,
+    format_json,
 )
 
 
@@ -291,3 +294,101 @@ def test_build_report_no_warnings_on_healthy():
         target_date=date(2026, 4, 27),
     )
     assert report.warnings == []
+
+
+# ---------------------------------------------------------------------------
+# フォーマッター用ヘルパー
+# ---------------------------------------------------------------------------
+
+
+def _make_report(status: str = "READY") -> NightBatchReport:
+    if status == "BLOCKED":
+        jobs = [_make_job(name="data_update_job", status="failed")]
+    elif status == "READY_WITH_WARNINGS":
+        jobs = [_make_job(name="ai_analysis_job", status="warning")]
+    else:
+        jobs = _all_success_jobs()
+    return build_report(
+        jobs,
+        _make_counts(),
+        _make_next_day(),
+        run_date=date(2026, 4, 26),
+        target_date=date(2026, 4, 27),
+    )
+
+
+# ---------------------------------------------------------------------------
+# format_cli_summary
+# ---------------------------------------------------------------------------
+
+
+def test_format_cli_summary_contains_status():
+    """CLI サマリに最終判定ステータスが含まれる。"""
+    report = _make_report("READY")
+    summary = format_cli_summary(report)
+    assert "READY" in summary
+
+
+def test_format_cli_summary_contains_run_date():
+    """CLI サマリに実行日が含まれる。"""
+    report = _make_report()
+    summary = format_cli_summary(report)
+    assert "2026-04-26" in summary
+
+
+def test_format_cli_summary_contains_signal_queue():
+    """CLI サマリに signal_queue 件数が含まれる。"""
+    report = _make_report()
+    summary = format_cli_summary(report)
+    assert "15" in summary  # signal_queue=15
+
+
+def test_format_cli_summary_blocked_shows_blocked():
+    """BLOCKED のとき CLI サマリに BLOCKED が含まれる。"""
+    report = _make_report("BLOCKED")
+    summary = format_cli_summary(report)
+    assert "BLOCKED" in summary
+
+
+# ---------------------------------------------------------------------------
+# format_json
+# ---------------------------------------------------------------------------
+
+
+def test_format_json_is_valid_json():
+    """format_json() が有効な JSON 文字列を返す。"""
+    report = _make_report()
+    raw = format_json(report)
+    data = json_mod.loads(raw)
+    assert isinstance(data, dict)
+
+
+def test_format_json_contains_expected_keys():
+    """JSON に必須キーが含まれる。"""
+    report = _make_report()
+    data = json_mod.loads(format_json(report))
+    for key in [
+        "run_date",
+        "target_date",
+        "generated_at",
+        "status",
+        "job_results",
+        "update_counts",
+        "next_day_summary",
+        "warnings",
+    ]:
+        assert key in data, f"Missing key: {key}"
+
+
+def test_format_json_status_roundtrip():
+    """JSON から status が正しく復元できる。"""
+    report = _make_report("BLOCKED")
+    data = json_mod.loads(format_json(report))
+    assert data["status"] == "BLOCKED"
+
+
+def test_format_json_datetime_serialized_as_string():
+    """JobRunResult の started_at が JSON で文字列にシリアライズされる。"""
+    report = _make_report()
+    data = json_mod.loads(format_json(report))
+    assert isinstance(data["job_results"][0]["started_at"], str)
