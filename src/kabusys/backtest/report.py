@@ -72,7 +72,7 @@ class TradeSection:
     payoff_ratio: float
     profit_factor: float
     avg_profit: float
-    avg_loss: float
+    avg_loss: float  # 負値（損失トレードの平均 realized_pnl）
     avg_holding_days: float
 
 

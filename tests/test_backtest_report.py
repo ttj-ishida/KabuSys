@@ -59,6 +59,27 @@ def _make_result(history, trades):
 # ---------------------------------------------------------------------------
 
 
+def test_sharpe_uses_population_variance():
+    """Sharpe は母分散（n 分母）で計算されることを固定系列で検証する。
+
+    系列: [100, 110, 100]
+    日次リターン: [+0.1, -1/11]
+    mean = (0.1 - 1/11) / 2
+    母分散 = Σ(r - mean)^2 / 2
+    """
+    import math
+    from kabusys.backtest.metrics import _calc_sharpe
+
+    history = _make_history([100.0, 110.0, 100.0])
+    returns = [0.1, -1.0 / 11.0]
+    n = len(returns)
+    mean_r = sum(returns) / n
+    # 母分散（n 分母）
+    variance = sum((r - mean_r) ** 2 for r in returns) / n
+    expected_sharpe = (mean_r / math.sqrt(variance)) * math.sqrt(252)
+    assert abs(_calc_sharpe(history) - expected_sharpe) < 1e-9
+
+
 def test_annual_volatility_flat_returns():
     """リターンが常に0のとき年率ボラティリティ = 0.0。"""
     from kabusys.backtest.metrics import calc_metrics
