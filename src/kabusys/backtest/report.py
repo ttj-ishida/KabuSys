@@ -505,9 +505,9 @@ def _generate_warnings(result: "BacktestResult") -> list[str]:
             f"総トレード数が少ないです（{m.total_trades}件）。統計的信頼性が低い可能性があります。"
         )
 
-    # 検証期間が短い
+    # 検証期間が短い（入力順序に依存しないよう min/max で期間を算出）
     if len(history) >= 2:
-        days = (history[-1].date - history[0].date).days
+        days = (max(s.date for s in history) - min(s.date for s in history)).days
         if days < 180:
             warnings.append(
                 f"検証期間が短いです（{days}日）。180日以上の検証を推奨します。"
