@@ -641,3 +641,56 @@ def test_sharpe_variance_zero_returns_zero():
 
     history = _make_history([1_000_000, 1_100_000])
     assert _calc_sharpe(history) == 0.0
+
+
+def test_sharpe_zero_prev_value_no_zerodivision():
+    """前日ポートフォリオ値が 0 のスナップショットを含む場合にゼロ除算が発生しない。"""
+    from kabusys.backtest.metrics import _calc_sharpe
+    from datetime import date
+
+    history = [
+        DailySnapshot(
+            date=date(2024, 1, 1), cash=0.0, positions={}, portfolio_value=0.0
+        ),
+        DailySnapshot(
+            date=date(2024, 1, 2), cash=0.0, positions={}, portfolio_value=1_000_000.0
+        ),
+        DailySnapshot(
+            date=date(2024, 1, 3), cash=0.0, positions={}, portfolio_value=1_100_000.0
+        ),
+    ]
+    result = _calc_sharpe(history)
+    assert isinstance(result, float)
+
+
+def test_max_drawdown_reverse_order_history():
+    """逆順の history を calc_metrics に渡しても MDD が正しく計算される。"""
+    from kabusys.backtest.metrics import calc_metrics
+
+    # 昇順: [1_000_000, 900_000, 1_100_000] → MDD = (1_000_000 - 900_000) / 1_000_000 = 10%
+    history_fwd = _make_history([1_000_000.0, 900_000.0, 1_100_000.0])
+    history_rev = list(reversed(history_fwd))
+    m_fwd = calc_metrics(history_fwd, [])
+    m_rev = calc_metrics(history_rev, [])
+    assert abs(m_fwd.max_drawdown - m_rev.max_drawdown) < 1e-9
+    assert abs(m_fwd.max_drawdown - 0.1) < 1e-9
+
+
+def test_save_report_equity_csv_is_date_sorted(tmp_path):
+    """daily_equity.csv が日付昇順で出力される。"""
+    from kabusys.backtest.report import build_report, save_report
+    import csv as csv_mod
+
+    history = list(reversed(_make_history([1_000_000.0, 1_050_000.0, 1_100_000.0])))
+    result = _make_result(history, [])
+    report = build_report(
+        result,
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 1, 3),
+        initial_cash=1_000_000.0,
+    )
+    run_dir = save_report(report, result, output_dir=tmp_path)
+    with open(run_dir / "daily_equity.csv", encoding="utf-8") as f:
+        rows = list(csv_mod.DictReader(f))
+    dates = [r["date"] for r in rows]
+    assert dates == sorted(dates)

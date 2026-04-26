@@ -40,22 +40,23 @@ def calc_metrics(
     """DailySnapshot と TradeRecord からバックテスト評価指標を計算する。
 
     Args:
-        history: 日次ポートフォリオ履歴（portfolio_value が必要）。
+        history: 日次ポートフォリオ履歴（portfolio_value が必要）。入力順序は問わない。
         trades:  全約定履歴。SELL の realized_pnl を使用。
 
     Returns:
         BacktestMetrics インスタンス。
     """
-    cagr = _calc_cagr(history)
-    max_dd = _calc_max_drawdown(history)
+    history_sorted = sorted(history, key=lambda s: s.date)
+    cagr = _calc_cagr(history_sorted)
+    max_dd = _calc_max_drawdown(history_sorted)
     return BacktestMetrics(
         cagr=cagr,
-        sharpe_ratio=_calc_sharpe(history),
+        sharpe_ratio=_calc_sharpe(history_sorted),
         max_drawdown=max_dd,
         win_rate=_calc_win_rate(trades),
         payoff_ratio=_calc_payoff_ratio(trades),
         total_trades=sum(1 for t in trades if t.side == "sell"),
-        annual_volatility=_calc_annual_volatility(history),
+        annual_volatility=_calc_annual_volatility(history_sorted),
         calmar_ratio=_calc_calmar_ratio(cagr, max_dd),
         profit_factor=_calc_profit_factor(trades),
         avg_holding_days=_calc_avg_holding_days(trades),
@@ -74,7 +75,6 @@ def _calc_cagr(history: list["DailySnapshot"]) -> float:
     """
     if len(history) < 2:
         return 0.0
-    history = sorted(history, key=lambda s: s.date)
     initial = history[0].portfolio_value
     final = history[-1].portfolio_value
     if initial <= 0:
@@ -95,7 +95,6 @@ def _calc_sharpe(history: list["DailySnapshot"]) -> float:
     """
     if len(history) < 2:
         return 0.0
-    history = sorted(history, key=lambda s: s.date)
     values = [s.portfolio_value for s in history]
     returns = [
         (values[i] - values[i - 1]) / values[i - 1]
@@ -159,7 +158,6 @@ def _calc_annual_volatility(history: list["DailySnapshot"]) -> float:
     """
     if len(history) < 2:
         return 0.0
-    history = sorted(history, key=lambda s: s.date)
     values = [s.portfolio_value for s in history]
     returns = [
         (values[i] - values[i - 1]) / values[i - 1]

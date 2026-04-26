@@ -426,7 +426,9 @@ def save_report(
         writer.writerow(
             ["date", "code", "side", "shares", "price", "commission", "realized_pnl"]
         )
-        for t in result.trades:
+        for t in sorted(
+            result.trades, key=lambda t: (t.date, 0 if t.side == "buy" else 1)
+        ):
             writer.writerow(
                 [
                     t.date.isoformat(),
@@ -444,7 +446,7 @@ def save_report(
     with equity_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["date", "cash", "portfolio_value"])
-        for s in result.history:
+        for s in sorted(result.history, key=lambda s: s.date):
             writer.writerow([s.date.isoformat(), s.cash, s.portfolio_value])
 
     return run_dir
