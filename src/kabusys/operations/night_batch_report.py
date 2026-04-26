@@ -255,12 +255,14 @@ def format_cli_summary(report: NightBatchReport) -> str:
 
 
 def _to_serializable(obj: object) -> object:
-    """dataclass → dict 変換後の datetime を ISO 文字列に変換する。"""
+    """dataclass → dict 変換後の datetime/date を ISO 文字列に変換する。"""
     if isinstance(obj, dict):
         return {k: _to_serializable(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_to_serializable(i) for i in obj]
     if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, date):
         return obj.isoformat()
     return obj
 

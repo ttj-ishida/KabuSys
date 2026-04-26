@@ -446,6 +446,15 @@ def test_format_json_datetime_serialized_as_string():
     assert isinstance(data["job_results"][0]["started_at"], str)
 
 
+def test_format_json_date_serialized_as_string():
+    """_to_serializable が date 型を ISO 文字列に変換する。"""
+    from datetime import date as date_type
+    from kabusys.operations.night_batch_report import _to_serializable
+
+    d = date_type(2026, 4, 27)
+    assert _to_serializable(d) == "2026-04-27"
+
+
 # ---------------------------------------------------------------------------
 # format_markdown
 # ---------------------------------------------------------------------------
@@ -555,7 +564,7 @@ def test_save_report_warnings_json_is_list(tmp_path):
 
 
 def test_save_report_default_output_dir(tmp_path, monkeypatch):
-    """output_dir 省略時は artifacts/operations/night_batch/ 以下に保存される。"""
+    """output_dir 省略時は artifacts/night_batch/ 以下に保存される。"""
     monkeypatch.chdir(tmp_path)
     report = _make_report()
     run_dir = save_report(report)
