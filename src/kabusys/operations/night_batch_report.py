@@ -93,10 +93,10 @@ def _determine_status(
 
     それ以外: READY
     """
-    failed_mandatory = [
-        j for j in job_results if j.job_name in MANDATORY_JOBS and j.status == "failed"
-    ]
-    if failed_mandatory or update_counts.signal_queue == 0:
+    has_failed_mandatory = any(
+        j.job_name in MANDATORY_JOBS and j.status == "failed" for j in job_results
+    )
+    if has_failed_mandatory or update_counts.signal_queue == 0:
         return STATUS_BLOCKED
 
     has_warning_status = any(j.status == "warning" for j in job_results)
