@@ -1,4 +1,5 @@
 """Bootstrap runner: orchestrates J-Quants Bulk API download and ingestion."""
+
 from __future__ import annotations
 
 import argparse
@@ -83,7 +84,15 @@ def _record(
         "ON CONFLICT (file_key) DO UPDATE SET "
         "status=EXCLUDED.status, row_count=EXCLUDED.row_count, "
         "error_msg=EXCLUDED.error_msg, loaded_at=EXCLUDED.loaded_at",
-        [file_key, endpoint, file_name, status, row_count, error_msg, datetime.now(timezone.utc)],
+        [
+            file_key,
+            endpoint,
+            file_name,
+            status,
+            row_count,
+            error_msg,
+            datetime.now(timezone.utc),
+        ],
     )
 
 
@@ -138,7 +147,14 @@ def run_bootstrap(
                     download_file(presigned, dest)
                 except Exception as exc:
                     logger.error("ダウンロード失敗 (%s): %s", file_key, exc)
-                    _record(conn, file_key, endpoint, file_name, "failed", error_msg=str(exc))
+                    _record(
+                        conn,
+                        file_key,
+                        endpoint,
+                        file_name,
+                        "failed",
+                        error_msg=str(exc),
+                    )
                     result.failed_files += 1
                     continue
 
@@ -149,7 +165,9 @@ def run_bootstrap(
                 result.loaded_files += 1
             except Exception as exc:
                 logger.error("ロード失敗 (%s): %s", file_key, exc)
-                _record(conn, file_key, endpoint, file_name, "failed", error_msg=str(exc))
+                _record(
+                    conn, file_key, endpoint, file_name, "failed", error_msg=str(exc)
+                )
                 result.failed_files += 1
 
         result.rows_by_endpoint[endpoint] = rows_ep
@@ -171,10 +189,16 @@ def main(argv: list[str] | None = None) -> int:
     from kabusys.config import Settings
     from kabusys.data.schema import init_schema
 
-    parser = argparse.ArgumentParser(description="J-Quants Bootstrap: 初回一括データ投入")
-    parser.add_argument("--dry-run", action="store_true", help="ダウンロードせず件数確認のみ")
+    parser = argparse.ArgumentParser(
+        description="J-Quants Bootstrap: 初回一括データ投入"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="ダウンロードせず件数確認のみ"
+    )
     parser.add_argument("--endpoint", metavar="EP", help="特定エンドポイントのみ処理")
-    parser.add_argument("--raw-dir", default="data/bootstrap/raw", help="ローカルキャッシュディレクトリ")
+    parser.add_argument(
+        "--raw-dir", default="data/bootstrap/raw", help="ローカルキャッシュディレクトリ"
+    )
     args = parser.parse_args(argv)
 
     settings = Settings()

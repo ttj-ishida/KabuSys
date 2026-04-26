@@ -200,7 +200,9 @@ def load_financials(conn: duckdb.DuckDBPyConnection, csv_path: Path) -> int:
         eps = _to_float(row.get("EPS"))
         roe = _to_float(row.get("ROE"))
 
-        buf_raw.append((code, report_date, period_type, revenue, op, np_, eps, roe, fetched_at))
+        buf_raw.append(
+            (code, report_date, period_type, revenue, op, np_, eps, roe, fetched_at)
+        )
         buf_proc.append((code, report_date, period_type, revenue, op, np_, eps, roe))
 
         if len(buf_raw) >= _CHUNK:
@@ -286,7 +288,9 @@ def load_dividend(conn: duckdb.DuckDBPyConnection, csv_path: Path) -> int:
         rec_date = row.get("RecDate", "").strip() or None
         pay_date = row.get("PayDate", "").strip() or None
         div_rate = _to_float(row.get("DivRate"))
-        buf.append((code, pub_date, ref_no, ex_date, rec_date, pay_date, div_rate, fetched_at))
+        buf.append(
+            (code, pub_date, ref_no, ex_date, rec_date, pay_date, div_rate, fetched_at)
+        )
         if len(buf) >= _CHUNK:
             _flush()
 

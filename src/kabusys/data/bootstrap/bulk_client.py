@@ -62,7 +62,9 @@ def get_presigned_url(file_key: str, api_key: str) -> str:
     try:
         return data["url"]
     except KeyError as exc:
-        raise BulkApiError(f"get_presigned_url: response missing 'url' key: {data}") from exc
+        raise BulkApiError(
+            f"get_presigned_url: response missing 'url' key: {data}"
+        ) from exc
 
 
 def download_file(presigned_url: str, dest: Path) -> Path:
@@ -76,8 +78,10 @@ def download_file(presigned_url: str, dest: Path) -> Path:
             return dest
         except (urllib.error.HTTPError, urllib.error.URLError) as exc:
             if attempt + 1 >= _MAX_RETRIES:
-                raise BulkApiError(f"download_file 失敗（{_MAX_RETRIES}回）: {exc}") from exc
-            wait = _RETRY_BACKOFF_BASE ** attempt
+                raise BulkApiError(
+                    f"download_file 失敗（{_MAX_RETRIES}回）: {exc}"
+                ) from exc
+            wait = _RETRY_BACKOFF_BASE**attempt
             logger.warning(
                 "ダウンロード失敗（%d/%d）: %s — %.0fs後にリトライ",
                 attempt + 1,
