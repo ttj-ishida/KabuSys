@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from kabusys.operations.night_batch_report import (
     JobRunResult,
@@ -24,7 +24,7 @@ def _make_job(
         job_name=name,
         status=status,
         started_at=dt,
-        finished_at=datetime(2026, 4, 26, 15, 30, int(duration), tzinfo=timezone.utc),
+        finished_at=dt + timedelta(seconds=duration),
         duration_sec=duration,
         updated_rows=updated_rows or {},
         warnings=warnings or [],
