@@ -1,1 +1,3 @@
-# src/kabusys/data/bootstrap/__init__.py
+from kabusys.data.bootstrap.runner import BootstrapResult, run_bootstrap
+
+__all__ = ["run_bootstrap", "BootstrapResult"]
