@@ -277,6 +277,15 @@ def test_safe_errmsg_masks_http_error():
     assert "s3.amazonaws.com" not in msg
 
 
-def test_safe_errmsg_generic_exception():
+def test_safe_errmsg_url_error_shows_reason():
+    import urllib.error
+
+    exc = urllib.error.URLError(reason="Connection refused")
+    msg = _safe_errmsg(exc)
+    assert "Connection refused" in msg
+    assert "URLError" in msg
+
+
+def test_safe_errmsg_generic_exception_shows_message():
     msg = _safe_errmsg(ValueError("some detail"))
-    assert msg == "ValueError"
+    assert msg == "some detail"

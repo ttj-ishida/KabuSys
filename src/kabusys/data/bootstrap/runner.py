@@ -63,10 +63,17 @@ def _endpoint_to_dir(endpoint: str, raw_dir: Path) -> Path:
 
 
 def _safe_errmsg(exc: Exception) -> str:
-    """presigned URL がログ/DBに漏れないよう HTTPError は status+reason のみ返す。"""
+    """presigned URL がログ/DBに漏れないよう URLを含む可能性のある例外を整形する。
+
+    - HTTPError: status + reason のみ（URL を除外）
+    - URLError: reason のみ（OS レベルのエラー詳細）
+    - その他: str(exc) をそのまま使用（自前コードの例外は URL を含まない）
+    """
     if isinstance(exc, urllib.error.HTTPError):
         return f"HTTP {exc.code} {exc.reason}"
-    return type(exc).__name__
+    if isinstance(exc, urllib.error.URLError):
+        return f"URLError: {exc.reason}"
+    return str(exc)
 
 
 def _safe_filename(file_key: str) -> str | None:
