@@ -40,24 +40,53 @@
 
 # 3. 市場データ
 
-## prices_daily
+## raw_prices（Raw Layer）
 
-日足株価データ。
+J-Quants から取得した生の日足株価データ。差分 API・Bulk API どちらも本テーブルに保存する。
+
+  column       type     description
+  ------------ -------- -----------------------------------------
+  date         date     取引日
+  code         string   銘柄コード
+  open         float    始値（調整前）
+  high         float    高値（調整前）
+  low          float    安値（調整前）
+  close        float    終値（調整前）
+  volume       bigint   出来高（調整前）
+  turnover     float    売買代金
+  adj_factor   float    分割調整係数（Bulk CSV の AdjFactor。差分APIは NULL）
+  fetched_at   timestamp 取込日時
+
+主キー: `(date, code)`
+取得元: J-Quants `/prices/daily_quotes`（差分 API）/ Bulk `/equities/bars/daily`
+
+Bulk CSV カラムマッピング:
+  Date → date, Code → code, O → open, H → high, L → low, C → close
+  Vo → volume, Va → turnover, AdjFactor → adj_factor
+  ※ UL・LL・AdjO/H/L/C/Vo は Raw には保存しない（prices_daily は調整前価格を使用）
+
+------------------------------------------------------------------------
+
+## prices_daily（Processed Layer）
+
+日足株価データ（整形済み）。戦略・バックテスト・research が参照する。
 
   column     type     description
   ---------- -------- -------------
   date       date     取引日
   code       string   銘柄コード
-  open       float    始値
-  high       float    高値
-  low        float    安値
-  close      float    終値
-  volume     float    出来高
+  open       float    始値（調整前）
+  high       float    高値（調整前）
+  low        float    安値（調整前）
+  close      float    終値（調整前）
+  volume     bigint   出来高
   turnover   float    売買代金
 
-主キー
+主キー: `(date, code)`
+投入元: `raw_prices` からの ETL コピー（NOT NULL・low<=high を検証後に UPSERT）
 
-    (date, code)
+注: 調整価格（分割対応）は raw_prices.adj_factor を使って算出する。
+    DataPlatform §6.1 の補正ルールを参照。
 
 ------------------------------------------------------------------------
 
@@ -65,7 +94,7 @@
 
 ## stocks
 
-全上場銘柄のマスタ情報。J-Quants `/listed/info` から毎日 UPSERT する。
+全上場銘柄のマスタ情報。毎日 UPSERT する。
 セクター集中制限（PortfolioConstruction Section 8）で参照する。
 
   column      type       description
@@ -73,16 +102,16 @@
   code        string     銘柄コード（PRIMARY KEY）
   name        string     銘柄名
   market      string     市場区分（'Prime' / 'Standard' / 'Growth' / 'Other'）
-  sector      string     TSE 33業種名（J-Quants Sector33CodeName）
+  sector      string     TSE 33業種名
   updated_at  timestamp  最終更新日時
 
-取得元: J-Quants `/listed/info`（MarketCode → market 文字列に変換）
+取得元（差分 API）: J-Quants `/listed/info`
+  "Code" → code, "CompanyName" → name
+  "MarketCode" → market（"0111"→Prime, "0121"→Standard, "0131"→Growth）
+  "Sector33CodeName" → sector
 
-フィールドマッピング:
-  J-Quants "Code"             → code
-  J-Quants "CompanyName"      → name
-  J-Quants "MarketCode"       → market（"0111"→"Prime", "0121"→"Standard", "0131"→"Growth"）
-  J-Quants "Sector33CodeName" → sector
+取得元（Bulk API）: `/equities/master`
+  Code → code, CoName → name, MktNm → market, S33Nm → sector
 
 ------------------------------------------------------------------------
 
@@ -107,21 +136,113 @@ JPXのカレンダー情報（祝日・半休・SQ等）。
 
 # 5. 財務データ
 
-## fundamentals
+## raw_financials（Raw Layer）
+
+J-Quants から取得した生の財務データ。
+
+  column             type      description
+  ------------------ --------- -------------
+  code               string    銘柄コード
+  report_date        date      開示日
+  period_type        string    会計期間タイプ（1Q/2Q/3Q/FY 等）
+  revenue            float     売上
+  operating_profit   float     営業利益
+  net_income         float     純利益
+  eps                float     EPS
+  roe                float     ROE
+  fetched_at         timestamp 取込日時
+
+主キー: `(code, report_date, period_type)`
+取得元（差分 API）: J-Quants `/fins/statements`
+取得元（Bulk API）: `/fins/summary`
+  DiscDate→report_date, CurPerType→period_type, Sales→revenue, OP→operating_profit
+  NP→net_income, EPS→eps, Eq/TA→roe
+
+------------------------------------------------------------------------
+
+## fundamentals（Processed Layer）
+
+整形済み財務データ。戦略・research が参照する。
 
   column             type     description
   ------------------ -------- -------------
   code               string   銘柄コード
   report_date        date     決算日
+  period_type        string   会計期間タイプ
   revenue            float    売上
   operating_profit   float    営業利益
   net_income         float    純利益
   eps                float    EPS
   roe                float    ROE
 
+主キー: `(code, report_date, period_type)`
+投入元: `raw_financials` からの ETL コピー
+
 ------------------------------------------------------------------------
 
-# 5. ニュースデータ
+## dividends（新規）
+
+配当情報。Bulk API `/fins/dividend` から取得。
+
+  column       type      description
+  ------------ --------- ---------------------------------------
+  code         string    銘柄コード
+  pub_date     date      公告日（PRIMARY KEY の一部）
+  ref_no       string    参照番号（PRIMARY KEY の一部）
+  ex_date      date      権利落ち日
+  record_date  date      基準日
+  pay_date     date      支払日
+  div_rate     float     配当率（円）
+  fetched_at   timestamp 取込日時
+
+主キー: `(code, pub_date, ref_no)`
+取得元: Bulk API `/fins/dividend`
+
+------------------------------------------------------------------------
+
+# 5b. 指数データ
+
+## topix_daily（新規）
+
+TOPIX 日足データ。regime_detector の ma200_ratio 算出に使用する。
+
+  column   type   description
+  -------- ------ -----------
+  date     date   取引日（PRIMARY KEY）
+  open     float  始値
+  high     float  高値
+  low      float  安値
+  close    float  終値
+
+取得元: Bulk API `/indices/bars/daily/topix`
+  Date→date, O→open, H→high, L→low, C→close
+
+------------------------------------------------------------------------
+
+# 5c. Bootstrap 管理
+
+## bootstrap_load_history
+
+Bulk API からのファイル単位の処理状態を管理する。再実行時のスキップ制御に使用。
+
+  column       type      description
+  ------------ --------- -----------------------------------------
+  file_key     string    Bulk API のファイルキー（PRIMARY KEY）
+  endpoint     string    Bulk エンドポイント（例: /equities/bars/daily）
+  file_name    string    ダウンロードファイル名
+  status       string    pending / loaded / failed
+  row_count    bigint    ロードしたレコード件数
+  error_msg    string    失敗時のエラーメッセージ
+  loaded_at    timestamp 処理完了日時
+
+状態遷移:
+  pending → loaded（正常完了）
+  pending → failed（エラー）
+  failed  → pending（手動リセット後に再実行）
+
+------------------------------------------------------------------------
+
+# 7. ニュースデータ
 
 ## news_articles
 
@@ -136,7 +257,7 @@ JPXのカレンダー情報（祝日・半休・SQ等）。
 
 ------------------------------------------------------------------------
 
-# 6. ニュース銘柄マッピング
+# 8. ニュース銘柄マッピング
 
 ## news_symbols
 
@@ -147,7 +268,7 @@ JPXのカレンダー情報（祝日・半休・SQ等）。
 
 ------------------------------------------------------------------------
 
-# 7. AIスコア
+# 9. AIスコア
 
 ## ai_scores
 
@@ -187,7 +308,7 @@ JPXのカレンダー情報（祝日・半休・SQ等）。
 
 ------------------------------------------------------------------------
 
-# 8. 特徴量
+# 10. 特徴量
 
 ## features
 
@@ -204,7 +325,7 @@ JPXのカレンダー情報（祝日・半休・SQ等）。
 
 ------------------------------------------------------------------------
 
-# 9. シグナル
+# 11. シグナル
 
 ## signals
 
@@ -220,7 +341,7 @@ JPXのカレンダー情報（祝日・半休・SQ等）。
 
 ------------------------------------------------------------------------
 
-# 10. シグナルキュー
+# 12. シグナルキュー
 
 ## signal_queue
 
@@ -263,7 +384,7 @@ Executionの処理フロー:
 
 ------------------------------------------------------------------------
 
-# 11. ポートフォリオ
+# 13. ポートフォリオ
 
 ## portfolio_targets
 
@@ -278,7 +399,7 @@ Executionの処理フロー:
 
 ------------------------------------------------------------------------
 
-# 11. 注文
+# 14. 注文
 
 ## orders
 
@@ -302,7 +423,7 @@ Executionの処理フロー:
 
 ------------------------------------------------------------------------
 
-# 12. 約定
+# 15. 約定
 
 ## trades
 
@@ -317,7 +438,7 @@ Executionの処理フロー:
 
 ------------------------------------------------------------------------
 
-# 13. ポジション
+# 16. ポジション
 
 ## positions
 
@@ -331,7 +452,7 @@ Executionの処理フロー:
 
 ------------------------------------------------------------------------
 
-# 14. パフォーマンス
+# 17. パフォーマンス
 
 ## portfolio_performance
 
@@ -345,29 +466,41 @@ Executionの処理フロー:
 
 ------------------------------------------------------------------------
 
-# 15. データフロー
+# 18. データフロー
 
-    Market Data / News        J-Quants /listed/info
-    ↓                         ↓
-    prices_daily / news_articles    stocks（銘柄マスタ）
-    ↓                               ↓
-    features / ai_scores        ────┘（セクター参照）
+## 初回 Bootstrap フロー
+
+    J-Quants Bulk API
+      /equities/bars/daily  → raw_prices → prices_daily
+      /equities/master      →              stocks
+      /fins/summary         → raw_financials → fundamentals
+      /markets/calendar     →              market_calendar
+      /fins/dividend        →              dividends（新規）
+      /indices/bars/daily/topix →          topix_daily（新規）
+    ↓ 処理状態記録
+    bootstrap_load_history
+
+## 日次差分更新フロー（通常運用）
+
+    J-Quants 差分 API
+      /prices/daily_quotes  → raw_prices → prices_daily
+      /fins/statements      → raw_financials → fundamentals
+      /listed/info          →              stocks
+      /market/trading_calendar →           market_calendar
+    ↓
+    news_articles（RSS取得）
+    ↓
+    features / ai_scores / topix_daily（regime_detector 参照）
     ↓
     signals
     ↓
-    portfolio_targets（ポートフォリオ構築モジュールが生成）
+    portfolio_targets
     ↓
-    orders
-    ↓
-    trades
-    ↓
-    positions
-    ↓
-    portfolio_performance
+    orders → trades → positions → portfolio_performance
 
 ------------------------------------------------------------------------
 
-# 16. まとめ
+# 19. まとめ
 
 本データスキーマは以下の領域をカバーする。
 

@@ -949,3 +949,88 @@ def test_position_entries_sell_date_updated(conn):
     ).fetchone()
     assert str(row[1]) == "2026-04-05"
     bt_conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Issue #184: market_breadth バックテスト対応
+# ---------------------------------------------------------------------------
+
+
+def _insert_prices_for_breadth(conn, base_date: date, n_days: int = 30) -> None:
+    """breadth 計算に必要な十分な price データを挿入する。
+
+    n_days 日分の価格データを 10 銘柄分作成する。
+    base_date の当日分も含めるため range(n_days + 1) とする。
+    """
+    codes = [f"{1000 + i:04d}" for i in range(10)]
+    for i in range(n_days + 1):
+        d = base_date - timedelta(days=n_days - i)
+        for j, code in enumerate(codes):
+            close_price = 1000.0 + j * 10 + i  # 単調増加で上昇銘柄が多い
+            conn.execute(
+                "INSERT INTO prices_daily (date, code, open, high, low, close, volume) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [d, code, close_price, close_price, close_price, close_price, 100_000],
+            )
+
+
+def test_populate_backtest_breadth_inserts_rows(conn):
+    """_populate_backtest_breadth: 対象期間に market_breadth が挿入される。"""
+    from kabusys.backtest.engine import _populate_backtest_breadth
+
+    target = date(2024, 3, 1)
+    _insert_prices_for_breadth(conn, target, n_days=30)
+
+    _populate_backtest_breadth(conn, target, target)
+
+    row = conn.execute(
+        "SELECT adv_decline_ratio, ma25_above_pct, breadth_stop "
+        "FROM market_breadth WHERE date = ?",
+        [target],
+    ).fetchone()
+    assert row is not None, "market_breadth に行が挿入されているべき"
+    assert row[1] is not None, "ma25_above_pct が NULL であってはならない"
+    assert isinstance(row[2], bool), "breadth_stop は bool であるべき"
+
+
+def test_populate_backtest_breadth_idempotent(conn):
+    """_populate_backtest_breadth: 2回呼んでも同じ日付が重複しない（冪等）。"""
+    from kabusys.backtest.engine import _populate_backtest_breadth
+
+    target = date(2024, 3, 1)
+    _insert_prices_for_breadth(conn, target, n_days=30)
+
+    _populate_backtest_breadth(conn, target, target)
+    _populate_backtest_breadth(conn, target, target)
+
+    count = conn.execute(
+        "SELECT COUNT(*) FROM market_breadth WHERE date = ?", [target]
+    ).fetchone()[0]
+    assert count == 1, "同日を2回呼んでも1行のみであるべき"
+
+
+def test_populate_backtest_breadth_skips_when_no_prices(conn):
+    """_populate_backtest_breadth: prices_daily が空でもエラーにならない。"""
+    from kabusys.backtest.engine import _populate_backtest_breadth
+
+    # prices_daily は空のまま
+    _populate_backtest_breadth(conn, date(2024, 3, 1), date(2024, 3, 5))
+
+    count = conn.execute("SELECT COUNT(*) FROM market_breadth").fetchone()[0]
+    assert count == 0
+
+
+def test_build_backtest_conn_populates_breadth(conn):
+    """_build_backtest_conn: bt_conn の market_breadth が計算済みになっている。"""
+    from kabusys.backtest.engine import _build_backtest_conn
+
+    target = date(2024, 3, 1)
+    _insert_prices_for_breadth(conn, target, n_days=30)
+
+    bt_conn = _build_backtest_conn(conn, target, target)
+    row = bt_conn.execute(
+        "SELECT breadth_stop FROM market_breadth WHERE date = ?", [target]
+    ).fetchone()
+    bt_conn.close()
+
+    assert row is not None, "_build_backtest_conn 後に market_breadth が存在するべき"
