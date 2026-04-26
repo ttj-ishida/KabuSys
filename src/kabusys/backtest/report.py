@@ -433,7 +433,7 @@ def save_report(
         for t in result.trades:
             writer.writerow(
                 [
-                    t.date,
+                    t.date.isoformat(),
                     t.code,
                     t.side,
                     t.shares,
@@ -449,7 +449,7 @@ def save_report(
         writer = csv.writer(f)
         writer.writerow(["date", "cash", "portfolio_value"])
         for s in result.history:
-            writer.writerow([s.date, s.cash, s.portfolio_value])
+            writer.writerow([s.date.isoformat(), s.cash, s.portfolio_value])
 
     return run_dir
 
@@ -513,19 +513,19 @@ def _generate_warnings(result: "BacktestResult") -> list[str]:
                 f"検証期間が短いです（{days}日）。180日以上の検証を推奨します。"
             )
 
-    # 1銘柄寄与が過大（sell trades の pnl 集計）
+    # 1銘柄寄与が過大（正の pnl のみで集計。負含む総和では損失が大きいと比率が歪むため）
     sell_trades = [t for t in trades if t.side == "sell" and t.realized_pnl is not None]
     if sell_trades:
-        total_pnl = sum(t.realized_pnl for t in sell_trades)
-        if total_pnl > 0:
-            by_code: dict[str, float] = {}
-            for t in sell_trades:
-                by_code[t.code] = by_code.get(t.code, 0.0) + t.realized_pnl
-            max_contrib = max(by_code.values())
-            if max_contrib / total_pnl > 0.5:
-                top_code = max(by_code, key=lambda c: by_code[c])
+        pos_by_code: dict[str, float] = {}
+        for t in sell_trades:
+            if t.realized_pnl > 0:
+                pos_by_code[t.code] = pos_by_code.get(t.code, 0.0) + t.realized_pnl
+        total_pos = sum(pos_by_code.values())
+        if total_pos > 0:
+            top_code, max_contrib = max(pos_by_code.items(), key=lambda kv: kv[1])
+            if max_contrib / total_pos > 0.5:
                 warnings.append(
-                    f"銘柄 {top_code} が総利益の {max_contrib / total_pnl:.0%} を占めています。"
+                    f"銘柄 {top_code} が利益合計の {max_contrib / total_pos:.0%} を占めています。"
                     "特定銘柄への依存が過大な可能性があります。"
                 )
 
