@@ -65,14 +65,18 @@ def _endpoint_to_dir(endpoint: str, raw_dir: Path) -> Path:
 def _safe_errmsg(exc: Exception) -> str:
     """presigned URL がログ/DBに漏れないよう URLを含む可能性のある例外を整形する。
 
+    __cause__ チェーンを辿って urllib 例外を探し、見つかればその安全なメッセージを返す。
     - HTTPError: status + reason のみ（URL を除外）
     - URLError: reason のみ（OS レベルのエラー詳細）
     - その他: str(exc) をそのまま使用（自前コードの例外は URL を含まない）
     """
-    if isinstance(exc, urllib.error.HTTPError):
-        return f"HTTP {exc.code} {exc.reason}"
-    if isinstance(exc, urllib.error.URLError):
-        return f"URLError: {exc.reason}"
+    cause: BaseException | None = exc
+    while cause is not None:
+        if isinstance(cause, urllib.error.HTTPError):
+            return f"HTTP {cause.code} {cause.reason}"
+        if isinstance(cause, urllib.error.URLError):
+            return f"URLError: {cause.reason}"
+        cause = cause.__cause__ or cause.__context__
     return str(exc)
 
 

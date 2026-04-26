@@ -291,3 +291,23 @@ def test_safe_errmsg_url_error_shows_reason():
 def test_safe_errmsg_generic_exception_shows_message():
     msg = _safe_errmsg(ValueError("some detail"))
     assert msg == "some detail"
+
+
+def test_safe_errmsg_unwraps_cause_chain():
+    """BulkApiError でラップされた HTTPError でも URL が漏れないことを確認。"""
+    import urllib.error
+
+    http_exc = urllib.error.HTTPError(
+        url="https://s3.amazonaws.com/?X-Amz-Signature=secret",
+        code=403,
+        msg="Forbidden",
+        hdrs=None,
+        fp=None,
+    )
+    wrapped = RuntimeError("download failed")
+    wrapped.__cause__ = http_exc
+
+    msg = _safe_errmsg(wrapped)
+    assert "403" in msg
+    assert "Forbidden" in msg
+    assert "secret" not in msg
