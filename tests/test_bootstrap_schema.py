@@ -1,5 +1,5 @@
 from __future__ import annotations
-import duckdb
+
 import pytest
 from kabusys.data.schema import init_schema
 
@@ -17,7 +17,16 @@ def test_dividends_table_exists(schema_conn):
         "SELECT column_name FROM information_schema.columns WHERE table_name='dividends'"
     ).fetchall()
     cols = {r[0] for r in rows}
-    assert cols == {"code", "pub_date", "ref_no", "ex_date", "record_date", "pay_date", "div_rate", "fetched_at"}
+    assert cols == {
+        "code",
+        "pub_date",
+        "ref_no",
+        "ex_date",
+        "record_date",
+        "pay_date",
+        "div_rate",
+        "fetched_at",
+    }
 
 
 def test_topix_daily_table_exists(schema_conn):
@@ -33,7 +42,15 @@ def test_bootstrap_load_history_table_exists(schema_conn):
         "SELECT column_name FROM information_schema.columns WHERE table_name='bootstrap_load_history'"
     ).fetchall()
     cols = {r[0] for r in rows}
-    assert cols == {"file_key", "endpoint", "file_name", "status", "row_count", "error_msg", "loaded_at"}
+    assert cols == {
+        "file_key",
+        "endpoint",
+        "file_name",
+        "status",
+        "row_count",
+        "error_msg",
+        "loaded_at",
+    }
 
 
 def test_raw_prices_has_adj_factor(schema_conn):

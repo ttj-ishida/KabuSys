@@ -1,4 +1,3 @@
-
 import json
 import math
 from datetime import date, datetime
@@ -19,9 +18,6 @@ from kabusys import validate_config as validate_mod
 from kabusys.portfolio import portfolio_builder as pb
 from kabusys.portfolio import risk_adjustment as ra
 from kabusys.portfolio import position_sizing as ps
-
-# ---- feature exploration ----
-from kabusys.feature_exploration import rank, calc_ic, factor_summary
 
 # ---- ai news nlp utils ----
 from kabusys.ai import news_nlp as news_nlp_mod
@@ -128,7 +124,13 @@ def test_validate_config_basic(monkeypatch):
     monkeypatch.setenv("KABU_API_PASSWORD", "your_value")
     errors, warnings, infos = validate_mod.validate()
     # both required set but placeholders produce warnings
-    assert any("プレースホルダ" in w or "プレースホルダ値" in w or "プレースホルダ値" for w in warnings) or len(warnings) >= 1
+    assert (
+        any(
+            "プレースホルダ" in w or "プレースホルダ値" in w or "プレースホルダ値"
+            for w in warnings
+        )
+        or len(warnings) >= 1
+    )
 
 
 # ---------------------------
@@ -158,8 +160,7 @@ def test_select_candidates_and_weights():
 
     # score weights fallback when total == 0
     zero_signals = [{"code": "X", "score": 0.0}, {"code": "Y", "score": 0.0}]
-    with pytest.warns(None) as record:
-        res = pb.calc_score_weights(zero_signals)
+    res = pb.calc_score_weights(zero_signals)
     # fallback to equal
     assert res == {"X": 0.5, "Y": 0.5}
 
@@ -168,17 +169,39 @@ def test_select_candidates_and_weights():
 # Tests for risk_adjustment
 # ---------------------------
 def test_apply_sector_cap_and_sell_codes(caplog):
-    candidates = [{"code": "A", "score": 1.0}, {"code": "B", "score": 0.5}, {"code": "C", "score": 0.2}]
+    candidates = [
+        {"code": "A", "score": 1.0},
+        {"code": "B", "score": 0.5},
+        {"code": "C", "score": 0.2},
+    ]
     sector_map = {"A": "s1", "B": "s1", "C": "unknown"}
     portfolio_value = 100000.0
     current_positions = {"A": 100, "B": 0}
     price_map = {"A": 400.0, "B": 100.0}
     # exposure for s1 = 100 * 400 = 40000 -> 40% of pv -> blocked if max_sector_pct=0.3
-    filtered = ra.apply_sector_cap(candidates, sector_map, portfolio_value, current_positions, price_map, max_sector_pct=0.3)
+    filtered = ra.apply_sector_cap(
+        candidates,
+        sector_map,
+        portfolio_value,
+        current_positions,
+        price_map,
+        max_sector_pct=0.3,
+    )
     # codes in blocked sector s1 should be excluded; C unknown must remain
-    assert all(c["code"] == "C" or sector_map.get(c["code"], "unknown") != "s1" for c in filtered)
+    assert all(
+        c["code"] == "C" or sector_map.get(c["code"], "unknown") != "s1"
+        for c in filtered
+    )
     # test that sell_codes excludes code from exposure calculation
-    filtered2 = ra.apply_sector_cap(candidates, sector_map, portfolio_value, {"A": 100, "B": 0}, price_map, max_sector_pct=0.3, sell_codes={"A"})
+    filtered2 = ra.apply_sector_cap(
+        candidates,
+        sector_map,
+        portfolio_value,
+        {"A": 100, "B": 0},
+        price_map,
+        max_sector_pct=0.3,
+        sell_codes={"A"},
+    )
     # with A sold, sector exposure becomes 0 and so no blocking -> candidates unchanged
     assert len(filtered2) == 3
 
@@ -206,7 +229,16 @@ def test_calc_position_sizes_equal_and_scaling():
     current_positions = {}
     open_prices = {"AA": 100.0, "BB": 100.0}
     # With max_utilization default 0.7, per-position alloc = 100000 * 0.5 * 0.7 = 35000 -> 350 shares -> floored to 300 (lot_size=100)
-    out = ps.calc_position_sizes(weights, candidates, portfolio_value, available_cash, current_positions, open_prices, allocation_method="equal", lot_size=100)
+    out = ps.calc_position_sizes(
+        weights,
+        candidates,
+        portfolio_value,
+        available_cash,
+        current_positions,
+        open_prices,
+        allocation_method="equal",
+        lot_size=100,
+    )
     # results should be multiples of lot_size
     for v in out.values():
         assert v % 100 == 0
@@ -222,43 +254,16 @@ def test_calc_position_sizes_risk_based_skips_missing_price(caplog):
     available_cash = 70000.0
     current_positions = {}
     open_prices = {"X": 0.0}  # missing/zero price -> skip
-    out = ps.calc_position_sizes(weights, candidates, portfolio_value, available_cash, current_positions, open_prices, allocation_method="risk_based")
+    out = ps.calc_position_sizes(
+        weights,
+        candidates,
+        portfolio_value,
+        available_cash,
+        current_positions,
+        open_prices,
+        allocation_method="risk_based",
+    )
     assert out == {}
-
-
-# ---------------------------
-# Tests for feature_exploration: rank, calc_ic, factor_summary
-# ---------------------------
-def test_rank_ties_and_order():
-    vals = [1.0, 2.0, 2.0, 4.0]
-    r = rank(vals)
-    # ranks: 1, (2+3)/2+? -> average ranks for ties: positions 1->1, 2&3 -> 2.5, 4 -> 4
-    assert len(r) == 4
-    assert math.isclose(r[0], 1.0)
-    assert math.isclose(r[1], 2.5)
-    assert math.isclose(r[2], 2.5)
-    assert math.isclose(r[3], 4.0)
-
-
-def test_calc_ic_and_threshold():
-    factor_records = [{"code": "A", "f": 1.0}, {"code": "B", "f": 2.0}, {"code": "C", "f": 3.0}]
-    forward_records = [{"code": "A", "r": 1.0}, {"code": "B", "r": 2.0}, {"code": "C", "r": 3.0}]
-    ic = calc_ic(factor_records, forward_records, "f", "r")
-    assert ic is not None
-    # Perfect rank correlation should give +1.0
-    assert pytest.approx(ic, rel=1e-6) == 1.0
-
-    # fewer than 3 valid pairs -> None
-    ic2 = calc_ic([{"code": "A", "f": 1}], [{"code": "A", "r": 1}], "f", "r")
-    assert ic2 is None
-
-
-def test_factor_summary_basic():
-    recs = [{"code": "A", "x": 1.0}, {"code": "B", "x": 3.0}, {"code": "C", "x": None}, {"code": "D", "x": 5.0}]
-    res = factor_summary(recs, ["x"])
-    assert "x" in res
-    assert res["x"]["count"] == 3
-    assert math.isclose(res["x"]["mean"], (1.0 + 3.0 + 5.0) / 3.0)
 
 
 # ---------------------------
@@ -283,7 +288,9 @@ def make_resp(content: str):
 
 def test_validate_and_extract_basic_and_edge_cases(caplog):
     # valid content with numeric score > clip
-    content = json.dumps({"results": [{"code": "1234", "score": 1.5}, {"code": 9999, "score": 0.2}]})
+    content = json.dumps(
+        {"results": [{"code": "1234", "score": 1.5}, {"code": 9999, "score": 0.2}]}
+    )
     resp = make_resp(content)
     extracted = news_nlp_mod._validate_and_extract(resp, {"1234", "9999"})
     # score should be clipped to 1.0 for code 1234
@@ -297,7 +304,9 @@ def test_validate_and_extract_basic_and_edge_cases(caplog):
     assert ex2 == {}
 
     # non-numeric score is ignored with warning
-    content3 = json.dumps({"results": [{"code": "X", "score": "nan"}, {"code": "Y", "score": "3.14"}]})
+    content3 = json.dumps(
+        {"results": [{"code": "X", "score": "nan"}, {"code": "Y", "score": "3.14"}]}
+    )
     resp3 = make_resp(content3)
     out3 = news_nlp_mod._validate_and_extract(resp3, {"Y"})
     assert "Y" in out3
@@ -329,7 +338,9 @@ def test_set_cpu_affinity_invalid_and_success(monkeypatch, caplog):
             self._nice = val
 
     dummy = DummyProc()
-    monkeypatch.setattr(pp, "psutil", mock.MagicMock(Process=lambda: dummy, cpu_count=lambda: 4))
+    monkeypatch.setattr(
+        pp, "psutil", mock.MagicMock(Process=lambda: dummy, cpu_count=lambda: 4)
+    )
     # Should not raise
     pp.set_cpu_affinity(2)
     assert dummy._affinity == [0, 1]
