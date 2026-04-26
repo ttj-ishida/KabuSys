@@ -16,6 +16,7 @@ from kabusys.operations.night_batch_report import (
     build_report,
     format_cli_summary,
     format_json,
+    format_markdown,
 )
 
 
@@ -392,3 +393,58 @@ def test_format_json_datetime_serialized_as_string():
     report = _make_report()
     data = json_mod.loads(format_json(report))
     assert isinstance(data["job_results"][0]["started_at"], str)
+
+
+# ---------------------------------------------------------------------------
+# format_markdown
+# ---------------------------------------------------------------------------
+
+
+def test_format_markdown_contains_sections():
+    """Markdown に必須セクション見出しが含まれる。"""
+    report = _make_report()
+    md = format_markdown(report)
+    for section in [
+        "Overview",
+        "Job Status",
+        "Update Counts",
+        "Next Trading Day",
+        "Final Decision",
+    ]:
+        assert section in md, f"Missing section: {section}"
+
+
+def test_format_markdown_contains_status():
+    """Markdown にステータスが含まれる。"""
+    report = _make_report("READY")
+    md = format_markdown(report)
+    assert "READY" in md
+
+
+def test_format_markdown_contains_signal_queue():
+    """Markdown に signal_queue 件数が含まれる。"""
+    report = _make_report()
+    md = format_markdown(report)
+    assert "15" in md  # signal_queue=15
+
+
+def test_format_markdown_warnings_section():
+    """警告がある場合は Warnings セクションが含まれる。"""
+    report = _make_report("READY_WITH_WARNINGS")
+    md = format_markdown(report)
+    assert "Warnings" in md
+
+
+def test_format_markdown_no_warnings_section_when_empty():
+    """警告なしのとき Warnings セクションは含まれない。"""
+    report = _make_report("READY")
+    md = format_markdown(report)
+    assert "## 5. Warnings" not in md
+
+
+def test_format_markdown_final_decision_blocked():
+    """BLOCKED のとき Final Decision に自動執行禁止の文言が含まれる。"""
+    report = _make_report("BLOCKED")
+    md = format_markdown(report)
+    assert "BLOCKED" in md
+    assert "自動執行" in md or "執行" in md

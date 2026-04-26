@@ -241,3 +241,117 @@ def format_json(report: NightBatchReport) -> str:
     """全指標を含む JSON 文字列を返す。"""
     data = _to_serializable(asdict(report))
     return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def format_markdown(report: NightBatchReport) -> str:
+    """人間向け Markdown レポート文字列を返す。"""
+    lines: list[str] = []
+
+    # 1. Overview
+    lines += [
+        "# Night Batch Report",
+        "",
+        "## 1. Overview",
+        "",
+        "| Item | Value |",
+        "|------|-------|",
+        f"| 実行日 | {report.run_date} |",
+        f"| 対象取引日 | {report.target_date} |",
+        f"| 生成時刻 | {report.generated_at} |",
+        f"| **最終判定** | **{report.status}** |",
+        "",
+    ]
+
+    # 2. Job Status
+    lines += [
+        "## 2. Job Status",
+        "",
+        "| ジョブ名 | ステータス | 開始時刻 | 終了時刻 | 実行時間(s) |",
+        "|---------|-----------|---------|---------|------------|",
+    ]
+    for j in report.job_results:
+        started = (
+            j.started_at.isoformat()
+            if isinstance(j.started_at, datetime)
+            else j.started_at
+        )
+        finished = (
+            j.finished_at.isoformat()
+            if isinstance(j.finished_at, datetime)
+            else j.finished_at
+        )
+        lines.append(
+            f"| {j.job_name} | {j.status} | {started} | {finished} | {j.duration_sec:.1f} |"
+        )
+    lines.append("")
+
+    # 3. Update Counts
+    uc = report.update_counts
+    lines += [
+        "## 3. Update Counts",
+        "",
+        "| テーブル | 更新件数 |",
+        "|---------|--------|",
+        f"| prices_daily | {uc.prices_daily} |",
+        f"| news_articles | {uc.news_articles} |",
+        f"| fundamentals | {uc.fundamentals} |",
+        f"| features | {uc.features} |",
+        f"| ai_scores | {uc.ai_scores} |",
+        f"| signals | {uc.signals} |",
+        f"| signal_queue | {uc.signal_queue} |",
+        "",
+    ]
+
+    # 4. Next Trading Day Preparation
+    nd = report.next_day_summary
+    lines += [
+        "## 4. Next Trading Day Preparation",
+        "",
+        f"対象取引日: **{report.target_date}**",
+        "",
+        "| 項目 | 件数 |",
+        "|-----|-----|",
+        f"| BUY 件数 | {nd.buy_count} |",
+        f"| SELL 件数 | {nd.sell_count} |",
+        f"| 対象銘柄数 | {nd.target_symbols} |",
+        f"| 想定発注件数 | {nd.expected_orders} |",
+        "",
+    ]
+
+    # 5. Warnings（ある場合のみ）
+    if report.warnings:
+        lines += [
+            "## 5. Warnings",
+            "",
+        ]
+        for w in report.warnings:
+            lines.append(f"- ⚠️ {w}")
+        lines.append("")
+
+    # 6. Final Decision
+    lines += ["## 6. Final Decision", ""]
+    if report.status == STATUS_READY:
+        lines += [
+            f"**{STATUS_READY}** — 翌営業日の自動執行を開始できます。",
+            "",
+            "- 全必須ジョブが正常完了しています。",
+            "- signal_queue が正常に作成されています。",
+            "- 特段の対応は不要です。",
+        ]
+    elif report.status == STATUS_READY_WITH_WARNINGS:
+        lines += [
+            f"**{STATUS_READY_WITH_WARNINGS}** — 警告を確認した上で、執行開始を判断してください。",
+            "",
+            "- 基本的な処理は完了していますが、警告があります。",
+            "- 上記 Warnings を確認し、問題がなければ自動執行を開始できます。",
+        ]
+    else:  # BLOCKED
+        lines += [
+            f"**{STATUS_BLOCKED}** — 翌営業日の自動執行を **開始しないでください**。",
+            "",
+            "- 必須ジョブの失敗または signal_queue が空のため、自動執行は安全ではありません。",
+            "- 上記 Warnings を確認し、手動で問題を解消してから再実行してください。",
+        ]
+    lines.append("")
+
+    return "\n".join(lines)
