@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -400,6 +401,8 @@ def save_report(
     Returns:
         保存先ディレクトリのパス。
     """
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", report.run_date):
+        raise ValueError(f"Invalid run_date: {report.run_date!r}")
     base = Path(output_dir) if output_dir else Path("artifacts") / "night_batch"
     run_dir = base / report.run_date
     run_dir.mkdir(parents=True, exist_ok=True)

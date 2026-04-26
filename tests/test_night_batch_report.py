@@ -555,3 +555,13 @@ def test_save_report_overwrite_existing(tmp_path):
     save_report(report, output_dir=tmp_path)
     save_report(report, output_dir=tmp_path)  # 2回目もエラーなし
     assert (tmp_path / "2026-04-26" / "summary.json").exists()
+
+
+def test_save_report_invalid_run_date_raises(tmp_path):
+    """不正な run_date を持つレポートを保存しようとすると ValueError が発生する。"""
+    report = _make_report()
+    report.run_date = "../evil"
+    import pytest
+
+    with pytest.raises(ValueError, match="Invalid run_date"):
+        save_report(report, output_dir=tmp_path)
