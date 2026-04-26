@@ -54,7 +54,7 @@ def calc_metrics(
         max_drawdown=max_dd,
         win_rate=_calc_win_rate(trades),
         payoff_ratio=_calc_payoff_ratio(trades),
-        total_trades=len([t for t in trades if t.side == "sell"]),
+        total_trades=sum(1 for t in trades if t.side == "sell"),
         annual_volatility=_calc_annual_volatility(history),
         calmar_ratio=_calc_calmar_ratio(cagr, max_dd),
         profit_factor=_calc_profit_factor(trades),

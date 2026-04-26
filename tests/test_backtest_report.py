@@ -229,6 +229,21 @@ def test_build_report_headline_total_return():
     assert abs(report.headline.total_return - 0.10) < 1e-6
 
 
+def test_build_report_final_value_uses_latest_date():
+    """history が日付順でなくても final_value は最新日付のポートフォリオ値を使う。"""
+    from kabusys.backtest.report import build_report
+
+    # 逆順の history（古い日付が末尾）
+    history = [
+        DailySnapshot(date=date(2024, 3, 1), cash=0.0, positions={}, portfolio_value=12_000_000.0),
+        DailySnapshot(date=date(2024, 1, 1), cash=0.0, positions={}, portfolio_value=10_000_000.0),
+        DailySnapshot(date=date(2024, 2, 1), cash=0.0, positions={}, portfolio_value=11_000_000.0),
+    ]
+    result = _make_result(history, [])
+    report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 3, 1))
+    assert report.headline.final_value == 12_000_000.0
+
+
 def test_build_report_trade_section_win_rate():
     """3勝1敗 → win_rate = 0.75。"""
     from kabusys.backtest.report import build_report

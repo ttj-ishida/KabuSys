@@ -144,7 +144,9 @@ def build_report(
     history = result.history
     trades = result.trades
 
-    final_value = history[-1].portfolio_value if history else initial_cash
+    final_value = (
+        max(history, key=lambda s: s.date).portfolio_value if history else initial_cash
+    )
     realized_pnl = sum(
         t.realized_pnl
         for t in trades
@@ -152,18 +154,10 @@ def build_report(
     )
     total_commission = sum(t.commission for t in trades)
     sell_trades = [t for t in trades if t.side == "sell" and t.realized_pnl is not None]
-    avg_profit = (
-        sum(t.realized_pnl for t in sell_trades if t.realized_pnl > 0)
-        / max(1, sum(1 for t in sell_trades if t.realized_pnl > 0))
-        if any(t.realized_pnl > 0 for t in sell_trades)
-        else 0.0
-    )
-    avg_loss = (
-        sum(t.realized_pnl for t in sell_trades if t.realized_pnl < 0)
-        / max(1, sum(1 for t in sell_trades if t.realized_pnl < 0))
-        if any(t.realized_pnl < 0 for t in sell_trades)
-        else 0.0
-    )
+    winners = [t.realized_pnl for t in sell_trades if t.realized_pnl > 0]
+    losers = [t.realized_pnl for t in sell_trades if t.realized_pnl < 0]
+    avg_profit = sum(winners) / len(winners) if winners else 0.0
+    avg_loss = sum(losers) / len(losers) if losers else 0.0
 
     meta = ReportMeta(
         run_id=run_id,
@@ -476,18 +470,15 @@ def _calc_monthly_returns(history: list["DailySnapshot"]) -> list[MonthlyReturn]
 
     results: list[MonthlyReturn] = []
     prev_value = None
-    prev_key = None
 
     for key in keys:
         value = month_end[key]
-        if prev_value is not None and prev_key is not None:
-            # 月が連続している（または跨いでいる）場合にリターンを計算
+        if prev_value is not None:
             ret = (value - prev_value) / prev_value if prev_value > 0 else 0.0
             results.append(
                 MonthlyReturn(year=key[0], month=key[1], return_pct=ret * 100)
             )
         prev_value = value
-        prev_key = key
 
     return results
 
