@@ -23,6 +23,7 @@ MINIMAL_DDL = [
         close       DECIMAL(18,4),
         volume      BIGINT,
         turnover    DECIMAL(18,2),
+        adj_factor  DECIMAL(18,6),
         fetched_at  TIMESTAMP     NOT NULL DEFAULT current_timestamp,
         PRIMARY KEY (date, code)
     )""",

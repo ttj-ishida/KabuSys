@@ -72,10 +72,39 @@ class TestBrokerClientFactory:
         broker = BrokerClientFactory.create(Settings())
         assert broker.fill_mode == "instant"
 
-    def test_live_mode_raises_not_implemented(self, monkeypatch):
+    def test_live_mode_returns_kabu_station_client(self, monkeypatch):
+        from kabusys.execution.kabu_client import KabuStationClient
+
         monkeypatch.setenv("KABUSYS_ENV", "live")
-        with pytest.raises(NotImplementedError):
-            BrokerClientFactory.create(Settings())
+        monkeypatch.setenv("KABU_API_PASSWORD", "test_password")
+        monkeypatch.delenv("KABU_TRADE_PASSWORD", raising=False)
+        broker = BrokerClientFactory.create(Settings())
+        assert isinstance(broker, KabuStationClient)
+        broker.close()  # httpx.Client を閉じる
+
+    def test_live_mode_passes_trade_password_when_set(self, monkeypatch):
+        from kabusys.execution.kabu_client import KabuStationClient
+
+        monkeypatch.setenv("KABUSYS_ENV", "live")
+        monkeypatch.setenv("KABU_API_PASSWORD", "api_pass")
+        monkeypatch.setenv("KABU_TRADE_PASSWORD", "trade_pass")
+        broker = BrokerClientFactory.create(Settings())
+        assert isinstance(broker, KabuStationClient)
+        assert broker._trade_password == "trade_pass"
+        broker.close()
+
+    def test_live_mode_falls_back_to_api_password_when_trade_password_not_set(
+        self, monkeypatch
+    ):
+        from kabusys.execution.kabu_client import KabuStationClient
+
+        monkeypatch.setenv("KABUSYS_ENV", "live")
+        monkeypatch.setenv("KABU_API_PASSWORD", "api_pass")
+        monkeypatch.delenv("KABU_TRADE_PASSWORD", raising=False)
+        broker = BrokerClientFactory.create(Settings())
+        assert isinstance(broker, KabuStationClient)
+        assert broker._trade_password == "api_pass"
+        broker.close()
 
     def test_fill_mode_never_applied(self, monkeypatch):
         monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
@@ -95,3 +124,17 @@ class TestBrokerClientFactory:
         monkeypatch.setenv("KABUSYS_ENV", "unknown_env")
         with pytest.raises(ValueError):
             BrokerClientFactory.create(Settings())
+
+
+class TestKabuTradePassword:
+    def test_returns_none_when_not_set(self, monkeypatch):
+        monkeypatch.delenv("KABU_TRADE_PASSWORD", raising=False)
+        assert Settings().kabu_trade_password is None
+
+    def test_returns_value_when_set(self, monkeypatch):
+        monkeypatch.setenv("KABU_TRADE_PASSWORD", "secret123")
+        assert Settings().kabu_trade_password == "secret123"
+
+    def test_returns_none_for_empty_string(self, monkeypatch):
+        monkeypatch.setenv("KABU_TRADE_PASSWORD", "")
+        assert Settings().kabu_trade_password is None
