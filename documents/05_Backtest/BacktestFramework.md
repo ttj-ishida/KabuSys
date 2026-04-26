@@ -11,6 +11,17 @@
 
 「本番環境（Production）」と「テスト環境（Backtest）」のコードベース（ロジック）を完全に共通化し、バックテストで利益が出たのに本番で損をする「乖離（オーバーフィッティング等）」を最小限にとどめることを目的とする。
 
+**対象戦略**: 日足スイング戦略（想定保有期間: 数営業日〜数週間、最大 60 営業日）。夜間バッチでシグナル生成し翌営業日寄付き執行する設計を前提とする。以下の制御ルールがバックテスト本番で共通適用される。
+
+| 制御ルール | 実装箇所 |
+|-----------|---------|
+| ギャップリスクフィルタ（始値 +5%超 / -3%以下でBUY見送り） | `generate_signals()` |
+| 決算回避（決算前日のBUY禁止・決算前強制SELL） | `generate_signals()` |
+| 主要イベント前BUYサイズ縮小（50%） | `generate_signals()` |
+| セクター相対強弱フィルタ（下位25%セクターBUY禁止） | `generate_signals()` |
+| 最低保有日数（5営業日、ストップロス・決算回避を除く） | `_generate_sell_signals()` |
+| 再エントリー制限（SELL後5営業日同一銘柄BUY禁止） | `generate_signals()` |
+
 ---
 
 ## 2. Research Environment ワークフロー
@@ -69,8 +80,13 @@
 | シグナル生成（day T） | `date < T` の価格・特徴量 | `generate_signals()` の SQL が `WHERE date = T` でバインド |
 | SELL 判定（day T） | `date <= T` の prices_daily | `_generate_sell_signals()` の SQL が `WHERE date <= T` でバインド |
 | 約定（day T+1） | day T+1 の始値 | シグナルは常に翌営業日の始値で執行 |
+| 最低保有日数判定（day T） | `position_entries.entry_date` | バックテスト用インメモリ DB で管理（本番と同一ロジック） |
+| 再エントリー制限判定（day T） | `position_entries.sell_date` | 同上 |
+| 決算回避判定（day T） | `earnings_calendar.announcement_date` | インメモリ DB にコピー済み |
 
 さらに、インメモリ DB には `end_date` 以降のデータを含まないため、物理的に未来参照が不可能。
+
+`position_entries` テーブルはバックテスト開始時に空で初期化され、`simulator.py` が BUY/SELL 約定のたびに書き込む。`earnings_calendar` は本番 DB から `end_date` までのデータをコピーして使用する。
 
 ### 4.3 スリッページと手数料の厳密なモデリング
 
@@ -133,7 +149,7 @@ python -m kabusys.backtest.run \
     --db path/to/kabusys.duckdb
 ```
 
-**前提条件**: 指定 DB ファイルに `prices_daily`, `features`, `ai_scores`, `market_regime`, `market_calendar` が入力済みであること。
+**前提条件**: 指定 DB ファイルに `prices_daily`, `features`, `ai_scores`, `market_regime`, `market_breadth`, `market_calendar`, `earnings_calendar` が入力済みであること。`position_entries` はバックテスト開始時に自動で空テーブルとして初期化される。
 
 ---
 
@@ -147,13 +163,20 @@ python -m kabusys.backtest.run \
 _build_backtest_conn(source_conn, start_date, end_date):
   1. ":memory:" で新規 DuckDB を作成しスキーマを初期化
   2. source_conn から以下のデータをコピー:
-     - prices_daily  (start_date - 300日 〜 end_date)
-     - features      (同範囲)
-     - ai_scores     (同範囲)
-     - market_regime (同範囲)
-     - market_calendar (全件)
+     - prices_daily     (start_date - 300日 〜 end_date)
+     - features         (同範囲)
+     - ai_scores        (同範囲)
+     - market_regime    (同範囲)
+     - market_calendar  (全件)
+     - stocks           (全件。セクターフィルタ用)
+     - earnings_calendar (end_date までの全件。未来参照防止のため end_date でカット)
   3. インメモリ conn を返す
 ```
+
+> **注意（未対応）**: `market_breadth` はバックテスト用インメモリ DB にコピーされていない。
+> このため `_is_breadth_stop()` は常に `False`（BUY 許可・安全側）を返し、
+> バックテストでは breadth_stop フィルタが機能しない。
+> 対応は別 Issue で実装予定。
 
 ---
 

@@ -5,6 +5,7 @@ feature_engineering と signal_generator の動作を検証する。
 """
 
 import datetime
+import datetime as _dt
 from datetime import date
 
 import duckdb
@@ -16,10 +17,12 @@ from kabusys.strategy.feature_engineering import (
     build_features,
 )
 from kabusys.strategy.signal_generator import (
+    _calc_sector_strengths,
     _compute_liquidity_score,
     _compute_momentum_score,
     _compute_value_score,
     _compute_volatility_score,
+    _fetch_gap_ratios,
     _is_bear_regime,
     _sigmoid,
     generate_signals,
@@ -755,3 +758,635 @@ def test_is_bear_regime_exactly_min_samples(conn):
         [TARGET_DATE, -0.3, "bear"],
     )
     assert _is_bear_regime(conn, TARGET_DATE) is True
+
+
+# ---------------------------------------------------------------------------
+# _fetch_gap_ratios
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# セクター強弱テスト用ヘルパー
+# ---------------------------------------------------------------------------
+
+
+def _insert_sector_test_data(
+    conn: duckdb.DuckDBPyConnection,
+    sector_data: list[tuple[str, str, float, float]],
+    target_date: date = TARGET_DATE,
+) -> None:
+    """セクター強弱テスト用: stocks と prices_daily の最小セットを挿入する。
+
+    Args:
+        sector_data: [(code, sector, close_today, close_20d_ago), ...]
+                     sector が空文字の場合は stocks に挿入しない。
+        target_date: シグナル生成対象日（デフォルト TARGET_DATE）。
+    """
+    # 21 営業日分の日付を降順で生成（rn=1=target_date, rn=21=20営業日前）
+    biz_dates: list[date] = []
+    d = target_date
+    while len(biz_dates) < 21:
+        if d.weekday() < 5:
+            biz_dates.append(d)
+        d = d - _dt.timedelta(days=1)
+    date_20d = biz_dates[20]  # 20 営業日前の日付
+
+    for code, sector, close_today, close_20d_ago in sector_data:
+        if sector:
+            conn.execute(
+                "INSERT INTO stocks (code, sector) VALUES (?, ?)",
+                [code, sector],
+            )
+        # target_date の価格
+        conn.execute(
+            "INSERT INTO prices_daily "
+            "(date, code, open, high, low, close, volume, turnover) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                target_date,
+                code,
+                close_today,
+                close_today,
+                close_today,
+                close_today,
+                1_000_000,
+                5e8,
+            ],
+        )
+        # 20 営業日前の価格
+        conn.execute(
+            "INSERT INTO prices_daily "
+            "(date, code, open, high, low, close, volume, turnover) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                date_20d,
+                code,
+                close_20d_ago,
+                close_20d_ago,
+                close_20d_ago,
+                close_20d_ago,
+                1_000_000,
+                5e8,
+            ],
+        )
+        # 中間日付を埋める（biz_dates[1..19]、rn=2..20 が存在するために必要）
+        for mid_d in biz_dates[1:20]:
+            conn.execute(
+                "INSERT INTO prices_daily "
+                "(date, code, open, high, low, close, volume, turnover) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    mid_d,
+                    code,
+                    close_today,
+                    close_today,
+                    close_today,
+                    close_today,
+                    1_000_000,
+                    5e8,
+                ],
+            )
+
+
+# ---------------------------------------------------------------------------
+# _calc_sector_strengths 単体テスト
+# ---------------------------------------------------------------------------
+
+
+def test_calc_sector_strengths_basic(conn):
+    """4セクター正常ケース: top/bottom 各1セクターが正しく分類される"""
+    # セクターリターン: Tech=+10%, Food=+5%, Energy=+2%, Retail=-5%
+    # → top={Tech}, bottom={Retail}
+    _insert_sector_test_data(
+        conn,
+        [
+            ("T1", "Tech", 1100.0, 1000.0),  # +10%
+            ("T2", "Tech", 1100.0, 1000.0),
+            ("F1", "Food", 1050.0, 1000.0),  # +5%
+            ("E1", "Energy", 1020.0, 1000.0),  # +2%
+            ("R1", "Retail", 950.0, 1000.0),  # -5%
+        ],
+    )
+    top, bottom, sector_map = _calc_sector_strengths(conn, TARGET_DATE)
+    assert "Tech" in top
+    assert "Retail" in bottom
+    assert "Food" not in top and "Food" not in bottom
+    assert "Energy" not in top and "Energy" not in bottom
+    # sector_map に全銘柄が含まれる
+    assert sector_map["T1"] == "Tech"
+    assert sector_map["R1"] == "Retail"
+
+
+def test_calc_sector_strengths_single_sector(conn):
+    """有効セクターが1つ → top と bottom が同一 → 両方 frozenset() を返す"""
+    _insert_sector_test_data(
+        conn,
+        [
+            ("A1", "Tech", 1100.0, 1000.0),
+            ("A2", "Tech", 1200.0, 1000.0),
+        ],
+    )
+    top, bottom, sector_map = _calc_sector_strengths(conn, TARGET_DATE)
+    assert top == frozenset()
+    assert bottom == frozenset()
+    # sector_map は正常に返る
+    assert sector_map["A1"] == "Tech"
+
+
+def test_calc_sector_strengths_no_20d_data(conn):
+    """20営業日前のデータがない → rows 空 → (frozenset, frozenset, map) を返す"""
+    # prices_daily に1日分しか入れない（21日分の distinct date がない）
+    conn.execute("INSERT INTO stocks (code, sector) VALUES (?, ?)", ["A", "Tech"])
+    conn.execute(
+        "INSERT INTO prices_daily "
+        "(date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "A", 1000.0, 1000.0, 1000.0, 1000.0, 1_000_000, 5e8],
+    )
+    top, bottom, sector_map = _calc_sector_strengths(conn, TARGET_DATE)
+    assert top == frozenset()
+    assert bottom == frozenset()
+    # sector_map は取得できる
+    assert sector_map.get("A") == "Tech"
+
+
+def test_calc_sector_strengths_multi_sector_insufficient_history(conn):
+    """複数セクターが存在しても distinct 日数が 21 未満ならフィルタ無効
+    （21日未満の場合 MIN(date) が最古日を返し ret=0 になることで誤分類が
+    発生しないよう HAVING COUNT(*) = 21 で排除されることを確認）"""
+    # 2セクター・5日分のデータ（21日には満たない）
+    for sector, code in [("Tech", "T1"), ("Food", "F1")]:
+        conn.execute("INSERT INTO stocks (code, sector) VALUES (?, ?)", [code, sector])
+    # 5営業日分の価格を挿入（TARGET_DATE から 4 日前まで）
+    base = _dt.date(2024, 1, 10)  # TARGET_DATE = 2024-01-10
+    prices = [
+        _dt.date(2024, 1, 6),
+        _dt.date(2024, 1, 7),
+        _dt.date(2024, 1, 8),
+        _dt.date(2024, 1, 9),
+        base,
+    ]
+    for d in prices:
+        for code, close in [("T1", 1100.0), ("F1", 900.0)]:
+            conn.execute(
+                "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [d, code, close, close, close, close, 1_000_000, 5e8],
+            )
+    top, bottom, sector_map = _calc_sector_strengths(conn, base)
+    # 21 日分の履歴がないのでフィルタ無効
+    assert top == frozenset(), "21日未満のデータでは top は空であるべき"
+    assert bottom == frozenset(), "21日未満のデータでは bottom は空であるべき"
+
+
+def test_calc_sector_strengths_unknown_sector_excluded(conn):
+    """sector=NULL の銘柄は sector_map に含まれない（安全側）"""
+    _insert_sector_test_data(
+        conn,
+        [
+            ("A", "Tech", 1100.0, 1000.0),
+            ("B", "Food", 950.0, 1000.0),
+        ],
+    )
+    # sector なし銘柄（stocks に挿入しない → sector_map に含まれない）
+    conn.execute(
+        "INSERT INTO prices_daily "
+        "(date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "C", 1050.0, 1050.0, 1050.0, 1050.0, 1_000_000, 5e8],
+    )
+    top, bottom, sector_map = _calc_sector_strengths(conn, TARGET_DATE)
+    assert "C" not in sector_map
+    assert "A" in sector_map
+
+
+def test_calc_sector_strengths_empty_stocks(conn):
+    """stocks テーブルが空 → (frozenset, frozenset, {}) を返す"""
+    top, bottom, sector_map = _calc_sector_strengths(conn, TARGET_DATE)
+    assert top == frozenset()
+    assert bottom == frozenset()
+    assert sector_map == {}
+
+
+# ---------------------------------------------------------------------------
+# generate_signals — セクター強弱フィルタ統合テスト
+# ---------------------------------------------------------------------------
+
+
+def test_sector_bottom_suppresses_buy(conn):
+    """下位セクター銘柄の BUY が抑制される"""
+    # 4 セクター: Tech(+10%), Food(+5%), Energy(+2%), Retail(-5%)
+    # → bottom = {Retail}
+    _insert_sector_test_data(
+        conn,
+        [
+            ("T1", "Tech", 1100.0, 1000.0),
+            ("T2", "Tech", 1100.0, 1000.0),
+            ("F1", "Food", 1050.0, 1000.0),
+            ("F2", "Food", 1050.0, 1000.0),
+            ("E1", "Energy", 1020.0, 1000.0),
+            ("E2", "Energy", 1020.0, 1000.0),
+            ("R1", "Retail", 950.0, 1000.0),
+            ("R2", "Retail", 950.0, 1000.0),
+        ],
+    )
+    # features に高スコアを設定（全銘柄 BUY 候補）
+    for code in ["T1", "T2", "F1", "F2", "E1", "E2", "R1", "R2"]:
+        conn.execute(
+            "INSERT INTO features "
+            "(date, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev) "
+            "VALUES (?, ?, 3.0, 3.0, 0.0, 0.0, 20.0, 0.0)",
+            [TARGET_DATE, code],
+        )
+    generate_signals(conn, TARGET_DATE)
+    buy_codes = {
+        row[0]
+        for row in conn.execute(
+            "SELECT code FROM signals WHERE date = ? AND side = 'buy'",
+            [TARGET_DATE],
+        ).fetchall()
+    }
+    assert "R1" not in buy_codes, "Retail（下位セクター）は BUY 抑制されるべき"
+    assert "R2" not in buy_codes, "Retail（下位セクター）は BUY 抑制されるべき"
+    assert "T1" in buy_codes, "Tech（上位セクター）は BUY 通過するべき"
+
+
+def test_sector_boost_pushes_score_above_threshold(conn):
+    """上位セクター補正 +0.03 でスコアが閾値を超えて BUY が生成される"""
+    # 4 sectors so filter is active: Tech(top +10%), Retail(bottom -5%), Food(+5%), Energy(+2%)
+    # A: Tech (上位) → boost で threshold=0.58 超え → BUY
+    # B: Energy (中立) → boost なし → BUY なし
+    _insert_sector_test_data(
+        conn,
+        [
+            ("A", "Tech", 1100.0, 1000.0),  # top sector (+10%)
+            ("B", "Energy", 1000.0, 1000.0),  # neutral (0%)
+            ("C", "Food", 1050.0, 1000.0),  # middle (+5%)
+            ("D", "Retail", 950.0, 1000.0),  # bottom sector (-5%)
+        ],
+    )
+    # momentum_20=1.0, momentum_60=1.0, ma200_dev=0.0 → final_score ≈ 0.5616 < 0.58
+    for code in ["A", "B", "C", "D"]:
+        conn.execute(
+            "INSERT INTO features "
+            "(date, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev) "
+            "VALUES (?, ?, 1.0, 1.0, 0.0, 0.0, NULL, 0.0)",
+            [TARGET_DATE, code],
+        )
+    # threshold=0.58 で実行（default 0.60 より低く設定してブーストの効果を確認）
+    generate_signals(conn, TARGET_DATE, threshold=0.58)
+    buy_codes = {
+        row[0]
+        for row in conn.execute(
+            "SELECT code FROM signals WHERE date = ? AND side = 'buy'",
+            [TARGET_DATE],
+        ).fetchall()
+    }
+    assert "A" in buy_codes, "Tech（上位セクター +0.03 boost）→ 0.5916 > 0.58 で BUY"
+    assert "B" not in buy_codes, "Energy（中立）→ 0.5616 < 0.58 で BUY なし"
+
+
+def test_sector_unknown_not_affected(conn):
+    """セクター未登録銘柄はブーストも抑制もされない"""
+    # 2 セクター: Tech(top +10%), Food(bottom -5%)
+    # X は stocks に登録しない（sector 不明） → sector_map に含まれない
+    _insert_sector_test_data(
+        conn,
+        [
+            ("T1", "Tech", 1100.0, 1000.0),
+            ("T2", "Tech", 1100.0, 1000.0),
+            ("U1", "Food", 950.0, 1000.0),
+            ("U2", "Food", 950.0, 1000.0),
+        ],
+    )
+    # X の prices_daily だけ追加
+    biz_dates: list[date] = []
+    d = TARGET_DATE
+    while len(biz_dates) < 21:
+        if d.weekday() < 5:
+            biz_dates.append(d)
+        d = d - _dt.timedelta(days=1)
+    for d2 in biz_dates:
+        conn.execute(
+            "INSERT INTO prices_daily "
+            "(date, code, open, high, low, close, volume, turnover) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [d2, "X", 1000.0, 1000.0, 1000.0, 1000.0, 1_000_000, 5e8],
+        )
+    for code in ["T1", "T2", "U1", "U2", "X"]:
+        conn.execute(
+            "INSERT INTO features "
+            "(date, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev) "
+            "VALUES (?, ?, 3.0, 3.0, 0.0, 0.0, 20.0, 0.0)",
+            [TARGET_DATE, code],
+        )
+    generate_signals(conn, TARGET_DATE)
+    buy_codes = {
+        row[0]
+        for row in conn.execute(
+            "SELECT code FROM signals WHERE date = ? AND side = 'buy'",
+            [TARGET_DATE],
+        ).fetchall()
+    }
+    # X は bottom セクターでも top セクターでもない → BUY 通過
+    assert "X" in buy_codes, "セクター未登録銘柄は抑制されない"
+    # U1, U2 は Food (bottom) → 抑制
+    assert "U1" not in buy_codes
+    assert "U2" not in buy_codes
+
+
+def test_sector_filter_skipped_in_bear(conn):
+    """Bear レジーム時はセクターフィルタが適用されない"""
+    _insert_sector_test_data(
+        conn,
+        [
+            ("A", "Tech", 1100.0, 1000.0),
+            ("B", "Retail", 950.0, 1000.0),
+        ],
+    )
+    # Bear レジームを設定
+    conn.execute(
+        "INSERT INTO market_regime (date, regime_label, regime_score) VALUES (?, 'bear', -0.5)",
+        [TARGET_DATE],
+    )
+    for code in ["A", "B"]:
+        conn.execute(
+            "INSERT INTO features "
+            "(date, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev) "
+            "VALUES (?, ?, 3.0, 3.0, 0.0, 0.0, 20.0, 0.0)",
+            [TARGET_DATE, code],
+        )
+    generate_signals(conn, TARGET_DATE)
+    buy_count = conn.execute(
+        "SELECT COUNT(*) FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
+    ).fetchone()[0]
+    assert buy_count == 0, "Bear レジームでは BUY が生成されない"
+
+
+def test_sector_sell_not_affected(conn):
+    """SELL シグナルはセクターフィルタの対象外"""
+    # 2 セクター: Tech(top +10%), Food(bottom -5%)
+    # A は Tech（top セクター）だが open position でストップロス水準 → SELL が生成されること
+    _insert_sector_test_data(
+        conn,
+        [
+            ("A", "Tech", 1100.0, 1000.0),
+            ("B", "Tech", 1100.0, 1000.0),
+            ("C", "Food", 950.0, 1000.0),
+            ("D", "Food", 950.0, 1000.0),
+        ],
+    )
+    # A を保有中でストップロス水準に設定
+    conn.execute(
+        "INSERT INTO positions (date, code, position_size, avg_price) "
+        "VALUES (?, ?, ?, ?)",
+        [TARGET_DATE, "A", 100, 1200.0],
+    )
+    # A の終値を avg_price の 91% に設定（-9% < ストップロス -8%）
+    conn.execute(
+        "UPDATE prices_daily SET close = 1092.0 WHERE date = ? AND code = 'A'",
+        [TARGET_DATE],
+    )
+    for code in ["A", "B", "C", "D"]:
+        conn.execute(
+            "INSERT INTO features "
+            "(date, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev) "
+            "VALUES (?, ?, -3.0, -3.0, 0.0, 0.0, 20.0, 0.0)",
+            [TARGET_DATE, code],
+        )
+    generate_signals(conn, TARGET_DATE)
+    sell_count = conn.execute(
+        "SELECT COUNT(*) FROM signals WHERE date = ? AND side = 'sell' AND code = 'A'",
+        [TARGET_DATE],
+    ).fetchone()[0]
+    assert sell_count == 1, "SELL はセクターフィルタの対象外"
+
+
+def test_sector_single_sector_no_filter(conn):
+    """有効セクターが1つの場合はフィルタが無効（BUY は通常通り生成される）"""
+    _insert_sector_test_data(
+        conn,
+        [
+            ("A", "Tech", 1100.0, 1000.0),
+            ("B", "Tech", 1200.0, 1000.0),
+        ],
+    )
+    for code in ["A", "B"]:
+        conn.execute(
+            "INSERT INTO features "
+            "(date, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev) "
+            "VALUES (?, ?, 3.0, 3.0, 0.0, 0.0, 20.0, 0.0)",
+            [TARGET_DATE, code],
+        )
+    generate_signals(conn, TARGET_DATE)
+    buy_codes = {
+        row[0]
+        for row in conn.execute(
+            "SELECT code FROM signals WHERE date = ? AND side = 'buy'",
+            [TARGET_DATE],
+        ).fetchall()
+    }
+    assert "A" in buy_codes
+    assert "B" in buy_codes
+
+
+_PREV_DATE = date(2020, 5, 29)  # TARGET_DATE の直前営業日
+
+
+def test_fetch_gap_ratios_gap_up(conn):
+    """ギャップアップ時に正の比率が返る"""
+    # prev: close=1000, target: open=1061 → gap = 0.061
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [_PREV_DATE, "A", 990.0, 1010.0, 985.0, 1000.0, 1_000_000, 5e8],
+    )
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "A", 1061.0, 1080.0, 1060.0, 1070.0, 1_000_000, 5e8],
+    )
+    result = _fetch_gap_ratios(conn, ["A"], TARGET_DATE)
+    assert "A" in result
+    assert result["A"] == pytest.approx(0.061, rel=1e-4)
+
+
+def test_fetch_gap_ratios_missing_data_returns_empty(conn):
+    """target_date のデータなし → {} を返す（BUY 許可側）"""
+    result = _fetch_gap_ratios(conn, ["A"], TARGET_DATE)
+    assert result == {}
+
+
+def test_fetch_gap_ratios_empty_codes(conn):
+    """codes が空リスト → {} を返す"""
+    result = _fetch_gap_ratios(conn, [], TARGET_DATE)
+    assert result == {}
+
+
+def test_fetch_gap_ratios_zero_prev_close_excluded(conn):
+    """前日 close = 0 の銘柄はゼロ除算防止のため結果から除外される"""
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [_PREV_DATE, "A", 0.0, 0.0, 0.0, 0.0, 0, 0],
+    )
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "A", 100.0, 110.0, 95.0, 105.0, 1_000_000, 5e8],
+    )
+    result = _fetch_gap_ratios(conn, ["A"], TARGET_DATE)
+    assert "A" not in result
+
+
+def test_fetch_gap_ratios_zero_open_excluded(conn):
+    """当日 open = 0 の銘柄はデータ異常として結果から除外される"""
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [_PREV_DATE, "A", 990.0, 1010.0, 985.0, 1000.0, 1_000_000, 5e8],
+    )
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "A", 0.0, 0.0, 0.0, 0.0, 0, 0],
+    )
+    result = _fetch_gap_ratios(conn, ["A"], TARGET_DATE)
+    assert "A" not in result
+
+
+# ---------------------------------------------------------------------------
+# generate_signals — ギャップフィルタ統合テスト
+# ---------------------------------------------------------------------------
+
+
+def test_gap_up_suppresses_buy(conn):
+    """ギャップアップ過大（+5.1%）で BUY が抑制される"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8), ("B", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    # A に高スコアを設定（BUY 候補）
+    conn.execute(
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 "
+        "WHERE code = 'A' AND date = ?",
+        [TARGET_DATE],
+    )
+    # A の当日 open を前日終値 (1000) 比 +5.1% に設定
+    # _insert_price_history が open=close*0.99=990 で挿入しているので UPDATE で上書き
+    conn.execute(
+        "UPDATE prices_daily SET open = 1051.0 WHERE date = ? AND code = 'A'",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.5)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    # BUY 抑制・ポジションなし → シグナルなし
+    assert row is None
+
+
+def test_gap_down_at_boundary_suppresses_buy(conn):
+    """ギャップダウン -3.0%（境界値：以下に含む）で BUY が抑制される"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    conn.execute(
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 "
+        "WHERE code = 'A' AND date = ?",
+        [TARGET_DATE],
+    )
+    # open = 970.0 → gap = 970/1000 - 1 = -0.03（ちょうど -3%、以下に含む → 抑制）
+    conn.execute(
+        "UPDATE prices_daily SET open = 970.0 WHERE date = ? AND code = 'A'",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.5)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    assert row is None
+
+
+def test_gap_up_at_threshold_allows_buy(conn):
+    """ギャップアップちょうど +5.0%（超ではない）では BUY が許可される"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    conn.execute(
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 "
+        "WHERE code = 'A' AND date = ?",
+        [TARGET_DATE],
+    )
+    # open = 1050.0 → gap = 1050/1000 - 1 = 0.05（ちょうど +5%、超ではない → 許可）
+    # IEEE754 では 1050.0/1000.0 - 1.0 = 0.050000000000000044 となるが
+    # _GAP_THRESHOLD_EPSILON = 1e-9 を加算した比較で正しく「許可」と判定される
+    conn.execute(
+        "UPDATE prices_daily SET open = 1050.0 WHERE date = ? AND code = 'A'",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.5)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    assert row is not None and row[0] == "buy"
+
+
+def test_gap_down_just_above_threshold_allows_buy(conn):
+    """ギャップダウン -2.9%（閾値より上）では BUY が許可される"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    conn.execute(
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 "
+        "WHERE code = 'A' AND date = ?",
+        [TARGET_DATE],
+    )
+    # open = 971.0 → gap = 971/1000 - 1 = -0.029 > -0.03 → 許可
+    conn.execute(
+        "UPDATE prices_daily SET open = 971.0 WHERE date = ? AND code = 'A'",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.5)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    assert row is not None and row[0] == "buy"
+
+
+def test_gap_missing_prev_data_allows_buy(conn):
+    """前日データなし（gap_ratios にキーなし）→ BUY 許可（安全側）"""
+    # prices_daily に TARGET_DATE の 1 行だけ挿入（前日なし）
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [TARGET_DATE, "A", 1000.0, 1020.0, 990.0, 1010.0, 1_000_000, 5e8],
+    )
+    # features に直接挿入（build_features は価格履歴が必要なためスキップ）
+    conn.execute(
+        "INSERT INTO features "
+        "(date, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev) "
+        "VALUES (?, 'A', 3.0, 3.0, NULL, NULL, NULL, NULL)",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.5)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    assert row is not None and row[0] == "buy"
+
+
+def test_sell_not_affected_by_gap(conn):
+    """ギャップ過大でも SELL シグナルは通常通り生成される（SELL は対象外）"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    # avg_price=1100、終値=1000 → pnl=-9.1% → stop-loss 発動
+    conn.execute(
+        "INSERT INTO positions (date, code, position_size, avg_price, market_value) "
+        "VALUES (?, 'A', 100, 1100.0, 110000.0)",
+        [TARGET_DATE],
+    )
+    # ギャップアップ過大を設定（BUY 候補なら抑制されるが、SELL は影響を受けない）
+    conn.execute(
+        "UPDATE prices_daily SET open = 1061.0 WHERE date = ? AND code = 'A'",
+        [TARGET_DATE],
+    )
+    generate_signals(conn, TARGET_DATE, threshold=0.5)
+    row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
+    ).fetchone()
+    assert row is not None and row[0] == "sell"

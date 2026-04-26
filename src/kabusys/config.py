@@ -141,6 +141,10 @@ class Settings:
     def jquants_refresh_token(self) -> str:
         return _require("JQUANTS_REFRESH_TOKEN")
 
+    @property
+    def jquants_bulk_api_key(self) -> str:
+        return _require("JQUANTS_BULK_API_KEY")
+
     # --- kabuステーション API ---
     @property
     def kabu_api_password(self) -> str:
@@ -149,6 +153,10 @@ class Settings:
     @property
     def kabu_api_base_url(self) -> str:
         return os.environ.get("KABU_API_BASE_URL", "http://localhost:18080/kabusapi")
+
+    @property
+    def kabu_trade_password(self) -> str | None:
+        return os.environ.get("KABU_TRADE_PASSWORD") or None
 
     # --- LINE Messaging API ---
     @property

@@ -23,6 +23,7 @@ MINIMAL_DDL = [
         close       DECIMAL(18,4),
         volume      BIGINT,
         turnover    DECIMAL(18,2),
+        adj_factor  DECIMAL(18,6),
         fetched_at  TIMESTAMP     NOT NULL DEFAULT current_timestamp,
         PRIMARY KEY (date, code)
     )""",
@@ -73,10 +74,18 @@ def sqlite_conn():
 def duckdb_conn():
     conn = duckdb.connect(":memory:")
     conn.execute("""
-        CREATE TABLE signals (date DATE, code VARCHAR, side VARCHAR, score FLOAT, signal_rank INTEGER)
+        CREATE TABLE signals (date DATE, code VARCHAR, side VARCHAR, score FLOAT, signal_rank INTEGER, size_multiplier DOUBLE NOT NULL DEFAULT 1.0)
     """)
     conn.execute("""
         CREATE TABLE portfolio_targets (date DATE, code VARCHAR, target_size INTEGER, entry_price FLOAT)
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS position_entries (
+            code        VARCHAR  NOT NULL,
+            entry_date  DATE     NOT NULL,
+            sell_date   DATE,
+            PRIMARY KEY (code, entry_date)
+        )
     """)
     yield conn
     conn.close()

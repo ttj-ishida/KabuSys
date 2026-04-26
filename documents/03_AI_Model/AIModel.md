@@ -50,7 +50,7 @@ AIが直接「買う・売る」の判断を下したり、APIを叩いて直接
 - **マクロ経済ニュースの LLM センチメント（重み30%）**: `raw_news` からキーワード
   （日銀・FOMC・CPI・為替介入等）でフィルタし、gpt-4o-mini で評価。
 
-**実装予定（Issue #173）— 市場内部指標（breadth）補正:**
+**実装済み（Issue #173 / PR #176）— 市場内部指標（breadth）補正:**
 - **25日騰落レシオ**: 直近25営業日の値上がり銘柄数合計 / 値下がり銘柄数合計 × 100
   - 80 未満 → `raw_score -= 0.2`（市場の弱さをスコアに反映）
   - 120 超 → `raw_score += 0.1`（市場の強さをスコアに反映）
@@ -70,7 +70,7 @@ AIが直接「買う・売る」の判断を下したり、APIを叩いて直接
 raw_score = 0.7 * (ma200_ratio - 1.0) * 10 + 0.3 * macro_sentiment
 ```
 
-**ステップ2: breadth 補正（Issue #173 で追加）**
+**ステップ2: breadth 補正（Issue #173 / PR #176 実装済み）**
 ```
 if adv_decline_ratio < 80:  raw_score -= 0.2
 if adv_decline_ratio > 120: raw_score += 0.1

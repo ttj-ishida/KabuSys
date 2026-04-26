@@ -17,6 +17,7 @@ from pathlib import Path
 
 import duckdb
 
+from kabusys.data.calendar_management import next_trading_day
 from kabusys.execution.broker_api import BrokerAPIProtocol, OrderSentPendingError
 
 # DuplicateOrderError は _process_signals() (Task 7) で使用
@@ -88,8 +89,24 @@ class ExecutionEngine:
 
             code: str = sig["code"]
             side: str = sig["side"]
-            qty: int = sig["qty"]
+            raw_qty: int = sig["qty"]
             price: float = sig["price"]
+
+            # BUY のみ size_multiplier を適用（SELL は保有株数を売るため縮小しない）
+            qty: int
+            if side == "buy":
+                sm: float = sig.get("size_multiplier", 1.0)
+                qty = max(0, (int(raw_qty * sm) // 100) * 100)
+                if qty <= 0:
+                    logger.info(
+                        "size_multiplier 適用後 qty=0 のためスキップ: code=%s sm=%.2f",
+                        code,
+                        sm,
+                    )
+                    continue
+            else:
+                qty = raw_qty
+
             signal_id = f"{self._config.target_date.isoformat()}_{code}_{side}"
             order_value = price * qty
 
@@ -139,10 +156,13 @@ class ExecutionEngine:
 
             t0 = _time_module.perf_counter()
             latency_ms: float | None = None
+            _order_sent = False
+            _order_pending = False
             try:
                 self._order_manager.send_order(record.client_order_id)
                 latency_ms = (_time_module.perf_counter() - t0) * 1000
                 self._risk_manager.record_api_success()
+                _order_sent = True
                 logger.info(
                     "発注成功: signal_id=%s, client_order_id=%s",
                     signal_id,
@@ -151,10 +171,41 @@ class ExecutionEngine:
             except OrderSentPendingError:
                 latency_ms = (_time_module.perf_counter() - t0) * 1000
                 self._risk_manager.record_api_success()
+                _order_sent = True
+                _order_pending = True
                 logger.info("発注保留（pending）: signal_id=%s", signal_id)
             except Exception as exc:
                 self._risk_manager.record_api_error()
                 logger.error("発注失敗: signal_id=%s: %s", signal_id, exc)
+
+            # position_entries に約定を記録（最低保有日数・再エントリー制限用）
+            # fill_date: 発注当日の翌営業日（バックテストと整合させるため）
+            # BUY pending も記録する（発注確約済みとして扱う。キャンセル時はリコンシリエーションで回収）
+            # SELL pending は記録しない（保有中のポジションのクローズ確定前のため）
+            if _order_sent:
+                try:
+                    fill_date = next_trading_day(
+                        self._duckdb_conn, self._config.target_date
+                    )
+                    if side == "buy":
+                        self._duckdb_conn.execute(
+                            """
+                            INSERT INTO position_entries (code, entry_date)
+                            VALUES (?, ?)
+                            ON CONFLICT DO NOTHING
+                            """,
+                            [code, fill_date],
+                        )
+                    elif side == "sell" and not _order_pending:
+                        self._duckdb_conn.execute(
+                            "UPDATE position_entries SET sell_date = ? "
+                            "WHERE code = ? AND sell_date IS NULL",
+                            [fill_date, code],
+                        )
+                except Exception as _pe_exc:
+                    logger.warning(
+                        "position_entries 書き込み失敗（発注フローは継続）: %s", _pe_exc
+                    )
 
             if latency_ms is not None and self._monitoring_db is not None:
                 try:
@@ -357,7 +408,8 @@ class ExecutionEngine:
         """DuckDB から今日のシグナルを portfolio_targets と JOIN して返す。"""
         rows = self._duckdb_conn.execute(
             """
-            SELECT s.code, s.side, pt.target_size AS qty, pt.entry_price AS price
+            SELECT s.code, s.side, pt.target_size AS qty, pt.entry_price AS price,
+                   COALESCE(s.size_multiplier, 1.0) AS size_multiplier
             FROM signals s
             JOIN portfolio_targets pt ON s.date = pt.date AND s.code = pt.code
             WHERE s.date = ?
@@ -366,6 +418,12 @@ class ExecutionEngine:
             [self._config.target_date],
         ).fetchall()
         return [
-            {"code": r[0], "side": r[1], "qty": int(r[2]), "price": float(r[3])}
+            {
+                "code": r[0],
+                "side": r[1],
+                "qty": int(r[2]),
+                "price": float(r[3]),
+                "size_multiplier": float(r[4]),
+            }
             for r in rows
         ]

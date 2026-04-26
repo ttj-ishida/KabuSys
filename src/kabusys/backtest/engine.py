@@ -117,7 +117,74 @@ def _build_backtest_conn(
     except Exception as exc:
         logger.warning("_build_backtest_conn: stocks のコピーをスキップ: %s", exc)
 
+    # earnings_calendar は end_date 以前の全件コピー
+    try:
+        rows = source_conn.execute(
+            "SELECT code, announcement_date FROM earnings_calendar "
+            "WHERE announcement_date <= ?",
+            [end_date],
+        ).fetchall()
+        if rows:
+            bt_conn.executemany(
+                "INSERT INTO earnings_calendar (code, announcement_date) VALUES (?, ?)",
+                rows,
+            )
+    except Exception as exc:
+        logger.warning(
+            "_build_backtest_conn: earnings_calendar のコピーをスキップ: %s", exc
+        )
+
+    # market_breadth はインメモリDB上の prices_daily から計算（外部データ依存なし）
+    _populate_backtest_breadth(bt_conn, start_date, end_date)
+
     return bt_conn
+
+
+def _populate_backtest_breadth(
+    bt_conn: duckdb.DuckDBPyConnection,
+    start_date: date,
+    end_date: date,
+) -> None:
+    """バックテスト対象期間の market_breadth を prices_daily から計算して挿入する。
+
+    prices_daily は data_start（start_date - 300日）から既にコピー済みのため、
+    breadth 計算に必要な過去データは揃っている。
+    """
+    from kabusys.data.breadth import calc_and_save_breadth
+
+    try:
+        # EXCEPT で既存行をスキップし、未計算日のみ対象にする（再実行コスト削減）
+        trading_dates = bt_conn.execute(
+            """
+            SELECT DISTINCT date FROM prices_daily
+            WHERE date >= ? AND date <= ?
+            EXCEPT SELECT date FROM market_breadth
+            ORDER BY date
+            """,
+            [start_date, end_date],
+        ).fetchall()
+    except Exception as exc:
+        logger.warning(
+            "_populate_backtest_breadth: trading_dates 取得失敗 → market_breadth をスキップ: %s",
+            exc,
+        )
+        return
+
+    processed, failed = 0, 0
+    for (d,) in trading_dates:
+        try:
+            if calc_and_save_breadth(bt_conn, d):
+                processed += 1
+        except Exception as exc:
+            failed += 1
+            logger.warning("_populate_backtest_breadth: date=%s のスキップ: %s", d, exc)
+
+    logger.info(
+        "_populate_backtest_breadth: 完了 対象=%d processed=%d failed=%d",
+        len(trading_dates),
+        processed,
+        failed,
+    )
 
 
 def _fetch_open_prices(
@@ -174,6 +241,45 @@ def _write_positions(
         )
 
 
+def _write_position_entries(
+    conn: duckdb.DuckDBPyConnection,
+    trades: list[TradeRecord],
+    trading_day: date,
+) -> None:
+    """当日の約定を position_entries テーブルに反映する。
+
+    BUY 約定 → (code, entry_date) を INSERT（重複は無視）。
+    SELL 約定 → 最新の未クローズレコードの sell_date を UPDATE。
+    """
+    today_trades = [t for t in trades if t.date == trading_day]
+    for trade in today_trades:
+        if trade.side == "buy":
+            conn.execute(
+                """
+                INSERT INTO position_entries (code, entry_date)
+                VALUES (?, ?)
+                ON CONFLICT DO NOTHING
+                """,
+                [trade.code, trading_day],
+            )
+        elif trade.side == "sell":
+            result = conn.execute(
+                """
+                UPDATE position_entries
+                SET sell_date = ?
+                WHERE code = ? AND sell_date IS NULL
+                RETURNING code
+                """,
+                [trading_day, trade.code],
+            ).fetchall()
+            if not result:
+                logger.debug(
+                    "_write_position_entries: SELL for %s matched no open position_entries row date=%s",
+                    trade.code,
+                    trading_day,
+                )
+
+
 def _read_day_signals(
     conn: duckdb.DuckDBPyConnection,
     trading_day: date,
@@ -182,11 +288,11 @@ def _read_day_signals(
 
     Returns:
         (buy_signals, sell_signals)
-        buy_signals:  [{"code": str, "signal_rank": int, "score": float}, ...]
+        buy_signals:  [{"code": str, "signal_rank": int, "score": float, "size_multiplier": float}, ...]
         sell_signals: [{"code": str}, ...]
     """
     buy_rows = conn.execute(
-        "SELECT code, signal_rank, score FROM signals "
+        "SELECT code, signal_rank, score, size_multiplier FROM signals "
         "WHERE date = ? AND side = 'buy' ORDER BY signal_rank",
         [trading_day],
     ).fetchall()
@@ -195,7 +301,12 @@ def _read_day_signals(
         [trading_day],
     ).fetchall()
     buy_signals = [
-        {"code": row[0], "signal_rank": row[1], "score": row[2] or 0.0}
+        {
+            "code": row[0],
+            "signal_rank": row[1],
+            "score": row[2] or 0.0,
+            "size_multiplier": row[3] if row[3] is not None else 1.0,
+        }
         for row in buy_rows
     ]
     sell_signals = [{"code": row[0]} for row in sell_rows]
@@ -251,6 +362,7 @@ def run_backtest(
     risk_pct: float = 0.005,
     stop_loss_pct: float = 0.08,
     lot_size: int = 100,
+    event_dates: dict[date, str] | None = None,
 ) -> BacktestResult:
     """バックテストを実行し結果を返す。
 
@@ -268,6 +380,8 @@ def run_backtest(
         risk_pct:          1トレード許容リスク率（risk_based 時、デフォルト 0.5%）。
         stop_loss_pct:     損切り率（株数計算用、risk_based 時、デフォルト 8%）。
         lot_size:          単元株数（デフォルト 100）。日本株の標準単元。
+        event_dates:       {event_date: event_name} のイベント日辞書。翌営業日がイベント日の
+                           場合、BUY サイズを 50% に縮小する。None は空辞書と同義。
 
     Returns:
         BacktestResult（history, trades, metrics）。
@@ -331,6 +445,9 @@ def run_backtest(
                 lot_size=lot_size,
             )
 
+            # position_entries テーブルに約定を反映（最低保有日数・再エントリー制限用）
+            _write_position_entries(bt_conn, simulator.trades, trading_day)
+
             # Step 2: positions テーブルに書き戻し（generate_signals の SELL 判定に必要）
             _write_positions(
                 bt_conn, trading_day, simulator.positions, simulator.cost_basis
@@ -341,7 +458,9 @@ def run_backtest(
             simulator.mark_to_market(trading_day, close_prices)
 
             # Step 4: 翌日用シグナル生成（bt_conn の positions を読んで SELL 判定）
-            generate_signals(bt_conn, target_date=trading_day)
+            generate_signals(
+                bt_conn, target_date=trading_day, event_dates=event_dates or {}
+            )
 
             # Step 5: ポートフォリオ構築（Phase 5 モジュール使用）
             buy_signals, sell_signals = _read_day_signals(bt_conn, trading_day)
@@ -400,11 +519,21 @@ def run_backtest(
 
             # 翌日の約定に使う発注リストをメモリ上で更新（次ループの Step 1 で消費）
             # BUY と SELL が同一銘柄になる場合は BUY を除外（SELL を優先）
+            # size_multiplier を各 BUY に適用（主要イベント前は 50% 縮小）
+            sm_map = {s["code"]: s.get("size_multiplier", 1.0) for s in buy_signals}
             next_day_orders = [
-                {"code": code, "side": "buy", "shares": shares}
+                {
+                    "code": code,
+                    "side": "buy",
+                    "shares": max(
+                        0, (int(shares * sm_map.get(code, 1.0)) // lot_size) * lot_size
+                    ),
+                }
                 for code, shares in sized.items()
                 if shares > 0 and code not in sell_codes
             ] + [{"code": s["code"], "side": "sell"} for s in sell_signals]
+            # shares=0 になったエントリーを除外
+            next_day_orders = [o for o in next_day_orders if o.get("shares", 1) > 0]
     finally:
         bt_conn.close()
     metrics = calc_metrics(simulator.history, simulator.trades)

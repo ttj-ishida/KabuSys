@@ -63,7 +63,7 @@ def duck_conn():
     conn = duckdb.connect(":memory:")
     conn.execute(
         "CREATE TABLE signals "
-        "(date DATE, code VARCHAR, side VARCHAR, score FLOAT, signal_rank INTEGER)"
+        "(date DATE, code VARCHAR, side VARCHAR, score FLOAT, signal_rank INTEGER, size_multiplier DOUBLE NOT NULL DEFAULT 1.0)"
     )
     conn.execute(
         "CREATE TABLE portfolio_targets "
@@ -77,7 +77,7 @@ def _insert_signal(
     conn: duckdb.DuckDBPyConnection, code: str, side: str = "buy", score: float = 0.8
 ):
     conn.execute(
-        "INSERT INTO signals VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO signals (date, code, side, score, signal_rank) VALUES (?, ?, ?, ?, ?)",
         [TARGET_DATE, code, side, score, 1],
     )
 

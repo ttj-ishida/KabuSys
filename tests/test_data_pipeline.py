@@ -487,3 +487,37 @@ class TestAdditionalCases:
         )
         result = jquants.fetch_daily_quotes(id_token="dummy")
         assert result == []
+
+
+class TestEarningsCalendarPipeline:
+    def test_save_earnings_calendar_idempotent(self):
+        """save_earnings_calendar は重複実行で件数が増えない。"""
+        from kabusys.data.schema import init_schema
+        from kabusys.data import jquants_client as jq
+
+        conn = init_schema(":memory:")
+        records = [
+            {"Code": "1001", "Date": "20260501"},
+            {"Code": "1002", "Date": "20260502"},
+        ]
+        n1 = jq.save_earnings_calendar(conn, records)
+        n2 = jq.save_earnings_calendar(conn, records)
+        assert n1 == 2
+        assert n2 == 2  # 冪等: 2回目も 2件処理するが重複挿入なし
+        count = conn.execute("SELECT COUNT(*) FROM earnings_calendar").fetchone()[0]
+        assert count == 2
+        conn.close()
+
+    def test_save_earnings_calendar_skips_invalid_date(self):
+        """不正な日付フォーマットはスキップされる。"""
+        from kabusys.data.schema import init_schema
+        from kabusys.data import jquants_client as jq
+
+        conn = init_schema(":memory:")
+        records = [
+            {"Code": "1001", "Date": "not-a-date"},
+            {"Code": "1002", "Date": "20260502"},
+        ]
+        n = jq.save_earnings_calendar(conn, records)
+        assert n == 1  # 有効な 1件のみ保存
+        conn.close()
