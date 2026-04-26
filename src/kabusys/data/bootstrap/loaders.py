@@ -332,6 +332,9 @@ def load_topix(conn: duckdb.DuckDBPyConnection, csv_path: Path) -> int:
         if None in (o, h, lo, c):
             logger.warning("load_topix: OHLC 欠損行をスキップ: %s", row)
             continue
+        if lo > h:  # type: ignore[operator]
+            logger.warning("load_topix: low > high の行をスキップ: %s", row)
+            continue
         buf.append((date, o, h, lo, c))
         if len(buf) >= _CHUNK:
             _flush()

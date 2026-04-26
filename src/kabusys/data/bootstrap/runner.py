@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import urllib.error
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -59,6 +60,21 @@ class BootstrapResult:
 def _endpoint_to_dir(endpoint: str, raw_dir: Path) -> Path:
     """'/equities/bars/daily' → raw_dir/equities/bars/daily/"""
     return raw_dir / endpoint.lstrip("/")
+
+
+def _safe_errmsg(exc: Exception) -> str:
+    """presigned URL がログ/DBに漏れないよう HTTPError は status+reason のみ返す。"""
+    if isinstance(exc, urllib.error.HTTPError):
+        return f"HTTP {exc.code} {exc.reason}"
+    return type(exc).__name__
+
+
+def _safe_filename(file_key: str) -> str | None:
+    """file_key の末尾セグメントを検証してファイル名として返す。'.'/'..' は拒否。"""
+    name = file_key.split("/")[-1] if "/" in file_key else file_key
+    if not name or name in (".", ".."):
+        return None
+    return name
 
 
 def _loaded_keys(conn: duckdb.DuckDBPyConnection) -> set[str]:
@@ -129,7 +145,10 @@ def run_bootstrap(
             if not file_key:
                 logger.warning("file_key が空のエントリをスキップ: %s", f)
                 continue
-            file_name = file_key.split("/")[-1] if "/" in file_key else file_key
+            file_name = _safe_filename(file_key)
+            if file_name is None:
+                logger.warning("不正な file_key をスキップ: %s", file_key)
+                continue
             result.total_files += 1
 
             if file_key in loaded_keys:
@@ -153,7 +172,7 @@ def run_bootstrap(
                         endpoint,
                         file_name,
                         "failed",
-                        error_msg=str(exc),
+                        error_msg=_safe_errmsg(exc),
                     )
                     result.failed_files += 1
                     continue
@@ -166,7 +185,12 @@ def run_bootstrap(
             except Exception as exc:
                 logger.error("ロード失敗 (%s): %s", file_key, exc)
                 _record(
-                    conn, file_key, endpoint, file_name, "failed", error_msg=str(exc)
+                    conn,
+                    file_key,
+                    endpoint,
+                    file_name,
+                    "failed",
+                    error_msg=_safe_errmsg(exc),
                 )
                 result.failed_files += 1
 

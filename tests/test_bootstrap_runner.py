@@ -7,7 +7,12 @@ from unittest.mock import patch
 import duckdb
 import pytest
 
-from kabusys.data.bootstrap.runner import run_bootstrap, BootstrapResult
+from kabusys.data.bootstrap.runner import (
+    run_bootstrap,
+    BootstrapResult,
+    _safe_filename,
+    _safe_errmsg,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -245,3 +250,33 @@ def test_run_bootstrap_continues_on_single_file_failure(conn, tmp_path):
         "SELECT status FROM bootstrap_load_history WHERE file_key='prices_2024_01.csv.gz'"
     ).fetchone()
     assert failed_row[0] == "failed"
+
+
+def test_safe_filename_rejects_dot_and_dotdot():
+    assert _safe_filename("path/to/file.csv.gz") == "file.csv.gz"
+    assert _safe_filename("file.csv.gz") == "file.csv.gz"
+    assert _safe_filename("path/.") is None
+    assert _safe_filename("..") is None
+    assert _safe_filename("") is None
+
+
+def test_safe_errmsg_masks_http_error():
+    import urllib.error
+
+    exc = urllib.error.HTTPError(
+        url="https://s3.amazonaws.com/bucket/key?X-Amz-Signature=secret",
+        code=403,
+        msg="Forbidden",
+        hdrs=None,
+        fp=None,
+    )
+    msg = _safe_errmsg(exc)
+    assert "403" in msg
+    assert "Forbidden" in msg
+    assert "secret" not in msg
+    assert "s3.amazonaws.com" not in msg
+
+
+def test_safe_errmsg_generic_exception():
+    msg = _safe_errmsg(ValueError("some detail"))
+    assert msg == "ValueError"

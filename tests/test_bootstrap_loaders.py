@@ -318,3 +318,14 @@ def test_load_topix_inserts_topix_daily(conn, tmp_path):
         "SELECT close FROM topix_daily WHERE date='2024-01-04'"
     ).fetchone()
     assert float(row[0]) == 2505.0
+
+
+def test_load_topix_skips_low_gt_high(conn, tmp_path):
+    rows = [
+        {"Date": "2024-01-05", "O": "100.0", "H": "90.0", "L": "110.0", "C": "95.0"},
+        {"Date": "2024-01-06", "O": "100.0", "H": "110.0", "L": "90.0", "C": "105.0"},
+    ]
+    path = _gz(rows, tmp_path, "topix_bad.csv.gz")
+    count = load_topix(conn, path)
+    assert count == 1
+    assert conn.execute("SELECT COUNT(*) FROM topix_daily").fetchone()[0] == 1
