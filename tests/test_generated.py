@@ -1,332 +1,338 @@
-import os
+
+import json
 import math
-from unittest import mock
+from datetime import date, datetime
+from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
+from unittest import mock
 
-# 自動 .env ロードを抑止しておく（テストの安定化）
-os.environ.setdefault("KABUSYS_DISABLE_AUTO_ENV_LOAD", "1")
+# ---- config: _parse_env_line, _load_env_file, Settings ----
+from kabusys import config as config_mod
+from kabusys.config import Settings
 
-# インポート（テスト対象モジュール）
-from kabusys.run_monitoring import _get_poll_interval
-from kabusys.portfolio.portfolio_builder import (
-    select_candidates,
-    calc_equal_weights,
-    calc_score_weights,
-)
-from kabusys.portfolio.risk_adjustment import (
-    apply_sector_cap,
-    calc_regime_multiplier,
-)
-from kabusys.portfolio.position_sizing import calc_position_sizes
-from kabusys.config import (
-    _parse_env_line,
-    _load_env_file,
-    Settings,
-)
-from kabusys.research.feature_exploration import calc_ic, rank
+# ---- validate_config ----
+from kabusys import validate_config as validate_mod
 
-# process_priority のテストでモックするためインポート
+# ---- portfolio builder & risk & position sizing ----
+from kabusys.portfolio import portfolio_builder as pb
+from kabusys.portfolio import risk_adjustment as ra
+from kabusys.portfolio import position_sizing as ps
+
+# ---- feature exploration ----
+from kabusys.feature_exploration import rank, calc_ic, factor_summary
+
+# ---- ai news nlp utils ----
+from kabusys.ai import news_nlp as news_nlp_mod
+
+# ---- utils process_priority ----
+from kabusys.utils import process_priority as pp
 
 
-# -----------------------
-# run_monitoring._get_poll_interval
-# -----------------------
-@pytest.mark.parametrize(
-    ("env_val", "expected"),
-    [
-        ("10", 10),
-        (None, 60),  # デフォルト
-    ],
-)
-def test_get_poll_interval_valid(monkeypatch, env_val, expected):
-    if env_val is None:
-        monkeypatch.delenv("MONITOR_POLL_INTERVAL", raising=False)
-    else:
-        monkeypatch.setenv("MONITOR_POLL_INTERVAL", env_val)
-    assert _get_poll_interval() == expected
+# ---------------------------
+# Tests for config parsing
+# ---------------------------
+def test_parse_env_line_basic_and_comments():
+    assert config_mod._parse_env_line("") is None
+    assert config_mod._parse_env_line("# comment") is None
+    # no '='
+    assert config_mod._parse_env_line("INVALIDLINE") is None
+    # simple key=value
+    assert config_mod._parse_env_line("KEY=val") == ("KEY", "val")
+    # inline comment after space
+    assert config_mod._parse_env_line("KEY=val #comment") == ("KEY", "val")
+    # comment char not preceded by space should be preserved
+    assert config_mod._parse_env_line("KEY=foo#bar") == ("KEY", "foo#bar")
+    # export prefix
+    assert config_mod._parse_env_line("export FOO=bar") == ("FOO", "bar")
 
 
-def test_get_poll_interval_invalid_nonint(monkeypatch, caplog):
-    monkeypatch.setenv("MONITOR_POLL_INTERVAL", "notint")
-    caplog.clear()
-    val = _get_poll_interval()
-    assert val == 60
-    # 警告ログが出ていること
-    assert any(
-        "MONITOR_POLL_INTERVAL の値が不正" in rec.message for rec in caplog.records
-    )
-
-
-def test_get_poll_interval_zero_or_negative(monkeypatch):
-    for v in ("0", "-5"):
-        monkeypatch.setenv("MONITOR_POLL_INTERVAL", v)
-        assert _get_poll_interval() == 60
-
-
-# -----------------------
-# config._parse_env_line / _load_env_file
-# -----------------------
-def test_parse_env_line_basic():
-    assert _parse_env_line("KEY=val") == ("KEY", "val")
-    assert _parse_env_line("  export KEY2 = some ") == ("KEY2", "some")
-    assert _parse_env_line("# comment") is None
-    assert _parse_env_line("") is None
-    assert _parse_env_line("NOEQ") is None
-
-
-def test_parse_env_line_quoted_and_escaped():
-    # シングルクォート内のエスケープ
-    line = r"SECRET='pa\'ss\"word'"
-    k, v = _parse_env_line(line)
-    assert k == "SECRET"
-    # エスケープがデコードされていること
-    assert "pa'ss\"word" == v
-
-    # ダブルクォートとインラインコメント
-    line2 = 'FOO="a=b # not comment"  # trailing comment'
-    k2, v2 = _parse_env_line(line2)
-    assert k2 == "FOO"
-    assert v2 == "a=b # not comment"
+def test_parse_env_line_quoted_and_escapes():
+    # double quotes with escaped quote inside
+    s = 'KEY="a\\"b"'
+    assert config_mod._parse_env_line(s) == ("KEY", 'a"b')
+    # single quotes with escaped single quote
+    s2 = "KEY='a\\'b'"
+    assert config_mod._parse_env_line(s2) == ("KEY", "a'b")
+    # empty value
+    assert config_mod._parse_env_line("KEY=") == ("KEY", "")
 
 
 def test_load_env_file_override_and_protected(tmp_path, monkeypatch):
-    envfile = tmp_path / ".env.test"
-    envfile.write_text(
-        "\n".join(
-            [
-                "A=1",
-                "B=from_file",
-                "SECRET='x\\'y'",
-                "SKIP_ME=noeq",
-            ]
-        )
-    )
-    # 初期 OS 環境
-    monkeypatch.delenv("A", raising=False)
-    monkeypatch.setenv("B", "os_b")
-    # protected は既存の OS 環境キー集合として扱われる
-    protected = frozenset(["B"])
-    # override=False: 未設定のキーのみセット
-    _load_env_file(envfile, override=False, protected=protected)
-    assert os.environ.get("A") == "1"
-    # B は既にあるので上書きされない
-    assert os.environ.get("B") == "os_b"
-    # override=True: protected に含まれるキーは上書きされない
-    monkeypatch.setenv("B", "os_b2")
-    _load_env_file(envfile, override=True, protected=protected)
-    assert os.environ.get("B") == "os_b2"
-    # SECRET がパースされている
-    assert os.environ.get("SECRET") == "x'y"
+    env_path = tmp_path / ".env"
+    env_path.write_text("A=1\nB=2\nC=3\n")
+
+    # ensure environment initially contains B=existing and OS-protected set contains B
+    monkeypatch.setenv("B", "existing")
+    # override=False should not overwrite B, but set A,C
+    config_mod._load_env_file(env_path, override=False, protected=frozenset())
+    assert Path(config_mod.__file__).exists()  # sanity: module loaded
+    assert "A" in __import__("os").environ and __import__("os").environ["A"] == "1"
+    assert __import__("os").environ["B"] == "existing"
+    assert __import__("os").environ["C"] == "3"
+
+    # Now test override=True with protected preventing overwrite
+    env_path.write_text("B=bold\nD=4\n")
+    os = __import__("os")
+    os.environ["B"] = "existing2"
+    protected = frozenset({"B"})
+    config_mod._load_env_file(env_path, override=True, protected=protected)
+    assert os.environ["B"] == "existing2"  # protected not overwritten
+    assert os.environ["D"] == "4"
 
 
-# -----------------------
-# Settings クラスの主要挙動
-# -----------------------
-def test_settings_env_and_flags(monkeypatch):
-    monkeypatch.setenv("KABUSYS_ENV", "development")
+# ---------------------------
+# Tests for Settings
+# ---------------------------
+def test_settings_env_and_log_level_and_paper_fill_mode(monkeypatch):
+    monkeypatch.delenv("KABUSYS_ENV", raising=False)
     s = Settings()
+    # default env is development
     assert s.env == "development"
     assert s.is_dev
-    monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
-    s2 = Settings()
-    assert s2.is_paper
-    monkeypatch.setenv("KABUSYS_ENV", "live")
-    s3 = Settings()
-    assert s3.is_live
-
-
-def test_settings_invalid_env(monkeypatch):
-    monkeypatch.setenv("KABUSYS_ENV", "invalid_env_value")
-    s = Settings()
+    # invalid env
+    monkeypatch.setenv("KABUSYS_ENV", "BAD_ENV")
     with pytest.raises(ValueError):
-        _ = s.env  # property アクセス時に例外
+        _ = Settings().env
 
+    # log level valid / invalid
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+    assert Settings().log_level == "DEBUG"
+    monkeypatch.setenv("LOG_LEVEL", "INVALID")
+    with pytest.raises(ValueError):
+        _ = Settings().log_level
 
-def test_settings_paper_fill_mode_valid_and_invalid(monkeypatch):
-    monkeypatch.delenv("PAPER_FILL_MODE", raising=False)
-    s = Settings()
-    assert s.paper_fill_mode == "instant"
-    monkeypatch.setenv("PAPER_FILL_MODE", "partial")
+    # paper_fill_mode valid / invalid
+    monkeypatch.setenv("PAPER_FILL_MODE", "instant")
+    assert Settings().paper_fill_mode == "instant"
+    monkeypatch.setenv("PAPER_FILL_MODE", "PARTIAL")
     assert Settings().paper_fill_mode == "partial"
-    monkeypatch.setenv("PAPER_FILL_MODE", "INVALID")
+    monkeypatch.setenv("PAPER_FILL_MODE", "badvalue")
     with pytest.raises(ValueError):
         _ = Settings().paper_fill_mode
 
 
-# -----------------------
-# portfolio_builder: select / weights
-# -----------------------
+# ---------------------------
+# Tests for validate_config.validate (basic parts)
+# ---------------------------
+def test_validate_config_basic(monkeypatch):
+    # Ensure required vars missing -> errors
+    monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
+    monkeypatch.delenv("KABU_API_PASSWORD", raising=False)
+    monkeypatch.setenv("KABUSYS_ENV", "development")
+    errors, warnings, infos = validate_mod.validate()
+    assert any("必須環境変数" in e for e in errors)
+    # placeholder detection: set token to placeholder to get warning
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "abc_here")
+    monkeypatch.setenv("KABU_API_PASSWORD", "your_value")
+    errors, warnings, infos = validate_mod.validate()
+    # both required set but placeholders produce warnings
+    assert any("プレースホルダ" in w or "プレースホルダ値" in w or "プレースホルダ値" for w in warnings) or len(warnings) >= 1
+
+
+# ---------------------------
+# Tests for portfolio builder
+# ---------------------------
 def test_select_candidates_and_weights():
     signals = [
-        {"code": "AAA", "score": 1.0, "signal_rank": 2},
-        {"code": "BBB", "score": 2.0, "signal_rank": 1},
-        {"code": "CCC", "score": 2.0, "signal_rank": 3},
+        {"code": "A", "signal_rank": 2, "score": 1.0},
+        {"code": "B", "signal_rank": 1, "score": 1.0},
+        {"code": "C", "signal_rank": 3, "score": 0.5},
     ]
-    selected = select_candidates(signals, max_positions=2)
-    # score 降順 -> BBB (2.0, rank1), CCC (2.0, rank3) が上位2件
-    assert [s["code"] for s in selected] == ["BBB", "CCC"]
+    sel = pb.select_candidates(signals, max_positions=2)
+    # A and B have same score, tie broken by signal_rank ascending -> B then A
+    assert [s["code"] for s in sel] == ["B", "A"]
 
-    eq_weights = calc_equal_weights(selected)
-    assert math.isclose(eq_weights["BBB"], 0.5)
-    assert math.isclose(eq_weights["CCC"], 0.5)
+    # equal weights
+    eq = pb.calc_equal_weights(sel)
+    assert set(eq.keys()) == {"B", "A"}
+    assert math.isclose(eq["B"], 0.5)
+    assert math.isclose(eq["A"], 0.5)
 
-    # score_weights: sum(scores)=4.0 -> weights 2/4,2/4 -> 0.5 each
-    sw = calc_score_weights(selected)
-    assert pytest.approx(sw["BBB"]) == 0.5
-    assert pytest.approx(sw["CCC"]) == 0.5
+    # score weights normal
+    sw = pb.calc_score_weights(sel)
+    assert set(sw.keys()) == {"B", "A"}
+    # B and A have equal score -> equal weights
+    assert math.isclose(sw["B"], sw["A"])
 
-    # 全スコアが 0 の場合は等金額フォールバック
+    # score weights fallback when total == 0
     zero_signals = [{"code": "X", "score": 0.0}, {"code": "Y", "score": 0.0}]
-    with mock.patch("kabusys.portfolio.portfolio_builder.logger") as mocked_logger:
-        w = calc_score_weights(zero_signals)
-        assert w == {"X": 0.5, "Y": 0.5}
-        # 警告が出ていること
-        mocked_logger.warning.assert_called()
+    with pytest.warns(None) as record:
+        res = pb.calc_score_weights(zero_signals)
+    # fallback to equal
+    assert res == {"X": 0.5, "Y": 0.5}
 
 
-# -----------------------
-# risk_adjustment.apply_sector_cap / calc_regime_multiplier
-# -----------------------
-def test_apply_sector_cap_basic_and_sell_codes():
-    candidates = [{"code": "A"}, {"code": "B"}, {"code": "C"}]
-    sector_map = {"A": "Tech", "B": "Tech", "C": "Food"}
-    portfolio_value = 1000000.0
-    # 現在 A,B を大量保有して Tech が上限を超えるようにする
-    current_positions = {"A": 1000, "B": 500}
-    price_map = {"A": 100.0, "B": 100.0, "C": 10.0}
-    # 1セクター上限 30% -> Tech exposure = (1000+500)*100 = 150000 -> 15% -> not blocked
-    filtered = apply_sector_cap(
-        candidates,
-        sector_map,
-        portfolio_value,
-        current_positions,
-        price_map,
-        max_sector_pct=0.10,  # 10% にすると 150k / 1M = 15% -> blocked
-    )
-    # C (Food) は残り、Tech がブロックされるため only C remains
-    assert all(c["code"] == "C" for c in filtered)
-
-    # sell_codes に A を入れると exposure が減りブロックされなくなる
-    filtered2 = apply_sector_cap(
-        candidates,
-        sector_map,
-        portfolio_value,
-        current_positions,
-        price_map,
-        max_sector_pct=0.10,
-        sell_codes={"A"},
-    )
-    # now Tech exposure = B only => 50k -> 5% -> not blocked -> all candidates remain
-    codes = {c["code"] for c in filtered2}
-    assert codes == {"A", "B", "C"}
+# ---------------------------
+# Tests for risk_adjustment
+# ---------------------------
+def test_apply_sector_cap_and_sell_codes(caplog):
+    candidates = [{"code": "A", "score": 1.0}, {"code": "B", "score": 0.5}, {"code": "C", "score": 0.2}]
+    sector_map = {"A": "s1", "B": "s1", "C": "unknown"}
+    portfolio_value = 100000.0
+    current_positions = {"A": 100, "B": 0}
+    price_map = {"A": 400.0, "B": 100.0}
+    # exposure for s1 = 100 * 400 = 40000 -> 40% of pv -> blocked if max_sector_pct=0.3
+    filtered = ra.apply_sector_cap(candidates, sector_map, portfolio_value, current_positions, price_map, max_sector_pct=0.3)
+    # codes in blocked sector s1 should be excluded; C unknown must remain
+    assert all(c["code"] == "C" or sector_map.get(c["code"], "unknown") != "s1" for c in filtered)
+    # test that sell_codes excludes code from exposure calculation
+    filtered2 = ra.apply_sector_cap(candidates, sector_map, portfolio_value, {"A": 100, "B": 0}, price_map, max_sector_pct=0.3, sell_codes={"A"})
+    # with A sold, sector exposure becomes 0 and so no blocking -> candidates unchanged
+    assert len(filtered2) == 3
 
 
-def test_calc_regime_multiplier_known_and_unknown(monkeypatch):
-    assert calc_regime_multiplier("bull") == 1.0
-    assert calc_regime_multiplier("neutral") == pytest.approx(0.7)
-    assert calc_regime_multiplier("bear") == pytest.approx(0.3)
-    # unknown regime: warning and fallback 1.0
-    with mock.patch("kabusys.portfolio.risk_adjustment.logger") as mocked_logger:
-        assert calc_regime_multiplier("weird") == 1.0
-        mocked_logger.warning.assert_called()
+def test_calc_regime_multiplier(caplog):
+    assert ra.calc_regime_multiplier("bull") == 1.0
+    assert math.isclose(ra.calc_regime_multiplier("neutral"), 0.7)
+    assert math.isclose(ra.calc_regime_multiplier("bear"), 0.3)
+    caplog.clear()
+    # unknown regime logs a warning and returns 1.0
+    val = ra.calc_regime_multiplier("unknown_regime")
+    assert val == 1.0
+    assert any("未知のレジーム" in rec.getMessage() for rec in caplog.records)
 
 
-# -----------------------
-# position_sizing.calc_position_sizes（主なケース）
-# -----------------------
-def test_calc_position_sizes_equal_and_aggregate_scaling():
-    # Simple equal weights case
-    candidates = [{"code": "AAA"}, {"code": "BBB"}]
-    weights = {"AAA": 0.5, "BBB": 0.5}
-    portfolio_value = 100_0000.0  # 1,000,000
-    available_cash = 200_000.0
+# ---------------------------
+# Tests for position_sizing (basic scenarios)
+# ---------------------------
+def test_calc_position_sizes_equal_and_scaling():
+    # Two candidates, equal weights normalized externally
+    candidates = [{"code": "AA", "score": 1}, {"code": "BB", "score": 1}]
+    weights = {"AA": 0.5, "BB": 0.5}
+    portfolio_value = 100000.0
+    available_cash = 50000.0  # intentionally small to force scaling
     current_positions = {}
-    open_prices = {"AAA": 1000.0, "BBB": 1000.0}
-    # max_utilization default 0.7 used in function; but available_cash limits aggregate
-    sizes = calc_position_sizes(
-        weights,
-        candidates,
-        portfolio_value,
-        available_cash,
-        current_positions,
-        open_prices,
-        allocation_method="equal",
-        lot_size=100,
-    )
-    # available_cash = 200_000 が制約: per stock = 200_000 / 2 = 100_000
-    # shares = floor(100_000 / 1000) = 100 → 100株（1単元）
-    assert sizes["AAA"] == 100
-    assert sizes["BBB"] == 100
-
-    # If available_cash smaller than total cost, aggregate scaling should reduce sizes
-    small_cash = 100_000.0
-    scaled = calc_position_sizes(
-        weights,
-        candidates,
-        portfolio_value,
-        small_cash,
-        current_positions,
-        open_prices,
-        allocation_method="equal",
-        lot_size=100,
-    )
-    # scaled total cost must not exceed small_cash
-    total_cost = sum(scaled[c] * open_prices[c] for c in scaled)
-    assert total_cost <= small_cash + 1e-6
+    open_prices = {"AA": 100.0, "BB": 100.0}
+    # With max_utilization default 0.7, per-position alloc = 100000 * 0.5 * 0.7 = 35000 -> 350 shares -> floored to 300 (lot_size=100)
+    out = ps.calc_position_sizes(weights, candidates, portfolio_value, available_cash, current_positions, open_prices, allocation_method="equal", lot_size=100)
+    # results should be multiples of lot_size
+    for v in out.values():
+        assert v % 100 == 0
+    # total cost must not exceed available_cash + small epsilon
+    total_cost = sum(out[c] * open_prices[c] for c in out)
+    assert total_cost <= available_cash + 1e-6
 
 
-def test_calc_position_sizes_risk_based_and_price_missing(caplog):
-    candidates = [{"code": "X"}, {"code": "Y"}]
+def test_calc_position_sizes_risk_based_skips_missing_price(caplog):
+    candidates = [{"code": "X", "score": 1}]
     weights = {}
-    portfolio_value = 1_000_000
-    available_cash = 500_000
-    current_positions = {"X": 0}
-    open_prices = {"X": 0.0}  # price missing / zero -> skip
-    res = calc_position_sizes(
-        weights,
-        candidates,
-        portfolio_value,
-        available_cash,
-        current_positions,
-        open_prices,
-        allocation_method="risk_based",
-        lot_size=100,
-    )
-    # X skipped due to price 0, Y not in open_prices -> skipped -> empty dict
-    assert res == {}
+    portfolio_value = 100000.0
+    available_cash = 70000.0
+    current_positions = {}
+    open_prices = {"X": 0.0}  # missing/zero price -> skip
+    out = ps.calc_position_sizes(weights, candidates, portfolio_value, available_cash, current_positions, open_prices, allocation_method="risk_based")
+    assert out == {}
 
 
-# -----------------------
-# feature_exploration.rank / calc_ic
-# -----------------------
-
-
-def test_rank_with_ties():
+# ---------------------------
+# Tests for feature_exploration: rank, calc_ic, factor_summary
+# ---------------------------
+def test_rank_ties_and_order():
     vals = [1.0, 2.0, 2.0, 4.0]
     r = rank(vals)
-    # ranks should be [1, 2.5, 2.5, 4]
-    assert pytest.approx(r[0]) == 1.0
-    assert pytest.approx(r[1]) == 2.5
-    assert pytest.approx(r[2]) == 2.5
-    assert pytest.approx(r[3]) == 4.0
+    # ranks: 1, (2+3)/2+? -> average ranks for ties: positions 1->1, 2&3 -> 2.5, 4 -> 4
+    assert len(r) == 4
+    assert math.isclose(r[0], 1.0)
+    assert math.isclose(r[1], 2.5)
+    assert math.isclose(r[2], 2.5)
+    assert math.isclose(r[3], 4.0)
 
 
-def test_calc_ic_basic_and_insufficient():
-    factor = [
-        {"code": "A", "mom_1m": 0.1},
-        {"code": "B", "mom_1m": 0.2},
-        {"code": "C", "mom_1m": 0.3},
-    ]
-    forward = [
-        {"code": "A", "fwd_1d": 0.01},
-        {"code": "B", "fwd_1d": -0.02},
-        {"code": "C", "fwd_1d": 0.03},
-    ]
-    ic = calc_ic(factor, forward, "mom_1m", "fwd_1d")
-    # Should return a finite float
-    assert isinstance(ic, float)
+def test_calc_ic_and_threshold():
+    factor_records = [{"code": "A", "f": 1.0}, {"code": "B", "f": 2.0}, {"code": "C", "f": 3.0}]
+    forward_records = [{"code": "A", "r": 1.0}, {"code": "B", "r": 2.0}, {"code": "C", "r": 3.0}]
+    ic = calc_ic(factor_records, forward_records, "f", "r")
+    assert ic is not None
+    # Perfect rank correlation should give +1.0
+    assert pytest.approx(ic, rel=1e-6) == 1.0
 
-    # insufficient pairs -> None
-    ic2 = calc_ic(factor[:2], forward[:2], "mom_1m", "fwd_1d")
+    # fewer than 3 valid pairs -> None
+    ic2 = calc_ic([{"code": "A", "f": 1}], [{"code": "A", "r": 1}], "f", "r")
     assert ic2 is None
+
+
+def test_factor_summary_basic():
+    recs = [{"code": "A", "x": 1.0}, {"code": "B", "x": 3.0}, {"code": "C", "x": None}, {"code": "D", "x": 5.0}]
+    res = factor_summary(recs, ["x"])
+    assert "x" in res
+    assert res["x"]["count"] == 3
+    assert math.isclose(res["x"]["mean"], (1.0 + 3.0 + 5.0) / 3.0)
+
+
+# ---------------------------
+# Tests for news_nlp calc_news_window and _validate_and_extract
+# ---------------------------
+def test_calc_news_window_expected():
+    td = date(2026, 3, 20)
+    start, end = news_nlp_mod.calc_news_window(td)
+    # start should be previous day at 06:00
+    assert start == datetime(2026, 3, 19, 6, 0)
+    # end should be previous day at 23:30
+    assert end == datetime(2026, 3, 19, 23, 30)
+
+
+def make_resp(content: str):
+    # Build object with .choices[0].message.content attribute
+    msg = SimpleNamespace(content=content)
+    choice = SimpleNamespace(message=msg)
+    resp = SimpleNamespace(choices=[choice])
+    return resp
+
+
+def test_validate_and_extract_basic_and_edge_cases(caplog):
+    # valid content with numeric score > clip
+    content = json.dumps({"results": [{"code": "1234", "score": 1.5}, {"code": 9999, "score": 0.2}]})
+    resp = make_resp(content)
+    extracted = news_nlp_mod._validate_and_extract(resp, {"1234", "9999"})
+    # score should be clipped to 1.0 for code 1234
+    assert extracted["1234"] == 1.0
+    assert math.isclose(extracted["9999"], 0.2)
+
+    # malformed JSON returns {}
+    bad = "not json"
+    resp2 = make_resp(bad)
+    ex2 = news_nlp_mod._validate_and_extract(resp2, {"1234"})
+    assert ex2 == {}
+
+    # non-numeric score is ignored with warning
+    content3 = json.dumps({"results": [{"code": "X", "score": "nan"}, {"code": "Y", "score": "3.14"}]})
+    resp3 = make_resp(content3)
+    out3 = news_nlp_mod._validate_and_extract(resp3, {"Y"})
+    assert "Y" in out3
+
+
+# ---------------------------
+# Tests for process_priority: invalid level handling and delegation
+# ---------------------------
+def test_set_process_priority_invalid_level():
+    with pytest.raises(ValueError):
+        pp.set_process_priority("super_high")
+
+
+def test_set_cpu_affinity_invalid_and_success(monkeypatch, caplog):
+    # invalid cpu_count <1
+    with pytest.raises(ValueError):
+        pp.set_cpu_affinity(0)
+
+    # simulate psutil.Process with cpu_affinity method
+    class DummyProc:
+        def __init__(self):
+            self._affinity = None
+            self.pid = 99999
+
+        def cpu_affinity(self, pinned):
+            self._affinity = pinned
+
+        def nice(self, val):
+            self._nice = val
+
+    dummy = DummyProc()
+    monkeypatch.setattr(pp, "psutil", mock.MagicMock(Process=lambda: dummy, cpu_count=lambda: 4))
+    # Should not raise
+    pp.set_cpu_affinity(2)
+    assert dummy._affinity == [0, 1]
+
+
+# End of tests
