@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import gzip
-import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import patch
 
 import duckdb
 import pytest
@@ -14,6 +13,7 @@ from kabusys.data.bootstrap.runner import run_bootstrap, BootstrapResult
 # ---------------------------------------------------------------------------
 # テスト用 DB フィクスチャ（最小スキーマ）
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def conn():
@@ -107,11 +107,27 @@ def conn():
 
 
 def _gz_prices(tmp_path: Path) -> bytes:
-    import csv, io
+    import csv
+    import io
+
     buf = io.StringIO()
-    w = csv.DictWriter(buf, fieldnames=["Date","Code","O","H","L","C","Vo","Va","AdjFactor"])
+    w = csv.DictWriter(
+        buf, fieldnames=["Date", "Code", "O", "H", "L", "C", "Vo", "Va", "AdjFactor"]
+    )
     w.writeheader()
-    w.writerow({"Date":"2024-01-10","Code":"7203","O":"2800","H":"2850","L":"2780","C":"2830","Vo":"1000000","Va":"","AdjFactor":"1.0"})
+    w.writerow(
+        {
+            "Date": "2024-01-10",
+            "Code": "7203",
+            "O": "2800",
+            "H": "2850",
+            "L": "2780",
+            "C": "2830",
+            "Vo": "1000000",
+            "Va": "",
+            "AdjFactor": "1.0",
+        }
+    )
     return gzip.compress(buf.getvalue().encode())
 
 
@@ -119,11 +135,17 @@ def _gz_prices(tmp_path: Path) -> bytes:
 # テスト
 # ---------------------------------------------------------------------------
 
+
 def test_run_bootstrap_dry_run_returns_result(conn, tmp_path):
     file_list = [{"key": "prices_2024_01.csv.gz", "date": "2024-01"}]
-    with patch("kabusys.data.bootstrap.runner.list_files", return_value=file_list), \
-         patch("kabusys.data.bootstrap.runner.get_presigned_url", return_value="https://s3/f"), \
-         patch("kabusys.data.bootstrap.runner.download_file") as mock_dl:
+    with (
+        patch("kabusys.data.bootstrap.runner.list_files", return_value=file_list),
+        patch(
+            "kabusys.data.bootstrap.runner.get_presigned_url",
+            return_value="https://s3/f",
+        ),
+        patch("kabusys.data.bootstrap.runner.download_file") as mock_dl,
+    ):
         result = run_bootstrap(
             conn=conn,
             api_key="test_key",
@@ -142,8 +164,10 @@ def test_run_bootstrap_skips_loaded_files(conn, tmp_path):
         "VALUES ('prices_2024_01.csv.gz', '/equities/bars/daily', 'prices_2024_01.csv.gz', 'loaded', 100)"
     )
     file_list = [{"key": "prices_2024_01.csv.gz", "date": "2024-01"}]
-    with patch("kabusys.data.bootstrap.runner.list_files", return_value=file_list), \
-         patch("kabusys.data.bootstrap.runner.download_file") as mock_dl:
+    with (
+        patch("kabusys.data.bootstrap.runner.list_files", return_value=file_list),
+        patch("kabusys.data.bootstrap.runner.download_file") as mock_dl,
+    ):
         result = run_bootstrap(
             conn=conn,
             api_key="test_key",
@@ -161,9 +185,14 @@ def test_run_bootstrap_records_loaded_status(conn, tmp_path):
     gz_path.write_bytes(_gz_prices(tmp_path))
 
     file_list = [{"key": "prices_2024_01.csv.gz", "date": "2024-01"}]
-    with patch("kabusys.data.bootstrap.runner.list_files", return_value=file_list), \
-         patch("kabusys.data.bootstrap.runner.get_presigned_url", return_value="https://s3/f"), \
-         patch("kabusys.data.bootstrap.runner.download_file", return_value=gz_path):
+    with (
+        patch("kabusys.data.bootstrap.runner.list_files", return_value=file_list),
+        patch(
+            "kabusys.data.bootstrap.runner.get_presigned_url",
+            return_value="https://s3/f",
+        ),
+        patch("kabusys.data.bootstrap.runner.download_file", return_value=gz_path),
+    ):
         result = run_bootstrap(
             conn=conn,
             api_key="test_key",
@@ -195,9 +224,14 @@ def test_run_bootstrap_continues_on_single_file_failure(conn, tmp_path):
         dest.write_bytes(_gz_prices(tmp_path))
         return dest
 
-    with patch("kabusys.data.bootstrap.runner.list_files", return_value=file_list), \
-         patch("kabusys.data.bootstrap.runner.get_presigned_url", return_value="https://s3/f"), \
-         patch("kabusys.data.bootstrap.runner.download_file", side_effect=_side_effect):
+    with (
+        patch("kabusys.data.bootstrap.runner.list_files", return_value=file_list),
+        patch(
+            "kabusys.data.bootstrap.runner.get_presigned_url",
+            return_value="https://s3/f",
+        ),
+        patch("kabusys.data.bootstrap.runner.download_file", side_effect=_side_effect),
+    ):
         result = run_bootstrap(
             conn=conn,
             api_key="test_key",

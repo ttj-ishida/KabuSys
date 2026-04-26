@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import gzip
 import json
-import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch, call
 import urllib.error
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -27,11 +25,21 @@ def _make_response(body: bytes, status: int = 200):
 
 
 def test_list_files_returns_list():
-    payload = json.dumps({"files": [{"key": "k1", "date": "2024-01-01"}, {"key": "k2", "date": "2024-01-02"}]}).encode()
+    payload = json.dumps(
+        {
+            "files": [
+                {"key": "k1", "date": "2024-01-01"},
+                {"key": "k2", "date": "2024-01-02"},
+            ]
+        }
+    ).encode()
     with patch("urllib.request.urlopen") as mock_open:
         mock_open.return_value = _make_response(payload)
         result = list_files("/equities/bars/daily", "my_api_key")
-    assert result == [{"key": "k1", "date": "2024-01-01"}, {"key": "k2", "date": "2024-01-02"}]
+    assert result == [
+        {"key": "k1", "date": "2024-01-01"},
+        {"key": "k2", "date": "2024-01-02"},
+    ]
     req = mock_open.call_args[0][0]
     assert req.get_header("X-api-key") == "my_api_key"
 
