@@ -215,7 +215,7 @@ def test_calc_ma200_ratio_full_window():
     conn = duckdb.connect(":memory:")
     setup_prices_table(conn)
     # insert exactly 200 rows decreasing close so latest is first (we insert ordered by date asc then query uses date < target sorted desc)
-    target = date(2026, 1, 201)
+    target = date(2026, 8, 1)
     base_close = 100.0
     rows = []
     for i in range(1, 201):
@@ -224,8 +224,8 @@ def test_calc_ma200_ratio_full_window():
         rows.append((d, "1321", base_close + i))
     conn.executemany("INSERT INTO prices_daily VALUES (?, ?, ?)", rows)
     ratio = _calc_ma200_ratio(conn, target)
-    # latest close = base_close + 200, ma200 = average(base_close+1 .. base_close+200)
-    latest = base_close + 200
+    # latest close = base_close + 1 (i=1 → most recent date target-1), ma200 = average(base_close+1 .. base_close+200)
+    latest = base_close + 1
     ma200 = sum(base_close + i for i in range(1, 201)) / 200.0
     assert math.isclose(ratio, latest / ma200, rel_tol=1e-9)
     conn.close()
