@@ -3,7 +3,8 @@
 Usage:
     python -m kabusys.backtest.run \\
         --start 2023-01-01 --end 2024-12-31 \\
-        --cash 10000000 --db path/to/kabusys.duckdb
+        --cash 10000000 --db path/to/kabusys.duckdb \\
+        --output-format summary
 
 Prerequisite:
     The specified DB file must be pre-populated with prices_daily, features, ai_scores,
@@ -90,6 +91,17 @@ def main() -> None:
         help="Lot size (shares per lot) for Japanese stocks [default: 100]",
     )
     parser.add_argument("--db", required=True, help="DuckDB file path")
+    parser.add_argument(
+        "--output-format",
+        default="summary",
+        choices=["summary", "json", "markdown", "all"],
+        help="Output format [default: summary]",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Directory to save report files (only used when --output-format=all)",
+    )
     args = parser.parse_args()
 
     try:
@@ -105,6 +117,13 @@ def main() -> None:
 
     from kabusys.data.schema import init_schema
     from kabusys.backtest.engine import run_backtest
+    from kabusys.backtest.report import (
+        build_report,
+        format_cli_summary,
+        format_json,
+        format_markdown,
+        save_report,
+    )
 
     conn = init_schema(args.db)
     try:
@@ -126,17 +145,33 @@ def main() -> None:
     finally:
         conn.close()
 
-    m = result.metrics
-    print(f"\n{'=' * 40}")
-    print(f"  Backtest Result  {start_date} → {end_date}")
-    print(f"{'=' * 40}")
-    print(f"  CAGR           : {m.cagr:+.2%}")
-    print(f"  Sharpe Ratio   : {m.sharpe_ratio:.3f}")
-    print(f"  Max Drawdown   : {m.max_drawdown:.2%}")
-    print(f"  Win Rate       : {m.win_rate:.2%}")
-    print(f"  Payoff Ratio   : {m.payoff_ratio:.3f}")
-    print(f"  Total Trades   : {m.total_trades}")
-    print(f"{'=' * 40}\n")
+    report = build_report(
+        result,
+        start_date=start_date,
+        end_date=end_date,
+        initial_cash=args.cash,
+        slippage_rate=args.slippage,
+        commission_rate=args.commission,
+        allocation_method=args.allocation_method,
+        max_position_pct=args.max_position_pct,
+        max_utilization=args.max_utilization,
+        max_positions=args.max_positions,
+        risk_pct=args.risk_pct,
+        stop_loss_pct=args.stop_loss_pct,
+        lot_size=args.lot_size,
+    )
+
+    fmt = args.output_format
+    if fmt == "summary":
+        print(format_cli_summary(report))
+    elif fmt == "json":
+        print(format_json(report))
+    elif fmt == "markdown":
+        print(format_markdown(report))
+    elif fmt == "all":
+        print(format_cli_summary(report))
+        run_dir = save_report(report, result, output_dir=args.output_dir)
+        logger.info("レポートを保存しました: %s", run_dir)
 
 
 if __name__ == "__main__":
