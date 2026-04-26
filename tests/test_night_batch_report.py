@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from kabusys.operations.night_batch_report import (
     JobRunResult,
+    NightBatchReport,
     NextDaySummary,
     UpdateCounts,
 )
@@ -64,6 +65,11 @@ def test_update_counts_defaults():
     """UpdateCounts のデフォルト値がすべて 0。"""
     counts = UpdateCounts()
     assert counts.prices_daily == 0
+    assert counts.news_articles == 0
+    assert counts.fundamentals == 0
+    assert counts.features == 0
+    assert counts.ai_scores == 0
+    assert counts.signals == 0
     assert counts.signal_queue == 0
 
 
@@ -72,3 +78,20 @@ def test_next_day_summary_instantiation():
     nd = _make_next_day()
     assert nd.buy_count == 8
     assert nd.expected_orders == 15
+
+
+def test_night_batch_report_instantiation():
+    """NightBatchReport が正しくインスタンス化できる。"""
+    report = NightBatchReport(
+        run_date="2026-04-26",
+        target_date="2026-04-27",
+        generated_at="2026-04-26T12:00:00+00:00",
+        status="READY",
+        job_results=[_make_job()],
+        update_counts=_make_counts(),
+        next_day_summary=_make_next_day(),
+        warnings=[],
+    )
+    assert report.run_date == "2026-04-26"
+    assert report.status == "READY"
+    assert len(report.job_results) == 1
