@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from kabusys.operations.night_batch_report import (
     MANDATORY_JOBS,
@@ -12,6 +12,7 @@ from kabusys.operations.night_batch_report import (
     UpdateCounts,
     _determine_status,
     _generate_warnings,
+    build_report,
 )
 
 
@@ -54,6 +55,10 @@ def _make_next_day(**kwargs) -> NextDaySummary:
     defaults = dict(buy_count=8, sell_count=7, target_symbols=15, expected_orders=15)
     defaults.update(kwargs)
     return NextDaySummary(**defaults)
+
+
+def _all_success_jobs() -> list[JobRunResult]:
+    return [_make_job(name=n) for n in MANDATORY_JOBS]
 
 
 def test_job_run_result_instantiation():
@@ -207,3 +212,82 @@ def test_warnings_includes_job_warnings():
     jobs = [_make_job(warnings=["シグナル件数が少ない"])]
     warnings = _generate_warnings(jobs, _make_counts())
     assert "シグナル件数が少ない" in warnings
+
+
+# ---------------------------------------------------------------------------
+# build_report
+# ---------------------------------------------------------------------------
+
+
+def test_build_report_returns_night_batch_report():
+    """build_report() が NightBatchReport を返す。"""
+    report = build_report(
+        _all_success_jobs(),
+        _make_counts(),
+        _make_next_day(),
+        run_date=date(2026, 4, 26),
+        target_date=date(2026, 4, 27),
+    )
+    assert isinstance(report, NightBatchReport)
+
+
+def test_build_report_status_ready():
+    """全成功 → status == READY。"""
+    report = build_report(
+        _all_success_jobs(),
+        _make_counts(),
+        _make_next_day(),
+        run_date=date(2026, 4, 26),
+        target_date=date(2026, 4, 27),
+    )
+    assert report.status == "READY"
+
+
+def test_build_report_status_blocked():
+    """必須ジョブ失敗 → status == BLOCKED。"""
+    jobs = [_make_job(name="data_update_job", status="failed")]
+    report = build_report(
+        jobs,
+        _make_counts(),
+        _make_next_day(),
+        run_date=date(2026, 4, 26),
+        target_date=date(2026, 4, 27),
+    )
+    assert report.status == "BLOCKED"
+
+
+def test_build_report_dates_as_iso_string():
+    """run_date / target_date が ISO 形式文字列。"""
+    report = build_report(
+        _all_success_jobs(),
+        _make_counts(),
+        _make_next_day(),
+        run_date=date(2026, 4, 26),
+        target_date=date(2026, 4, 27),
+    )
+    assert report.run_date == "2026-04-26"
+    assert report.target_date == "2026-04-27"
+
+
+def test_build_report_generated_at_is_utc_iso():
+    """generated_at が UTC ISO 8601 形式（末尾が +00:00）。"""
+    report = build_report(
+        _all_success_jobs(),
+        _make_counts(),
+        _make_next_day(),
+        run_date=date(2026, 4, 26),
+        target_date=date(2026, 4, 27),
+    )
+    assert report.generated_at.endswith("+00:00")
+
+
+def test_build_report_no_warnings_on_healthy():
+    """全成功・全カウント正常 → warnings が空。"""
+    report = build_report(
+        _all_success_jobs(),
+        _make_counts(),
+        _make_next_day(),
+        run_date=date(2026, 4, 26),
+        target_date=date(2026, 4, 27),
+    )
+    assert report.warnings == []

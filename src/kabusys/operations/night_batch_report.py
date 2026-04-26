@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timezone
 
 # 必須ジョブ一覧（いずれかが failed → BLOCKED）
 MANDATORY_JOBS: list[str] = [
@@ -131,3 +131,37 @@ def _generate_warnings(
         warnings.append("features の更新件数が 0 件です")
 
     return warnings
+
+
+def build_report(
+    job_results: list[JobRunResult],
+    update_counts: UpdateCounts,
+    next_day_summary: NextDaySummary,
+    *,
+    run_date: date,
+    target_date: date,
+) -> NightBatchReport:
+    """NightBatchReport を構築する。
+
+    Args:
+        job_results:      各ジョブの実行結果リスト。
+        update_counts:    各テーブルへの更新件数。
+        next_day_summary: 翌営業日の発注準備サマリ。
+        run_date:         バッチ実行日（キーワード引数）。
+        target_date:      対象取引日（キーワード引数）。
+
+    Returns:
+        NightBatchReport インスタンス。
+    """
+    warnings = _generate_warnings(job_results, update_counts)
+    status = _determine_status(job_results, update_counts)
+    return NightBatchReport(
+        run_date=run_date.isoformat(),
+        target_date=target_date.isoformat(),
+        generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        status=status,
+        job_results=job_results,
+        update_counts=update_counts,
+        next_day_summary=next_day_summary,
+        warnings=warnings,
+    )
