@@ -235,12 +235,20 @@ def test_build_report_final_value_uses_latest_date():
 
     # 逆順の history（古い日付が末尾）
     history = [
-        DailySnapshot(date=date(2024, 3, 1), cash=0.0, positions={}, portfolio_value=12_000_000.0),
-        DailySnapshot(date=date(2024, 1, 1), cash=0.0, positions={}, portfolio_value=10_000_000.0),
-        DailySnapshot(date=date(2024, 2, 1), cash=0.0, positions={}, portfolio_value=11_000_000.0),
+        DailySnapshot(
+            date=date(2024, 3, 1), cash=0.0, positions={}, portfolio_value=12_000_000.0
+        ),
+        DailySnapshot(
+            date=date(2024, 1, 1), cash=0.0, positions={}, portfolio_value=10_000_000.0
+        ),
+        DailySnapshot(
+            date=date(2024, 2, 1), cash=0.0, positions={}, portfolio_value=11_000_000.0
+        ),
     ]
     result = _make_result(history, [])
-    report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 3, 1))
+    report = build_report(
+        result, start_date=date(2024, 1, 1), end_date=date(2024, 3, 1)
+    )
     assert report.headline.final_value == 12_000_000.0
 
 
