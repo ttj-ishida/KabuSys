@@ -473,7 +473,7 @@ def test_warning_few_trades():
     history = _make_history([1_000_000] * 400)
     trades = [_make_trade(pnl=500.0, day_offset=i) for i in range(5)]  # 5件のみ
     result = _make_result(history, trades)
-    warnings = _generate_warnings(result, 10_000_000)
+    warnings = _generate_warnings(result)
     assert any("トレード数" in w for w in warnings)
 
 
@@ -483,7 +483,7 @@ def test_warning_short_period():
 
     history = _make_history([1_000_000] * 50)  # 50日のみ
     result = _make_result(history, [])
-    warnings = _generate_warnings(result, 10_000_000)
+    warnings = _generate_warnings(result)
     assert any("期間" in w for w in warnings)
 
 
@@ -497,7 +497,7 @@ def test_warning_single_stock_dominance():
         _make_trade(code="5678", pnl=1000.0, day_offset=1),  # 10%
     ]
     result = _make_result(history, trades)
-    warnings = _generate_warnings(result, 10_000_000)
+    warnings = _generate_warnings(result)
     assert any("1234" in w for w in warnings)
 
 
@@ -511,7 +511,7 @@ def test_no_warnings_healthy_run():
         _make_trade(code=str(1000 + i), pnl=1000.0, day_offset=i) for i in range(10)
     ]
     result = _make_result(history, trades)
-    warnings = _generate_warnings(result, 10_000_000)
+    warnings = _generate_warnings(result)
     assert warnings == []
 
 

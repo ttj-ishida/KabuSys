@@ -8,7 +8,9 @@ BacktestFramework.md Section 3 に定義された評価指標を計算する。
 from __future__ import annotations
 
 import math
+from collections import deque
 from dataclasses import dataclass
+from datetime import date
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -86,7 +88,10 @@ def _calc_cagr(history: list["DailySnapshot"]) -> float:
 
 
 def _calc_sharpe(history: list["DailySnapshot"]) -> float:
-    """Sharpe Ratio = 年次化超過リターン / 年次化標準偏差（無リスク金利=0）。"""
+    """Sharpe Ratio = 年次化超過リターン / 年次化標準偏差（無リスク金利=0）。
+
+    分散は母分散（n 分母）で計算する。DailySnapshot は取引日のみ前提（252 日/年）。
+    """
     if len(history) < 2:
         return 0.0
     values = [s.portfolio_value for s in history]
@@ -147,7 +152,10 @@ def _calc_payoff_ratio(trades: list["TradeRecord"]) -> float:
 
 
 def _calc_annual_volatility(history: list["DailySnapshot"]) -> float:
-    """年率ボラティリティ = 日次リターンの標準偏差 × sqrt(252)。"""
+    """年率ボラティリティ = 日次リターンの標準偏差 × sqrt(252)。
+
+    分散は母分散（n 分母）で計算する。DailySnapshot は取引日のみ前提。
+    """
     if len(history) < 2:
         return 0.0
     values = [s.portfolio_value for s in history]
@@ -165,14 +173,20 @@ def _calc_annual_volatility(history: list["DailySnapshot"]) -> float:
 
 
 def _calc_calmar_ratio(cagr: float, max_drawdown: float) -> float:
-    """Calmar Ratio = CAGR / Max Drawdown。ドローダウンが 0 の場合は 0.0 を返す。"""
+    """Calmar Ratio = CAGR / Max Drawdown。ドローダウンが 0 の場合は 0.0 を返す。
+
+    MDD=0（ドローダウンなし）のとき理論上は ∞ だが、下流のシリアライズ互換のため 0.0 とする。
+    """
     if max_drawdown <= 0:
         return 0.0
     return cagr / max_drawdown
 
 
 def _calc_profit_factor(trades: list["TradeRecord"]) -> float:
-    """Profit Factor = 総利益 / 総損失（絶対値）。損失なしの場合は 0.0 を返す。"""
+    """Profit Factor = 総利益 / 総損失（絶対値）。
+
+    損失トレードなし（損失=0）のとき理論上は ∞ だが、シリアライズ互換のため 0.0 を返す。
+    """
     sell_trades = [t for t in trades if t.side == "sell" and t.realized_pnl is not None]
     total_profit = sum(t.realized_pnl for t in sell_trades if t.realized_pnl > 0)
     total_loss = abs(sum(t.realized_pnl for t in sell_trades if t.realized_pnl < 0))
@@ -184,16 +198,16 @@ def _calc_profit_factor(trades: list["TradeRecord"]) -> float:
 def _calc_avg_holding_days(trades: list["TradeRecord"]) -> float:
     """平均保有日数 = BUY-SELL ペアの保有日数の平均。
 
-    TradeRecord の date フィールドを使い、同一 code の BUY→SELL ペアを順番にマッチする。
+    同一 code の BUY→SELL を FIFO でマッチする（数量・分割決済は未考慮）。
     ペアが存在しない場合は 0.0 を返す。
     """
-    buy_dates: dict[str, list] = {}
+    buy_dates: dict[str, deque[date]] = {}
     holding_days: list[float] = []
     for t in trades:
         if t.side == "buy":
-            buy_dates.setdefault(t.code, []).append(t.date)
+            buy_dates.setdefault(t.code, deque()).append(t.date)
         elif t.side == "sell" and t.code in buy_dates and buy_dates[t.code]:
-            entry_date = buy_dates[t.code].pop(0)
+            entry_date = buy_dates[t.code].popleft()
             days = (t.date - entry_date).days
             holding_days.append(float(days))
     if not holding_days:

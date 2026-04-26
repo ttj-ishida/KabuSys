@@ -9,14 +9,16 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from kabusys.backtest.engine import BacktestResult
+    from kabusys.backtest.simulator import DailySnapshot
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +167,7 @@ def build_report(
 
     meta = ReportMeta(
         run_id=run_id,
-        generated_at=datetime.now().isoformat(timespec="seconds"),
+        generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         start_date=start_date.isoformat(),
         end_date=end_date.isoformat(),
         initial_cash=initial_cash,
@@ -205,7 +207,7 @@ def build_report(
     performance = PerformanceSection(
         monthly_returns=_calc_monthly_returns(history),
     )
-    warnings = _generate_warnings(result, initial_cash)
+    warnings = _generate_warnings(result)
 
     return BacktestReport(
         meta=meta,
@@ -400,6 +402,8 @@ def save_report(
         trades.csv        約定一覧
         daily_equity.csv  日次ポートフォリオ履歴
 
+    同一 run_id で再実行した場合は既存ファイルを上書きする（exist_ok=True）。
+
     Args:
         report:     build_report() の戻り値。
         result:     run_backtest() の戻り値（CSV 出力用）。
@@ -409,7 +413,8 @@ def save_report(
         保存先ディレクトリのパス。
     """
     base = Path(output_dir) if output_dir else Path("artifacts") / "backtests"
-    run_dir = base / report.meta.run_id
+    safe_run_id = re.sub(r"[^A-Za-z0-9._-]", "_", report.meta.run_id)
+    run_dir = base / safe_run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # summary.json
@@ -454,14 +459,14 @@ def save_report(
 # ---------------------------------------------------------------------------
 
 
-def _calc_monthly_returns(history: list) -> list[MonthlyReturn]:
+def _calc_monthly_returns(history: list["DailySnapshot"]) -> list[MonthlyReturn]:
     """日次スナップショットから月次リターンを計算する。"""
     if len(history) < 2:
         return []
 
-    # 月末値を収集
+    # 月末値を収集（入力順序に依存しないよう日付昇順でソート）
     month_end: dict[tuple[int, int], float] = {}
-    for snap in history:
+    for snap in sorted(history, key=lambda s: s.date):
         key = (snap.date.year, snap.date.month)
         month_end[key] = snap.portfolio_value
 
@@ -487,7 +492,7 @@ def _calc_monthly_returns(history: list) -> list[MonthlyReturn]:
     return results
 
 
-def _generate_warnings(result: "BacktestResult", initial_cash: float) -> list[str]:
+def _generate_warnings(result: "BacktestResult") -> list[str]:
     """結果に基づいて自動 Warning を生成する。"""
     warnings: list[str] = []
     m = result.metrics
