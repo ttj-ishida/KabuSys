@@ -134,7 +134,42 @@ def _build_backtest_conn(
             "_build_backtest_conn: earnings_calendar のコピーをスキップ: %s", exc
         )
 
+    # market_breadth はインメモリDB上の prices_daily から計算（外部データ依存なし）
+    _populate_backtest_breadth(bt_conn, start_date, end_date)
+
     return bt_conn
+
+
+def _populate_backtest_breadth(
+    bt_conn: duckdb.DuckDBPyConnection,
+    start_date: date,
+    end_date: date,
+) -> None:
+    """バックテスト対象期間の market_breadth を prices_daily から計算して挿入する。
+
+    prices_daily は data_start（start_date - 300日）から既にコピー済みのため、
+    breadth 計算に必要な過去データは揃っている。
+    """
+    from kabusys.data.breadth import calc_and_save_breadth
+
+    try:
+        trading_dates = bt_conn.execute(
+            "SELECT DISTINCT date FROM prices_daily "
+            "WHERE date >= ? AND date <= ? ORDER BY date",
+            [start_date, end_date],
+        ).fetchall()
+    except Exception as exc:
+        logger.warning(
+            "_populate_backtest_breadth: trading_dates 取得失敗 → market_breadth をスキップ: %s",
+            exc,
+        )
+        return
+
+    for (d,) in trading_dates:
+        try:
+            calc_and_save_breadth(bt_conn, d)
+        except Exception as exc:
+            logger.warning("_populate_backtest_breadth: date=%s のスキップ: %s", d, exc)
 
 
 def _fetch_open_prices(
