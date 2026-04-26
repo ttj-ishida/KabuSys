@@ -5,10 +5,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from kabusys.operations.night_batch_report import (
+    MANDATORY_JOBS,
     JobRunResult,
     NightBatchReport,
     NextDaySummary,
     UpdateCounts,
+    _determine_status,
+    _generate_warnings,
 )
 
 
@@ -95,3 +98,112 @@ def test_night_batch_report_instantiation():
     assert report.run_date == "2026-04-26"
     assert report.status == "READY"
     assert len(report.job_results) == 1
+
+
+# ---------------------------------------------------------------------------
+# _determine_status
+# ---------------------------------------------------------------------------
+
+
+def test_status_ready_all_success():
+    """全ジョブ成功 + signal_queue > 0 → READY。"""
+    jobs = [
+        _make_job(name=n)
+        for n in [
+            "data_update_job",
+            "feature_generation_job",
+            "ai_analysis_job",
+            "strategy_signal_job",
+            "portfolio_construction_job",
+        ]
+    ]
+    counts = _make_counts()
+    assert _determine_status(jobs, counts) == "READY"
+
+
+def test_status_blocked_mandatory_failed():
+    """必須ジョブが failed → BLOCKED。"""
+    jobs = [_make_job(name="data_update_job", status="failed")]
+    counts = _make_counts()
+    assert _determine_status(jobs, counts) == "BLOCKED"
+
+
+def test_status_blocked_signal_queue_zero():
+    """signal_queue == 0 → BLOCKED。"""
+    jobs = [
+        _make_job(name=n)
+        for n in [
+            "data_update_job",
+            "feature_generation_job",
+            "ai_analysis_job",
+            "strategy_signal_job",
+            "portfolio_construction_job",
+        ]
+    ]
+    counts = _make_counts(signal_queue=0)
+    assert _determine_status(jobs, counts) == "BLOCKED"
+
+
+def test_status_ready_with_warnings_job_warning():
+    """ジョブが warning → READY_WITH_WARNINGS。"""
+    jobs = [_make_job(name="ai_analysis_job", status="warning")]
+    counts = _make_counts()
+    assert _determine_status(jobs, counts) == "READY_WITH_WARNINGS"
+
+
+def test_status_ready_with_warnings_signals_zero():
+    """signals == 0（signal_queue > 0）→ READY_WITH_WARNINGS。"""
+    jobs = [_make_job()]
+    counts = _make_counts(signals=0, signal_queue=5)
+    assert _determine_status(jobs, counts) == "READY_WITH_WARNINGS"
+
+
+def test_status_ready_with_warnings_job_has_warning_message():
+    """ジョブの warnings リストが空でない → READY_WITH_WARNINGS。"""
+    jobs = [_make_job(warnings=["データ件数が少ない"])]
+    counts = _make_counts()
+    assert _determine_status(jobs, counts) == "READY_WITH_WARNINGS"
+
+
+# ---------------------------------------------------------------------------
+# _generate_warnings
+# ---------------------------------------------------------------------------
+
+
+def test_warnings_failed_mandatory_job():
+    """必須ジョブが failed → 警告にジョブ名が含まれる。"""
+    jobs = [_make_job(name="data_update_job", status="failed")]
+    warnings = _generate_warnings(jobs, _make_counts())
+    assert any("data_update_job" in w for w in warnings)
+
+
+def test_warnings_signal_queue_zero():
+    """signal_queue == 0 → 警告に signal_queue が含まれる。"""
+    warnings = _generate_warnings([_make_job()], _make_counts(signal_queue=0))
+    assert any("signal_queue" in w for w in warnings)
+
+
+def test_warnings_signals_zero():
+    """signals == 0 → 警告に signals が含まれる。"""
+    warnings = _generate_warnings([_make_job()], _make_counts(signals=0))
+    assert any("signals" in w for w in warnings)
+
+
+def test_warnings_prices_daily_zero():
+    """prices_daily == 0 → 警告が生成される。"""
+    warnings = _generate_warnings([_make_job()], _make_counts(prices_daily=0))
+    assert any("prices_daily" in w for w in warnings)
+
+
+def test_warnings_empty_on_healthy():
+    """全ジョブ成功・全カウント正常 → 警告なし。"""
+    jobs = [_make_job(name=n) for n in MANDATORY_JOBS]
+    warnings = _generate_warnings(jobs, _make_counts())
+    assert warnings == []
+
+
+def test_warnings_includes_job_warnings():
+    """ジョブの warnings フィールドが全体の warnings に含まれる。"""
+    jobs = [_make_job(warnings=["シグナル件数が少ない"])]
+    warnings = _generate_warnings(jobs, _make_counts())
+    assert "シグナル件数が少ない" in warnings

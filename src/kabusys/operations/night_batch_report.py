@@ -74,3 +74,60 @@ class NightBatchReport:
     update_counts: UpdateCounts
     next_day_summary: NextDaySummary
     warnings: list[str]
+
+
+def _determine_status(
+    job_results: list[JobRunResult],
+    update_counts: UpdateCounts,
+) -> str:
+    """READY / READY_WITH_WARNINGS / BLOCKED を判定する。
+
+    BLOCKED 条件（いずれかが真）:
+      - 必須ジョブのいずれかが failed
+      - signal_queue == 0
+
+    READY_WITH_WARNINGS 条件（BLOCKED でなく、いずれかが真）:
+      - いずれかのジョブが status == "warning"
+      - いずれかのジョブの warnings リストが空でない
+      - signals == 0
+
+    それ以外: READY
+    """
+    failed_mandatory = [
+        j for j in job_results if j.job_name in MANDATORY_JOBS and j.status == "failed"
+    ]
+    if failed_mandatory or update_counts.signal_queue == 0:
+        return STATUS_BLOCKED
+
+    has_warning_status = any(j.status == "warning" for j in job_results)
+    has_job_warnings = any(j.warnings for j in job_results)
+    if has_warning_status or has_job_warnings or update_counts.signals == 0:
+        return STATUS_READY_WITH_WARNINGS
+
+    return STATUS_READY
+
+
+def _generate_warnings(
+    job_results: list[JobRunResult],
+    update_counts: UpdateCounts,
+) -> list[str]:
+    """警告メッセージのリストを生成する。"""
+    warnings: list[str] = []
+
+    for j in job_results:
+        if j.status == "failed" and j.job_name in MANDATORY_JOBS:
+            warnings.append(f"必須ジョブが失敗しました: {j.job_name}")
+        if j.status == "warning":
+            warnings.append(f"ジョブが警告で完了: {j.job_name}")
+        warnings.extend(j.warnings)
+
+    if update_counts.signals == 0:
+        warnings.append("signals が生成されていません")
+    if update_counts.signal_queue == 0:
+        warnings.append("signal_queue が空です（翌営業日の自動執行は不可）")
+    if update_counts.prices_daily == 0:
+        warnings.append("prices_daily の更新件数が 0 件です")
+    if update_counts.features == 0:
+        warnings.append("features の更新件数が 0 件です")
+
+    return warnings
