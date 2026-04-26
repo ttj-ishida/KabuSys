@@ -17,6 +17,7 @@ from kabusys.operations.night_batch_report import (
     format_cli_summary,
     format_json,
     format_markdown,
+    save_report,
 )
 
 
@@ -448,3 +449,57 @@ def test_format_markdown_final_decision_blocked():
     md = format_markdown(report)
     assert "BLOCKED" in md
     assert "自動執行" in md or "執行" in md
+
+
+# ---------------------------------------------------------------------------
+# save_report
+# ---------------------------------------------------------------------------
+
+
+def test_save_report_creates_files(tmp_path):
+    """save_report() が summary.json / report.md / warnings.json を作成する。"""
+    report = _make_report()
+    run_dir = save_report(report, output_dir=tmp_path)
+    assert (run_dir / "summary.json").exists()
+    assert (run_dir / "report.md").exists()
+    assert (run_dir / "warnings.json").exists()
+
+
+def test_save_report_run_dir_name(tmp_path):
+    """保存先ディレクトリ名が run_date と一致する。"""
+    report = _make_report()
+    run_dir = save_report(report, output_dir=tmp_path)
+    assert run_dir.name == "2026-04-26"
+
+
+def test_save_report_summary_json_valid(tmp_path):
+    """summary.json が有効な JSON で status キーを含む。"""
+    report = _make_report()
+    run_dir = save_report(report, output_dir=tmp_path)
+    data = json_mod.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert data["status"] == "READY"
+
+
+def test_save_report_warnings_json_is_list(tmp_path):
+    """warnings.json がリスト形式。"""
+    report = _make_report()
+    run_dir = save_report(report, output_dir=tmp_path)
+    data = json_mod.loads((run_dir / "warnings.json").read_text(encoding="utf-8"))
+    assert isinstance(data, list)
+
+
+def test_save_report_default_output_dir(tmp_path, monkeypatch):
+    """output_dir 省略時は artifacts/operations/night_batch/ 以下に保存される。"""
+    monkeypatch.chdir(tmp_path)
+    report = _make_report()
+    run_dir = save_report(report)
+    assert run_dir.parts[-3] == "artifacts"
+    assert run_dir.parts[-2] == "night_batch"
+
+
+def test_save_report_overwrite_existing(tmp_path):
+    """同一 run_date で再実行しても上書きできる（exist_ok=True）。"""
+    report = _make_report()
+    save_report(report, output_dir=tmp_path)
+    save_report(report, output_dir=tmp_path)  # 2回目もエラーなし
+    assert (tmp_path / "2026-04-26" / "summary.json").exists()

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 # 必須ジョブ一覧（いずれかが failed → BLOCKED）
 MANDATORY_JOBS: list[str] = [
@@ -355,3 +356,38 @@ def format_markdown(report: NightBatchReport) -> str:
     lines.append("")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# 保存
+# ---------------------------------------------------------------------------
+
+
+def save_report(
+    report: NightBatchReport,
+    output_dir: Path | str | None = None,
+) -> Path:
+    """レポートを artifacts/operations/night_batch/{run_date}/ に保存する。
+
+    保存ファイル:
+        summary.json    全指標 JSON
+        report.md       Markdown レポート
+        warnings.json   警告リスト JSON
+
+    同一 run_date で再実行した場合は既存ファイルを上書きする（exist_ok=True）。
+
+    Returns:
+        保存先ディレクトリのパス。
+    """
+    base = Path(output_dir) if output_dir else Path("artifacts") / "night_batch"
+    run_dir = base / report.run_date
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    (run_dir / "summary.json").write_text(format_json(report), encoding="utf-8")
+    (run_dir / "report.md").write_text(format_markdown(report), encoding="utf-8")
+    (run_dir / "warnings.json").write_text(
+        json.dumps(report.warnings, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    return run_dir
