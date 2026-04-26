@@ -461,6 +461,27 @@ def test_save_report_equity_csv_has_header(tmp_path):
     assert "date" in header and "portfolio_value" in header
 
 
+def test_save_report_buy_realized_pnl_none_is_empty(tmp_path):
+    """BUY トレードの realized_pnl=None は CSV で空欄として出力される。"""
+    from kabusys.backtest.report import build_report, save_report
+
+    history = _make_history([1_000_000] * 10)
+    buy_trade = _make_trade(side="buy", pnl=None, day_offset=0)
+    result = _make_result(history, [buy_trade])
+    report = build_report(
+        result,
+        run_id="none-pnl-test",
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 1, 10),
+    )
+    run_dir = save_report(report, result, output_dir=tmp_path)
+    rows = (run_dir / "trades.csv").read_text(encoding="utf-8").splitlines()
+    # header + 1 data row
+    assert len(rows) == 2
+    assert rows[1].endswith(",")  # 末尾が空欄（ "None" でない）
+    assert "None" not in rows[1]
+
+
 # ---------------------------------------------------------------------------
 # Task 7: _generate_warnings()
 # ---------------------------------------------------------------------------

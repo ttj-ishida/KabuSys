@@ -439,7 +439,7 @@ def save_report(
                     t.shares,
                     t.price,
                     t.commission,
-                    t.realized_pnl,
+                    "" if t.realized_pnl is None else t.realized_pnl,
                 ]
             )
 

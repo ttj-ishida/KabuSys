@@ -199,16 +199,18 @@ def _calc_avg_holding_days(trades: list["TradeRecord"]) -> float:
     """平均保有日数 = BUY-SELL ペアの保有日数の平均。
 
     同一 code の BUY→SELL を FIFO でマッチする（数量・分割決済は未考慮）。
+    入力順序に依存しないよう (date, side) 昇順（同日は BUY を先に）でソートする。
     ペアが存在しない場合は 0.0 を返す。
     """
     buy_dates: dict[str, deque[date]] = {}
     holding_days: list[float] = []
-    for t in trades:
+    sorted_trades = sorted(trades, key=lambda t: (t.date, 0 if t.side == "buy" else 1))
+    for t in sorted_trades:
         if t.side == "buy":
             buy_dates.setdefault(t.code, deque()).append(t.date)
         elif t.side == "sell" and t.code in buy_dates and buy_dates[t.code]:
             entry_date = buy_dates[t.code].popleft()
-            days = (t.date - entry_date).days
+            days = max(0, (t.date - entry_date).days)
             holding_days.append(float(days))
     if not holding_days:
         return 0.0
