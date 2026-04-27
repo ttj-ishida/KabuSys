@@ -35,7 +35,12 @@ response = client.chat.completions.create(
     messages=[
         {
             "role": "system",
-            "content": "You are a senior software engineer specializing in Python testing.",
+            "content": (
+                "You are a senior software engineer specializing in Python testing. "
+                "Output ONLY valid Python code. "
+                "Do NOT output any conversational text, explanations, or markdown formatting "
+                "(such as ```python or ```)."
+            ),
         },
         {"role": "user", "content": prompt},
     ],
@@ -43,11 +48,13 @@ response = client.chat.completions.create(
 
 tests = response.choices[0].message.content
 
-# コードブロックを除去して純粋なPythonコードのみ抽出
-if "```python" in tests:
-    tests = tests.split("```python")[1].split("```")[0]
-elif "```" in tests:
-    tests = tests.split("```")[1].split("```")[0]
+# マークダウンのコードフェンスを除去して純粋なPythonコードのみ抽出
+lines = tests.strip().splitlines()
+if lines and lines[0].startswith("```"):
+    lines = lines[1:]
+if lines and lines[-1].strip() == "```":
+    lines = lines[:-1]
+tests = "\n".join(lines)
 
 os.makedirs("tests", exist_ok=True)
 with open("tests/test_generated.py", "w", encoding="utf-8") as f:

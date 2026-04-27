@@ -37,13 +37,27 @@ response = client.chat.completions.create(
     messages=[
         {
             "role": "system",
-            "content": "You are a senior software engineer specializing in bug detection and code review.",
+            "content": (
+                "You are a senior software engineer specializing in bug detection and code review. "
+                "Output ONLY valid unified diff format. "
+                "Do NOT output any conversational text, explanations, or markdown formatting "
+                "(such as ```diff or ```python). "
+                "If there are no bugs, output an empty string."
+            ),
         },
         {"role": "user", "content": prompt},
     ],
 )
 
 fixed = response.choices[0].message.content
+
+# マークダウンのコードフェンスを除去する
+lines = fixed.strip().splitlines()
+if lines and lines[0].startswith("```"):
+    lines = lines[1:]
+if lines and lines[-1].strip() == "```":
+    lines = lines[:-1]
+fixed = "\n".join(lines)
 
 with open("ai_patch.diff", "w", encoding="utf-8") as f:
     f.write(fixed)
