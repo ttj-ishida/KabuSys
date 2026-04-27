@@ -1,5 +1,6 @@
 # tests/test_signal_queue_report.py
 """signal_queue_report のユニットテスト"""
+
 from __future__ import annotations
 
 import json as json_mod
@@ -129,14 +130,28 @@ def test_generate_warnings_empty():
 
 
 def test_generate_warnings_ready_no_warnings():
-    sigs = [{"code": "7203", "side": "buy", "target_size": 100,
-             "target_weight": 0.05, "signal_rank": 1}]
+    sigs = [
+        {
+            "code": "7203",
+            "side": "buy",
+            "target_size": 100,
+            "target_weight": 0.05,
+            "signal_rank": 1,
+        }
+    ]
     assert _generate_warnings(signals=sigs, total_count=1) == []
 
 
 def test_generate_warnings_buy_no_size():
-    sigs = [{"code": "7203", "side": "buy", "target_size": None,
-             "target_weight": 0.05, "signal_rank": 1}]
+    sigs = [
+        {
+            "code": "7203",
+            "side": "buy",
+            "target_size": None,
+            "target_weight": 0.05,
+            "signal_rank": 1,
+        }
+    ]
     w = _generate_warnings(signals=sigs, total_count=1)
     assert any("7203" in warning for warning in w)
 
@@ -148,10 +163,20 @@ def test_generate_warnings_buy_no_size():
 
 def test_build_report_ready():
     sigs = [
-        {"code": "7203", "side": "buy", "target_size": 100,
-         "target_weight": 0.05, "signal_rank": 1},
-        {"code": "9984", "side": "sell", "target_size": 50,
-         "target_weight": 0.03, "signal_rank": 2},
+        {
+            "code": "7203",
+            "side": "buy",
+            "target_size": 100,
+            "target_weight": 0.05,
+            "signal_rank": 1,
+        },
+        {
+            "code": "9984",
+            "side": "sell",
+            "target_size": 50,
+            "target_weight": 0.03,
+            "signal_rank": 2,
+        },
     ]
     report = build_report(sigs, report_date=TARGET_DATE)
     assert report.status == "READY"
@@ -177,12 +202,27 @@ def test_build_report_generated_at_utc():
 
 def test_build_report_counts_correctly():
     sigs = [
-        {"code": "1111", "side": "buy", "target_size": 100,
-         "target_weight": 0.05, "signal_rank": 1},
-        {"code": "2222", "side": "buy", "target_size": 200,
-         "target_weight": 0.10, "signal_rank": 2},
-        {"code": "3333", "side": "sell", "target_size": 50,
-         "target_weight": 0.03, "signal_rank": 3},
+        {
+            "code": "1111",
+            "side": "buy",
+            "target_size": 100,
+            "target_weight": 0.05,
+            "signal_rank": 1,
+        },
+        {
+            "code": "2222",
+            "side": "buy",
+            "target_size": 200,
+            "target_weight": 0.10,
+            "signal_rank": 2,
+        },
+        {
+            "code": "3333",
+            "side": "sell",
+            "target_size": 50,
+            "target_weight": 0.03,
+            "signal_rank": 3,
+        },
     ]
     report = build_report(sigs, report_date=TARGET_DATE)
     assert report.buy_count == 2
@@ -196,8 +236,15 @@ def test_build_report_counts_correctly():
 
 
 def test_format_cli_summary_ready():
-    sigs = [{"code": "7203", "side": "buy", "target_size": 100,
-             "target_weight": 0.05, "signal_rank": 1}]
+    sigs = [
+        {
+            "code": "7203",
+            "side": "buy",
+            "target_size": 100,
+            "target_weight": 0.05,
+            "signal_rank": 1,
+        }
+    ]
     report = build_report(sigs, report_date=TARGET_DATE)
     s = format_cli_summary(report)
     assert "READY" in s
@@ -220,8 +267,16 @@ def test_format_cli_summary_empty_shows_warning():
 def test_format_json_parseable():
     report = build_report([], report_date=TARGET_DATE)
     data = json_mod.loads(format_json(report))
-    for key in ("status", "report_date", "generated_at",
-                "total_count", "buy_count", "sell_count", "signals", "warnings"):
+    for key in (
+        "status",
+        "report_date",
+        "generated_at",
+        "total_count",
+        "buy_count",
+        "sell_count",
+        "signals",
+        "warnings",
+    ):
         assert key in data
 
 
@@ -231,8 +286,15 @@ def test_format_json_parseable():
 
 
 def test_format_markdown_ready_has_signal_table():
-    sigs = [{"code": "7203", "side": "buy", "target_size": 100,
-             "target_weight": 0.05, "signal_rank": 1}]
+    sigs = [
+        {
+            "code": "7203",
+            "side": "buy",
+            "target_size": 100,
+            "target_weight": 0.05,
+            "signal_rank": 1,
+        }
+    ]
     report = build_report(sigs, report_date=TARGET_DATE)
     md = format_markdown(report)
     assert "Signal Queue Confirmation" in md
@@ -272,8 +334,11 @@ def test_save_report_invalid_format_raises(tmp_path):
         report_date="invalid-date",
         generated_at="2026-04-27T00:00:00+00:00",
         status="EMPTY",
-        total_count=0, buy_count=0, sell_count=0,
-        signals=[], warnings=[],
+        total_count=0,
+        buy_count=0,
+        sell_count=0,
+        signals=[],
+        warnings=[],
     )
     with pytest.raises(ValueError, match="Invalid report_date"):
         save_report(report, output_dir=tmp_path)
@@ -284,8 +349,11 @@ def test_save_report_impossible_calendar_date_raises(tmp_path):
         report_date="2026-02-30",
         generated_at="2026-04-27T00:00:00+00:00",
         status="EMPTY",
-        total_count=0, buy_count=0, sell_count=0,
-        signals=[], warnings=[],
+        total_count=0,
+        buy_count=0,
+        sell_count=0,
+        signals=[],
+        warnings=[],
     )
     with pytest.raises(ValueError, match="Invalid report_date"):
         save_report(report, output_dir=tmp_path)
