@@ -183,10 +183,11 @@ def main() -> None:
         reconciler = Reconciler(broker=broker, repo=repo, order_manager=order_manager)
 
         # 起動時リコンシリエーション + Execution Startup Summary 生成
+        today = date.today()
         reconcile_result = reconciler.run()
         try:
             _report = build_report(
-                reconcile_result=reconcile_result, startup_date=date.today()
+                reconcile_result=reconcile_result, startup_date=today
             )
             print(format_cli_summary(_report))
             save_report(_report)
@@ -203,7 +204,7 @@ def main() -> None:
             risk_manager=risk_manager,
             order_manager=order_manager,
             duckdb_conn=duckdb_conn,
-            config=EngineConfig(target_date=date.today()),
+            config=EngineConfig(target_date=today),
             reconciler=None,
             pid_file=_EXECUTION_PID,
         )
