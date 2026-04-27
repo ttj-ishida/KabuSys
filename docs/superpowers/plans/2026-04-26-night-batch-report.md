@@ -1026,7 +1026,7 @@ def test_save_report_warnings_json_is_list(tmp_path):
 
 
 def test_save_report_default_output_dir(tmp_path, monkeypatch):
-    """output_dir 省略時は artifacts/operations/night_batch/ 以下に保存される。"""
+    """output_dir 省略時は artifacts/night_batch/ 以下に保存される。"""
     monkeypatch.chdir(tmp_path)
     report = _make_report()
     run_dir = save_report(report)
@@ -1064,7 +1064,7 @@ def save_report(
     report: NightBatchReport,
     output_dir: Path | str | None = None,
 ) -> Path:
-    """レポートを artifacts/operations/night_batch/{run_date}/ に保存する。
+    """レポートを artifacts/night_batch/{run_date}/ に保存する。
 
     保存ファイル:
         summary.json    全指標 JSON
@@ -1075,7 +1075,7 @@ def save_report(
 
     Args:
         report:     build_report() の戻り値。
-        output_dir: 保存先ルート（省略時は artifacts/operations/night_batch）。
+        output_dir: 保存先ルート（省略時は artifacts/night_batch）。
 
     Returns:
         保存先ディレクトリのパス。
@@ -1154,7 +1154,7 @@ gh pr create \
 - \`src/kabusys/operations/night_batch_report.py\` を新規実装
 - READY / READY_WITH_WARNINGS / BLOCKED の3段階ステータス判定
 - CLI summary / JSON / Markdown の3形式出力
-- \`artifacts/operations/night_batch/{run_date}/\` への保存（summary.json / report.md / warnings.json）
+- \`artifacts/night_batch/{run_date}/\` への保存（summary.json / report.md / warnings.json）
 
 ## Test Plan
 - [ ] pytest tests/test_night_batch_report.py 全テスト通過
