@@ -185,7 +185,9 @@ def main() -> None:
         # 起動時リコンシリエーション + Execution Startup Summary 生成
         reconcile_result = reconciler.run()
         try:
-            _report = build_report(reconcile_result=reconcile_result, startup_date=date.today())
+            _report = build_report(
+                reconcile_result=reconcile_result, startup_date=date.today()
+            )
             print(format_cli_summary(_report))
             save_report(_report)
         except Exception:

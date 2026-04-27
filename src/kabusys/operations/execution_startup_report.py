@@ -21,9 +21,9 @@ STATUS_BLOCKED = "BLOCKED"
 
 @dataclass
 class ExecutionStartupReport:
-    startup_date: str           # ISO date（起動日）
-    generated_at: str           # ISO 8601 UTC
-    status: str                 # READY / READY_WITH_WARNINGS / BLOCKED
+    startup_date: str  # ISO date（起動日）
+    generated_at: str  # ISO 8601 UTC
+    status: str  # READY / READY_WITH_WARNINGS / BLOCKED
     orders_synced: int
     orders_no_status: int
     position_discrepancies: list[dict]  # PositionDiscrepancy の dict 表現
@@ -248,10 +248,10 @@ def save_report(
     try:
         date.fromisoformat(report.startup_date)
     except ValueError:
-        raise ValueError(f"Invalid startup_date (not a valid calendar date): {report.startup_date!r}")
-    base = (
-        Path(output_dir) if output_dir else Path("artifacts") / "execution_startup"
-    )
+        raise ValueError(
+            f"Invalid startup_date (not a valid calendar date): {report.startup_date!r}"
+        )
+    base = Path(output_dir) if output_dir else Path("artifacts") / "execution_startup"
     run_dir = base / report.startup_date
     run_dir.mkdir(parents=True, exist_ok=True)
 

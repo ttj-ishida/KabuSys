@@ -26,12 +26,18 @@ from kabusys.operations.execution_startup_report import (
 
 
 def test_determine_status_blocked_by_no_status():
-    assert _determine_status(orders_no_status=1, position_discrepancies_count=0) == "BLOCKED"
+    assert (
+        _determine_status(orders_no_status=1, position_discrepancies_count=0)
+        == "BLOCKED"
+    )
 
 
 def test_determine_status_blocked_even_with_discrepancies():
     """orders_no_status > 0 は discrepancies があっても BLOCKED。"""
-    assert _determine_status(orders_no_status=2, position_discrepancies_count=3) == "BLOCKED"
+    assert (
+        _determine_status(orders_no_status=2, position_discrepancies_count=3)
+        == "BLOCKED"
+    )
 
 
 def test_determine_status_ready_with_warnings():
@@ -42,7 +48,9 @@ def test_determine_status_ready_with_warnings():
 
 
 def test_determine_status_ready():
-    assert _determine_status(orders_no_status=0, position_discrepancies_count=0) == "READY"
+    assert (
+        _determine_status(orders_no_status=0, position_discrepancies_count=0) == "READY"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +87,9 @@ def test_generate_warnings_both():
 
 
 def test_build_report_ready():
-    result = ReconcileResult(orders_synced=3, orders_no_status=0, position_discrepancies=[])
+    result = ReconcileResult(
+        orders_synced=3, orders_no_status=0, position_discrepancies=[]
+    )
     report = build_report(result, startup_date=date(2026, 4, 27))
     assert report.status == "READY"
     assert report.orders_synced == 3
@@ -90,14 +100,18 @@ def test_build_report_ready():
 
 
 def test_build_report_blocked():
-    result = ReconcileResult(orders_synced=0, orders_no_status=1, position_discrepancies=[])
+    result = ReconcileResult(
+        orders_synced=0, orders_no_status=1, position_discrepancies=[]
+    )
     report = build_report(result, startup_date=date(2026, 4, 27))
     assert report.status == "BLOCKED"
     assert len(report.warnings) > 0
 
 
 def test_build_report_ready_with_warnings():
-    discrepancy = PositionDiscrepancy(code="1234", broker_qty=100, local_qty=80, diff=20)
+    discrepancy = PositionDiscrepancy(
+        code="1234", broker_qty=100, local_qty=80, diff=20
+    )
     result = ReconcileResult(
         orders_synced=2, orders_no_status=0, position_discrepancies=[discrepancy]
     )
@@ -120,7 +134,9 @@ def test_build_report_generated_at_is_utc():
 
 
 def test_format_cli_summary_ready():
-    result = ReconcileResult(orders_synced=3, orders_no_status=0, position_discrepancies=[])
+    result = ReconcileResult(
+        orders_synced=3, orders_no_status=0, position_discrepancies=[]
+    )
     report = build_report(result, startup_date=date(2026, 4, 27))
     s = format_cli_summary(report)
     assert "READY" in s
@@ -129,7 +145,9 @@ def test_format_cli_summary_ready():
 
 
 def test_format_cli_summary_blocked_shows_warnings():
-    result = ReconcileResult(orders_synced=0, orders_no_status=1, position_discrepancies=[])
+    result = ReconcileResult(
+        orders_synced=0, orders_no_status=1, position_discrepancies=[]
+    )
     report = build_report(result, startup_date=date(2026, 4, 27))
     s = format_cli_summary(report)
     assert "BLOCKED" in s
@@ -142,7 +160,9 @@ def test_format_cli_summary_blocked_shows_warnings():
 
 
 def test_format_json_parseable_with_required_keys():
-    result = ReconcileResult(orders_synced=1, orders_no_status=0, position_discrepancies=[])
+    result = ReconcileResult(
+        orders_synced=1, orders_no_status=0, position_discrepancies=[]
+    )
     report = build_report(result, startup_date=date(2026, 4, 27))
     data = json_mod.loads(format_json(report))
     assert data["status"] == "READY"
@@ -159,7 +179,9 @@ def test_format_json_parseable_with_required_keys():
 
 
 def test_format_markdown_contains_required_sections():
-    result = ReconcileResult(orders_synced=1, orders_no_status=0, position_discrepancies=[])
+    result = ReconcileResult(
+        orders_synced=1, orders_no_status=0, position_discrepancies=[]
+    )
     report = build_report(result, startup_date=date(2026, 4, 27))
     md = format_markdown(report)
     assert "Execution Startup Summary" in md
@@ -168,7 +190,9 @@ def test_format_markdown_contains_required_sections():
 
 
 def test_format_markdown_blocked_includes_warnings_section():
-    result = ReconcileResult(orders_synced=0, orders_no_status=2, position_discrepancies=[])
+    result = ReconcileResult(
+        orders_synced=0, orders_no_status=2, position_discrepancies=[]
+    )
     report = build_report(result, startup_date=date(2026, 4, 27))
     md = format_markdown(report)
     assert "Warnings" in md
@@ -177,7 +201,9 @@ def test_format_markdown_blocked_includes_warnings_section():
 
 def test_format_markdown_discrepancy_table():
     discrepancy = PositionDiscrepancy(code="5678", broker_qty=50, local_qty=30, diff=20)
-    result = ReconcileResult(orders_synced=0, orders_no_status=0, position_discrepancies=[discrepancy])
+    result = ReconcileResult(
+        orders_synced=0, orders_no_status=0, position_discrepancies=[discrepancy]
+    )
     report = build_report(result, startup_date=date(2026, 4, 27))
     md = format_markdown(report)
     assert "5678" in md
@@ -190,7 +216,9 @@ def test_format_markdown_discrepancy_table():
 
 
 def test_save_report_creates_three_files(tmp_path):
-    result = ReconcileResult(orders_synced=2, orders_no_status=0, position_discrepancies=[])
+    result = ReconcileResult(
+        orders_synced=2, orders_no_status=0, position_discrepancies=[]
+    )
     report = build_report(result, startup_date=date(2026, 4, 27))
     dest = save_report(report, output_dir=tmp_path)
     assert (dest / "summary.json").exists()
@@ -229,7 +257,9 @@ def test_save_report_impossible_calendar_date_raises(tmp_path):
 
 def test_save_report_overwrite_is_idempotent(tmp_path):
     """同一 startup_date で 2 回保存しても例外にならない。"""
-    result = ReconcileResult(orders_synced=1, orders_no_status=0, position_discrepancies=[])
+    result = ReconcileResult(
+        orders_synced=1, orders_no_status=0, position_discrepancies=[]
+    )
     report = build_report(result, startup_date=date(2026, 4, 27))
     save_report(report, output_dir=tmp_path)
     save_report(report, output_dir=tmp_path)  # 2回目も例外なし
