@@ -54,7 +54,7 @@ jobs:
           git config user.name "ai-testgen[bot]"
           git config user.email "ai-testgen-bot@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}
-          git add tests/test_generated.py
+          git add -f tests/test_generated.py
           git diff --cached --quiet && echo "no changes" && exit 0
           git commit -m "Add AI generated tests for PR #${{ github.event.pull_request.number }} [skip ci]"
           git push origin HEAD:"$HEAD_REF"
