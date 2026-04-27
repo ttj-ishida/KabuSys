@@ -21,16 +21,16 @@ _FRESHNESS_DAYS = 3  # today との差が 3 日以内なら OK（週末・祝日
 
 
 def _to_date(v: object) -> date | None:
-    """DB から返る値を date に正規化する。datetime/str も受け付ける。"""
+    """DB から返る値を date に正規化する。datetime/str（スペース・T 区切り）も受け付ける。"""
     if v is None:
         return None
     if isinstance(v, datetime):
         return v.date()
     if isinstance(v, date):
         return v
-    s = str(v).strip()
-    if " " in s:
-        s = s.split(" ")[0]
+    # ISO 8601 の datetime 文字列（"YYYY-MM-DD HH:MM:SS" / "YYYY-MM-DDTHH:MM:SS"）から
+    # 日付部分（先頭 10 文字 "YYYY-MM-DD"）を取り出す
+    s = str(v).strip()[:10]
     try:
         return date.fromisoformat(s)
     except Exception:
@@ -114,9 +114,10 @@ def check_task_scheduler(task_name: str) -> bool:
 
     # CSV 出力の 3 列目がステータス（例: "Ready", "Disabled", "Running"）
     # csv.reader を使い引用符内カンマを正しく処理する。
-    # 日本語 OS では "準備完了" が返る場合があるため lowercase 比較のみ。
+    # 日本語 OS では "準備完了" が返る場合があるため、受理語彙セットで判定する。
+    _READY_STATUSES = {"ready", "準備完了"}
     for row in csv.reader(StringIO(result.stdout)):
-        if len(row) >= 3 and row[2].strip().lower() == "ready":
+        if len(row) >= 3 and row[2].strip().lower() in _READY_STATUSES:
             return True
     return False
 

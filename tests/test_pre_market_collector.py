@@ -62,6 +62,14 @@ def test_data_freshness_future_date():
     assert result is False
 
 
+def test_data_freshness_iso8601_t_separator():
+    """T 区切りの ISO 8601 文字列（例: "2026-04-25T00:00:00"）を正しく処理できる。"""
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value.fetchone.return_value = ("2026-04-25T00:00:00",)
+    result = check_data_freshness(mock_conn, today=date(2026, 4, 27))
+    assert result is True
+
+
 # --- check_signal_queue ---
 
 
@@ -147,6 +155,20 @@ def test_task_scheduler_error():
         return_value=mock_result,
     ):
         assert check_task_scheduler("KabuSys_ExecutionStart") is False
+
+
+def test_task_scheduler_ready_japanese_locale():
+    """日本語 OS で "準備完了" が返った場合も True になる。"""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = (
+        '"\\\\KabuSys_ExecutionStart","2026/04/28 8:30:00","準備完了"\r\n'
+    )
+    with patch(
+        "kabusys.operations.pre_market_collector.subprocess.run",
+        return_value=mock_result,
+    ):
+        assert check_task_scheduler("KabuSys_ExecutionStart") is True
 
 
 # --- collect ---
