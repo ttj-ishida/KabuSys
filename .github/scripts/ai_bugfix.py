@@ -53,20 +53,20 @@ fixed = response.choices[0].message.content
 
 # マークダウンのコードフェンスを除去する
 # LLMが「説明文 + ```diff ... ``` + 締め文」を返す場合も考慮し、
-# 最初のフェンス開始行と最後のフェンス終了行の間を採用する。
+# 最初のフェンス開始行から直後のクローズフェンスまでを採用する。
+# （最後のフェンスを採用すると複数ブロック間の説明文を巻き込む恐れがある）
 lines = fixed.strip().splitlines()
-first_fence = next((i for i, l in enumerate(lines) if l.startswith("```")), None)
-last_fence = next(
-    (i for i in range(len(lines) - 1, -1, -1) if lines[i].strip() == "```"), None
-)
-if first_fence is not None and last_fence is not None and first_fence < last_fence:
-    lines = lines[first_fence + 1 : last_fence]
-else:
-    # フォールバック: 先頭・末尾のフェンスのみ除去
-    if lines and lines[0].startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
+first_open = next((i for i, ln in enumerate(lines) if ln.startswith("```")), None)
+if first_open is not None:
+    first_close = next(
+        (i for i in range(first_open + 1, len(lines)) if lines[i].strip() == "```"),
+        None,
+    )
+    if first_close is not None:
+        lines = lines[first_open + 1 : first_close]
+    else:
+        # クローズフェンスなし: 開始フェンス行のみ除去
+        lines = lines[first_open + 1 :]
 fixed = "\n".join(lines)
 
 with open("ai_patch.diff", "w", encoding="utf-8") as f:

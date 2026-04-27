@@ -212,6 +212,21 @@ def test_save_report_invalid_startup_date_raises(tmp_path):
         save_report(report, output_dir=tmp_path)
 
 
+def test_save_report_impossible_calendar_date_raises(tmp_path):
+    """2026-02-30 のように形式は正しいが存在しない日付は拒否する。"""
+    report = ExecutionStartupReport(
+        startup_date="2026-02-30",
+        generated_at="2026-04-27T00:00:00+00:00",
+        status="READY",
+        orders_synced=0,
+        orders_no_status=0,
+        position_discrepancies=[],
+        warnings=[],
+    )
+    with pytest.raises(ValueError, match="Invalid startup_date"):
+        save_report(report, output_dir=tmp_path)
+
+
 def test_save_report_overwrite_is_idempotent(tmp_path):
     """同一 startup_date で 2 回保存しても例外にならない。"""
     result = ReconcileResult(orders_synced=1, orders_no_status=0, position_discrepancies=[])

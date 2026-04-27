@@ -245,6 +245,10 @@ def save_report(
     """
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", report.startup_date):
         raise ValueError(f"Invalid startup_date: {report.startup_date!r}")
+    try:
+        date.fromisoformat(report.startup_date)
+    except ValueError:
+        raise ValueError(f"Invalid startup_date (not a valid calendar date): {report.startup_date!r}")
     base = (
         Path(output_dir) if output_dir else Path("artifacts") / "execution_startup"
     )
