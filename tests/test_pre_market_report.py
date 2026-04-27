@@ -1,13 +1,13 @@
 """Pre-Market Report 純粋関数テスト"""
+
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timezone
+from datetime import date
 
 import pytest
 
 from kabusys.operations.pre_market_report import (
-    CheckItem,
     PreMarketReport,
     STATUS_BLOCKED,
     STATUS_READY,
@@ -57,6 +57,7 @@ def _make_report(status_override: str | None = None) -> PreMarketReport:
 
 # --- _determine_status ---
 
+
 def test_status_ready_all_ok():
     assert _determine_status(**_make_checks()) == STATUS_READY
 
@@ -70,7 +71,9 @@ def test_status_blocked_stop_flag():
 
 
 def test_status_blocked_task_scheduler_not_ready():
-    assert _determine_status(**_make_checks(task_scheduler_ready=False)) == STATUS_BLOCKED
+    assert (
+        _determine_status(**_make_checks(task_scheduler_ready=False)) == STATUS_BLOCKED
+    )
 
 
 def test_status_ready_with_warnings_stale_data():
@@ -81,6 +84,7 @@ def test_status_ready_with_warnings_stale_data():
 
 
 # --- _generate_warnings ---
+
 
 def test_no_warnings_when_all_ok():
     assert _generate_warnings(**_make_checks()) == []
@@ -108,6 +112,7 @@ def test_warning_stale_data():
 
 # --- build_report ---
 
+
 def test_build_report_ready():
     report = build_report(report_date=date(2026, 4, 27), **_make_checks())
     assert report.status == STATUS_READY
@@ -117,12 +122,15 @@ def test_build_report_ready():
 
 
 def test_build_report_blocked_no_signals():
-    report = build_report(report_date=date(2026, 4, 27), **_make_checks(signal_queue_pending=0))
+    report = build_report(
+        report_date=date(2026, 4, 27), **_make_checks(signal_queue_pending=0)
+    )
     assert report.status == STATUS_BLOCKED
     assert any("signal_queue" in w for w in report.warnings)
 
 
 # --- format_cli_summary ---
+
 
 def test_format_cli_summary_contains_status():
     report = build_report(report_date=date(2026, 4, 27), **_make_checks())
@@ -141,6 +149,7 @@ def test_format_cli_summary_blocked_shows_blocked():
 
 # --- format_json ---
 
+
 def test_format_json_valid():
     report = build_report(report_date=date(2026, 4, 27), **_make_checks())
     data = json.loads(format_json(report))
@@ -150,6 +159,7 @@ def test_format_json_valid():
 
 
 # --- format_markdown ---
+
 
 def test_format_markdown_contains_sections():
     report = build_report(report_date=date(2026, 4, 27), **_make_checks())
@@ -173,6 +183,7 @@ def test_format_markdown_with_warnings_section():
 
 
 # --- save_report ---
+
 
 def test_save_report_creates_files(tmp_path):
     report = build_report(report_date=date(2026, 4, 27), **_make_checks())

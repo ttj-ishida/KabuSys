@@ -1,11 +1,10 @@
 """pre_market_collector のテスト（モックで IO を差し替え）"""
+
 from __future__ import annotations
 
 from datetime import date
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from kabusys.operations.pre_market_collector import (
     PreMarketData,
@@ -19,6 +18,7 @@ from kabusys.operations.pre_market_collector import (
 
 
 # --- check_data_freshness ---
+
 
 def test_data_freshness_ok(tmp_path):
     """prices_daily の最終日が today-1 以下 3 日以内なら OK。"""
@@ -46,6 +46,7 @@ def test_data_freshness_no_data():
 
 # --- check_signal_queue ---
 
+
 def test_signal_queue_pending_count():
     mock_conn = MagicMock()
     mock_conn.execute.return_value.fetchone.return_value = (7,)
@@ -61,6 +62,7 @@ def test_signal_queue_zero():
 
 
 # --- check_position_count ---
+
 
 def test_position_count():
     mock_conn = MagicMock()
@@ -78,6 +80,7 @@ def test_position_count_none():
 
 # --- check_stop_flag ---
 
+
 def test_stop_flag_exists(tmp_path):
     flag = tmp_path / "stop_requested.flag"
     flag.touch()
@@ -91,11 +94,17 @@ def test_stop_flag_not_exists(tmp_path):
 
 # --- check_task_scheduler ---
 
+
 def test_task_scheduler_ready():
     mock_result = MagicMock()
     mock_result.returncode = 0
-    mock_result.stdout = '"\\\\KabuSys_ExecutionStart","4/28/2026 8:30:00 AM","Ready"\r\n'
-    with patch("kabusys.operations.pre_market_collector.subprocess.run", return_value=mock_result):
+    mock_result.stdout = (
+        '"\\\\KabuSys_ExecutionStart","4/28/2026 8:30:00 AM","Ready"\r\n'
+    )
+    with patch(
+        "kabusys.operations.pre_market_collector.subprocess.run",
+        return_value=mock_result,
+    ):
         assert check_task_scheduler("KabuSys_ExecutionStart") is True
 
 
@@ -103,7 +112,10 @@ def test_task_scheduler_not_ready():
     mock_result = MagicMock()
     mock_result.returncode = 0
     mock_result.stdout = '"\\\\KabuSys_ExecutionStart","N/A","Disabled"\r\n'
-    with patch("kabusys.operations.pre_market_collector.subprocess.run", return_value=mock_result):
+    with patch(
+        "kabusys.operations.pre_market_collector.subprocess.run",
+        return_value=mock_result,
+    ):
         assert check_task_scheduler("KabuSys_ExecutionStart") is False
 
 
@@ -112,11 +124,15 @@ def test_task_scheduler_error():
     mock_result = MagicMock()
     mock_result.returncode = 1
     mock_result.stdout = ""
-    with patch("kabusys.operations.pre_market_collector.subprocess.run", return_value=mock_result):
+    with patch(
+        "kabusys.operations.pre_market_collector.subprocess.run",
+        return_value=mock_result,
+    ):
         assert check_task_scheduler("KabuSys_ExecutionStart") is False
 
 
 # --- collect ---
+
 
 def test_collect_returns_pre_market_data(tmp_path):
     mock_duckdb = MagicMock()
@@ -127,7 +143,10 @@ def test_collect_returns_pre_market_data(tmp_path):
 
     stop_flag = tmp_path / "stop_requested.flag"
 
-    with patch("kabusys.operations.pre_market_collector.check_task_scheduler", return_value=True):
+    with patch(
+        "kabusys.operations.pre_market_collector.check_task_scheduler",
+        return_value=True,
+    ):
         data = collect(
             duckdb_conn=mock_duckdb,
             sqlite_conn=mock_sqlite,

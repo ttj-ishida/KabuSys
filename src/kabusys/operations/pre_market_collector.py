@@ -4,6 +4,7 @@ Pre-Market データ収集モジュール。
 DB クエリ・ファイル確認・Task Scheduler 確認を行い、
 pre_market_report.build_report() に渡す値を収集する。
 """
+
 from __future__ import annotations
 
 import logging

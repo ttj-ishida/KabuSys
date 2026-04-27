@@ -6,6 +6,7 @@ Pre-Market Report エントリーポイント。
     python -m kabusys.run_pre_market_report --save
     python -m kabusys.run_pre_market_report --json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -34,7 +35,9 @@ _TASK_NAME = "KabuSys_ExecutionStart"
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Pre-Market Report を生成する")
-    parser.add_argument("--save", action="store_true", help="artifacts/pre_market/ に保存する")
+    parser.add_argument(
+        "--save", action="store_true", help="artifacts/pre_market/ に保存する"
+    )
     parser.add_argument("--json", action="store_true", help="JSON 形式で出力する")
     args = parser.parse_args(argv)
 
