@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
 
@@ -40,6 +40,24 @@ def test_data_freshness_no_data():
     """prices_daily にデータがなければ False。"""
     mock_conn = MagicMock()
     mock_conn.execute.return_value.fetchone.return_value = (None,)
+    result = check_data_freshness(mock_conn, today=date(2026, 4, 27))
+    assert result is False
+
+
+def test_data_freshness_datetime_type():
+    """DuckDB が datetime で返しても正しく処理できる。"""
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value.fetchone.return_value = (
+        datetime(2026, 4, 25, 15, 30, 0),
+    )
+    result = check_data_freshness(mock_conn, today=date(2026, 4, 27))
+    assert result is True
+
+
+def test_data_freshness_future_date():
+    """未来日が返った場合は False（データ異常とみなす）。"""
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value.fetchone.return_value = (date(2026, 4, 30),)
     result = check_data_freshness(mock_conn, today=date(2026, 4, 27))
     assert result is False
 

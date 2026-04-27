@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     today = date.today()
 
     duckdb_conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
-    sqlite_conn = sqlite3.connect(str(settings.sqlite_path))
+    sqlite_conn = sqlite3.connect(f"file:{settings.sqlite_path}?mode=ro", uri=True)
 
     try:
         data = collect(
@@ -77,7 +77,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.save:
         run_dir = save_report(report)
-        print(f"保存先: {run_dir}")
+        dest_msg = f"保存先: {run_dir}"
+        # --json 時は JSON ストリームを汚染しないよう stderr へ出す
+        if args.json:
+            sys.stderr.write(dest_msg + "\n")
+        else:
+            print(dest_msg)
 
     return 0 if report.status != "BLOCKED" else 1
 

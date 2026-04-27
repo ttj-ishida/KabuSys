@@ -7,15 +7,35 @@ pre_market_report.build_report() に渡す値を収集する。
 
 from __future__ import annotations
 
+import csv
 import logging
 import subprocess
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
+from io import StringIO
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_FRESHNESS_DAYS = 3  # 直近 3 営業日以内なら OK（週末・祝日のギャップを考慮）
+_FRESHNESS_DAYS = 3  # today との差が 3 日以内なら OK（週末・祝日のギャップを考慮）
+
+
+def _to_date(v: object) -> date | None:
+    """DB から返る値を date に正規化する。datetime/str も受け付ける。"""
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    s = str(v).strip()
+    if " " in s:
+        s = s.split(" ")[0]
+    try:
+        return date.fromisoformat(s)
+    except Exception:
+        logger.warning("Unexpected date value from prices_daily: %r", v)
+        return None
 
 
 @dataclass
@@ -30,11 +50,18 @@ class PreMarketData:
 
 
 def check_data_freshness(conn: object, today: date) -> bool:
-    """prices_daily の最終更新日が today から 3 日以内なら True。"""
+    """prices_daily の最終更新日と today の差が 3 日以内なら True。
+
+    DuckDB/SQLite ドライバの設定によって MAX(date) が datetime や str で
+    返ることがあるため、_to_date() で正規化してから比較する。
+    未来日（last_date > today）は 0 日差とみなさず False 扱いにする。
+    """
     row = conn.execute("SELECT MAX(date) FROM prices_daily").fetchone()
-    if row is None or row[0] is None:
+    last_date = _to_date(row[0] if row else None)
+    if last_date is None:
         return False
-    last_date = row[0] if isinstance(row[0], date) else date.fromisoformat(str(row[0]))
+    if last_date > today:
+        return False
     return (today - last_date).days <= _FRESHNESS_DAYS
 
 
@@ -77,13 +104,19 @@ def check_task_scheduler(task_name: str) -> bool:
         return False
 
     if result.returncode != 0:
-        logger.warning("schtasks 戻り値 %d: %s", result.returncode, result.stdout)
+        logger.warning(
+            "schtasks 戻り値 %d: stdout=%s stderr=%s",
+            result.returncode,
+            result.stdout,
+            result.stderr,
+        )
         return False
 
     # CSV 出力の 3 列目がステータス（例: "Ready", "Disabled", "Running"）
-    for line in result.stdout.splitlines():
-        parts = [p.strip('"') for p in line.split(",")]
-        if len(parts) >= 3 and "Ready" in parts[2]:
+    # csv.reader を使い引用符内カンマを正しく処理する。
+    # 日本語 OS では "準備完了" が返る場合があるため lowercase 比較のみ。
+    for row in csv.reader(StringIO(result.stdout)):
+        if len(row) >= 3 and row[2].strip().lower() == "ready":
             return True
     return False
 
