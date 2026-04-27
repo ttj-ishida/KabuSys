@@ -141,7 +141,12 @@ def format_cli_summary(report: ExecutionStartupReport) -> str:
 
 
 def format_json(report: ExecutionStartupReport) -> str:
-    """全指標を含む JSON 文字列を返す。"""
+    """全指標を含む JSON 文字列を返す。
+
+    Note: ExecutionStartupReport のフィールドは str / int / list[dict] のみで
+    構成されるため _to_serializable は不要。date/datetime フィールドを追加する
+    場合はこの前提を再確認すること。
+    """
     return json.dumps(asdict(report), ensure_ascii=False, indent=2)
 
 
