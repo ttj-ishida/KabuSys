@@ -192,22 +192,37 @@
 
 ## 4.5 Position Reconciliation View
 
+**ステータス: 設計済み (Issue #204)**
+
 目的:
 
-- DB 上のポジションと証券口座ポジションの差分を確認する
+- DB上のローカル推定ポジション（注文履歴から集計）と証券口座（kabuステーション）のポジションを突き合わせ、一致・不一致を銘柄単位で確認する
+
+設計決定:
+
+- **独立した CLIコマンド** として実装する（Execution Startup Summary には組み込まない）
+  - 理由: 起動時レポートは既に差分警告を表示しており重複になるため
+  - 任意のタイミング（朝の事前確認・ザラ場中・手動確認）で実行可能
+- **全保有銘柄を表示**する（差分がある銘柄のみではなく broker / local の union を一覧表示）
+- `--watch` オプションによる定期ポーリング（デフォルト10分間隔）をサポート
 
 確認対象:
 
-- 一致 / 不一致
-- 差分銘柄
-- 差分数量
-- 最終同期時刻
+- 銘柄ごとの broker_qty / local_qty / diff / MATCH・MISMATCH 判定
+- 全体ステータス: `CLEAN`（全銘柄一致）/ `DISCREPANCY`（1件以上差分あり）
+- 差分銘柄の警告一覧
 
-未検討点:
+コマンド:
 
-- 差分専用画面を作るか
-- 起動時サマリに含めるか
-- ログだけで済ませるか
+```cmd
+python -m kabusys.run_position_reconciliation_report
+python -m kabusys.run_position_reconciliation_report --watch --interval 300
+python -m kabusys.run_position_reconciliation_report --save --json
+```
+
+出力先: `artifacts/position_reconciliation/{date}/summary.json|report.md|warnings.json`
+
+詳細設計: `docs/superpowers/specs/2026-04-27-position-reconciliation-view-design.md`
 
 ## 4.6 Signal Queue Confirmation View
 
@@ -260,11 +275,14 @@
 
 1. Signal Queue Confirmation View
 
-### 優先度中
+### 優先度中（設計済み）
+
+1. Position Reconciliation View（設計済み: Issue #204）
+
+### 優先度中（未着手）
 
 1. Intraday Monitoring Interface
-2. Position Reconciliation View
-3. Market Close Summary
+2. Market Close Summary
 
 ### 優先度低
 
@@ -299,7 +317,9 @@
 |-----------|-----------|
 | `NightBatchOperationsReport` | 実装済み |
 | `PreMarketOperationsReport` | 実装済み (Issue #200, PR #214) |
-| `ExecutionStartupSummary` | 設計済み (Issue #201) |
+| `ExecutionStartupSummary` | 実装済み (Issue #201, PR #215) |
+| `SignalQueueConfirmationView` | 実装済み (Issue #202, PR #216) |
+| `PositionReconciliationView` | 設計済み (Issue #204) |
 | `IntradayMonitoringInterface` | 未着手 |
 | `MarketCloseSummary` | 未着手 |
 

@@ -52,11 +52,19 @@
 | API 接続 | kabuステーション API 応答あり | kabuステーション 画面の接続状態 |
 | J-Quants データ | 前日分データが DuckDB に入っていること | `data_update` バッチのログ確認 |
 | Signal Queue | 本日の `pending` シグナルが存在すること | SQLite / DuckDB 確認 |
-| ポジション | DB のポジションと証券口座が一致していること | kabuステーション ポジション画面と比較 |
+| ポジション | DB のポジションと証券口座が一致していること | `run_position_reconciliation_report` コマンドで確認 |
 | 停止フラグ | `data/stop_requested.flag` が存在しないこと | エクスプローラーで確認 |
 | Task Scheduler | KabuSys_* タスクが `Ready` 状態であること | タスクスケジューラ画面 |
 
 **ポジション確認コマンド（手動実行）:**
+
+```cmd
+python -m kabusys.run_position_reconciliation_report
+```
+
+`CLEAN` が表示されれば一致。`DISCREPANCY` が表示された場合は差分銘柄・数量を確認し、必要に応じて手動調整すること。
+
+**Task Scheduler 確認コマンド:**
 
 ```powershell
 Get-ScheduledTask -TaskName "KabuSys_*" | Select-Object TaskName, State
@@ -129,6 +137,7 @@ python scripts\stop_system.py
 | ドローダウン | 日次 DD | 10% 超過で Kill Switch 検討 |
 | Execution プロセス | PID ファイル存在確認 | `data/execution.pid` が消えたら再起動 |
 | Monitoring プロセス | PID ファイル存在確認 | `data/monitoring.pid` が消えたら再起動 |
+| ポジション差分 | DB とブローカーのポジション一致確認 | `run_position_reconciliation_report --watch` で定期確認 |
 
 ### 5.3 ログ確認
 
