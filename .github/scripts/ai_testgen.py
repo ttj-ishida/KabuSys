@@ -35,7 +35,12 @@ response = client.chat.completions.create(
     messages=[
         {
             "role": "system",
-            "content": "You are a senior software engineer specializing in Python testing.",
+            "content": (
+                "You are a senior software engineer specializing in Python testing. "
+                "Output ONLY valid Python code. "
+                "Do NOT output any conversational text, explanations, or markdown formatting "
+                "(such as ```python or ```)."
+            ),
         },
         {"role": "user", "content": prompt},
     ],
@@ -43,11 +48,30 @@ response = client.chat.completions.create(
 
 tests = response.choices[0].message.content
 
-# コードブロックを除去して純粋なPythonコードのみ抽出
-if "```python" in tests:
-    tests = tests.split("```python")[1].split("```")[0]
-elif "```" in tests:
-    tests = tests.split("```")[1].split("```")[0]
+# マークダウンのコードフェンスを除去して純粋なPythonコードのみ抽出
+# LLMが「説明文 + ```python ... ``` + 締め文」を返す場合も考慮し、
+# 最初のフェンス開始行から直後のクローズフェンスまでを採用する。
+# （最後のフェンスを採用すると複数ブロック間の説明文を巻き込む恐れがある）
+# ```python タグ付きフェンスを優先し、なければ最初の ``` にフォールバック。
+lines = tests.strip().splitlines()
+first_open = next(
+    (i for i, ln in enumerate(lines) if ln.strip().startswith("```python")), None
+)
+if first_open is None:
+    first_open = next(
+        (i for i, ln in enumerate(lines) if ln.strip().startswith("```")), None
+    )
+if first_open is not None:
+    first_close = next(
+        (i for i in range(first_open + 1, len(lines)) if lines[i].strip() == "```"),
+        None,
+    )
+    if first_close is not None:
+        lines = lines[first_open + 1 : first_close]
+    else:
+        # クローズフェンスなし: 開始フェンス行のみ除去
+        lines = lines[first_open + 1 :]
+tests = "\n".join(lines)
 
 os.makedirs("tests", exist_ok=True)
 with open("tests/test_generated.py", "w", encoding="utf-8") as f:
