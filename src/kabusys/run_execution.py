@@ -28,6 +28,11 @@ from kabusys.execution.order_manager import OrderManager  # noqa: E402
 from kabusys.execution.order_repository import OrderRepository  # noqa: E402
 from kabusys.execution.reconciler import Reconciler  # noqa: E402
 from kabusys.execution.risk_manager import RiskConfig, RiskManager  # noqa: E402
+from kabusys.operations.execution_startup_report import (  # noqa: E402
+    build_report,
+    format_cli_summary,
+    save_report,
+)
 from kabusys.monitoring.monitoring_db import init_monitoring_db  # noqa: E402
 from kabusys.utils.logging_setup import setup_logging  # noqa: E402
 from kabusys.utils.process_priority import set_process_priority  # noqa: E402
@@ -177,7 +182,19 @@ def main() -> None:
         )
         reconciler = Reconciler(broker=broker, repo=repo, order_manager=order_manager)
 
-        # 5. ExecutionEngine 起動
+        # 起動時リコンシリエーション + Execution Startup Summary 生成
+        reconcile_result = reconciler.run()
+        try:
+            _report = build_report(reconcile_result=reconcile_result, startup_date=date.today())
+            print(format_cli_summary(_report))
+            save_report(_report)
+        except Exception:
+            logger.warning(
+                "Execution Startup Summary の生成に失敗しました（起動を続行します）",
+                exc_info=True,
+            )
+
+        # 5. ExecutionEngine 起動（reconciliation は上で完了済みのため reconciler=None）
         engine = ExecutionEngine(
             broker=broker,
             repo=repo,
@@ -185,7 +202,7 @@ def main() -> None:
             order_manager=order_manager,
             duckdb_conn=duckdb_conn,
             config=EngineConfig(target_date=date.today()),
-            reconciler=reconciler,
+            reconciler=None,
             pid_file=_EXECUTION_PID,
         )
         # 停止フラグが既に立っている場合は起動せず終了
