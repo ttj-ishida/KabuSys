@@ -7,6 +7,9 @@ Keys/
 # Claude Code ローカル設定（トークン・allow設定を含む可能性があるため除外）
 .claude/settings.local.json
 
+# AI自動生成テスト（品質保証できないため追跡しない）
+tests/test_generated.py
+
 # ログ・作業ファイル
 OrderLogs/
 logs/
