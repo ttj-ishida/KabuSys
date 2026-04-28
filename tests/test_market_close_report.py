@@ -9,6 +9,15 @@ from datetime import date
 import duckdb as _duckdb
 import pytest
 
+from kabusys.operations.market_close_collector import (
+    collect_market_close_data,
+    check_signal_pending,
+    check_signal_filled,
+    check_positions_updated,
+    check_performance_recorded,
+    get_performance_row,
+    get_prev_equity,
+)
 from kabusys.operations.market_close_report import (
     STATUS_BLOCKED,
     STATUS_OK,
@@ -329,3 +338,148 @@ def _insert_performance(
         "INSERT INTO portfolio_performance VALUES (?, ?, 1000000.0, -0.005, ?)",
         [date_val.isoformat(), equity, daily_return],
     )
+
+
+# ---------------------------------------------------------------------------
+# check_signal_pending
+# ---------------------------------------------------------------------------
+
+
+def test_check_signal_pending_zero_when_empty(sdb):
+    assert check_signal_pending(sdb, TODAY) == 0
+
+
+def test_check_signal_pending_counts_pending(sdb):
+    _insert_signal(sdb, TODAY.isoformat(), "pending", "1234")
+    _insert_signal(sdb, TODAY.isoformat(), "pending", "5678")
+    assert check_signal_pending(sdb, TODAY) == 2
+
+
+def test_check_signal_pending_ignores_other_status(sdb):
+    _insert_signal(sdb, TODAY.isoformat(), "filled")
+    assert check_signal_pending(sdb, TODAY) == 0
+
+
+def test_check_signal_pending_ignores_other_date(sdb):
+    _insert_signal(sdb, "2026-04-27", "pending")
+    assert check_signal_pending(sdb, TODAY) == 0
+
+
+# ---------------------------------------------------------------------------
+# check_signal_filled
+# ---------------------------------------------------------------------------
+
+
+def test_check_signal_filled_zero_when_empty(sdb):
+    assert check_signal_filled(sdb, TODAY) == 0
+
+
+def test_check_signal_filled_counts_filled(sdb):
+    _insert_signal(sdb, TODAY.isoformat(), "filled", "1234")
+    _insert_signal(sdb, TODAY.isoformat(), "filled", "5678")
+    assert check_signal_filled(sdb, TODAY) == 2
+
+
+def test_check_signal_filled_ignores_pending(sdb):
+    _insert_signal(sdb, TODAY.isoformat(), "pending")
+    assert check_signal_filled(sdb, TODAY) == 0
+
+
+# ---------------------------------------------------------------------------
+# check_positions_updated
+# ---------------------------------------------------------------------------
+
+
+def test_check_positions_updated_false_when_empty(ddb):
+    assert check_positions_updated(ddb, TODAY) is False
+
+
+def test_check_positions_updated_true_when_today_exists(ddb):
+    _insert_position(ddb, TODAY)
+    assert check_positions_updated(ddb, TODAY) is True
+
+
+def test_check_positions_updated_false_when_only_prev(ddb):
+    _insert_position(ddb, PREV)
+    assert check_positions_updated(ddb, TODAY) is False
+
+
+# ---------------------------------------------------------------------------
+# check_performance_recorded
+# ---------------------------------------------------------------------------
+
+
+def test_check_performance_recorded_false_when_empty(ddb):
+    assert check_performance_recorded(ddb, TODAY) is False
+
+
+def test_check_performance_recorded_true_when_today_exists(ddb):
+    _insert_performance(ddb, TODAY)
+    assert check_performance_recorded(ddb, TODAY) is True
+
+
+# ---------------------------------------------------------------------------
+# get_performance_row
+# ---------------------------------------------------------------------------
+
+
+def test_get_performance_row_none_when_empty(ddb):
+    daily_return, equity = get_performance_row(ddb, TODAY)
+    assert daily_return is None
+    assert equity is None
+
+
+def test_get_performance_row_returns_values(ddb):
+    _insert_performance(ddb, TODAY, equity=5_234_000.0, daily_return=0.0032)
+    daily_return, equity = get_performance_row(ddb, TODAY)
+    assert daily_return == pytest.approx(0.0032)
+    assert equity == pytest.approx(5_234_000.0)
+
+
+# ---------------------------------------------------------------------------
+# get_prev_equity
+# ---------------------------------------------------------------------------
+
+
+def test_get_prev_equity_none_when_no_history(ddb):
+    assert get_prev_equity(ddb, TODAY) is None
+
+
+def test_get_prev_equity_returns_most_recent_before_today(ddb):
+    _insert_performance(ddb, PREV, equity=5_217_600.0)
+    _insert_performance(ddb, date(2026, 4, 24), equity=5_200_000.0)
+    result = get_prev_equity(ddb, TODAY)
+    assert result == pytest.approx(5_217_600.0)
+
+
+def test_get_prev_equity_ignores_today(ddb):
+    _insert_performance(ddb, TODAY, equity=5_234_000.0)
+    assert get_prev_equity(ddb, TODAY) is None
+
+
+# ---------------------------------------------------------------------------
+# collect_market_close_data
+# ---------------------------------------------------------------------------
+
+
+def test_collect_market_close_data_all_ok(ddb, sdb):
+    _insert_signal(sdb, TODAY.isoformat(), "filled")
+    _insert_position(ddb, TODAY)
+    _insert_performance(ddb, TODAY, equity=5_234_000.0, daily_return=0.0032)
+    _insert_performance(ddb, PREV, equity=5_217_600.0)
+    data = collect_market_close_data(ddb, sdb, TODAY)
+    assert data.signal_pending_count == 0
+    assert data.filled_count == 1
+    assert data.positions_updated is True
+    assert data.performance_recorded is True
+    assert data.daily_return == pytest.approx(0.0032)
+    assert data.equity_today == pytest.approx(5_234_000.0)
+    assert data.equity_prev == pytest.approx(5_217_600.0)
+
+
+def test_collect_market_close_data_blocked(ddb, sdb):
+    _insert_signal(sdb, TODAY.isoformat(), "pending")
+    data = collect_market_close_data(ddb, sdb, TODAY)
+    assert data.signal_pending_count == 1
+    assert data.positions_updated is False
+    assert data.performance_recorded is False
