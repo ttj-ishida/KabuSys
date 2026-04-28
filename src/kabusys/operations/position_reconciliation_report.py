@@ -8,10 +8,13 @@ DB 参照は collect_position_snapshot() のみ。それ以外の関数はすべ
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 STATUS_CLEAN = "CLEAN"
 STATUS_DISCREPANCY = "DISCREPANCY"
@@ -45,6 +48,7 @@ def collect_position_snapshot(broker, repo) -> list[PositionEntry]:
 
     ブローカー側は get_positions()、ローカル側は list_active() の
     Filled / PartialFill 注文から net qty を集計する。
+    list_active() は Closed/Cancelled/Rejected 以外を返すため Filled も含まれる。
     結果は code 昇順でソートして返す。
     """
     from kabusys.execution.order_record import OrderState
@@ -62,6 +66,10 @@ def collect_position_snapshot(broker, repo) -> list[PositionEntry]:
             local_map[record.code] = local_map.get(record.code, 0) + record.filled_qty
         elif side == "sell":
             local_map[record.code] = local_map.get(record.code, 0) - record.filled_qty
+        else:
+            logger.warning(
+                "未知の side 値を無視: code=%s side=%r", record.code, record.side
+            )
 
     entries: list[PositionEntry] = []
     for code in sorted(set(broker_map) | set(local_map)):
@@ -83,7 +91,7 @@ def collect_position_snapshot(broker, repo) -> list[PositionEntry]:
 def _generate_warnings(entries: list[PositionEntry]) -> list[str]:
     warnings: list[str] = []
     for e in entries:
-        if e.status == ENTRY_MISMATCH:
+        if e.diff != 0:  # status ではなく diff を真実源として判定
             sign = "+" if e.diff > 0 else ""
             warnings.append(
                 f"code={e.code}: broker={e.broker_qty}株 / local={e.local_qty}株"
@@ -98,8 +106,8 @@ def build_report(
     report_date: date,
 ) -> PositionReconciliationReport:
     """entries リストから PositionReconciliationReport を構築する（純粋関数）。"""
-    match_count = sum(1 for e in entries if e.status == ENTRY_MATCH)
-    mismatch_count = sum(1 for e in entries if e.status == ENTRY_MISMATCH)
+    match_count = sum(1 for e in entries if e.diff == 0)  # diff を真実源として判定
+    mismatch_count = len(entries) - match_count
     total_count = len(entries)
     warnings = _generate_warnings(entries)
     status = STATUS_CLEAN if mismatch_count == 0 else STATUS_DISCREPANCY

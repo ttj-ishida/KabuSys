@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         type=lambda s: date.fromisoformat(s),
         default=date.today(),
         metavar="YYYY-MM-DD",
-        help="対象日（省略時は今日）",
+        help="レポートの日付ラベル（現在のスナップショットに付与）（省略時は今日）",
     )
     parser.add_argument(
         "--save",
@@ -93,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 
     settings = Settings()
+    interval = max(1, args.interval)  # スピンループ防止のため最小 1 秒
 
     if args.watch:
         while True:
@@ -103,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as e:
                 logger.error("ポーリング中にエラー: %s", e, exc_info=True)
             try:
-                time.sleep(args.interval)
+                time.sleep(interval)
             except KeyboardInterrupt:
                 break
         return 0
