@@ -17,6 +17,7 @@ import sqlite3
 import sys
 import time
 from datetime import date
+from pathlib import Path
 
 from kabusys.config import Settings
 from kabusys.execution.broker_factory import BrokerClientFactory
@@ -35,7 +36,8 @@ logger = logging.getLogger(__name__)
 
 def _run_once(settings: Settings, target_date: date, args: argparse.Namespace) -> str:
     """1回のポーリングを実行してステータス文字列を返す。"""
-    sqlite_conn = sqlite3.connect(f"file:{settings.sqlite_path}?mode=ro", uri=True)
+    sqlite_uri = Path(settings.sqlite_path).resolve().as_uri() + "?mode=ro"
+    sqlite_conn = sqlite3.connect(sqlite_uri, uri=True)
     broker = None
     try:
         broker = BrokerClientFactory.create(settings)
