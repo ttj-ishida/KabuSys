@@ -1,4 +1,5 @@
 """Market Close Summary レポートのテスト。"""
+
 from __future__ import annotations
 
 import json
@@ -11,7 +12,6 @@ import pytest
 from kabusys.operations.market_close_report import (
     STATUS_BLOCKED,
     STATUS_OK,
-    CheckItem,
     MarketCloseReport,
     build_report,
     format_cli_summary,
@@ -24,6 +24,7 @@ from kabusys.operations.market_close_report import (
 # ---------------------------------------------------------------------------
 # ヘルパー
 # ---------------------------------------------------------------------------
+
 
 def _make_report(
     *,
@@ -51,6 +52,7 @@ def _make_report(
 # ---------------------------------------------------------------------------
 # build_report — ステータス判定
 # ---------------------------------------------------------------------------
+
 
 def test_build_report_ok():
     report = _make_report()
@@ -86,6 +88,7 @@ def test_build_report_all_blocked():
 # build_report — チェック項目
 # ---------------------------------------------------------------------------
 
+
 def test_build_report_check_items_count():
     report = _make_report()
     assert len(report.checks) == 3
@@ -119,6 +122,7 @@ def test_build_report_checks_performance_failed():
 # build_report — summary（損益額計算）
 # ---------------------------------------------------------------------------
 
+
 def test_build_report_pnl_amount_calculated():
     report = _make_report(equity_today=5_234_000.0, equity_prev=5_217_600.0)
     assert report.summary["pnl_amount"] == pytest.approx(16_400.0)
@@ -143,6 +147,7 @@ def test_build_report_summary_fields():
 # ---------------------------------------------------------------------------
 # format_cli_summary
 # ---------------------------------------------------------------------------
+
 
 def test_format_cli_summary_ok():
     report = _make_report()
@@ -185,6 +190,7 @@ def test_format_cli_summary_none_values():
 # format_json
 # ---------------------------------------------------------------------------
 
+
 def test_format_json_is_valid_json():
     report = _make_report()
     data = json.loads(format_json(report))
@@ -193,11 +199,13 @@ def test_format_json_is_valid_json():
     assert "checks" in data
     assert "summary" in data
     assert "warnings" in data
+    assert len(data["checks"]) == 3
 
 
 # ---------------------------------------------------------------------------
 # format_markdown
 # ---------------------------------------------------------------------------
+
 
 def test_format_markdown_contains_sections():
     report = _make_report()
@@ -220,6 +228,7 @@ def test_format_markdown_blocked_contains_warnings():
 # ---------------------------------------------------------------------------
 # save_report
 # ---------------------------------------------------------------------------
+
 
 def test_save_report_creates_files(tmp_path):
     report = _make_report()
