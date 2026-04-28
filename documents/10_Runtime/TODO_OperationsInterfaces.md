@@ -174,21 +174,49 @@
 
 ## 4.4 Market Close Summary
 
+**ステータス: 設計済み (Issue #205, 設計書: `docs/superpowers/specs/2026-04-29-market-close-summary-design.md`)**
+
 目的:
 
-- 引け後に「今日の運用が正常に締まったか」を確認する
+- 引け後（15:30 頃）に「今日の運用が正常に締まったか」を確認し、夜間バッチへ進んでよいかを判断する
 
 確認対象:
 
-- `pending` 残件
-- `positions` 更新状態
-- `portfolio_performance` 記録状態
+- `signal_queue` に当日 `pending` が残っていないこと
+- `positions` テーブルに当日分が記録されていること
+- `portfolio_performance` に当日分が記録されていること
 
-未検討点:
+設計決定:
 
-- 引け後専用の締めレポートを出すか
-- DB 手動確認のままにするか
-- 翌夜バッチに進んでよいかの判定を出すか
+- **独立した CLI コマンド** として実装する
+- インターフェース: CLI（stdout）＋ Markdown ＋ JSON（3 ファイル保存）
+- ステータス判定: `OK` / `BLOCKED`（2 段階）
+- BLOCKED 条件（いずれかが真）:
+  - `signal_queue` に当日 `pending` が残っている
+  - `positions` に当日分が記録されていない
+  - `portfolio_performance` に当日分が記録されていない
+- サマリ情報（判定に影響しない表示情報）:
+  - 当日 filled シグナル件数
+  - 日次リターン（`portfolio_performance.daily_return`）
+  - 当日損益額（equity 変動から近似）
+  - 期末総資産
+- 保存先: `artifacts/market_close/{date}/summary.json`, `report.md`, `warnings.json`
+- 終了コード: `0` = OK、`1` = BLOCKED
+
+コマンド:
+
+```cmd
+python -m kabusys.run_market_close_report
+python -m kabusys.run_market_close_report --date 2026-04-28
+python -m kabusys.run_market_close_report --save
+python -m kabusys.run_market_close_report --json
+```
+
+新規モジュール:
+
+- `src/kabusys/operations/market_close_collector.py`（DB クエリ）
+- `src/kabusys/operations/market_close_report.py`（純粋関数）
+- `src/kabusys/run_market_close_report.py`（CLI エントリーポイント）
 
 ## 4.5 Position Reconciliation View
 
@@ -279,10 +307,13 @@ python -m kabusys.run_position_reconciliation_report --save --json
 
 1. Position Reconciliation View（設計済み: Issue #204）
 
+### 優先度中（設計済み）
+
+1. Market Close Summary（設計済み: Issue #205）
+
 ### 優先度中（未着手）
 
 1. Intraday Monitoring Interface
-2. Market Close Summary
 
 ### 優先度低
 
