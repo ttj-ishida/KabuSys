@@ -61,7 +61,7 @@ def collect_position_snapshot(broker, repo) -> list[PositionEntry]:
     for record in repo.list_active():
         if record.state not in {OrderState.Filled, OrderState.PartialFill}:
             continue
-        side = (record.side or "").lower()
+        side = (record.side or "").strip().lower()
         if side == "buy":
             local_map[record.code] = local_map.get(record.code, 0) + record.filled_qty
         elif side == "sell":
