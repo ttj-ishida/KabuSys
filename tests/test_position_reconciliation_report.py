@@ -1,4 +1,5 @@
 """position_reconciliation_report のユニットテスト"""
+
 from __future__ import annotations
 
 import json as json_mod
@@ -146,7 +147,7 @@ def test_collect_multiple_codes(repo):
         ]
     )
     _insert_order(repo, "1111", "buy", 100, "ord-001")  # MATCH
-    _insert_order(repo, "2222", "buy", 30, "ord-002")   # MISMATCH
+    _insert_order(repo, "2222", "buy", 30, "ord-002")  # MISMATCH
     result = collect_position_snapshot(broker, repo)
     codes = [e.code for e in result]
     assert "1111" in codes
@@ -172,8 +173,13 @@ def test_collect_partial_fill_counts(repo):
     """PartialFill の filled_qty がローカル数量に反映される"""
     broker = MockBrokerClient()
     _insert_order(
-        repo, "7203", "buy", 100, "ord-001",
-        state=OrderState.PartialFill, filled_qty=50,
+        repo,
+        "7203",
+        "buy",
+        100,
+        "ord-001",
+        state=OrderState.PartialFill,
+        filled_qty=50,
     )
     result = collect_position_snapshot(broker, repo)
     assert len(result) == 1
@@ -194,8 +200,13 @@ def test_collect_skips_non_filled_states(repo):
     """OrderCreated は local 集計に含まない"""
     broker = MockBrokerClient()
     _insert_order(
-        repo, "7203", "buy", 100, "ord-001",
-        state=OrderState.OrderCreated, filled_qty=0,
+        repo,
+        "7203",
+        "buy",
+        100,
+        "ord-001",
+        state=OrderState.OrderCreated,
+        filled_qty=0,
     )
     result = collect_position_snapshot(broker, repo)
     assert result == []
@@ -208,16 +219,18 @@ def test_collect_skips_non_filled_states(repo):
 
 def test_generate_warnings_clean():
     entries = [
-        PositionEntry(code="7203", broker_qty=100, local_qty=100, diff=0,
-                      status=ENTRY_MATCH)
+        PositionEntry(
+            code="7203", broker_qty=100, local_qty=100, diff=0, status=ENTRY_MATCH
+        )
     ]
     assert _generate_warnings(entries) == []
 
 
 def test_generate_warnings_mismatch_contains_code():
     entries = [
-        PositionEntry(code="7203", broker_qty=100, local_qty=80, diff=20,
-                      status=ENTRY_MISMATCH)
+        PositionEntry(
+            code="7203", broker_qty=100, local_qty=80, diff=20, status=ENTRY_MISMATCH
+        )
     ]
     warnings = _generate_warnings(entries)
     assert len(warnings) == 1
@@ -228,10 +241,12 @@ def test_generate_warnings_mismatch_contains_code():
 
 def test_generate_warnings_multiple_mismatch():
     entries = [
-        PositionEntry(code="1111", broker_qty=100, local_qty=80, diff=20,
-                      status=ENTRY_MISMATCH),
-        PositionEntry(code="2222", broker_qty=0, local_qty=50, diff=-50,
-                      status=ENTRY_MISMATCH),
+        PositionEntry(
+            code="1111", broker_qty=100, local_qty=80, diff=20, status=ENTRY_MISMATCH
+        ),
+        PositionEntry(
+            code="2222", broker_qty=0, local_qty=50, diff=-50, status=ENTRY_MISMATCH
+        ),
     ]
     assert len(_generate_warnings(entries)) == 2
 
@@ -243,26 +258,30 @@ def test_generate_warnings_multiple_mismatch():
 
 def test_build_report_clean_status():
     entries = [
-        PositionEntry(code="7203", broker_qty=100, local_qty=100, diff=0,
-                      status=ENTRY_MATCH)
+        PositionEntry(
+            code="7203", broker_qty=100, local_qty=100, diff=0, status=ENTRY_MATCH
+        )
     ]
     assert build_report(entries, report_date=TARGET_DATE).status == STATUS_CLEAN
 
 
 def test_build_report_discrepancy_status():
     entries = [
-        PositionEntry(code="7203", broker_qty=100, local_qty=80, diff=20,
-                      status=ENTRY_MISMATCH)
+        PositionEntry(
+            code="7203", broker_qty=100, local_qty=80, diff=20, status=ENTRY_MISMATCH
+        )
     ]
     assert build_report(entries, report_date=TARGET_DATE).status == STATUS_DISCREPANCY
 
 
 def test_build_report_counts():
     entries = [
-        PositionEntry(code="1111", broker_qty=100, local_qty=100, diff=0,
-                      status=ENTRY_MATCH),
-        PositionEntry(code="2222", broker_qty=50, local_qty=30, diff=20,
-                      status=ENTRY_MISMATCH),
+        PositionEntry(
+            code="1111", broker_qty=100, local_qty=100, diff=0, status=ENTRY_MATCH
+        ),
+        PositionEntry(
+            code="2222", broker_qty=50, local_qty=30, diff=20, status=ENTRY_MISMATCH
+        ),
     ]
     report = build_report(entries, report_date=TARGET_DATE)
     assert report.total_count == 2
@@ -289,8 +308,9 @@ def test_build_report_empty_entries_is_clean():
 
 def test_format_cli_clean_no_mark():
     entries = [
-        PositionEntry(code="7203", broker_qty=100, local_qty=100, diff=0,
-                      status=ENTRY_MATCH)
+        PositionEntry(
+            code="7203", broker_qty=100, local_qty=100, diff=0, status=ENTRY_MATCH
+        )
     ]
     report = build_report(entries, report_date=TARGET_DATE)
     s = format_cli_summary(report)
@@ -301,8 +321,9 @@ def test_format_cli_clean_no_mark():
 
 def test_format_cli_discrepancy_shows_mark():
     entries = [
-        PositionEntry(code="7203", broker_qty=100, local_qty=80, diff=20,
-                      status=ENTRY_MISMATCH)
+        PositionEntry(
+            code="7203", broker_qty=100, local_qty=80, diff=20, status=ENTRY_MISMATCH
+        )
     ]
     report = build_report(entries, report_date=TARGET_DATE)
     s = format_cli_summary(report)
@@ -313,10 +334,12 @@ def test_format_cli_discrepancy_shows_mark():
 def test_format_cli_shows_all_positions():
     """MATCH 銘柄も出力に含まれる"""
     entries = [
-        PositionEntry(code="1111", broker_qty=100, local_qty=100, diff=0,
-                      status=ENTRY_MATCH),
-        PositionEntry(code="2222", broker_qty=50, local_qty=30, diff=20,
-                      status=ENTRY_MISMATCH),
+        PositionEntry(
+            code="1111", broker_qty=100, local_qty=100, diff=0, status=ENTRY_MATCH
+        ),
+        PositionEntry(
+            code="2222", broker_qty=50, local_qty=30, diff=20, status=ENTRY_MISMATCH
+        ),
     ]
     report = build_report(entries, report_date=TARGET_DATE)
     s = format_cli_summary(report)
@@ -331,13 +354,22 @@ def test_format_cli_shows_all_positions():
 
 def test_format_json_parseable():
     entries = [
-        PositionEntry(code="7203", broker_qty=100, local_qty=100, diff=0,
-                      status=ENTRY_MATCH)
+        PositionEntry(
+            code="7203", broker_qty=100, local_qty=100, diff=0, status=ENTRY_MATCH
+        )
     ]
     report = build_report(entries, report_date=TARGET_DATE)
     data = json_mod.loads(format_json(report))
-    for key in ("status", "report_date", "generated_at", "total_count",
-                "match_count", "mismatch_count", "positions", "warnings"):
+    for key in (
+        "status",
+        "report_date",
+        "generated_at",
+        "total_count",
+        "match_count",
+        "mismatch_count",
+        "positions",
+        "warnings",
+    ):
         assert key in data
 
 
@@ -356,15 +388,17 @@ def test_format_markdown_required_sections():
 
 def test_format_markdown_warnings_only_when_discrepancy():
     clean_entries = [
-        PositionEntry(code="7203", broker_qty=100, local_qty=100, diff=0,
-                      status=ENTRY_MATCH)
+        PositionEntry(
+            code="7203", broker_qty=100, local_qty=100, diff=0, status=ENTRY_MATCH
+        )
     ]
     assert "Warnings" not in format_markdown(
         build_report(clean_entries, report_date=TARGET_DATE)
     )
     disc_entries = [
-        PositionEntry(code="7203", broker_qty=100, local_qty=80, diff=20,
-                      status=ENTRY_MISMATCH)
+        PositionEntry(
+            code="7203", broker_qty=100, local_qty=80, diff=20, status=ENTRY_MISMATCH
+        )
     ]
     assert "Warnings" in format_markdown(
         build_report(disc_entries, report_date=TARGET_DATE)
@@ -373,8 +407,9 @@ def test_format_markdown_warnings_only_when_discrepancy():
 
 def test_format_markdown_position_table():
     entries = [
-        PositionEntry(code="7203", broker_qty=100, local_qty=80, diff=20,
-                      status=ENTRY_MISMATCH)
+        PositionEntry(
+            code="7203", broker_qty=100, local_qty=80, diff=20, status=ENTRY_MISMATCH
+        )
     ]
     report = build_report(entries, report_date=TARGET_DATE)
     md = format_markdown(report)
@@ -400,8 +435,11 @@ def test_save_report_invalid_format_raises(tmp_path):
         report_date="invalid-date",
         generated_at="2026-04-27T00:00:00+00:00",
         status=STATUS_CLEAN,
-        total_count=0, match_count=0, mismatch_count=0,
-        positions=[], warnings=[],
+        total_count=0,
+        match_count=0,
+        mismatch_count=0,
+        positions=[],
+        warnings=[],
     )
     with pytest.raises(ValueError, match="Invalid report_date"):
         save_report(report, output_dir=tmp_path)
@@ -412,8 +450,11 @@ def test_save_report_impossible_calendar_date_raises(tmp_path):
         report_date="2026-02-30",
         generated_at="2026-04-27T00:00:00+00:00",
         status=STATUS_CLEAN,
-        total_count=0, match_count=0, mismatch_count=0,
-        positions=[], warnings=[],
+        total_count=0,
+        match_count=0,
+        mismatch_count=0,
+        positions=[],
+        warnings=[],
     )
     with pytest.raises(ValueError, match="Invalid report_date"):
         save_report(report, output_dir=tmp_path)
