@@ -35,13 +35,19 @@ logger = logging.getLogger(__name__)
 
 def _run_once(settings: Settings, target_date: date, args: argparse.Namespace) -> str:
     """1回のポーリングを実行してステータス文字列を返す。"""
-    sqlite_conn = sqlite3.connect(str(settings.sqlite_path))
+    sqlite_conn = sqlite3.connect(f"file:{settings.sqlite_path}?mode=ro", uri=True)
+    broker = None
     try:
         broker = BrokerClientFactory.create(settings)
         repo = OrderRepository(sqlite_conn)
         entries = collect_position_snapshot(broker, repo)
     finally:
         sqlite_conn.close()
+        if broker is not None and hasattr(broker, "close"):
+            try:
+                broker.close()
+            except Exception:
+                logger.warning("broker.close() で例外が発生しました", exc_info=True)
 
     report = build_report(entries, report_date=target_date)
 
