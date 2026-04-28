@@ -8,7 +8,10 @@ model = os.environ.get("OPENAI_MODEL", "gpt-4o")
 repo = os.environ["REPO"]
 pr = os.environ["PR_NUMBER"]
 token = os.environ["GITHUB_TOKEN"]
-headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.v3+json"}
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Accept": "application/vnd.github.v3+json",
+}
 
 with open("diff.txt") as f:
     diff = f.read()
@@ -28,7 +31,12 @@ pr_body = pr_data.get("body") or ""
 comments_url = f"https://api.github.com/repos/{repo}/issues/{pr}/comments"
 comments_resp = requests.get(comments_url, headers=headers)
 comments_data = comments_resp.json() if comments_resp.status_code == 200 else []
-comments_text = "\n".join([f"- {c.get('user', {}).get('login', 'User')}: {c.get('body') or ''}" for c in comments_data])
+comments_text = "\n".join(
+    [
+        f"- {c.get('user', {}).get('login', 'User')}: {c.get('body') or ''}"
+        for c in comments_data
+    ]
+)
 if not comments_text:
     comments_text = "なし"
 
