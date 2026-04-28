@@ -323,8 +323,8 @@ def test_pre_market_collector_date_normalization_and_checks(monkeypatch):
     c_pos = C(7)
     assert pmc.check_position_count(c_pos) == 7
 
-    # check_stop_flag
-    p = Path(__file__)
+    # check_stop_flag: 存在しないパスを渡すと False を返す
+    p = Path(__file__).parent / "_nonexistent_stop_flag_for_test"
     assert pmc.check_stop_flag(p) is False
 
     # check_task_scheduler success and failure via mocking subprocess.run

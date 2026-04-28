@@ -306,6 +306,12 @@ def save_report(
     """
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", report.report_date):
         raise ValueError(f"Invalid report_date: {report.report_date!r}")
+    try:
+        date.fromisoformat(report.report_date)
+    except ValueError:
+        raise ValueError(
+            f"Invalid report_date (not a valid calendar date): {report.report_date!r}"
+        )
     base = Path(output_dir) if output_dir else Path("artifacts") / "pre_market"
     run_dir = base / report.report_date
     run_dir.mkdir(parents=True, exist_ok=True)
