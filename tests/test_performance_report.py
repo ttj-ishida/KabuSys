@@ -79,3 +79,70 @@ def test_schema_env_column_exists():
     ).fetchone()
     assert row is not None
     assert row[0] == "live"
+
+
+# ---------------------------------------------------------------------------
+# Task 2: collect_daily_rows
+# ---------------------------------------------------------------------------
+
+from datetime import date  # noqa: E402
+
+import pytest  # noqa: E402
+
+from kabusys.operations.performance_collector import (  # noqa: E402
+    DailyRow,
+    collect_daily_rows,
+)
+
+
+def test_collect_daily_rows_basic():
+    """基本的な日次行取得。"""
+    conn = _make_conn(
+        {"date": "2026-04-21", "equity": 5_000_000.0, "daily_return": 0.004, "drawdown": -0.002},
+        {"date": "2026-04-22", "equity": 5_020_000.0, "daily_return": 0.004, "drawdown": -0.001},
+    )
+    rows = collect_daily_rows(conn, "live", date(2026, 4, 21), date(2026, 4, 22))
+    assert len(rows) == 2
+    assert isinstance(rows[0], DailyRow)
+    assert rows[0].equity == 5_000_000.0
+
+
+def test_collect_daily_rows_env_isolation():
+    """live と paper_trading が混在しても正しく絞り込まれる。"""
+    conn = _make_conn(
+        {"date": "2026-04-21", "equity": 5_000_000.0, "env": "live"},
+        {"date": "2026-04-22", "equity": 4_500_000.0, "env": "paper_trading"},
+    )
+    rows = collect_daily_rows(conn, "live", date(2026, 4, 21), date(2026, 4, 22))
+    assert len(rows) == 1
+    assert rows[0].env == "live"
+
+
+def test_collect_daily_rows_empty():
+    """データなし → []。"""
+    conn = _make_conn()
+    rows = collect_daily_rows(conn, "live", date(2026, 4, 1), date(2026, 4, 30))
+    assert rows == []
+
+
+def test_collect_daily_rows_cumulative_return():
+    """累積リターンが期間内最初の equity を基準に計算される。"""
+    conn = _make_conn(
+        {"date": "2026-04-21", "equity": 5_000_000.0},
+        {"date": "2026-04-22", "equity": 5_100_000.0},
+    )
+    rows = collect_daily_rows(conn, "live", date(2026, 4, 21), date(2026, 4, 22))
+    assert rows[0].cumulative_return == pytest.approx(0.0)
+    assert rows[1].cumulative_return == pytest.approx(0.02)
+
+
+def test_collect_daily_rows_date_filter():
+    """from_date / to_date で正しく絞り込まれる。"""
+    conn = _make_conn(
+        {"date": "2026-04-20", "equity": 4_900_000.0},
+        {"date": "2026-04-21", "equity": 5_000_000.0},
+        {"date": "2026-04-23", "equity": 5_100_000.0},
+    )
+    rows = collect_daily_rows(conn, "live", date(2026, 4, 21), date(2026, 4, 22))
+    assert len(rows) == 1
+    assert rows[0].equity == 5_000_000.0
