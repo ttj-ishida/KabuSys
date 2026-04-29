@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from itertools import groupby
 
 
 @dataclass
@@ -96,6 +97,88 @@ def collect_daily_rows(
                 daily_return=float(r[3]) if r[3] is not None else None,
                 drawdown=float(r[4]) if r[4] is not None else None,
                 cumulative_return=cum,
+            )
+        )
+    return result
+
+
+def collect_weekly_rows(
+    conn,
+    env: str,
+    from_date: date,
+    to_date: date,
+) -> list[WeeklyRow]:
+    """日次行を ISO 週番号でグループ化して WeeklyRow を返す。
+
+    JPX 営業日数は market_calendar で週内の from_date〜to_date 範囲を集計する。
+    """
+    daily = collect_daily_rows(conn, env, from_date, to_date)
+    if not daily:
+        return []
+    result: list[WeeklyRow] = []
+    for week_label, group_iter in groupby(daily, key=lambda r: _iso_week_label(r.date)):
+        group = list(group_iter)
+        week_from = group[0].date
+        week_to = group[-1].date
+        trading_days = _count_trading_days(conn, week_from, week_to)
+        eq_start = group[0].equity
+        eq_end = group[-1].equity
+        weekly_return = (eq_end / eq_start - 1.0) if eq_start != 0.0 else None
+        drawdowns = [r.drawdown for r in group if r.drawdown is not None]
+        max_dd = min(drawdowns) if drawdowns else None
+        win_days = sum(
+            1 for r in group if r.daily_return is not None and r.daily_return > 0
+        )
+        result.append(
+            WeeklyRow(
+                week_label=week_label,
+                trading_days=trading_days,
+                equity_start=eq_start,
+                equity_end=eq_end,
+                weekly_return=weekly_return,
+                max_drawdown=max_dd,
+                win_days=win_days,
+            )
+        )
+    return result
+
+
+def collect_monthly_rows(
+    conn,
+    env: str,
+    from_date: date,
+    to_date: date,
+) -> list[MonthlyRow]:
+    """日次行を年月でグループ化して MonthlyRow を返す。
+
+    JPX 営業日数は market_calendar で月内の from_date〜to_date 範囲を集計する。
+    """
+    daily = collect_daily_rows(conn, env, from_date, to_date)
+    if not daily:
+        return []
+    result: list[MonthlyRow] = []
+    for month_label, group_iter in groupby(daily, key=lambda r: _month_label(r.date)):
+        group = list(group_iter)
+        month_from = group[0].date
+        month_to = group[-1].date
+        trading_days = _count_trading_days(conn, month_from, month_to)
+        eq_start = group[0].equity
+        eq_end = group[-1].equity
+        monthly_return = (eq_end / eq_start - 1.0) if eq_start != 0.0 else None
+        drawdowns = [r.drawdown for r in group if r.drawdown is not None]
+        max_dd = min(drawdowns) if drawdowns else None
+        win_days = sum(
+            1 for r in group if r.daily_return is not None and r.daily_return > 0
+        )
+        result.append(
+            MonthlyRow(
+                month_label=month_label,
+                trading_days=trading_days,
+                equity_start=eq_start,
+                equity_end=eq_end,
+                monthly_return=monthly_return,
+                max_drawdown=max_dd,
+                win_days=win_days,
             )
         )
     return result

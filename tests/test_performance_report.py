@@ -91,7 +91,11 @@ import pytest  # noqa: E402
 
 from kabusys.operations.performance_collector import (  # noqa: E402
     DailyRow,
+    WeeklyRow,
+    MonthlyRow,
     collect_daily_rows,
+    collect_weekly_rows,
+    collect_monthly_rows,
 )
 
 
@@ -146,3 +150,102 @@ def test_collect_daily_rows_date_filter():
     rows = collect_daily_rows(conn, "live", date(2026, 4, 21), date(2026, 4, 22))
     assert len(rows) == 1
     assert rows[0].equity == 5_000_000.0
+
+
+# ---------------------------------------------------------------------------
+# collect_weekly_rows
+# ---------------------------------------------------------------------------
+
+
+def test_collect_weekly_rows_grouping():
+    """同週の日次行が正しく 1 件の WeeklyRow に集約される。"""
+    conn = _make_conn(
+        {"date": "2026-04-21", "equity": 5_000_000.0, "daily_return": 0.004, "drawdown": -0.002},
+        {"date": "2026-04-22", "equity": 5_020_000.0, "daily_return": 0.004, "drawdown": -0.001},
+        # 2026-04-21 と 2026-04-22 は同じ ISO 週（W17）
+    )
+    rows = collect_weekly_rows(conn, "live", date(2026, 4, 21), date(2026, 4, 22))
+    assert len(rows) == 1
+    assert isinstance(rows[0], WeeklyRow)
+    assert rows[0].week_label == "2026-W17"
+    assert rows[0].equity_start == 5_000_000.0
+    assert rows[0].equity_end == 5_020_000.0
+    assert rows[0].win_days == 2
+
+
+def test_collect_weekly_rows_trading_days():
+    """market_calendar の営業日数が正しく集計される。"""
+    conn = _make_conn(
+        {"date": "2026-04-21", "equity": 5_000_000.0},
+        {"date": "2026-04-22", "equity": 5_020_000.0},
+        cal_rows=[
+            {"date": "2026-04-21", "is_trading_day": True},
+            {"date": "2026-04-22", "is_trading_day": True},
+            {"date": "2026-04-23", "is_trading_day": True},
+            {"date": "2026-04-24", "is_trading_day": False},
+            {"date": "2026-04-25", "is_trading_day": True},
+        ],
+    )
+    rows = collect_weekly_rows(conn, "live", date(2026, 4, 21), date(2026, 4, 22))
+    assert rows[0].trading_days == 2  # 21 と 22 のみ（portfolio_performance の範囲で集計）
+
+
+def test_collect_weekly_rows_empty():
+    """データなし → []。"""
+    conn = _make_conn()
+    rows = collect_weekly_rows(conn, "live", date(2026, 4, 1), date(2026, 4, 30))
+    assert rows == []
+
+
+def test_collect_weekly_rows_two_weeks():
+    """2 週にまたがるデータが 2 件の WeeklyRow になる。"""
+    conn = _make_conn(
+        # W17: 2026-04-20(月)〜2026-04-26(日)
+        {"date": "2026-04-21", "equity": 5_000_000.0, "daily_return": 0.004},
+        # W18: 2026-04-27(月)〜
+        {"date": "2026-04-28", "equity": 5_050_000.0, "daily_return": 0.010},
+    )
+    rows = collect_weekly_rows(conn, "live", date(2026, 4, 21), date(2026, 4, 28))
+    assert len(rows) == 2
+    assert rows[0].week_label == "2026-W17"
+    assert rows[1].week_label == "2026-W18"
+
+
+# ---------------------------------------------------------------------------
+# collect_monthly_rows
+# ---------------------------------------------------------------------------
+
+
+def test_collect_monthly_rows_grouping():
+    """同月の日次行が正しく 1 件の MonthlyRow に集約される。"""
+    conn = _make_conn(
+        {"date": "2026-04-21", "equity": 5_000_000.0, "daily_return": 0.004, "drawdown": -0.002},
+        {"date": "2026-04-22", "equity": 5_020_000.0, "daily_return": -0.002, "drawdown": -0.003},
+    )
+    rows = collect_monthly_rows(conn, "live", date(2026, 4, 1), date(2026, 4, 30))
+    assert len(rows) == 1
+    assert isinstance(rows[0], MonthlyRow)
+    assert rows[0].month_label == "2026-04"
+    assert rows[0].equity_start == 5_000_000.0
+    assert rows[0].equity_end == 5_020_000.0
+    assert rows[0].max_drawdown == pytest.approx(-0.003)
+    assert rows[0].win_days == 1  # daily_return > 0 は 1 日
+
+
+def test_collect_monthly_rows_two_months():
+    """2 ヶ月にまたがるデータが 2 件の MonthlyRow になる。"""
+    conn = _make_conn(
+        {"date": "2026-03-31", "equity": 4_900_000.0},
+        {"date": "2026-04-01", "equity": 5_000_000.0},
+    )
+    rows = collect_monthly_rows(conn, "live", date(2026, 3, 1), date(2026, 4, 30))
+    assert len(rows) == 2
+    assert rows[0].month_label == "2026-03"
+    assert rows[1].month_label == "2026-04"
+
+
+def test_collect_monthly_rows_empty():
+    """データなし → []。"""
+    conn = _make_conn()
+    rows = collect_monthly_rows(conn, "live", date(2026, 4, 1), date(2026, 4, 30))
+    assert rows == []
