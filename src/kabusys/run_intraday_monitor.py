@@ -65,12 +65,12 @@ def format_cli_summary(snap: IntradaySnapshot, interval: int | None = None) -> s
     if snap.execution_pid_ok:
         lines.append("    [ok  ] execution.pid    稼働中")
     else:
-        lines.append("    [CRIT] execution.pid    停止（PID ファイルなし）")
+        lines.append("    [CRIT] execution.pid    停止（未検出）")
 
     if snap.monitoring_pid_ok:
         lines.append("    [ok  ] monitoring.pid   稼働中")
     else:
-        lines.append("    [WARN] monitoring.pid   停止（PID ファイルなし）")
+        lines.append("    [WARN] monitoring.pid   停止（未検出）")
 
     if snap.kill_switch_active:
         lines.append(f"    [CRIT] Kill Switch      発動中: {snap.kill_switch_reason}")
@@ -139,11 +139,15 @@ def main() -> None:
     parser.add_argument("--interval", type=int, default=30, help="更新間隔（秒）")
     args = parser.parse_args()
 
+    if args.watch and args.interval <= 0:
+        print("[ERROR] --interval は1以上を指定してください", file=sys.stderr)
+        sys.exit(2)
+
     settings = Settings()
     sqlite_uri = Path(settings.sqlite_path).resolve().as_uri() + "?mode=ro"
 
     try:
-        conn = sqlite3.connect(sqlite_uri, uri=True)
+        conn = sqlite3.connect(sqlite_uri, uri=True, isolation_level=None)
     except Exception as exc:
         print(f"[ERROR] DB に接続できません: {exc}", file=sys.stderr)
         sys.exit(1)

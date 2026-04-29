@@ -109,15 +109,15 @@ def main(db_path: str) -> None:
                 st.caption(f"Updated: {dashboard['updated_at']}")
 
                 cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-                conn.row_factory = None
+                conn.row_factory = sqlite3.Row
                 order_error_count = conn.execute(
-                    "SELECT COUNT(*) FROM risk_logs WHERE event_type='ORDER_ERROR' AND logged_at > ?",
+                    "SELECT COUNT(*) AS cnt FROM risk_logs WHERE event_type='ORDER_ERROR' AND logged_at > ?",
                     (cutoff,),
-                ).fetchone()[0]
+                ).fetchone()["cnt"]
                 stale_order_count = conn.execute(
-                    "SELECT COUNT(*) FROM risk_logs WHERE event_type='STALE_ORDER' AND logged_at > ?",
+                    "SELECT COUNT(*) AS cnt FROM risk_logs WHERE event_type='STALE_ORDER' AND logged_at > ?",
                     (cutoff,),
-                ).fetchone()[0]
+                ).fetchone()["cnt"]
 
                 col4, col5 = st.columns(2)
                 col4.metric("注文エラー（直近1時間）", order_error_count)

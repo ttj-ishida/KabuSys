@@ -111,7 +111,7 @@ def collect_intraday_snapshot(
     order_error_count = count_recent_risk_events(conn, "ORDER_ERROR")
 
     sys_status = get_latest_system_status(conn)
-    process_ok = bool(sys_status["process_ok"]) if sys_status else False
+    process_ok = bool(sys_status["process_ok"]) if sys_status else True
     cpu_percent = sys_status["cpu_percent"] if sys_status else None
     memory_percent = sys_status["memory_percent"] if sys_status else None
 
