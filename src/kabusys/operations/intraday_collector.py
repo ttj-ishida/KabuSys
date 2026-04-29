@@ -65,6 +65,7 @@ def count_recent_risk_events(
 ) -> int:
     """指定 event_type の直近 N 分以内の件数を返す。"""
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+    conn.row_factory = None
     cursor = conn.execute(
         "SELECT COUNT(*) FROM risk_logs WHERE event_type = ? AND logged_at > ?",
         (event_type, cutoff),
@@ -110,7 +111,7 @@ def collect_intraday_snapshot(
     order_error_count = count_recent_risk_events(conn, "ORDER_ERROR")
 
     sys_status = get_latest_system_status(conn)
-    process_ok = bool(sys_status["process_ok"]) if sys_status else True
+    process_ok = bool(sys_status["process_ok"]) if sys_status else False
     cpu_percent = sys_status["cpu_percent"] if sys_status else None
     memory_percent = sys_status["memory_percent"] if sys_status else None
 

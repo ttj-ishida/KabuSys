@@ -209,4 +209,4 @@ def test_collect_intraday_snapshot_no_db_data(conn, tmp_path):
 
     snap = collect_intraday_snapshot(conn, settings)
     assert snap.drawdown_pct is None
-    assert snap.process_ok is True
+    assert snap.process_ok is False
