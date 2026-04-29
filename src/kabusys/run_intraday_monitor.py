@@ -154,7 +154,7 @@ def main() -> None:
         if args.watch:
             while True:
                 snap = collect_intraday_snapshot(conn, settings)
-                os.system("cls")
+                os.system("cls" if os.name == "nt" else "clear")
                 print(format_cli_summary(snap, interval=args.interval))
                 time.sleep(args.interval)
         else:

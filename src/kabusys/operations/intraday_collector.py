@@ -11,7 +11,7 @@ import psutil
 
 from kabusys.config import Settings
 
-_MONITORING_PID = Path("data/monitoring.pid")
+_MONITORING_PID = Path(__file__).resolve().parents[3] / "data" / "monitoring.pid"
 
 
 @dataclass
