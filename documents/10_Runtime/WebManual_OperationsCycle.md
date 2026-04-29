@@ -329,9 +329,20 @@ Execution 起動直後に `artifacts/execution_startup/{date}/report.md` が自�
 
 ### 引け後
 
-- `pending` 注文が残っていないか
-- `positions` は更新されたか
-- `portfolio_performance` は記録されたか
+`run_market_close_report.py` を実行して Market Close Summary を確認する。
+
+```cmd
+python -m kabusys.run_market_close_report --save
+```
+
+- ステータスが `OK` であれば夜間バッチへ進む
+- `BLOCKED` の場合は Warnings を確認し、問題を解消してから再実行する
+
+確認項目:
+
+- `signal_queue` に当日 `pending` が残っていないか
+- `positions` は当日分が更新されたか
+- `portfolio_performance` は当日分が記録されたか
 
 ### 夜
 
