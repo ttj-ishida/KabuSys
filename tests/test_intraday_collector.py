@@ -11,14 +11,16 @@ import pytest
 
 from kabusys.monitoring.monitoring_db import init_monitoring_db
 from kabusys.operations.intraday_collector import (
+    IntradaySnapshot,
     check_pid_file,
     check_kill_switch,
-    get_dashboard_row,
+    collect_intraday_snapshot,
     count_recent_risk_events,
+    get_dashboard_row,
     get_latest_system_status,
     get_recent_risk_events,
-    collect_intraday_snapshot,
 )
+from kabusys.run_intraday_monitor import _determine_status, format_cli_summary
 
 
 @pytest.fixture
@@ -214,11 +216,8 @@ def test_collect_intraday_snapshot_no_db_data(conn, tmp_path):
 
 # --- _determine_status / format_cli_summary ---
 
-from kabusys.run_intraday_monitor import _determine_status, format_cli_summary
-from kabusys.operations.intraday_collector import IntradaySnapshot as _Snap
 
-
-def _make_snap(**kwargs) -> _Snap:
+def _make_snap(**kwargs) -> IntradaySnapshot:
     defaults = dict(
         collected_at="2026-04-29T01:35:00+00:00",
         execution_pid_ok=True,
@@ -234,7 +233,7 @@ def _make_snap(**kwargs) -> _Snap:
         recent_risk_events=[],
     )
     defaults.update(kwargs)
-    return _Snap(**defaults)
+    return IntradaySnapshot(**defaults)
 
 
 def test_determine_status_ok():
