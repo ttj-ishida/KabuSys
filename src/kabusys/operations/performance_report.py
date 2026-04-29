@@ -89,12 +89,117 @@ def build_report(
     )
 
 
+_REPORT_TYPE_JA = {"daily": "日次", "weekly": "週次", "monthly": "月次"}
+
+
+def _fmt_return(v: float | None) -> str:
+    if v is None:
+        return "N/A"
+    sign = "+" if v > 0 else ""
+    return f"{sign}{v:.2%}"
+
+
+def _fmt_yen(v: float | None) -> str:
+    if v is None:
+        return "N/A"
+    return f"¥{int(v):,}"
+
+
+def _fmt_rate(v: float | None) -> str:
+    if v is None:
+        return "N/A"
+    return f"{v:.1%}"
+
+
 def format_markdown(report: PerformanceReport) -> str:
-    raise NotImplementedError
+    """PerformanceReport を Markdown 文字列に変換する。"""
+    type_ja = _REPORT_TYPE_JA.get(report.report_type, report.report_type)
+    s = report.summary
+    lines = [
+        f"# 運用成績レポート（{type_ja}）",
+        "",
+        f"- 環境: {report.env}",
+        f"- 期間: {report.from_date} 〜 {report.to_date}",
+        f"- 生成日時: {report.generated_at}",
+        "",
+        "## サマリー",
+        "",
+        "| 項目 | 値 |",
+        "|---|---|",
+        f"| 営業日数 | {s['total_trading_days']} 日 |",
+        f"| 累積リターン | {_fmt_return(s['cumulative_return'])} |",
+        f"| 最大ドローダウン | {_fmt_return(s['max_drawdown'])} |",
+        f"| 勝率 | {_fmt_rate(s['win_rate'])} |",
+        f"| 期首総資産 | {_fmt_yen(s['equity_start'])} |",
+        f"| 期末総資産 | {_fmt_yen(s['equity_end'])} |",
+        "",
+    ]
+
+    if report.report_type == "daily":
+        lines += [
+            "## 日次明細",
+            "",
+            "| 日付 | 総資産 | 日次リターン | ドローダウン | 累積リターン |",
+            "|---|---|---|---|---|",
+        ]
+        for r in report.rows:
+            lines.append(
+                f"| {r.date} | {_fmt_yen(r.equity)} | {_fmt_return(r.daily_return)}"
+                f" | {_fmt_return(r.drawdown)} | {_fmt_return(r.cumulative_return)} |"
+            )
+    elif report.report_type == "weekly":
+        lines += [
+            "## 週次明細",
+            "",
+            "| 週 | 営業日数 | 期首資産 | 期末資産 | 週次リターン | 最大DD | 勝ち日数 |",
+            "|---|---|---|---|---|---|---|",
+        ]
+        for r in report.rows:
+            lines.append(
+                f"| {r.week_label} | {r.trading_days} | {_fmt_yen(r.equity_start)}"
+                f" | {_fmt_yen(r.equity_end)} | {_fmt_return(r.weekly_return)}"
+                f" | {_fmt_return(r.max_drawdown)} | {r.win_days} |"
+            )
+    else:  # monthly
+        lines += [
+            "## 月次明細",
+            "",
+            "| 月 | 営業日数 | 期首資産 | 期末資産 | 月次リターン | 最大DD | 勝ち日数 |",
+            "|---|---|---|---|---|---|---|",
+        ]
+        for r in report.rows:
+            lines.append(
+                f"| {r.month_label} | {r.trading_days} | {_fmt_yen(r.equity_start)}"
+                f" | {_fmt_yen(r.equity_end)} | {_fmt_return(r.monthly_return)}"
+                f" | {_fmt_return(r.max_drawdown)} | {r.win_days} |"
+            )
+
+    lines.append("")
+    return "\n".join(lines)
 
 
 def save_report(
     report: PerformanceReport,
     output_dir: Path | str | None = None,
 ) -> Path:
-    raise NotImplementedError
+    """artifacts/performance/{env}/{report_type}/{period}/report.md に保存する。
+
+    period:
+      daily   → report.to_date (YYYY-MM-DD)
+      weekly  → rows[-1].week_label (YYYY-Www)
+      monthly → rows[-1].month_label (YYYY-MM)
+      rows が空の場合は report.to_date を使用。
+    """
+    base = Path(output_dir) if output_dir else Path("artifacts") / "performance"
+
+    if report.report_type == "weekly" and report.rows:
+        period = report.rows[-1].week_label
+    elif report.report_type == "monthly" and report.rows:
+        period = report.rows[-1].month_label
+    else:
+        period = report.to_date  # daily またはフォールバック
+
+    run_dir = base / report.env / report.report_type / period
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "report.md").write_text(format_markdown(report), encoding="utf-8")
+    return run_dir
