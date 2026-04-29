@@ -124,11 +124,23 @@ Execution 起動直後に `artifacts/execution_startup/{date}/report.md` が自�
 
 ユーザーが行うこと:
 
-- 注文エラーが多発していないか監視する
-- API 接続断が起きていないか確認する
-- ドローダウンが異常に拡大していないか確認する
-- `execution.pid` と `monitoring.pid` が存在するか確認する
-- ログに `ERROR`, `CRITICAL`, `Kill Switch`, `position_discrepancies` が出ていないか確認する
+`run_intraday_monitor` を起動して Intraday Monitoring Interface でステータスを確認する。
+
+```cmd
+python -m kabusys.run_intraday_monitor --watch
+```
+
+または Streamlit ダッシュボードを開いて常時監視する:
+
+```cmd
+streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
+```
+
+確認項目:
+
+- ステータスが `OK` であれば継続監視
+- `WARNING` の場合は Warnings 内容を確認し、必要に応じて対処する
+- `CRITICAL` の場合は即時対応（Kill Switch 発動 / Execution プロセス停止）
 
 ザラ場中の基本方針は、**売買判断と執行はシステム、継続運転の最終監督はユーザー** です。
 
@@ -321,11 +333,11 @@ Execution 起動直後に `artifacts/execution_startup/{date}/report.md` が自�
 
 ### ザラ場中
 
-- 注文エラーが連発していないか
-- API 接続が切れていないか
-- ドローダウンが異常に拡大していないか
-- `execution.pid` と `monitoring.pid` は存在するか
-- ログに `ERROR` や `CRITICAL` はないか
+`python -m kabusys.run_intraday_monitor --watch` を起動して以下を確認する:
+
+- ステータスが `OK` であれば継続監視
+- `WARNING`: 注文エラー・滞留注文・ドローダウン超過などの内容を確認し対処する
+- `CRITICAL`: Kill Switch 発動または Execution 停止 → 即時対応する
 
 ### 引け後
 

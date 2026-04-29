@@ -153,24 +153,49 @@
 
 ## 4.3 Intraday Monitoring Interface
 
+**ステータス: 設計済み (Issue #203, 設計書: `docs/superpowers/specs/2026-04-29-intraday-monitoring-interface-design.md`)**
+
 目的:
 
 - ザラ場中に異常を素早く検知し、ユーザーが対応判断できるようにする
 
 確認対象:
 
-- 注文エラー件数
-- API 接続状態
-- 日次ドローダウン
-- Kill Switch 状態
-- `execution_service` / `monitoring_service` の稼働状態
+- 注文エラー件数（直近1時間）
+- API 接続状態（`system_status.process_ok` 最新値）
+- 日次ドローダウン（`dashboard.drawdown_pct`）
+- Kill Switch 状態（`data/kill.flag` 存在確認）
+- `execution.pid` / `monitoring.pid` の稼働状態（psutil で生存確認）
 
-未検討点:
+設計決定:
 
-- リアルタイム監視画面を作るか
-- ログ監視だけにするか
-- Slack など即時通知を入れるか
-- 閾値超過時の見せ方をどうするか
+- **CLI `--watch` モード** + **Streamlit ダッシュボード強化** の2インターフェースを実装する
+- 共有データ層: `intraday_collector.py`（monitoring SQLite を read-only で参照）
+- CLI ステータス判定: `OK` / `WARNING` / `CRITICAL`（3段階）
+  - `CRITICAL`: Kill Switch 発動 OR `execution.pid` 停止
+  - `WARNING`: drawdown ≤ -10% OR 注文エラー > 0 OR 滞留注文 > 0 OR `monitoring.pid` 停止
+  - `OK`: それ以外
+- Streamlit: 自動更新（30/60/120秒 選択）、Kill Switch を最上部に表示、drawdown 閾値超過で赤表示
+- 終了コード: `0` = OK、`1` = WARNING または CRITICAL
+
+コマンド:
+
+```cmd
+python -m kabusys.run_intraday_monitor
+python -m kabusys.run_intraday_monitor --watch
+python -m kabusys.run_intraday_monitor --watch --interval 60
+streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
+```
+
+新規モジュール:
+
+- `src/kabusys/operations/intraday_collector.py`（monitoring DB クエリ）
+- `src/kabusys/run_intraday_monitor.py`（CLI エントリーポイント）
+
+強化モジュール:
+
+- `src/kabusys/monitoring/streamlit_dashboard.py`（Kill Switch・PID・自動更新を追加）
+- `src/kabusys/run_monitoring.py`（`data/monitoring.pid` 書き込みを追加）
 
 ## 4.4 Market Close Summary
 
@@ -351,8 +376,8 @@ python -m kabusys.run_position_reconciliation_report --save --json
 | `ExecutionStartupSummary` | 実装済み (Issue #201, PR #215) |
 | `SignalQueueConfirmationView` | 実装済み (Issue #202, PR #216) |
 | `PositionReconciliationView` | 設計済み (Issue #204) |
-| `IntradayMonitoringInterface` | 未着手 |
-| `MarketCloseSummary` | 未着手 |
+| `IntradayMonitoringInterface` | 設計済み (Issue #203) |
+| `MarketCloseSummary` | 実装済み (Issue #205, PR #218) |
 
 ---
 
