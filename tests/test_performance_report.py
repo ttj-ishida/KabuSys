@@ -456,3 +456,71 @@ def test_save_report_monthly(tmp_path):
     expected = tmp_path / "paper_trading" / "monthly" / "2026-04" / "report.md"
     assert expected.exists()
     assert saved == expected.parent
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def test_cli_returns_1_when_no_data(tmp_path, monkeypatch):
+    """データなしのとき終了コード 1 を返す。"""
+    import duckdb as _duckdb
+    from kabusys.run_performance_report import main
+
+    db_path = tmp_path / "test.duckdb"
+    conn = _duckdb.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE portfolio_performance (
+            date DATE NOT NULL PRIMARY KEY, equity DECIMAL(20,4) NOT NULL,
+            cash DECIMAL(20,4) NOT NULL DEFAULT 0, drawdown DOUBLE,
+            daily_return DOUBLE, env VARCHAR NOT NULL DEFAULT 'live'
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE market_calendar (
+            date DATE NOT NULL PRIMARY KEY, is_trading_day BOOLEAN NOT NULL
+        )
+        """
+    )
+    conn.close()
+
+    monkeypatch.setenv("DUCKDB_PATH", str(db_path))
+    result = main(["--type", "daily", "--from", "2026-04-01", "--to", "2026-04-30"])
+    assert result == 1
+
+
+def test_cli_returns_0_when_data_exists(tmp_path, monkeypatch):
+    """データありのとき終了コード 0 を返す。"""
+    import duckdb as _duckdb
+    from kabusys.run_performance_report import main
+
+    db_path = tmp_path / "test.duckdb"
+    conn = _duckdb.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE portfolio_performance (
+            date DATE NOT NULL PRIMARY KEY, equity DECIMAL(20,4) NOT NULL,
+            cash DECIMAL(20,4) NOT NULL DEFAULT 0, drawdown DOUBLE,
+            daily_return DOUBLE, env VARCHAR NOT NULL DEFAULT 'live'
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE market_calendar (
+            date DATE NOT NULL PRIMARY KEY, is_trading_day BOOLEAN NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO portfolio_performance (date, equity, cash, env) VALUES ('2026-04-21', 5000000, 0, 'live')"
+    )
+    conn.close()
+
+    monkeypatch.setenv("DUCKDB_PATH", str(db_path))
+    result = main(["--type", "daily", "--from", "2026-04-21", "--to", "2026-04-21"])
+    assert result == 0
