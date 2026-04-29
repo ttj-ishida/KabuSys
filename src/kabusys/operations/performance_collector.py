@@ -25,8 +25,8 @@ class DailyRow:
 class WeeklyRow:
     week_label: str            # "2026-W17"
     trading_days: int
-    equity_start: float | None
-    equity_end: float | None
+    equity_start: float
+    equity_end: float
     weekly_return: float | None  # (equity_end / equity_start) - 1.0
     max_drawdown: float | None   # 週内の drawdown 最小値
     win_days: int               # daily_return > 0 の日数
@@ -36,8 +36,8 @@ class WeeklyRow:
 class MonthlyRow:
     month_label: str             # "2026-04"
     trading_days: int
-    equity_start: float | None
-    equity_end: float | None
+    equity_start: float
+    equity_end: float
     monthly_return: float | None
     max_drawdown: float | None
     win_days: int
@@ -110,7 +110,8 @@ def collect_weekly_rows(
 ) -> list[WeeklyRow]:
     """日次行を ISO 週番号でグループ化して WeeklyRow を返す。
 
-    JPX 営業日数は market_calendar で週内の from_date〜to_date 範囲を集計する。
+    trading_days は portfolio_performance に記録がある最初〜最後の日付を範囲として
+    market_calendar の営業日数を集計する（週全体の境界ではない）。
     """
     daily = collect_daily_rows(conn, env, from_date, to_date)
     if not daily:
@@ -151,7 +152,8 @@ def collect_monthly_rows(
 ) -> list[MonthlyRow]:
     """日次行を年月でグループ化して MonthlyRow を返す。
 
-    JPX 営業日数は market_calendar で月内の from_date〜to_date 範囲を集計する。
+    trading_days は portfolio_performance に記録がある最初〜最後の日付を範囲として
+    market_calendar の営業日数を集計する（月全体の境界ではない）。
     """
     daily = collect_daily_rows(conn, env, from_date, to_date)
     if not daily:
