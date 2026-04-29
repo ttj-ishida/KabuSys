@@ -249,3 +249,87 @@ def test_collect_monthly_rows_empty():
     conn = _make_conn()
     rows = collect_monthly_rows(conn, "live", date(2026, 4, 1), date(2026, 4, 30))
     assert rows == []
+
+
+from kabusys.operations.performance_report import (  # noqa: E402
+    PerformanceReport,
+    build_report,
+    format_markdown,  # noqa: F401
+    save_report,  # noqa: F401
+)
+
+
+# ---------------------------------------------------------------------------
+# build_report
+# ---------------------------------------------------------------------------
+
+
+def _make_daily_rows() -> list:
+    from kabusys.operations.performance_collector import DailyRow
+    return [
+        DailyRow(date=date(2026, 4, 21), env="live", equity=5_000_000.0,
+                 daily_return=0.004, drawdown=-0.002, cumulative_return=0.0),
+        DailyRow(date=date(2026, 4, 22), env="live", equity=5_020_000.0,
+                 daily_return=-0.001, drawdown=-0.003, cumulative_return=0.004),
+        DailyRow(date=date(2026, 4, 23), env="live", equity=5_040_000.0,
+                 daily_return=0.004, drawdown=-0.001, cumulative_return=0.008),
+    ]
+
+
+def test_build_report_summary_basic():
+    """cumulative_return / max_drawdown / win_rate が正しく計算される。"""
+    rows = _make_daily_rows()
+    report = build_report(
+        rows,
+        report_type="daily",
+        env="live",
+        from_date=date(2026, 4, 21),
+        to_date=date(2026, 4, 23),
+    )
+    assert isinstance(report, PerformanceReport)
+    assert report.summary["total_trading_days"] == 3
+    assert report.summary["equity_start"] == 5_000_000.0
+    assert report.summary["equity_end"] == 5_040_000.0
+    assert report.summary["cumulative_return"] == pytest.approx(0.008)
+    assert report.summary["max_drawdown"] == pytest.approx(-0.003)
+    assert report.summary["win_rate"] == pytest.approx(2 / 3)
+
+
+def test_build_report_empty_rows():
+    """rows=[] のとき summary は None 値（total_trading_days=0）。"""
+    report = build_report(
+        [],
+        report_type="daily",
+        env="live",
+        from_date=date(2026, 4, 21),
+        to_date=date(2026, 4, 23),
+    )
+    assert report.summary["total_trading_days"] == 0
+    assert report.summary["cumulative_return"] is None
+    assert report.summary["max_drawdown"] is None
+    assert report.summary["win_rate"] is None
+
+
+def test_build_report_weekly_summary():
+    """週次 rows から summary が正しく集約される。"""
+    from kabusys.operations.performance_collector import WeeklyRow
+    rows = [
+        WeeklyRow(week_label="2026-W17", trading_days=5,
+                  equity_start=5_000_000.0, equity_end=5_025_000.0,
+                  weekly_return=0.005, max_drawdown=-0.002, win_days=3),
+        WeeklyRow(week_label="2026-W18", trading_days=5,
+                  equity_start=5_025_000.0, equity_end=5_050_000.0,
+                  weekly_return=0.005, max_drawdown=-0.001, win_days=4),
+    ]
+    report = build_report(
+        rows,
+        report_type="weekly",
+        env="live",
+        from_date=date(2026, 4, 20),
+        to_date=date(2026, 4, 30),
+    )
+    assert report.summary["total_trading_days"] == 10
+    assert report.summary["equity_start"] == 5_000_000.0
+    assert report.summary["equity_end"] == 5_050_000.0
+    assert report.summary["max_drawdown"] == pytest.approx(-0.002)
+    assert report.summary["win_rate"] == pytest.approx(7 / 10)
