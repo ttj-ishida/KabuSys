@@ -18,6 +18,7 @@ import duckdb
 from kabusys.config import Settings
 
 _STOP_FLAG = Path(__file__).resolve().parents[2] / "data" / "stop_requested.flag"
+_MONITORING_PID = Path(__file__).resolve().parents[2] / "data" / "monitoring.pid"
 from kabusys.monitoring.monitoring_db import init_monitoring_db  # noqa: E402
 from kabusys.monitoring.system_monitor import SystemMonitor  # noqa: E402
 from kabusys.utils.logging_setup import setup_logging  # noqa: E402
@@ -71,6 +72,8 @@ def main() -> None:
     # 4. ポーリングループ
     poll_interval = _get_poll_interval()
     logger.info("監視ループ開始（ポーリング間隔: %d 秒）", poll_interval)
+    _MONITORING_PID.parent.mkdir(parents=True, exist_ok=True)
+    _MONITORING_PID.write_text(str(os.getpid()))
     try:
         while True:
             if _STOP_FLAG.exists():
@@ -88,6 +91,7 @@ def main() -> None:
     finally:
         sqlite_conn.close()
         duckdb_conn.close()
+        _MONITORING_PID.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
