@@ -337,12 +337,34 @@ python scripts\run_portfolio_construction.py
 
 Market Close 後（または翌朝）に確認する。
 
+`run_performance_report` で成績サマリーを出力する:
+
+```cmd
+python -m kabusys.run_performance_report --type daily --save
+```
+
+週次・月次レポートは必要に応じて:
+
+```cmd
+python -m kabusys.run_performance_report --type weekly --save
+python -m kabusys.run_performance_report --type monthly --save
+```
+
+`paper_trading` 環境の成績を確認する場合:
+
+```cmd
+python -m kabusys.run_performance_report --type daily --env paper_trading
+```
+
+レポートは `artifacts/performance/{env}/{type}/{period}/report.md` に保存される。
+
 | 項目 | 確認方法 |
 |------|---------|
-| 日次リターン | `portfolio_performance` テーブル |
-| ポジション一覧 | `positions` テーブル |
-| 取引履歴 | `orders` テーブル（SQLite） |
-| ドローダウン | `portfolio_performance` の `drawdown` カラム |
+| 日次リターン・累積リターン | `run_performance_report --type daily` |
+| ドローダウン | `run_performance_report --type daily`（サマリー内） |
+| 週次成績 | `run_performance_report --type weekly` |
+| ポジション一覧（詳細） | `positions` テーブル（直接参照） |
+| 取引履歴（詳細） | `orders` テーブル（SQLite、直接参照） |
 
 ---
 

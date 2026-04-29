@@ -456,13 +456,14 @@ Executionの処理フロー:
 
 ## portfolio_performance
 
-  column         type    description
-  -------------- ------- --------------
-  date           date    日付
-  equity         float   総資産
-  cash           float   現金
-  drawdown       float   ドローダウン
-  daily_return   float   日次リターン
+  column         type     description
+  -------------- -------- --------------
+  date           date     日付
+  equity         float    総資産
+  cash           float    現金
+  drawdown       float    ドローダウン
+  daily_return   float    日次リターン
+  env            varchar  実行環境（"live" / "paper_trading"）デフォルト: "live"
 
 ------------------------------------------------------------------------
 
