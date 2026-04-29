@@ -210,3 +210,71 @@ def test_collect_intraday_snapshot_no_db_data(conn, tmp_path):
     snap = collect_intraday_snapshot(conn, settings)
     assert snap.drawdown_pct is None
     assert snap.process_ok is False
+
+
+# --- _determine_status / format_cli_summary ---
+
+from kabusys.run_intraday_monitor import _determine_status, format_cli_summary
+from kabusys.operations.intraday_collector import IntradaySnapshot as _Snap
+
+
+def _make_snap(**kwargs) -> _Snap:
+    defaults = dict(
+        collected_at="2026-04-29T01:35:00+00:00",
+        execution_pid_ok=True,
+        monitoring_pid_ok=True,
+        kill_switch_active=False,
+        kill_switch_reason="",
+        drawdown_pct=-0.02,
+        stale_order_count=0,
+        order_error_count=0,
+        process_ok=True,
+        cpu_percent=30.0,
+        memory_percent=50.0,
+        recent_risk_events=[],
+    )
+    defaults.update(kwargs)
+    return _Snap(**defaults)
+
+
+def test_determine_status_ok():
+    snap = _make_snap()
+    assert _determine_status(snap) == "OK"
+
+
+def test_determine_status_critical_kill_switch():
+    snap = _make_snap(kill_switch_active=True, kill_switch_reason="drawdown")
+    assert _determine_status(snap) == "CRITICAL"
+
+
+def test_determine_status_critical_execution_down():
+    snap = _make_snap(execution_pid_ok=False)
+    assert _determine_status(snap) == "CRITICAL"
+
+
+def test_determine_status_warning_drawdown():
+    snap = _make_snap(drawdown_pct=-0.11)
+    assert _determine_status(snap) == "WARNING"
+
+
+def test_determine_status_warning_order_error():
+    snap = _make_snap(order_error_count=2)
+    assert _determine_status(snap) == "WARNING"
+
+
+def test_format_cli_summary_ok_contains_ok():
+    snap = _make_snap()
+    output = format_cli_summary(snap)
+    assert "✅ OK" in output
+
+
+def test_format_cli_summary_critical_contains_crit():
+    snap = _make_snap(execution_pid_ok=False)
+    output = format_cli_summary(snap)
+    assert "🚫 CRITICAL" in output
+
+
+def test_format_cli_summary_shows_interval():
+    snap = _make_snap()
+    output = format_cli_summary(snap, interval=30)
+    assert "30秒後" in output
