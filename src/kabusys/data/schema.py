@@ -316,7 +316,8 @@ CREATE TABLE IF NOT EXISTS portfolio_performance (
     equity          DECIMAL(20,4) NOT NULL,
     cash            DECIMAL(20,4) NOT NULL,
     drawdown        DOUBLE,
-    daily_return    DOUBLE
+    daily_return    DOUBLE,
+    env             VARCHAR     NOT NULL DEFAULT 'live'
 )
 """
 
@@ -386,6 +387,8 @@ _MIGRATIONS: list[str] = [
     "ALTER TABLE signals ADD COLUMN size_multiplier DOUBLE NOT NULL DEFAULT 1.0",
     # v0.x → v0.y: raw_prices に adj_factor を追加
     "ALTER TABLE raw_prices ADD COLUMN adj_factor DECIMAL(18,6)",
+    # v0.x → v0.y: portfolio_performance に env を追加
+    "ALTER TABLE portfolio_performance ADD COLUMN env VARCHAR NOT NULL DEFAULT 'live'",
 ]
 
 # ---------------------------------------------------------------------------
