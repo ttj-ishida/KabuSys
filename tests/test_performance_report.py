@@ -308,6 +308,8 @@ def test_build_report_empty_rows():
     assert report.summary["cumulative_return"] is None
     assert report.summary["max_drawdown"] is None
     assert report.summary["win_rate"] is None
+    assert report.summary["equity_start"] is None
+    assert report.summary["equity_end"] is None
 
 
 def test_build_report_weekly_summary():
