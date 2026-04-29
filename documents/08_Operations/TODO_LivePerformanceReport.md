@@ -57,7 +57,7 @@
 
 例:
 
-- `environment = production`
+- `environment = live`
 - `environment = paper_trading`
 
 ### 3.2 出力形式は Markdown に統一する
@@ -337,7 +337,7 @@ artifacts/performance/paper_trading/monthly/2026-04.md
 
 以下の設計が確定した。
 
-- 週の定義: **JPX 営業日基準**（ISO 週番号ラベルを使用、`market_calendar.open_market=1` で営業日数を算出）
+- 週の定義: **JPX 営業日基準**（ISO 週番号ラベルを使用、`market_calendar.is_trading_day = true` で営業日数を算出）
 - `paper_trading` / `live` の分離方法: **`portfolio_performance.env` 列**（`ALTER TABLE ADD COLUMN env VARCHAR DEFAULT 'live'`）
 - CLI: `python -m kabusys.run_performance_report --type daily|weekly|monthly --env live|paper_trading`
 - 比較: 別々のコマンド実行（同一レポート内の自動比較は後続フェーズ）
