@@ -68,3 +68,15 @@ class LineNotifier:
 
         logger.info("LineNotifier: message sent (%d chars)", len(message))
         return True
+
+
+from kabusys.config import Settings  # noqa: E402 — 循環 import 回避のため末尾 import
+
+
+def build_notifier(settings: Settings) -> LineNotifier:
+    """Settings から LineNotifier を生成する。"""
+    return LineNotifier(
+        token=settings.line_channel_access_token,
+        user_id=settings.line_user_id,
+        enabled=settings.line_notify_enabled,
+    )

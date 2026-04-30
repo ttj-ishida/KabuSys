@@ -114,3 +114,26 @@ class TestLineNotifierSend:
         sent_text = mock_req.post.call_args[1]["json"]["messages"][0]["text"]
         assert len(sent_text) <= 5000
         assert sent_text.endswith("...(省略)")
+
+
+from kabusys.operations.notifier import build_notifier  # noqa: E402
+
+
+class TestBuildNotifier:
+    def test_build_notifier_from_settings(self, monkeypatch):
+        """`build_notifier()` が Settings から正しく構築される"""
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "mytoken")
+        monkeypatch.setenv("LINE_USER_ID", "myuserid")
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "true")
+        n = build_notifier(Settings())
+        assert n._token == "mytoken"
+        assert n._user_id == "myuserid"
+        assert n._enabled is True
+
+    def test_build_notifier_disabled_when_env_false(self, monkeypatch):
+        """`LINE_NOTIFY_ENABLED=false` → enabled=False"""
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("LINE_USER_ID", "uid")
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "false")
+        n = build_notifier(Settings())
+        assert n._enabled is False
