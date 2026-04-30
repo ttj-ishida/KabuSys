@@ -222,7 +222,7 @@ def log_trade_event(event: dict):
 ``` python
 def send_alert(message: str):
     """
-    Slack通知
+    LINE通知
     """
 ```
 

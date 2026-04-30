@@ -170,8 +170,7 @@ AIスコア分布 | 偏り検知 |
 
 | 方法 | 内容 |
 |----|----|
-Slack | 推奨 |
-メール | 補助 |
+LINE通知 | 推奨 |
 ログ | 必須 |
 
 ---
@@ -255,7 +254,7 @@ Windows 1台での稼働を前提とし、オーバーヘッドの少ない構�
 |----|----|----|
 | データベース | SQLite | `monitoring.db` (テーブル: `system_status`, `trade_logs`, `positions`, `risk_logs`, `dashboard`) |
 | ダッシュボード | Streamlit | Equity, Positions, Orders, Drawdownの画面 |
-| アラート | Slack | Slack API 経由での異常通知 |
+| アラート | LINE | LINE Messaging API 経由での異常通知 |
 
 ### SQLite テーブル設計（Phase 7 実装）
 
@@ -403,7 +402,7 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 
 **依存ライブラリ:** `psutil`（SystemMonitor）、`streamlit`（ダッシュボード UI）— `requirements.txt` に追加すること。
 
-> **注:** `cpu_threshold_pct` / `memory_threshold_pct` / `disk_threshold_pct` は、現フェーズでは収集・記録のみを行い、`SystemMonitor` 内では使用しない。将来の Slack アラート実装（Issue #39）で閾値判定に利用する予定。
+> **注:** `cpu_threshold_pct` / `memory_threshold_pct` / `disk_threshold_pct` は、現フェーズでは収集・記録のみを行い、`SystemMonitor` 内では使用しない。将来の LINE アラート実装（Issue #196）で閾値判定に利用する予定。
 
 ---
 
@@ -442,7 +441,7 @@ python -m kabusys.tools.paper_verification_report --from 2026-04-01 --to 2026-04
 |----|----|
 | ログ | Loki |
 | ダッシュボード | Grafana |
-| アラート | Slack |
+| アラート | LINE |
 | メトリクス | Prometheus |
 
 ---

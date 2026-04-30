@@ -16,7 +16,7 @@
 - 週次 Markdown レポート
 - 月次 Markdown レポート
 
-この段階では、JSON 出力、HTML 出力、Slack 通知、グラフ埋め込み、ダッシュボード統合は実装対象外とする。
+この段階では、JSON 出力、HTML 出力、LINE 通知、グラフ埋め込み、ダッシュボード統合は実装対象外とする。
 
 ---
 
@@ -240,7 +240,7 @@ artifacts/performance/paper_trading/weekly/2026-W17/report.md
 
 - JSON 出力
 - HTML 出力
-- Slack 通知
+- LINE 通知
 - グラフ埋め込み
 - セクター分析
 - シグナル分析

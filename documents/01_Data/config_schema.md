@@ -224,7 +224,7 @@ monitoring:
 
 alerts:
 
-  slack_enabled: true
+  line_notify_enabled: true
 
   max_drawdown_alert: 0.10
 

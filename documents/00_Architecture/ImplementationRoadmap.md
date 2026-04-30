@@ -200,7 +200,7 @@
 -   SQLite監視ログDB（Issue #36）
 -   システム監視エンジン — CPU/メモリ/プロセス監視（Issue #37）
 -   リスク監視エンジン — ポジション/DD/Circuit Breaker（Issue #38）
--   Slack アラート通知（Issue #39）
+-   LINE アラート通知（Issue #196）
 -   発注監視エンジン（Issue #40）
 -   Streamlit ダッシュボード（Issue #35）
 -   統合テスト・Phase 7 完了確認（Issue #41）
@@ -211,7 +211,7 @@
         monitoring_db.py        ← SQLite 永続化層（Issue #36）
         system_monitor.py       ← システム状態監視（Issue #37）
         risk_monitor.py         ← リスク監視（Issue #38）
-        alert_manager.py        ← Slack 通知（Issue #39）
+        alert_manager.py        ← LINE 通知（Issue #196）
         order_monitor.py        ← 発注監視（Issue #40）
         dashboard_app.py        ← Streamlit ダッシュボード（Issue #35）
 
@@ -219,7 +219,7 @@
 
     monitoring.db（system_status, trade_logs, positions, risk_logs, dashboard）
     Streamlit ダッシュボード
-    Slack アラート
+    LINE アラート
 
 ------------------------------------------------------------------------
 

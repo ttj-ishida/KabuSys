@@ -68,7 +68,7 @@
 
 - 人間が読みやすい
 - Git 管理しやすい
-- Slack や Wiki に転記しやすい
+- LINE や Wiki に転記しやすい
 - 本番 / paper の共通化がしやすい
 
 ### 3.3 集計単位は 3 種類
@@ -364,7 +364,7 @@ artifacts/performance/paper_trading/monthly/2026-04.md
 ### 優先度低
 
 1. グラフ埋め込み
-2. Slack 配信
+2. LINE 配信
 3. HTML 化
 
 ---

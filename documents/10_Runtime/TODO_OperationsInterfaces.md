@@ -352,7 +352,7 @@ python -m kabusys.run_position_reconciliation_report --save --json
 
 ### 優先度高
 
-1. 各確認対象を CLI / Markdown / JSON / Dashboard / Slack のどれで出すか
+1. 各確認対象を CLI / Markdown / JSON / Dashboard / LINE のどれで出すか
 2. 朝の運用開始判断を 1 つのレポートに集約するか
 3. Execution 起動結果をログ以外で見せるか
 4. `Signal Queue` をどの粒度でユーザーに見せるか
