@@ -641,35 +641,10 @@ def test_cli_returns_0_when_data_exists(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Issue #221: portfolio_performance PK (date, env) マイグレーション
+# Issue #221: portfolio_performance PRIMARY KEY (date, env)
 # ---------------------------------------------------------------------------
 
-from kabusys.data.schema import (  # noqa: E402
-    _migrate_portfolio_performance_pk,
-    init_schema,
-)
-
-
-def _make_old_schema_conn() -> duckdb.DuckDBPyConnection:
-    """旧スキーマ（PRIMARY KEY (date) 単独）のインメモリ DB を返す。"""
-    conn = duckdb.connect(":memory:")
-    conn.execute(
-        """
-        CREATE TABLE portfolio_performance (
-            date         DATE          NOT NULL PRIMARY KEY,
-            equity       DECIMAL(20,4) NOT NULL,
-            cash         DECIMAL(20,4) NOT NULL DEFAULT 0,
-            drawdown     DOUBLE,
-            daily_return DOUBLE,
-            env          VARCHAR       NOT NULL DEFAULT 'live'
-        )
-        """
-    )
-    conn.execute(
-        "INSERT INTO portfolio_performance (date, equity, cash, env)"
-        " VALUES ('2026-04-21', 5000000, 0, 'live')"
-    )
-    return conn
+from kabusys.data.schema import init_schema  # noqa: E402
 
 
 def _get_pk_columns(conn: duckdb.DuckDBPyConnection) -> list[str]:
@@ -685,32 +660,6 @@ def test_init_schema_creates_composite_pk():
     """init_schema が PRIMARY KEY (date, env) でテーブルを作成する。"""
     conn = init_schema(":memory:")
     assert _get_pk_columns(conn) == ["date", "env"]
-
-
-def test_migrate_pk_from_old_schema():
-    """旧スキーマ (date PK) から (date, env) PK へ正しく移行する。"""
-    conn = _make_old_schema_conn()
-    assert _get_pk_columns(conn) == ["date"]
-
-    _migrate_portfolio_performance_pk(conn)
-
-    assert _get_pk_columns(conn) == ["date", "env"]
-    row = conn.execute("SELECT date, env, equity FROM portfolio_performance").fetchone()
-    assert row is not None
-    assert row[2] == 5_000_000
-
-
-def test_migrate_pk_idempotent():
-    """既に (date, env) PK のテーブルに対してマイグレーションを2回実行しても壊れない。"""
-    conn = _make_conn(
-        {"date": "2026-04-21", "equity": 5_000_000.0, "env": "live"},
-    )
-    _migrate_portfolio_performance_pk(conn)
-    _migrate_portfolio_performance_pk(conn)
-
-    assert _get_pk_columns(conn) == ["date", "env"]
-    rows = conn.execute("SELECT COUNT(*) FROM portfolio_performance").fetchone()
-    assert rows[0] == 1
 
 
 def test_same_date_different_envs_can_coexist():

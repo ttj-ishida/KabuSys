@@ -433,63 +433,6 @@ _ALL_DDL: list[str] = [
 
 
 # ---------------------------------------------------------------------------
-# 複合 PK マイグレーション
-# ---------------------------------------------------------------------------
-
-
-def _migrate_portfolio_performance_pk(conn: duckdb.DuckDBPyConnection) -> None:
-    """portfolio_performance の PRIMARY KEY を (date, env) に変更する。
-
-    DuckDB は ALTER TABLE ... DROP/ADD PRIMARY KEY をサポートしないため、
-    テーブル再作成で対応する。既に (date, env) PK の場合は何もしない（冪等）。
-    """
-    row = conn.execute(
-        "SELECT constraint_column_names FROM duckdb_constraints()"
-        " WHERE table_name = 'portfolio_performance'"
-        " AND constraint_type = 'PRIMARY KEY'"
-    ).fetchone()
-    if row and list(row[0]) == ["date", "env"]:
-        return
-
-    conn.execute("DROP TABLE IF EXISTS portfolio_performance_new")
-    conn.execute("BEGIN")
-    try:
-        conn.execute(
-            """
-            CREATE TABLE portfolio_performance_new (
-                date            DATE          NOT NULL,
-                env             VARCHAR       NOT NULL DEFAULT 'live',
-                equity          DECIMAL(20,4) NOT NULL,
-                cash            DECIMAL(20,4) NOT NULL DEFAULT 0,
-                drawdown        DOUBLE,
-                daily_return    DOUBLE,
-                PRIMARY KEY (date, env)
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO portfolio_performance_new
-            SELECT date, COALESCE(env, 'live'), equity, cash, drawdown, daily_return
-            FROM portfolio_performance
-            """
-        )
-        conn.execute("DROP TABLE portfolio_performance")
-        conn.execute(
-            "ALTER TABLE portfolio_performance_new RENAME TO portfolio_performance"
-        )
-        conn.execute("COMMIT")
-    except Exception:
-        try:
-            conn.execute("ROLLBACK")
-        except Exception as rb_exc:
-            logger.warning(
-                "_migrate_portfolio_performance_pk: ROLLBACK failed: %s", rb_exc
-            )
-        raise
-
-
-# ---------------------------------------------------------------------------
 # 公開 API
 # ---------------------------------------------------------------------------
 
@@ -531,9 +474,6 @@ def init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection:
             conn.execute(migration)
         except Exception:
             pass
-
-    # portfolio_performance の PK を (date, env) に変更（テーブル再作成）
-    _migrate_portfolio_performance_pk(conn)
 
     return conn
 
