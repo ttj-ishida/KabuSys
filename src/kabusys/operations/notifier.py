@@ -70,7 +70,7 @@ class LineNotifier:
         return True
 
 
-from kabusys.config import Settings  # noqa: E402 — 循環 import 回避のため末尾 import
+from kabusys.config import Settings  # noqa: E402 — モジュール末尾配置（E402 抑制）
 
 
 def build_notifier(settings: Settings) -> LineNotifier:
