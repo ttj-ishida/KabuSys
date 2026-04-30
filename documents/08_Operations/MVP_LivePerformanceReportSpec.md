@@ -2,7 +2,7 @@
 
 - ステータス: 設計完了（Issue #195、仕様書: `docs/superpowers/specs/2026-04-29-performance-report-design.md`）
 - 目的: 最初に実装する運用成績サマリーレポートの最小仕様を 1 ページで定義する
-- 対象: `production` / `paper_trading` 共通
+- 対象: `live` / `paper_trading` 共通
 - 出力形式: Markdown
 - 集計単位: 日次 / 週次 / 月次
 
@@ -255,7 +255,7 @@ artifacts/performance/paper_trading/weekly/2026-W17/report.md
 
 以下を満たせば、この MVP は完了とする。
 
-1. `production` / `paper_trading` の両方で同じ形式の Markdown レポートが出力される
+1. `live` / `paper_trading` の両方で同じ形式の Markdown レポートが出力される
 2. 日次レポートが出力される
 3. 週次レポートが出力される
 4. 月次レポートが出力される

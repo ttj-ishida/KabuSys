@@ -126,7 +126,7 @@ def collect_weekly_rows(
     to_date: date,
 ) -> list[WeeklyRow]:
     """collect_daily_rows の結果を ISO 週番号でグループ化して集約。
-    JPX 営業日数は market_calendar WHERE open_market=1 で取得。
+    JPX 営業日数は market_calendar WHERE is_trading_day = true で取得。
     """
 
 def collect_monthly_rows(
@@ -157,9 +157,9 @@ ORDER BY date ASC
 
 ```sql
 SELECT COUNT(*) FROM market_calendar
-WHERE market_date >= ?
-  AND market_date <= ?
-  AND open_market = 1
+WHERE date >= ?
+  AND date <= ?
+  AND is_trading_day = true
 ```
 
 ---
