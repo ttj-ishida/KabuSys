@@ -18,12 +18,12 @@ from kabusys.operations.performance_collector import (  # noqa: F401
 
 @dataclass
 class PerformanceReport:
-    report_type: str   # "daily" | "weekly" | "monthly"
-    env: str           # "live" | "paper_trading"
+    report_type: str  # "daily" | "weekly" | "monthly"
+    env: str  # "live" | "paper_trading"
     generated_at: str  # ISO 8601 UTC
-    from_date: str     # YYYY-MM-DD
-    to_date: str       # YYYY-MM-DD
-    rows: list         # list[DailyRow | WeeklyRow | MonthlyRow]
+    from_date: str  # YYYY-MM-DD
+    to_date: str  # YYYY-MM-DD
+    rows: list  # list[DailyRow | WeeklyRow | MonthlyRow]
     summary: dict
 
 

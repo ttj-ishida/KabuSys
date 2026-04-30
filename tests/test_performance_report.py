@@ -102,8 +102,18 @@ from kabusys.operations.performance_collector import (  # noqa: E402
 def test_collect_daily_rows_basic():
     """基本的な日次行取得。"""
     conn = _make_conn(
-        {"date": "2026-04-21", "equity": 5_000_000.0, "daily_return": 0.004, "drawdown": -0.002},
-        {"date": "2026-04-22", "equity": 5_020_000.0, "daily_return": 0.004, "drawdown": -0.001},
+        {
+            "date": "2026-04-21",
+            "equity": 5_000_000.0,
+            "daily_return": 0.004,
+            "drawdown": -0.002,
+        },
+        {
+            "date": "2026-04-22",
+            "equity": 5_020_000.0,
+            "daily_return": 0.004,
+            "drawdown": -0.001,
+        },
     )
     rows = collect_daily_rows(conn, "live", date(2026, 4, 21), date(2026, 4, 22))
     assert len(rows) == 2
@@ -160,8 +170,18 @@ def test_collect_daily_rows_date_filter():
 def test_collect_weekly_rows_grouping():
     """同週の日次行が正しく 1 件の WeeklyRow に集約される。"""
     conn = _make_conn(
-        {"date": "2026-04-21", "equity": 5_000_000.0, "daily_return": 0.004, "drawdown": -0.002},
-        {"date": "2026-04-22", "equity": 5_020_000.0, "daily_return": 0.004, "drawdown": -0.001},
+        {
+            "date": "2026-04-21",
+            "equity": 5_000_000.0,
+            "daily_return": 0.004,
+            "drawdown": -0.002,
+        },
+        {
+            "date": "2026-04-22",
+            "equity": 5_020_000.0,
+            "daily_return": 0.004,
+            "drawdown": -0.001,
+        },
         # 2026-04-21 と 2026-04-22 は同じ ISO 週（W17）
     )
     rows = collect_weekly_rows(conn, "live", date(2026, 4, 21), date(2026, 4, 22))
@@ -187,7 +207,9 @@ def test_collect_weekly_rows_trading_days():
         ],
     )
     rows = collect_weekly_rows(conn, "live", date(2026, 4, 21), date(2026, 4, 22))
-    assert rows[0].trading_days == 2  # 21 と 22 のみ（portfolio_performance の範囲で集計）
+    assert (
+        rows[0].trading_days == 2
+    )  # 21 と 22 のみ（portfolio_performance の範囲で集計）
 
 
 def test_collect_weekly_rows_empty():
@@ -219,8 +241,18 @@ def test_collect_weekly_rows_two_weeks():
 def test_collect_monthly_rows_grouping():
     """同月の日次行が正しく 1 件の MonthlyRow に集約される。"""
     conn = _make_conn(
-        {"date": "2026-04-21", "equity": 5_000_000.0, "daily_return": 0.004, "drawdown": -0.002},
-        {"date": "2026-04-22", "equity": 5_020_000.0, "daily_return": -0.002, "drawdown": -0.003},
+        {
+            "date": "2026-04-21",
+            "equity": 5_000_000.0,
+            "daily_return": 0.004,
+            "drawdown": -0.002,
+        },
+        {
+            "date": "2026-04-22",
+            "equity": 5_020_000.0,
+            "daily_return": -0.002,
+            "drawdown": -0.003,
+        },
     )
     rows = collect_monthly_rows(conn, "live", date(2026, 4, 1), date(2026, 4, 30))
     assert len(rows) == 1
@@ -266,13 +298,32 @@ from kabusys.operations.performance_report import (  # noqa: E402
 
 def _make_daily_rows() -> list:
     from kabusys.operations.performance_collector import DailyRow
+
     return [
-        DailyRow(date=date(2026, 4, 21), env="live", equity=5_000_000.0,
-                 daily_return=0.004, drawdown=-0.002, cumulative_return=0.0),
-        DailyRow(date=date(2026, 4, 22), env="live", equity=5_020_000.0,
-                 daily_return=-0.001, drawdown=-0.003, cumulative_return=0.004),
-        DailyRow(date=date(2026, 4, 23), env="live", equity=5_040_000.0,
-                 daily_return=0.004, drawdown=-0.001, cumulative_return=0.008),
+        DailyRow(
+            date=date(2026, 4, 21),
+            env="live",
+            equity=5_000_000.0,
+            daily_return=0.004,
+            drawdown=-0.002,
+            cumulative_return=0.0,
+        ),
+        DailyRow(
+            date=date(2026, 4, 22),
+            env="live",
+            equity=5_020_000.0,
+            daily_return=-0.001,
+            drawdown=-0.003,
+            cumulative_return=0.004,
+        ),
+        DailyRow(
+            date=date(2026, 4, 23),
+            env="live",
+            equity=5_040_000.0,
+            daily_return=0.004,
+            drawdown=-0.001,
+            cumulative_return=0.008,
+        ),
     ]
 
 
@@ -315,13 +366,26 @@ def test_build_report_empty_rows():
 def test_build_report_weekly_summary():
     """週次 rows から summary が正しく集約される。"""
     from kabusys.operations.performance_collector import WeeklyRow
+
     rows = [
-        WeeklyRow(week_label="2026-W17", trading_days=5,
-                  equity_start=5_000_000.0, equity_end=5_025_000.0,
-                  weekly_return=0.005, max_drawdown=-0.002, win_days=3),
-        WeeklyRow(week_label="2026-W18", trading_days=5,
-                  equity_start=5_025_000.0, equity_end=5_050_000.0,
-                  weekly_return=0.005, max_drawdown=-0.001, win_days=4),
+        WeeklyRow(
+            week_label="2026-W17",
+            trading_days=5,
+            equity_start=5_000_000.0,
+            equity_end=5_025_000.0,
+            weekly_return=0.005,
+            max_drawdown=-0.002,
+            win_days=3,
+        ),
+        WeeklyRow(
+            week_label="2026-W18",
+            trading_days=5,
+            equity_start=5_025_000.0,
+            equity_end=5_050_000.0,
+            weekly_return=0.005,
+            max_drawdown=-0.001,
+            win_days=4,
+        ),
     ]
     report = build_report(
         rows,
@@ -346,8 +410,11 @@ def test_format_markdown_daily():
     """日次 Markdown にサマリー表と日次明細テーブルが含まれる。"""
     rows = _make_daily_rows()
     report = build_report(
-        rows, report_type="daily", env="live",
-        from_date=date(2026, 4, 21), to_date=date(2026, 4, 23),
+        rows,
+        report_type="daily",
+        env="live",
+        from_date=date(2026, 4, 21),
+        to_date=date(2026, 4, 23),
     )
     md = format_markdown(report)
     assert "# 運用成績レポート（日次）" in md
@@ -360,14 +427,24 @@ def test_format_markdown_daily():
 def test_format_markdown_weekly():
     """週次 Markdown に週次明細テーブルが含まれる。"""
     from kabusys.operations.performance_collector import WeeklyRow
+
     rows = [
-        WeeklyRow(week_label="2026-W17", trading_days=5,
-                  equity_start=5_000_000.0, equity_end=5_025_000.0,
-                  weekly_return=0.005, max_drawdown=-0.002, win_days=3),
+        WeeklyRow(
+            week_label="2026-W17",
+            trading_days=5,
+            equity_start=5_000_000.0,
+            equity_end=5_025_000.0,
+            weekly_return=0.005,
+            max_drawdown=-0.002,
+            win_days=3,
+        ),
     ]
     report = build_report(
-        rows, report_type="weekly", env="live",
-        from_date=date(2026, 4, 20), to_date=date(2026, 4, 26),
+        rows,
+        report_type="weekly",
+        env="live",
+        from_date=date(2026, 4, 20),
+        to_date=date(2026, 4, 26),
     )
     md = format_markdown(report)
     assert "# 運用成績レポート（週次）" in md
@@ -378,14 +455,24 @@ def test_format_markdown_weekly():
 def test_format_markdown_monthly():
     """月次 Markdown に月次明細テーブルが含まれる。"""
     from kabusys.operations.performance_collector import MonthlyRow
+
     rows = [
-        MonthlyRow(month_label="2026-04", trading_days=20,
-                   equity_start=5_000_000.0, equity_end=5_100_000.0,
-                   monthly_return=0.02, max_drawdown=-0.005, win_days=12),
+        MonthlyRow(
+            month_label="2026-04",
+            trading_days=20,
+            equity_start=5_000_000.0,
+            equity_end=5_100_000.0,
+            monthly_return=0.02,
+            max_drawdown=-0.005,
+            win_days=12,
+        ),
     ]
     report = build_report(
-        rows, report_type="monthly", env="live",
-        from_date=date(2026, 4, 1), to_date=date(2026, 4, 30),
+        rows,
+        report_type="monthly",
+        env="live",
+        from_date=date(2026, 4, 1),
+        to_date=date(2026, 4, 30),
     )
     md = format_markdown(report)
     assert "# 運用成績レポート（月次）" in md
@@ -396,8 +483,11 @@ def test_format_markdown_monthly():
 def test_format_markdown_empty_rows():
     """rows=[] でも正常に Markdown が出力される。"""
     report = build_report(
-        [], report_type="daily", env="live",
-        from_date=date(2026, 4, 21), to_date=date(2026, 4, 21),
+        [],
+        report_type="daily",
+        env="live",
+        from_date=date(2026, 4, 21),
+        to_date=date(2026, 4, 21),
     )
     md = format_markdown(report)
     assert "# 運用成績レポート（日次）" in md
@@ -413,8 +503,11 @@ def test_save_report_daily(tmp_path):
     """`artifacts/performance/live/daily/{date}/report.md` が生成される。"""
     rows = _make_daily_rows()
     report = build_report(
-        rows, report_type="daily", env="live",
-        from_date=date(2026, 4, 21), to_date=date(2026, 4, 23),
+        rows,
+        report_type="daily",
+        env="live",
+        from_date=date(2026, 4, 21),
+        to_date=date(2026, 4, 23),
     )
     saved = save_report(report, output_dir=tmp_path)
     expected = tmp_path / "live" / "daily" / "2026-04-23" / "report.md"
@@ -425,14 +518,24 @@ def test_save_report_daily(tmp_path):
 def test_save_report_weekly(tmp_path):
     """`artifacts/performance/live/weekly/YYYY-Www/report.md` が生成される。"""
     from kabusys.operations.performance_collector import WeeklyRow
+
     rows = [
-        WeeklyRow(week_label="2026-W17", trading_days=5,
-                  equity_start=5_000_000.0, equity_end=5_025_000.0,
-                  weekly_return=0.005, max_drawdown=-0.002, win_days=3),
+        WeeklyRow(
+            week_label="2026-W17",
+            trading_days=5,
+            equity_start=5_000_000.0,
+            equity_end=5_025_000.0,
+            weekly_return=0.005,
+            max_drawdown=-0.002,
+            win_days=3,
+        ),
     ]
     report = build_report(
-        rows, report_type="weekly", env="live",
-        from_date=date(2026, 4, 20), to_date=date(2026, 4, 26),
+        rows,
+        report_type="weekly",
+        env="live",
+        from_date=date(2026, 4, 20),
+        to_date=date(2026, 4, 26),
     )
     saved = save_report(report, output_dir=tmp_path)
     expected = tmp_path / "live" / "weekly" / "2026-W17" / "report.md"
@@ -443,14 +546,24 @@ def test_save_report_weekly(tmp_path):
 def test_save_report_monthly(tmp_path):
     """`artifacts/performance/live/monthly/YYYY-MM/report.md` が生成される。"""
     from kabusys.operations.performance_collector import MonthlyRow
+
     rows = [
-        MonthlyRow(month_label="2026-04", trading_days=20,
-                   equity_start=5_000_000.0, equity_end=5_100_000.0,
-                   monthly_return=0.02, max_drawdown=-0.005, win_days=12),
+        MonthlyRow(
+            month_label="2026-04",
+            trading_days=20,
+            equity_start=5_000_000.0,
+            equity_end=5_100_000.0,
+            monthly_return=0.02,
+            max_drawdown=-0.005,
+            win_days=12,
+        ),
     ]
     report = build_report(
-        rows, report_type="monthly", env="paper_trading",
-        from_date=date(2026, 4, 1), to_date=date(2026, 4, 30),
+        rows,
+        report_type="monthly",
+        env="paper_trading",
+        from_date=date(2026, 4, 1),
+        to_date=date(2026, 4, 30),
     )
     saved = save_report(report, output_dir=tmp_path)
     expected = tmp_path / "paper_trading" / "monthly" / "2026-04" / "report.md"

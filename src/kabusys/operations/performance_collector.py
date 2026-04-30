@@ -23,18 +23,18 @@ class DailyRow:
 
 @dataclass
 class WeeklyRow:
-    week_label: str            # "2026-W17"
+    week_label: str  # "2026-W17"
     trading_days: int
     equity_start: float
     equity_end: float
     weekly_return: float | None  # (equity_end / equity_start) - 1.0
-    max_drawdown: float | None   # 週内の drawdown 最小値
-    win_days: int               # daily_return > 0 の日数
+    max_drawdown: float | None  # 週内の drawdown 最小値
+    win_days: int  # daily_return > 0 の日数
 
 
 @dataclass
 class MonthlyRow:
-    month_label: str             # "2026-04"
+    month_label: str  # "2026-04"
     trading_days: int
     equity_start: float
     equity_end: float
