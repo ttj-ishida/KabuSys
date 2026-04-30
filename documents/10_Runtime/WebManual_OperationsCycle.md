@@ -356,6 +356,14 @@ python -m kabusys.run_market_close_report --save
 - `positions` は当日分が更新されたか
 - `portfolio_performance` は当日分が記録されたか
 
+Market Close Summary が `OK` であれば、日次成績レポートを生成する。
+
+```cmd
+python -m kabusys.run_performance_report --type daily --save
+```
+
+レポートは `artifacts/performance/live/daily/{date}/report.md` に保存される。
+
 ### 夜
 
 - `data_update` 成功
