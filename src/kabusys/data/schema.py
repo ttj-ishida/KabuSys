@@ -312,12 +312,13 @@ CREATE TABLE IF NOT EXISTS earnings_calendar (
 
 _PORTFOLIO_PERFORMANCE = """
 CREATE TABLE IF NOT EXISTS portfolio_performance (
-    date            DATE        NOT NULL PRIMARY KEY,
+    date            DATE          NOT NULL,
+    env             VARCHAR       NOT NULL DEFAULT 'live',
     equity          DECIMAL(20,4) NOT NULL,
     cash            DECIMAL(20,4) NOT NULL DEFAULT 0,
     drawdown        DOUBLE,
     daily_return    DOUBLE,
-    env             VARCHAR     NOT NULL DEFAULT 'live'
+    PRIMARY KEY (date, env)
 )
 """
 

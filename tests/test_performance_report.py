@@ -25,12 +25,13 @@ def _make_conn(
     conn.execute(
         """
         CREATE TABLE portfolio_performance (
-            date         DATE          NOT NULL PRIMARY KEY,
+            date         DATE          NOT NULL,
+            env          VARCHAR       NOT NULL DEFAULT 'live',
             equity       DECIMAL(20,4) NOT NULL,
             cash         DECIMAL(20,4) NOT NULL DEFAULT 0,
             drawdown     DOUBLE,
             daily_return DOUBLE,
-            env          VARCHAR       NOT NULL DEFAULT 'live'
+            PRIMARY KEY (date, env)
         )
         """
     )
@@ -586,9 +587,9 @@ def test_cli_returns_1_when_no_data(tmp_path, monkeypatch):
     conn.execute(
         """
         CREATE TABLE portfolio_performance (
-            date DATE NOT NULL PRIMARY KEY, equity DECIMAL(20,4) NOT NULL,
-            cash DECIMAL(20,4) NOT NULL DEFAULT 0, drawdown DOUBLE,
-            daily_return DOUBLE, env VARCHAR NOT NULL DEFAULT 'live'
+            date DATE NOT NULL, env VARCHAR NOT NULL DEFAULT 'live',
+            equity DECIMAL(20,4) NOT NULL, cash DECIMAL(20,4) NOT NULL DEFAULT 0,
+            drawdown DOUBLE, daily_return DOUBLE, PRIMARY KEY (date, env)
         )
         """
     )
@@ -616,9 +617,9 @@ def test_cli_returns_0_when_data_exists(tmp_path, monkeypatch):
     conn.execute(
         """
         CREATE TABLE portfolio_performance (
-            date DATE NOT NULL PRIMARY KEY, equity DECIMAL(20,4) NOT NULL,
-            cash DECIMAL(20,4) NOT NULL DEFAULT 0, drawdown DOUBLE,
-            daily_return DOUBLE, env VARCHAR NOT NULL DEFAULT 'live'
+            date DATE NOT NULL, env VARCHAR NOT NULL DEFAULT 'live',
+            equity DECIMAL(20,4) NOT NULL, cash DECIMAL(20,4) NOT NULL DEFAULT 0,
+            drawdown DOUBLE, daily_return DOUBLE, PRIMARY KEY (date, env)
         )
         """
     )
@@ -637,3 +638,81 @@ def test_cli_returns_0_when_data_exists(tmp_path, monkeypatch):
     monkeypatch.setenv("DUCKDB_PATH", str(db_path))
     result = main(["--type", "daily", "--from", "2026-04-21", "--to", "2026-04-21"])
     assert result == 0
+
+
+# ---------------------------------------------------------------------------
+# Issue #221: portfolio_performance PRIMARY KEY (date, env)
+# ---------------------------------------------------------------------------
+
+from kabusys.data.schema import init_schema  # noqa: E402
+
+
+def _get_pk_columns(conn: duckdb.DuckDBPyConnection) -> list[str]:
+    row = conn.execute(
+        "SELECT constraint_column_names FROM duckdb_constraints()"
+        " WHERE table_name = 'portfolio_performance'"
+        " AND constraint_type = 'PRIMARY KEY'"
+    ).fetchone()
+    return list(row[0]) if row else []
+
+
+def test_init_schema_creates_composite_pk():
+    """init_schema が PRIMARY KEY (date, env) でテーブルを作成する。"""
+    conn = init_schema(":memory:")
+    assert _get_pk_columns(conn) == ["date", "env"]
+
+
+def test_same_date_different_envs_can_coexist():
+    """同一日付で live / paper_trading の2行を共存できる。"""
+    conn = _make_conn(
+        {"date": "2026-04-21", "equity": 5_000_000.0, "env": "live"},
+        {"date": "2026-04-21", "equity": 4_800_000.0, "env": "paper_trading"},
+    )
+    rows = conn.execute(
+        "SELECT env, equity FROM portfolio_performance WHERE date = '2026-04-21'"
+        " ORDER BY env"
+    ).fetchall()
+    assert len(rows) == 2
+    assert rows[0] == ("live", 5_000_000)
+    assert rows[1] == ("paper_trading", 4_800_000)
+
+
+def test_collect_daily_rows_env_isolation_mixed_data():
+    """live と paper_trading が混在しても env で正しく絞り込む。"""
+    conn = _make_conn(
+        {
+            "date": "2026-04-21",
+            "equity": 5_000_000.0,
+            "daily_return": 0.01,
+            "env": "live",
+        },
+        {
+            "date": "2026-04-22",
+            "equity": 5_050_000.0,
+            "daily_return": 0.01,
+            "env": "live",
+        },
+        {
+            "date": "2026-04-21",
+            "equity": 4_800_000.0,
+            "daily_return": -0.02,
+            "env": "paper_trading",
+        },
+        {
+            "date": "2026-04-22",
+            "equity": 4_750_000.0,
+            "daily_return": -0.01,
+            "env": "paper_trading",
+        },
+    )
+    live_rows = collect_daily_rows(conn, "live", date(2026, 4, 21), date(2026, 4, 22))
+    paper_rows = collect_daily_rows(
+        conn, "paper_trading", date(2026, 4, 21), date(2026, 4, 22)
+    )
+
+    assert len(live_rows) == 2
+    assert all(r.env == "live" for r in live_rows)
+    assert len(paper_rows) == 2
+    assert all(r.env == "paper_trading" for r in paper_rows)
+    assert live_rows[0].equity == 5_000_000
+    assert paper_rows[0].equity == 4_800_000
