@@ -188,3 +188,79 @@ class TestGenerateSignalsScope:
             "SELECT code FROM signals WHERE date = ? AND side = 'buy'", [SCOPE_DATE]
         ).fetchall()
         assert len(rows) == 0
+
+
+class TestRunBacktestScope:
+    def test_run_backtest_has_backtest_scope_param(self):
+        """`run_backtest()` が `backtest_scope` 引数を持つ。"""
+        import inspect
+        from kabusys.backtest.engine import run_backtest
+
+        sig = inspect.signature(run_backtest)
+        assert "backtest_scope" in sig.parameters
+
+    def test_run_backtest_returns_default_scope_mode(self):
+        """`backtest_scope=None` → BacktestResult.scope_mode == 'default_universe'。"""
+        from kabusys.backtest.engine import run_backtest
+        from kabusys.data.schema import init_schema
+
+        conn = init_schema(":memory:")
+        try:
+            result = run_backtest(
+                conn,
+                start_date=date(2025, 1, 6),
+                end_date=date(2025, 1, 7),
+                backtest_scope=None,
+            )
+        finally:
+            conn.close()
+        assert result.scope_mode == "default_universe"
+        assert result.scope_codes is None
+        assert result.excluded_codes == []
+
+    def test_run_backtest_manual_scope_sets_metadata(self):
+        """`backtest_scope.mode='manual_codes'` → BacktestResult にスコープ情報が入る。"""
+        from kabusys.backtest.engine import run_backtest, BacktestScope
+        from kabusys.data.schema import init_schema
+
+        conn = init_schema(":memory:")
+        scope = BacktestScope(mode="manual_codes", codes=["1234", "5678"])
+        try:
+            result = run_backtest(
+                conn,
+                start_date=date(2025, 1, 6),
+                end_date=date(2025, 1, 7),
+                backtest_scope=scope,
+            )
+        finally:
+            conn.close()
+        assert result.scope_mode == "manual_codes"
+        assert result.scope_codes == ["1234", "5678"]
+        # DB が空なので全コードが除外される
+        assert set(result.excluded_codes) == {"1234", "5678"}
+        assert result.effective_universe_size == 0
+
+
+class TestCLIScope:
+    def _get_help_text(self) -> str:
+        """kabusys.backtest.run の --help 出力を取得する。"""
+        from kabusys.backtest import run as run_module
+
+        out = io.StringIO()
+        with contextlib.suppress(SystemExit):
+            with contextlib.redirect_stdout(out):
+                with patch("sys.argv", ["prog", "--help"]):
+                    run_module.main()
+        return out.getvalue()
+
+    def test_cli_has_scope_mode_arg(self):
+        """`--scope-mode` 引数が CLI に登録されている。"""
+        assert "--scope-mode" in self._get_help_text()
+
+    def test_cli_has_codes_arg(self):
+        """`--codes` 引数が CLI に登録されている。"""
+        assert "--codes" in self._get_help_text()
+
+    def test_cli_has_no_preserve_universe_filters_arg(self):
+        """`--no-preserve-universe-filters` 引数が CLI に登録されている。"""
+        assert "--no-preserve-universe-filters" in self._get_help_text()

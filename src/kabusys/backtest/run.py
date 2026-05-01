@@ -90,6 +90,24 @@ def main() -> None:
         default=100,
         help="Lot size (shares per lot) for Japanese stocks [default: 100]",
     )
+    parser.add_argument(
+        "--scope-mode",
+        default="default_universe",
+        choices=["default_universe", "manual_codes"],
+        help="Backtest scope mode [default: default_universe]",
+    )
+    parser.add_argument(
+        "--codes",
+        nargs="+",
+        default=None,
+        help="Stock codes for manual_codes scope (e.g. --codes 7203 9984)",
+    )
+    parser.add_argument(
+        "--no-preserve-universe-filters",
+        action="store_true",
+        default=False,
+        help="Disable universe quality filters for scope codes (diagnostic mode)",
+    )
     parser.add_argument("--db", required=True, help="DuckDB file path")
     parser.add_argument(
         "--output-format",
@@ -116,7 +134,7 @@ def main() -> None:
         sys.exit(1)
 
     from kabusys.data.schema import init_schema
-    from kabusys.backtest.engine import run_backtest
+    from kabusys.backtest.engine import run_backtest, BacktestScope
     from kabusys.backtest.report import (
         build_report,
         format_cli_summary,
@@ -127,6 +145,17 @@ def main() -> None:
 
     conn = init_schema(args.db)
     try:
+        scope: BacktestScope | None = None
+        if args.scope_mode == "manual_codes":
+            if not args.codes:
+                logger.error("--codes は --scope-mode=manual_codes のとき必須です")
+                sys.exit(1)
+            scope = BacktestScope(
+                mode="manual_codes",
+                codes=args.codes,
+                preserve_universe_filters=not args.no_preserve_universe_filters,
+            )
+
         result = run_backtest(
             conn=conn,
             start_date=start_date,
@@ -141,6 +170,7 @@ def main() -> None:
             risk_pct=args.risk_pct,
             stop_loss_pct=args.stop_loss_pct,
             lot_size=args.lot_size,
+            backtest_scope=scope,
         )
     finally:
         conn.close()

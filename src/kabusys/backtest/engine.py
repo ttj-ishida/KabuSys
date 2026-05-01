@@ -379,6 +379,7 @@ def run_backtest(
     stop_loss_pct: float = 0.08,
     lot_size: int = 100,
     event_dates: dict[date, str] | None = None,
+    backtest_scope: BacktestScope | None = None,
 ) -> BacktestResult:
     """バックテストを実行し結果を返す。
 
@@ -426,6 +427,20 @@ def run_backtest(
     if lot_size < 1:
         raise ValueError(f"lot_size は 1 以上を指定してください: {lot_size}")
 
+    # try ブロック外でも参照できるようデフォルト初期化
+    _scope_mode: Literal["default_universe", "manual_codes"] = (
+        backtest_scope.mode if backtest_scope else "default_universe"
+    )
+    _scope_codes: list[str] | None = (
+        backtest_scope.codes if backtest_scope and backtest_scope.codes else None
+    )
+    _preserve_filters: bool = (
+        backtest_scope.preserve_universe_filters if backtest_scope else True
+    )
+    _effective_universe_size: int | None = None
+    _excluded_codes: list[str] = []
+    _excluded_reasons: dict[str, str] = {}
+
     from kabusys.data.calendar_management import get_trading_days
     from kabusys.strategy.signal_generator import generate_signals
 
@@ -445,6 +460,30 @@ def run_backtest(
             initial_cash,
             allocation_method,
         )
+
+        # スコープメタデータを計算（manual_codes モード時）
+        if _scope_mode == "manual_codes" and _scope_codes:
+            placeholders = ", ".join(["?" for _ in _scope_codes])
+            available_rows = bt_conn.execute(
+                f"SELECT DISTINCT code FROM features WHERE date >= ? AND date <= ? AND code IN ({placeholders})",
+                [start_date, end_date, *_scope_codes],
+            ).fetchall()
+            available: set[str] = {r[0] for r in available_rows}
+            _effective_universe_size = len(available)
+            for code in _scope_codes:
+                if code not in available:
+                    _excluded_codes.append(code)
+                    _excluded_reasons[code] = (
+                        "not in features (universe filter)"
+                        if _preserve_filters
+                        else "not in features (data not available)"
+                    )
+            if _excluded_codes:
+                logger.warning(
+                    "run_backtest: scope で指定された %d 件が features に存在しません: %s",
+                    len(_excluded_codes),
+                    _excluded_codes,
+                )
 
         # sector_map はバックテスト開始前に一度だけ取得（銘柄のセクターは日次変化しない）
         sector_map = _fetch_sector_map(bt_conn)
@@ -475,7 +514,10 @@ def run_backtest(
 
             # Step 4: 翌日用シグナル生成（bt_conn の positions を読んで SELL 判定）
             generate_signals(
-                bt_conn, target_date=trading_day, event_dates=event_dates or {}
+                bt_conn,
+                target_date=trading_day,
+                event_dates=event_dates or {},
+                scope=backtest_scope,
             )
 
             # Step 5: ポートフォリオ構築（Phase 5 モジュール使用）
@@ -564,4 +606,10 @@ def run_backtest(
         history=simulator.history,
         trades=simulator.trades,
         metrics=metrics,
+        scope_mode=_scope_mode,
+        scope_codes=_scope_codes,
+        preserve_universe_filters=_preserve_filters,
+        effective_universe_size=_effective_universe_size,
+        excluded_codes=_excluded_codes,
+        excluded_reasons=_excluded_reasons,
     )
