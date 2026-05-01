@@ -8,8 +8,9 @@ BacktestFramework.md Section 6〜8 に従い、全体ループと補助関数を
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
+from typing import Literal
 
 import duckdb
 
@@ -28,12 +29,27 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class BacktestScope:
+    """バックテスト対象スコープの指定。"""
+
+    mode: Literal["default_universe", "manual_codes"]
+    codes: list[str] | None = None
+    preserve_universe_filters: bool = True
+
+
+@dataclass
 class BacktestResult:
     """run_backtest() の戻り値。"""
 
     history: list[DailySnapshot]
     trades: list[TradeRecord]
     metrics: BacktestMetrics
+    scope_mode: str = "default_universe"
+    scope_codes: list[str] | None = None
+    preserve_universe_filters: bool = True
+    effective_universe_size: int | None = None
+    excluded_codes: list[str] = field(default_factory=list)
+    excluded_reasons: dict[str, str] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
