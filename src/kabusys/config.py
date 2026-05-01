@@ -167,6 +167,14 @@ class Settings:
     def line_user_id(self) -> str:
         return os.environ.get("LINE_USER_ID", "")
 
+    @property
+    def line_notify_enabled(self) -> bool:
+        return os.environ.get("LINE_NOTIFY_ENABLED", "true").lower() not in (
+            "false",
+            "0",
+            "no",
+        )
+
     # --- データベース ---
     @property
     def duckdb_path(self) -> Path:
