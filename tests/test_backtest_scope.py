@@ -262,6 +262,27 @@ class TestRunBacktestScope:
         assert result.excluded_codes == ["1234"]
         assert "data not available" in result.excluded_reasons.get("1234", "")
 
+    def test_run_backtest_deduplicates_codes(self):
+        """重複コードが含まれる場合、排除結果に重複が発生しない。"""
+        from kabusys.backtest.engine import run_backtest, BacktestScope
+        from kabusys.data.schema import init_schema
+
+        conn = init_schema(":memory:")
+        scope = BacktestScope(mode="manual_codes", codes=["1234", "1234", "5678"])
+        try:
+            result = run_backtest(
+                conn,
+                start_date=date(2025, 1, 6),
+                end_date=date(2025, 1, 7),
+                backtest_scope=scope,
+            )
+        finally:
+            conn.close()
+        # 重複排除後は ["1234", "5678"] の 2 件のみ
+        assert result.excluded_codes.count("1234") == 1
+        assert result.excluded_codes.count("5678") == 1
+        assert len(result.excluded_codes) == 2
+
 
 class TestCLIScope:
     def _get_help_text(self) -> str:

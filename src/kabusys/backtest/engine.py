@@ -34,6 +34,11 @@ class BacktestScope:
 
     mode: Literal["default_universe", "manual_codes"]
     codes: list[str] | None = None
+    # True（デフォルト）: features に存在しない銘柄の excluded_reasons を
+    # "not in features (universe filter)" と記録する。
+    # False: "not in features (data not available)" と記録する。
+    # 注意: このフラグは excluded_reasons のメッセージ表現のみを切り替える診断用オプションであり、
+    # 実際のスコープフィルタリング（features ベースの銘柄絞り込み）の動作は変わらない。
     preserve_universe_filters: bool = True
 
 
@@ -440,7 +445,9 @@ def run_backtest(
     )
     _scope_codes: list[str] | None = None
     if backtest_scope is not None and backtest_scope.mode == "manual_codes":
-        _scope_codes = backtest_scope.codes if backtest_scope.codes is not None else []
+        raw = backtest_scope.codes if backtest_scope.codes is not None else []
+        # 順序を保持しつつ重複を排除する
+        _scope_codes = list(dict.fromkeys(raw))
     _preserve_filters: bool = (
         backtest_scope.preserve_universe_filters if backtest_scope else True
     )

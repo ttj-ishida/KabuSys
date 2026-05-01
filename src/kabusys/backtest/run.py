@@ -106,7 +106,13 @@ def main() -> None:
         "--no-preserve-universe-filters",
         action="store_true",
         default=False,
-        help="Disable universe quality filters for scope codes (diagnostic mode)",
+        help=(
+            "Diagnostic flag: changes how excluded_reasons are reported for codes "
+            "not found in features. When set, missing codes are labeled "
+            "'data not available' instead of 'universe filter'. "
+            "Does NOT change which codes are actually included in the backtest — "
+            "scope filtering is always features-based regardless of this flag."
+        ),
     )
     parser.add_argument("--db", required=True, help="DuckDB file path")
     parser.add_argument(
