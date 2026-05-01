@@ -244,13 +244,15 @@ Bulk API からのファイル単位の処理状態を管理する。再実行�
 
 # 7. ニュースデータ
 
+取得元: Yahoo News（RSS）。補助ニュース源として使用し、売買判断の主役にはしない。シグナルへの影響は AI スコア経由で最大 10% 以内に限定する。
+
 ## news_articles
 
   column     type        description
   ---------- ----------- --------------
   id         string      記事ID
   datetime   timestamp   記事時刻
-  source     string      ニュース媒体
+  source     string      ニュース媒体（例: Yahoo News）
   title      string      タイトル
   content    text        本文
   url        string      記事URL
