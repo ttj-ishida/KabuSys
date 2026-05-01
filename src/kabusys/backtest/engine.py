@@ -47,8 +47,11 @@ class BacktestResult:
     scope_mode: Literal["default_universe", "manual_codes"] = "default_universe"
     scope_codes: list[str] | None = None
     preserve_universe_filters: bool = True
+    # バックテスト期間中に少なくとも1日 features に存在したコード数。全日存在することは保証しない。
     effective_universe_size: int | None = None
+    # scope_codes のうち features に存在しなかったコード（scope_codes の入力順）
     excluded_codes: list[str] = field(default_factory=list)
+    # excluded_codes の各コードについての除外理由（キー：コード、値：理由文字列）
     excluded_reasons: dict[str, str] = field(default_factory=dict)
 
 

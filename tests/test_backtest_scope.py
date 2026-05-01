@@ -240,6 +240,27 @@ class TestRunBacktestScope:
         assert set(result.excluded_codes) == {"1234", "5678"}
         assert result.effective_universe_size == 0
 
+    def test_run_backtest_scope_preserve_false_reason_string(self):
+        """`preserve_universe_filters=False` → 除外理由が 'data not available' になる。"""
+        from kabusys.backtest.engine import run_backtest, BacktestScope
+        from kabusys.data.schema import init_schema
+
+        conn = init_schema(":memory:")
+        scope = BacktestScope(
+            mode="manual_codes", codes=["1234"], preserve_universe_filters=False
+        )
+        try:
+            result = run_backtest(
+                conn,
+                start_date=date(2025, 1, 6),
+                end_date=date(2025, 1, 7),
+                backtest_scope=scope,
+            )
+        finally:
+            conn.close()
+        assert result.excluded_codes == ["1234"]
+        assert "data not available" in result.excluded_reasons.get("1234", "")
+
 
 class TestCLIScope:
     def _get_help_text(self) -> str:
