@@ -55,8 +55,8 @@ def test_parse_env_line_basic_cases(monkeypatch):
 
     # quoted single with escapes
     assert config._parse_env_line(r"Q='va\'lue'") == ("Q", "va'lue")
-    # quoted double with escape
-    assert config._parse_env_line(r'P="line\n"') == ("P", "line\n")
+    # quoted double with backslash escape: \n → literal 'n' (no sequence expansion)
+    assert config._parse_env_line(r'P="line\n"') == ("P", "linen")
 
     # inline comment for unquoted where '#' preceded by space
     assert config._parse_env_line("X=foo # comment") == ("X", "foo")
