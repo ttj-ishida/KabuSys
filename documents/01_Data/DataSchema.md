@@ -254,7 +254,7 @@ Bulk API からのファイル単位の処理状態を管理する。再実行�
   datetime   timestamp   記事時刻
   source     string      ニュース媒体（例: Yahoo News）
   title      string      タイトル
-  content    text        本文
+  content    text        本文（RSS 要約。提供元規約に従い全文は保存しない）
   url        string      記事URL
 
 ------------------------------------------------------------------------
