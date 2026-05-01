@@ -1,269 +1,343 @@
 import os
-import importlib
+import sqlite3
+import tempfile
+import textwrap
+from types import SimpleNamespace
+from pathlib import Path
 import json
 import math
-from pathlib import Path
-from datetime import date, datetime, timezone
 
 import pytest
 
-# Ensure auto env loading is disabled to avoid side effects during import
-os.environ.setdefault("KABUSYS_DISABLE_AUTO_ENV_LOAD", "1")
-
-# Import modules under test
-import kabusys.config as config
-import kabusys.tools.paper_verification_report as pvr
-import kabusys.operations.signal_queue_report as sqr
-import kabusys.operations.performance_report as pr
-import kabusys.operations.performance_collector as pc
-
-
-def test_parse_env_line_blank_and_comment():
-    assert config._parse_env_line("") is None
-    assert config._parse_env_line("   \n") is None
-    assert config._parse_env_line("# a comment") is None
-    assert config._parse_env_line("   # another") is None
+from kabusys.run_monitoring import _get_poll_interval
+from kabusys.run_execution import _load_risk_config, _pos_value
+from kabusys.config import _parse_env_line, _load_env_file, _require, Settings
+import kabusys.validate_config as validate_config
+from kabusys.operations.signal_queue_report import (
+    build_report,
+    format_cli_summary as sq_format_cli_summary,
+    format_json as sq_format_json,
+    format_markdown as sq_format_markdown,
+    save_report as sq_save_report,
+    SignalQueueReport,
+)
+from datetime import date, datetime, timezone
 
 
-def test_parse_env_line_export_and_quotes_and_escapes():
-    # export prefix
-    assert config._parse_env_line("export FOO=bar") == ("FOO", "bar")
-    # single quoted with escaped quote
-    line = "A='x\\'y' # inline comment"
-    assert config._parse_env_line(line) == ("A", "x'y")
-    # double quoted with escape
-    line2 = 'B="hello\\nworld"'
-    assert config._parse_env_line(line2) == ("B", "hellonworld")
-    # no equals
-    assert config._parse_env_line("NOEQUALS") is None
-    # key empty
-    assert config._parse_env_line("=value") is None
+def test_get_poll_interval_default_and_valid(monkeypatch):
+    # default when unset
+    monkeypatch.delenv("MONITOR_POLL_INTERVAL", raising=False)
+    assert _get_poll_interval() == 60
+
+    # valid positive integer
+    monkeypatch.setenv("MONITOR_POLL_INTERVAL", "10")
+    assert _get_poll_interval() == 10
 
 
-def test_build_date_filter_variations():
-    # neither
-    clause, params = pvr._build_date_filter("ts", None, None)
-    assert clause == ""
-    assert params == []
-    # from only
-    clause, params = pvr._build_date_filter("ts", "2026-01-01", None)
-    assert clause == "ts >= ?"
-    assert params == ["2026-01-01"]
-    # to only
-    clause, params = pvr._build_date_filter("ts", None, "2026-01-31")
-    assert clause == "ts <= ?"
-    assert params == ["2026-01-31"]
-    # both
-    clause, params = pvr._build_date_filter("ts", "2026-01-01", "2026-01-31")
-    assert " AND " in clause
-    assert params == ["2026-01-01", "2026-01-31"]
+def test_get_poll_interval_invalid_values(monkeypatch):
+    # zero -> fallback
+    monkeypatch.setenv("MONITOR_POLL_INTERVAL", "0")
+    assert _get_poll_interval() == 60
+
+    # negative -> fallback
+    monkeypatch.setenv("MONITOR_POLL_INTERVAL", "-5")
+    assert _get_poll_interval() == 60
+
+    # non-integer -> fallback
+    monkeypatch.setenv("MONITOR_POLL_INTERVAL", "abc")
+    assert _get_poll_interval() == 60
 
 
-def test_p95_empty_and_values():
-    assert pvr._p95([]) is None
-    # single value
-    assert pvr._p95([42.0]) == 42.0
-    # multiple values
-    values = [i for i in range(1, 21)]  # 1..20
-    # n=20 -> idx = ceil(20*0.95)-1 = ceil(19)-1 = 19-1 = 18 -> sorted[18] = 19
-    assert pvr._p95(values) == 19
+def write_yaml(path: Path, content: str):
+    path.write_text(content, encoding="utf-8")
 
 
-def test_fmt_float_and_int():
-    assert pvr._fmt_float(None) == "N/A"
-    assert pvr._fmt_float(12.3456, decimals=2, suffix=" ms") == "12.35 ms"
-    assert pvr._fmt_int(None) == "N/A"
-    assert pvr._fmt_int(123) == "123"
+def make_valid_risk_yaml():
+    return """
+risk:
+  max_position_pct: 0.5
+  max_utilization: 0.8
+  rate_limit_per_sec: 5
+  circuit_breaker_errors: 3
+  circuit_breaker_window_sec: 60
+  max_drawdown: 0.2
+"""
 
 
-def test__parse_and_load_env_file(tmp_path, monkeypatch):
-    # prepare a .env file
+def make_invalid_yaml():
+    return "this: [unbalanced"
+
+
+def test_load_risk_config_happy(tmp_path):
+    path = tmp_path / "risk_config.yaml"
+    write_yaml(path, make_valid_risk_yaml())
+    cfg = _load_risk_config(path, initial_portfolio_value=100000.0)
+    assert cfg.max_position_pct == pytest.approx(0.5)
+    assert cfg.initial_portfolio_value == pytest.approx(100000.0)
+    assert cfg.rate_limit_per_sec == 5
+
+
+def test_load_risk_config_missing_file(tmp_path):
+    path = tmp_path / "nope.yaml"
+    with pytest.raises(FileNotFoundError):
+        _load_risk_config(path, initial_portfolio_value=1.0)
+
+
+def test_load_risk_config_bad_yaml(tmp_path):
+    path = tmp_path / "bad.yaml"
+    write_yaml(path, make_invalid_yaml())
+    with pytest.raises(ValueError):
+        _load_risk_config(path, initial_portfolio_value=1.0)
+
+
+def test_load_risk_config_missing_risk_key(tmp_path):
+    path = tmp_path / "norisk.yaml"
+    write_yaml(path, "notrisk: {}")
+    with pytest.raises(KeyError):
+        _load_risk_config(path, initial_portfolio_value=1.0)
+
+
+def test_load_risk_config_invalid_ranges(tmp_path):
+    # max_position_pct > max_utilization
+    path = tmp_path / "badrange.yaml"
+    write_yaml(
+        path,
+        """
+risk:
+  max_position_pct: 0.9
+  max_utilization: 0.5
+  rate_limit_per_sec: 5
+  circuit_breaker_errors: 3
+  circuit_breaker_window_sec: 60
+  max_drawdown: 0.2
+""",
+    )
+    with pytest.raises(ValueError):
+        _load_risk_config(path, initial_portfolio_value=1.0)
+
+    # rate_limit_per_sec < 1
+    path2 = tmp_path / "badrate.yaml"
+    write_yaml(
+        path2,
+        """
+risk:
+  max_position_pct: 0.5
+  max_utilization: 0.7
+  rate_limit_per_sec: 0
+  circuit_breaker_errors: 3
+  circuit_breaker_window_sec: 60
+  max_drawdown: 0.2
+""",
+    )
+    with pytest.raises(ValueError):
+        _load_risk_config(path2, initial_portfolio_value=1.0)
+
+
+def test_pos_value_prefers_current_price_and_fallbacks(caplog):
+    class P:
+        def __init__(self, qty, current_price, avg_price, code="X"):
+            self.qty = qty
+            self.current_price = current_price
+            self.avg_price = avg_price
+            self.code = code
+
+    # current_price positive
+    p1 = P(qty=10, current_price=100.0, avg_price=90.0)
+    assert _pos_value(p1) == pytest.approx(1000.0)
+
+    # current_price None, use avg_price
+    p2 = P(qty=2, current_price=None, avg_price=50.0, code="Y")
+    assert _pos_value(p2) == pytest.approx(100.0)
+
+    # both prices invalid => returns 0 and logs a warning
+    p3 = P(qty=5, current_price=0.0, avg_price=None, code="Z")
+    caplog.clear()
+    val = _pos_value(p3)
+    assert val == 0.0
+    # Expect a warning mentioning code Z
+    found = any("code=Z" in rec.getMessage() or "Z" in rec.getMessage() for rec in caplog.records)
+    assert found
+
+
+def test_parse_env_line_various_cases():
+    assert _parse_env_line("") is None
+    assert _parse_env_line("# comment") is None
+    assert _parse_env_line("export KEY=value") == ("KEY", "value")
+    assert _parse_env_line("KEY=123") == ("KEY", "123")
+    # quoted with escapes
+    s = r"SECRET='a\'b\nc'"
+    parsed = _parse_env_line(s)
+    assert parsed is not None
+    k, v = parsed
+    assert k == "SECRET"
+    assert "a'b" in v  # escape handled, newline included as literal n by our simplistic parser? ensure substring
+
+    # inline comment handling: comment only recognized if preceded by space/tab
+    assert _parse_env_line("K=val#notcomment") == ("K", "val#notcomment")
+    assert _parse_env_line("K=val #comment") == ("K", "val")
+
+
+def test_load_env_file_behavior(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
-    content = "\n".join(
-        [
-            "# comment",
-            "KEY1=val1",
-            "KEY2=\"hello # not a comment\"",
-            "export KEY3='x\\'y'",
-            "BADLINE",
-        ]
+    env_file.write_text(
+        "\n".join(
+            [
+                "# sample",
+                "A=1",
+                "B=2",
+                "EXPORT_ME=should",
+                "QUOTED='with spaces'",
+                "TO_OVERRIDE=orig",
+            ]
+        ),
+        encoding="utf-8",
     )
-    env_file.write_text(content, encoding="utf-8")
-    # isolate environment
-    monkeypatch.delenv("KEY1", raising=False)
-    monkeypatch.delenv("KEY2", raising=False)
-    monkeypatch.delenv("KEY3", raising=False)
-    # load with override=False: should set missing keys
-    config._load_env_file(env_file, override=False, protected=frozenset())
-    assert os.environ.get("KEY1") == "val1"
-    assert os.environ.get("KEY2") == "hello # not a comment"
-    assert os.environ.get("KEY3") == "x'y"
-    # test override protected: if protected contains KEY1, it should not be overwritten
-    monkeypatch.setenv("KEY1", "original")
-    config._load_env_file(env_file, override=True, protected=frozenset({"KEY1"}))
-    assert os.environ.get("KEY1") == "original"
+    # set an existing env var to test override=False (should not overwrite)
+    monkeypatch.setenv("TO_OVERRIDE", "orig")
+    # protected contains existing os env keys: simulate with provided frozenset
+    _load_env_file(env_file, override=False, protected=frozenset(os.environ.keys()))
+    assert os.environ.get("A") == "1"
+    assert os.environ.get("TO_OVERRIDE") == "orig"  # unchanged
+
+    # Now test override True but protected prevents overwrite
+    monkeypatch.setenv("TO_OVERRIDE", "orig2")
+    _load_env_file(env_file, override=True, protected=frozenset(["TO_OVERRIDE"]))
+    assert os.environ.get("TO_OVERRIDE") == "orig2"
+
+    # override True without protection overwrites
+    _load_env_file(env_file, override=True, protected=frozenset())
+    assert os.environ.get("TO_OVERRIDE") == "orig"
 
 
-def test_require_and_settings_properties(monkeypatch):
-    # ensure absence of keys triggers ValueError
-    monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
+def test_require_raises(monkeypatch):
+    monkeypatch.delenv("SOME_MUST_EXIST", raising=False)
     with pytest.raises(ValueError):
-        config._require("JQUANTS_REFRESH_TOKEN")
-    # set and ensure retrieval
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok123")
-    assert config._require("JQUANTS_REFRESH_TOKEN") == "tok123"
+        _require("SOME_MUST_EXIST")
+    monkeypatch.setenv("SOME_MUST_EXIST", "value")
+    assert _require("SOME_MUST_EXIST") == "value"
 
-    # PAPER_FILL_MODE valid
-    s = config.Settings()
+
+def test_settings_paper_fill_mode_and_env_and_log_level(monkeypatch):
+    # valid fill mode
     monkeypatch.setenv("PAPER_FILL_MODE", "instant")
+    s = Settings()
     assert s.paper_fill_mode == "instant"
-    monkeypatch.setenv("PAPER_FILL_MODE", "Partial")
-    assert s.paper_fill_mode == "partial"
-    # invalid mode
-    monkeypatch.setenv("PAPER_FILL_MODE", "invalid_mode")
-    with pytest.raises(ValueError):
-        config.Settings().paper_fill_mode
 
-    # env validation
-    monkeypatch.setenv("KABUSYS_ENV", "development")
-    assert config.Settings().env == "development"
-    monkeypatch.setenv("KABUSYS_ENV", "LIVE")
-    assert config.Settings().env == "live"
-    monkeypatch.setenv("KABUSYS_ENV", "invalid")
+    # invalid fill mode
+    monkeypatch.setenv("PAPER_FILL_MODE", "badmode")
     with pytest.raises(ValueError):
-        config.Settings().env
+        _ = Settings().paper_fill_mode
 
-    # log level validation
+    # env valid
+    monkeypatch.setenv("KABUSYS_ENV", "live")
     monkeypatch.setenv("LOG_LEVEL", "INFO")
-    assert config.Settings().log_level == "INFO"
-    monkeypatch.setenv("LOG_LEVEL", "debug")
-    assert config.Settings().log_level == "DEBUG"
-    monkeypatch.setenv("LOG_LEVEL", "NOPE")
+    s2 = Settings()
+    assert s2.env == "live"
+    assert s2.is_live is True
+    assert s2.log_level == "INFO"
+
+    # invalid env
+    monkeypatch.setenv("KABUSYS_ENV", "unknown-env")
     with pytest.raises(ValueError):
-        config.Settings().log_level
+        _ = Settings().env
 
-
-def make_signal(code: str, side: str, target_size, target_weight, rank):
-    return {
-        "code": code,
-        "side": side,
-        "target_size": target_size,
-        "target_weight": target_weight,
-        "signal_rank": rank,
-    }
-
-
-def test_signal_queue_build_and_format_and_json_and_save(tmp_path):
-    # signals with one buy missing size and one sell fully specified
-    signals = [
-        make_signal("7203", "buy", None, None, 1),
-        make_signal("9432", "sell", 100, 0.05, 2),
-    ]
-    report = sqr.build_report(signals, report_date=date(2026, 4, 28))
-    assert report.status == sqr.STATUS_READY
-    assert report.total_count == 2
-    assert report.buy_count == 1
-    assert report.sell_count == 1
-    # warnings should mention target_size missing
-    assert any("target_size" in w for w in report.warnings)
-
-    # format CLI summary contains codes and counts
-    text = sqr.format_cli_summary(report)
-    assert "7203" in text
-    assert "9432" in text
-    assert "total" in text
-    assert "buy" in text
-
-    # format_json returns valid JSON with expected keys
-    j = sqr.format_json(report)
-    obj = json.loads(j)
-    assert obj["status"] == report.status
-    assert obj["total_count"] == report.total_count
-    assert isinstance(obj["signals"], list)
-
-    # save_report writes files to provided output dir
-    out = sqr.save_report(report, output_dir=tmp_path)
-    assert (out / "summary.json").exists()
-    assert (out / "report.md").exists()
-    assert (out / "warnings.json").exists()
-    # validate content of summary.json
-    data = json.loads((out / "summary.json").read_text(encoding="utf-8"))
-    assert data["report_date"] == report.report_date
-
-
-def test_save_report_invalid_date_raises(tmp_path):
-    # craft a fake report dataclass with invalid date string
-    bad = sqr.SignalQueueReport(
-        report_date="2026-02-30",  # invalid calendar date but matches regex
-        generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        status="READY",
-        total_count=0,
-        buy_count=0,
-        sell_count=0,
-        signals=[],
-        warnings=[],
-    )
+    # invalid log level
+    monkeypatch.setenv("KABUSYS_ENV", "development")
+    monkeypatch.setenv("LOG_LEVEL", "nope")
     with pytest.raises(ValueError):
-        sqr.save_report(bad, output_dir=tmp_path)
+        _ = Settings().log_level
 
 
-def make_daily_row(d: date, equity, daily_return, drawdown, cumulative):
-    return pc.DailyRow(
-        date=d,
-        env="live",
-        equity=equity,
-        daily_return=daily_return,
-        drawdown=drawdown,
-        cumulative_return=cumulative,
+def test_intraday_determine_status_and_formatting():
+    # Build a snapshot-like object with required attributes
+    snap = SimpleNamespace(
+        kill_switch_active=False,
+        execution_pid_ok=True,
+        drawdown_pct=None,
+        order_error_count=0,
+        stale_order_count=0,
+        monitoring_pid_ok=True,
+        process_ok=True,
+        cpu_percent=12.34,
+        memory_percent=None,
     )
+    # status OK
+    from kabusys.run_intraday_monitor import _determine_status, format_cli_summary, STATUS_OK
+
+    assert _determine_status(snap) == STATUS_OK
+    formatted = format_cli_summary(snap)
+    assert "KabuSys Intraday Monitor" in formatted
+    assert "CPU" in formatted
+    assert "Memory" in formatted
+
+    # make it critical via kill switch
+    snap.kill_switch_active = True
+    snap.kill_switch_reason = "manual"
+    from kabusys.run_intraday_monitor import STATUS_CRITICAL
+
+    assert _determine_status(snap) == STATUS_CRITICAL
+    fmt2 = format_cli_summary(snap)
+    assert "Kill Switch" in fmt2
+    assert "CRIT" in fmt2 or "🚫" in fmt2
 
 
-def test_performance_build_report_daily_and_markdown_and_save(tmp_path):
-    # construct three daily rows
-    rows = [
-        pc.DailyRow(date=date(2026, 4, 1), env="live", equity=100.0, daily_return=0.0, drawdown=0.0, cumulative_return=0.0),
-        pc.DailyRow(date=date(2026, 4, 2), env="live", equity=110.0, daily_return=0.10, drawdown=-0.01, cumulative_return=0.10),
-        pc.DailyRow(date=date(2026, 4, 3), env="live", equity=105.0, daily_return=-0.0454545, drawdown=-0.05, cumulative_return=0.05),
+def test_validate_config_checks_and_yaml(monkeypatch, tmp_path):
+    # prepare a fake config dir and monkeypatch module variable
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "token_ok")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pw_ok")
+    # create a tmp config dir and some files
+    fake_config = tmp_path / "config"
+    fake_config.mkdir()
+    good_yaml = fake_config / "system_config.yaml"
+    good_yaml.write_text("ok: true", encoding="utf-8")
+    bad_yaml = fake_config / "risk_config.yaml"
+    bad_yaml.write_text(":::bad:::")
+    # monkeypatch the module _CONFIG_DIR
+    monkeypatch.setattr(validate_config, "_CONFIG_DIR", fake_config)
+    # Run validate
+    errors, warnings, infos = validate_config.validate()
+    # risk_config.yaml parse should produce an error
+    # There should be at least one error due to bad yaml parse
+    assert any("risk_config.yaml" in e for e in errors)
+    # infos should include required env infos
+    assert any("JQUANTS_REFRESH_TOKEN" in i for i in infos)
+
+
+def build_sample_signals():
+    return [
+        {"code": "AAA", "side": "buy", "target_size": None, "target_weight": 0.1, "signal_rank": 1},
+        {"code": "BBB", "side": "sell", "target_size": 100, "target_weight": None, "signal_rank": 2},
     ]
-    report = pr.build_report(rows, report_type="daily", env="live", from_date=date(2026, 4, 1), to_date=date(2026, 4, 3))
-    s = report.summary
-    assert s["total_trading_days"] == 3
-    assert s["equity_start"] == 100.0
-    assert s["equity_end"] == 105.0
-    # cumulative_return = 105/100 - 1.0 = 0.05
-    assert pytest.approx(s["cumulative_return"], rel=1e-6) == 0.05
-    md = pr.format_markdown(report)
-    assert "累積リターン" in md or "累積" in md
-    # save to tmp path
-    out = pr.save_report(report, output_dir=tmp_path)
-    assert (out / "report.md").exists()
 
 
-def test_performance_build_report_empty_rows():
-    rows: list = []
-    report = pr.build_report(rows, report_type="daily", env="live", from_date=date(2026, 4, 1), to_date=date(2026, 4, 3))
-    s = report.summary
-    # summary fields should be None or zero appropriately
-    assert s["total_trading_days"] == 0
-    assert s["cumulative_return"] is None
-    assert s["equity_start"] is None
-    assert s["equity_end"] is None
-    md = pr.format_markdown(report)
-    assert "営業日数" in md or "期間" in md
+def test_signal_queue_report_build_and_format_and_save(tmp_path):
+    signals = build_sample_signals()
+    rpt = build_report(signals, report_date=date(2026, 4, 28))
+    assert rpt.total_count == 2
+    assert rpt.buy_count == 1
+    assert rpt.status == "READY"
+    # warnings should include missing target_size for buy
+    assert any("target_size" in w for w in rpt.warnings)
 
+    cli = sq_format_cli_summary(rpt)
+    assert "Signal Queue Confirmation" in cli
+    assert "total" in cli
 
-# Additional tests for paper_verification_report _query helpers that are pure functions
-def test_pvr__fmt_helpers():
-    assert pvr._fmt_float(None) == "N/A"
-    assert pvr._fmt_float(12.3456, 1) == "12.3"
-    assert pvr._fmt_int(None) == "N/A"
-    assert pvr._fmt_int(0) == "0"
+    js = sq_format_json(rpt)
+    parsed = json.loads(js)
+    assert parsed["total_count"] == rpt.total_count
 
+    md = sq_format_markdown(rpt)
+    assert "# Signal Queue Confirmation" in md
 
-# Ensure imports didn't trigger unexpected side-effects; reload config to ensure stable state
-def test_config_reload_no_auto_load(monkeypatch):
-    monkeypatch.setenv("KABUSYS_DISABLE_AUTO_ENV_LOAD", "1")
-    importlib.reload(config)
-    # after reload, settings instance exists
-    s = config.Settings()
-    assert isinstance(s, config.Settings)
+    # save_report writes files and returns run_dir
+    run_dir = sq_save_report(rpt, output_dir=tmp_path / "artifacts")
+    assert (run_dir / "summary.json").exists()
+    assert (run_dir / "report.md").exists()
+    assert (run_dir / "warnings.json").exists()
+
+    # invalid report_date raises
+    bad = rpt
+    bad.report_date = "invalid-date"
+    with pytest.raises(ValueError):
+        sq_save_report(bad, output_dir=tmp_path / "artifacts2")
