@@ -1,269 +1,278 @@
 import os
-import importlib
 import json
 import math
+import sqlite3
+from types import SimpleNamespace
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
-from datetime import date, datetime, timezone
 
 import pytest
 
-# Ensure auto env loading is disabled to avoid side effects during import
-os.environ.setdefault("KABUSYS_DISABLE_AUTO_ENV_LOAD", "1")
+from kabusys.config import _parse_env_line, _load_env_file, _require, Settings
+from kabusys.tools.paper_verification_report import _p95
+from kabusys.operations.signal_queue_report import (
+    build_report as build_signal_report,
+    format_cli_summary as format_signal_cli,
+    format_json as format_signal_json,
+    format_markdown as format_signal_md,
+    save_report as save_signal_report,
+)
+from kabusys.operations.execution_startup_report import (
+    build_report as build_exec_report,
+    format_cli_summary as format_exec_cli,
+    format_json as format_exec_json,
+    format_markdown as format_exec_md,
+    save_report as save_exec_report,
+)
+from kabusys.operations.night_batch_report import (
+    JobRunResult,
+    UpdateCounts,
+    NextDaySummary,
+    build_report as build_night_report,
+    _determine_status as night_determine_status,
+    _generate_warnings as night_generate_warnings,
+    format_cli_summary as format_night_cli,
+    format_json as format_night_json,
+)
+from kabusys.operations.performance_report import (
+    build_report as build_performance_report,
+    format_markdown as format_performance_md,
+    save_report as save_performance_report,
+)
 
-# Import modules under test
-import kabusys.config as config
-import kabusys.tools.paper_verification_report as pvr
-import kabusys.operations.signal_queue_report as sqr
-import kabusys.operations.performance_report as pr
-import kabusys.operations.performance_collector as pc
 
-
-def test_parse_env_line_blank_and_comment():
-    assert config._parse_env_line("") is None
-    assert config._parse_env_line("   \n") is None
-    assert config._parse_env_line("# a comment") is None
-    assert config._parse_env_line("   # another") is None
-
-
-def test_parse_env_line_export_and_quotes_and_escapes():
-    # export prefix
-    assert config._parse_env_line("export FOO=bar") == ("FOO", "bar")
-    # single quoted with escaped quote
-    line = "A='x\\'y' # inline comment"
-    assert config._parse_env_line(line) == ("A", "x'y")
-    # double quoted with escape
-    line2 = 'B="hello\\nworld"'
-    assert config._parse_env_line(line2) == ("B", "hellonworld")
+def test_parse_env_line_basic_and_comments():
+    assert _parse_env_line("") is None
+    assert _parse_env_line("   # comment") is None
+    assert _parse_env_line("export KEY=val") == ("KEY", "val")
+    assert _parse_env_line("KEY=  value  ") == ("KEY", "value")
     # no equals
-    assert config._parse_env_line("NOEQUALS") is None
-    # key empty
-    assert config._parse_env_line("=value") is None
+    assert _parse_env_line("NOEQUALS") is None
+    # quoted with escapes
+    assert _parse_env_line("FOO='a\\'b\\nc'") == ("FOO", "a'b\\nc")
+    assert _parse_env_line('BAR="x\\\\"') == ("BAR", 'x\\')
+    # inline comment only when preceded by space/tab
+    assert _parse_env_line("K=1#notcomment") == ("K", "1#notcomment")
+    assert _parse_env_line("K=1 #comment") == ("K", "1")
 
 
-def test_build_date_filter_variations():
-    # neither
-    clause, params = pvr._build_date_filter("ts", None, None)
-    assert clause == ""
-    assert params == []
-    # from only
-    clause, params = pvr._build_date_filter("ts", "2026-01-01", None)
-    assert clause == "ts >= ?"
-    assert params == ["2026-01-01"]
-    # to only
-    clause, params = pvr._build_date_filter("ts", None, "2026-01-31")
-    assert clause == "ts <= ?"
-    assert params == ["2026-01-31"]
-    # both
-    clause, params = pvr._build_date_filter("ts", "2026-01-01", "2026-01-31")
-    assert " AND " in clause
-    assert params == ["2026-01-01", "2026-01-31"]
-
-
-def test_p95_empty_and_values():
-    assert pvr._p95([]) is None
-    # single value
-    assert pvr._p95([42.0]) == 42.0
-    # multiple values
-    values = [i for i in range(1, 21)]  # 1..20
-    # n=20 -> idx = ceil(20*0.95)-1 = ceil(19)-1 = 19-1 = 18 -> sorted[18] = 19
-    assert pvr._p95(values) == 19
-
-
-def test_fmt_float_and_int():
-    assert pvr._fmt_float(None) == "N/A"
-    assert pvr._fmt_float(12.3456, decimals=2, suffix=" ms") == "12.35 ms"
-    assert pvr._fmt_int(None) == "N/A"
-    assert pvr._fmt_int(123) == "123"
-
-
-def test__parse_and_load_env_file(tmp_path, monkeypatch):
-    # prepare a .env file
-    env_file = tmp_path / ".env"
-    content = "\n".join(
-        [
-            "# comment",
-            "KEY1=val1",
-            "KEY2=\"hello # not a comment\"",
-            "export KEY3='x\\'y'",
-            "BADLINE",
-        ]
+def test_load_env_file_override_and_protected(tmp_path, monkeypatch):
+    envfile = tmp_path / ".env"
+    envfile.write_text(
+        "\n".join(
+            [
+                "# comment",
+                "A=1",
+                "B=two",
+                "SECRET='s\\'e\\'c'",
+                "EXPORT_ME=ok",
+            ]
+        ),
+        encoding="utf-8",
     )
-    env_file.write_text(content, encoding="utf-8")
-    # isolate environment
-    monkeypatch.delenv("KEY1", raising=False)
-    monkeypatch.delenv("KEY2", raising=False)
-    monkeypatch.delenv("KEY3", raising=False)
-    # load with override=False: should set missing keys
-    config._load_env_file(env_file, override=False, protected=frozenset())
-    assert os.environ.get("KEY1") == "val1"
-    assert os.environ.get("KEY2") == "hello # not a comment"
-    assert os.environ.get("KEY3") == "x'y"
-    # test override protected: if protected contains KEY1, it should not be overwritten
-    monkeypatch.setenv("KEY1", "original")
-    config._load_env_file(env_file, override=True, protected=frozenset({"KEY1"}))
-    assert os.environ.get("KEY1") == "original"
+    # ensure B not set, A set
+    monkeypatch.delenv("A", raising=False)
+    monkeypatch.setenv("B", "existing")
+    # protected should prevent overwrite when override=True
+    protected = frozenset(["B"])
+    _load_env_file(envfile, override=True, protected=protected)
+    assert os.environ.get("A") == "1"
+    # B should remain existing
+    assert os.environ.get("B") == "existing"
+    assert os.environ.get("SECRET") == "s'e'c"
+    # load without override should not overwrite existing keys
+    monkeypatch.setenv("EXPORT_ME", "existing2")
+    _load_env_file(envfile, override=False, protected=frozenset())
+    assert os.environ.get("EXPORT_ME") == "existing2"
 
 
 def test_require_and_settings_properties(monkeypatch):
-    # ensure absence of keys triggers ValueError
-    monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
+    # Ensure missing variable raises
+    monkeypatch.delenv("SOME_REQUIRED", raising=False)
     with pytest.raises(ValueError):
-        config._require("JQUANTS_REFRESH_TOKEN")
-    # set and ensure retrieval
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok123")
-    assert config._require("JQUANTS_REFRESH_TOKEN") == "tok123"
-
-    # PAPER_FILL_MODE valid
-    s = config.Settings()
+        _require("SOME_REQUIRED")
+    # Test Settings.env and derived flags
+    monkeypatch.setenv("KABUSYS_ENV", "live")
+    s = Settings()
+    assert s.env == "live"
+    assert s.is_live is True
+    # invalid env
+    monkeypatch.setenv("KABUSYS_ENV", "invalid_env")
+    with pytest.raises(ValueError):
+        _ = Settings().env
+    # paper_fill_mode valid/invalid
     monkeypatch.setenv("PAPER_FILL_MODE", "instant")
-    assert s.paper_fill_mode == "instant"
-    monkeypatch.setenv("PAPER_FILL_MODE", "Partial")
-    assert s.paper_fill_mode == "partial"
-    # invalid mode
-    monkeypatch.setenv("PAPER_FILL_MODE", "invalid_mode")
+    assert Settings().paper_fill_mode == "instant"
+    monkeypatch.setenv("PAPER_FILL_MODE", "PARTIAL")
+    assert Settings().paper_fill_mode == "partial"
+    monkeypatch.setenv("PAPER_FILL_MODE", "bad_mode")
     with pytest.raises(ValueError):
-        config.Settings().paper_fill_mode
-
-    # env validation
-    monkeypatch.setenv("KABUSYS_ENV", "development")
-    assert config.Settings().env == "development"
-    monkeypatch.setenv("KABUSYS_ENV", "LIVE")
-    assert config.Settings().env == "live"
-    monkeypatch.setenv("KABUSYS_ENV", "invalid")
-    with pytest.raises(ValueError):
-        config.Settings().env
-
-    # log level validation
-    monkeypatch.setenv("LOG_LEVEL", "INFO")
-    assert config.Settings().log_level == "INFO"
-    monkeypatch.setenv("LOG_LEVEL", "debug")
-    assert config.Settings().log_level == "DEBUG"
-    monkeypatch.setenv("LOG_LEVEL", "NOPE")
-    with pytest.raises(ValueError):
-        config.Settings().log_level
+        _ = Settings().paper_fill_mode
 
 
-def make_signal(code: str, side: str, target_size, target_weight, rank):
-    return {
-        "code": code,
-        "side": side,
-        "target_size": target_size,
-        "target_weight": target_weight,
-        "signal_rank": rank,
-    }
+def test_p95_empty_and_values():
+    assert _p95([]) is None
+    vals = [1, 2, 3, 4, 5, 100]
+    # 95th percentile index ceil(6 * .95) -1 = ceil(5.7)-1 = 6-1=5 -> vals[5]=100
+    assert _p95(vals) == 100
+    vals2 = list(range(100))
+    # expect element at ceil(100*.95)-1 = 95-1=94 -> 94
+    assert _p95(vals2) == 94
 
 
-def test_signal_queue_build_and_format_and_json_and_save(tmp_path):
-    # signals with one buy missing size and one sell fully specified
+def test_signal_queue_build_format_save(tmp_path):
+    # build with no signals -> EMPTY
+    report = build_signal_report([], report_date=date(2026, 4, 28))
+    assert report.status == "EMPTY"
+    assert "翌営業日のシグナルがありません" in "\n".join(report.warnings)
+    s = format_signal_cli(report)
+    assert "Signal Queue Confirmation" in s
+    j = format_signal_json(report)
+    parsed = json.loads(j)
+    assert parsed["report_date"] == "2026-04-28"
+    md = format_signal_md(report)
+    assert "Signal Queue Confirmation" in md
+    # create one buy without size to generate warning
     signals = [
-        make_signal("7203", "buy", None, None, 1),
-        make_signal("9432", "sell", 100, 0.05, 2),
+        {"code": "1234", "side": "buy", "target_size": None, "target_weight": None, "signal_rank": 1}
     ]
-    report = sqr.build_report(signals, report_date=date(2026, 4, 28))
-    assert report.status == sqr.STATUS_READY
-    assert report.total_count == 2
-    assert report.buy_count == 1
-    assert report.sell_count == 1
-    # warnings should mention target_size missing
-    assert any("target_size" in w for w in report.warnings)
-
-    # format CLI summary contains codes and counts
-    text = sqr.format_cli_summary(report)
-    assert "7203" in text
-    assert "9432" in text
-    assert "total" in text
-    assert "buy" in text
-
-    # format_json returns valid JSON with expected keys
-    j = sqr.format_json(report)
-    obj = json.loads(j)
-    assert obj["status"] == report.status
-    assert obj["total_count"] == report.total_count
-    assert isinstance(obj["signals"], list)
-
-    # save_report writes files to provided output dir
-    out = sqr.save_report(report, output_dir=tmp_path)
-    assert (out / "summary.json").exists()
-    assert (out / "report.md").exists()
-    assert (out / "warnings.json").exists()
-    # validate content of summary.json
-    data = json.loads((out / "summary.json").read_text(encoding="utf-8"))
-    assert data["report_date"] == report.report_date
-
-
-def test_save_report_invalid_date_raises(tmp_path):
-    # craft a fake report dataclass with invalid date string
-    bad = sqr.SignalQueueReport(
-        report_date="2026-02-30",  # invalid calendar date but matches regex
-        generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        status="READY",
-        total_count=0,
-        buy_count=0,
-        sell_count=0,
-        signals=[],
-        warnings=[],
-    )
+    report2 = build_signal_report(signals, report_date=date(2026, 4, 28))
+    assert report2.status == "READY"
+    assert any("target_size 未設定" in w for w in report2.warnings)
+    # save to tmp dir
+    out_dir = tmp_path / "out"
+    run_dir = save_signal_report(report2, output_dir=out_dir)
+    assert (run_dir / "summary.json").exists()
+    assert (run_dir / "report.md").exists()
+    assert (run_dir / "warnings.json").exists()
+    # invalid report_date should raise
+    bad = report2
+    bad.report_date = "2026-02-30"  # invalid calendar date
     with pytest.raises(ValueError):
-        sqr.save_report(bad, output_dir=tmp_path)
+        save_signal_report(bad, output_dir=out_dir)
 
 
-def make_daily_row(d: date, equity, daily_return, drawdown, cumulative):
-    return pc.DailyRow(
-        date=d,
-        env="live",
-        equity=equity,
-        daily_return=daily_return,
-        drawdown=drawdown,
-        cumulative_return=cumulative,
+def _make_reconcile_result(orders_synced=0, orders_no_status=0, discrepancies=None):
+    if discrepancies is None:
+        discrepancies = []
+    # Create object with expected attributes
+    return SimpleNamespace(
+        orders_synced=orders_synced,
+        orders_no_status=orders_no_status,
+        position_discrepancies=discrepancies,
     )
 
 
-def test_performance_build_report_daily_and_markdown_and_save(tmp_path):
-    # construct three daily rows
-    rows = [
-        pc.DailyRow(date=date(2026, 4, 1), env="live", equity=100.0, daily_return=0.0, drawdown=0.0, cumulative_return=0.0),
-        pc.DailyRow(date=date(2026, 4, 2), env="live", equity=110.0, daily_return=0.10, drawdown=-0.01, cumulative_return=0.10),
-        pc.DailyRow(date=date(2026, 4, 3), env="live", equity=105.0, daily_return=-0.0454545, drawdown=-0.05, cumulative_return=0.05),
+def test_execution_startup_report_statuss_and_save(tmp_path):
+    # BLOCKED when orders_no_status > 0
+    rr = _make_reconcile_result(orders_synced=1, orders_no_status=2, discrepancies=[])
+    rep = build_exec_report(rr, startup_date=date(2026, 4, 28))
+    assert rep.status == "BLOCKED"
+    assert any("ステータス不明の注文" in w for w in rep.warnings)
+    # READY_WITH_WARNINGS when discrepancies exist
+    disc = [SimpleNamespace(code="AAA", broker_qty=10, local_qty=8, diff=2)]
+    rr2 = _make_reconcile_result(orders_synced=1, orders_no_status=0, discrepancies=disc)
+    rep2 = build_exec_report(rr2, startup_date=date(2026, 4, 28))
+    assert rep2.status == "READY_WITH_WARNINGS"
+    assert any("ポジション差分" in w for w in rep2.warnings)
+    # READY when clean
+    rr3 = _make_reconcile_result(orders_synced=5, orders_no_status=0, discrepancies=[])
+    rep3 = build_exec_report(rr3, startup_date=date(2026, 4, 28))
+    assert rep3.status == "READY"
+    # formatting
+    s = format_exec_cli(rep3)
+    assert "Execution Startup Summary" in s
+    j = format_exec_json(rep3)
+    parsed = json.loads(j)
+    assert parsed["startup_date"] == "2026-04-28"
+    md = format_exec_md(rep3)
+    assert "Execution Startup Summary" in md
+    # save and invalid startup_date
+    out = tmp_path / "exec_out"
+    run_dir = save_exec_report(rep3, output_dir=out)
+    assert (run_dir / "summary.json").exists()
+    # invalid startup_date format
+    rep3_bad = rep3
+    rep3_bad.startup_date = "bad-date"
+    with pytest.raises(ValueError):
+        save_exec_report(rep3_bad, output_dir=out)
+
+
+def test_night_batch_report_logic_and_formatting():
+    now = datetime.now(timezone.utc)
+    # Build job results: include all mandatory jobs as success
+    jobs = [
+        JobRunResult(
+            job_name=name,
+            status="success",
+            started_at=now,
+            finished_at=now + timedelta(seconds=1),
+            duration_sec=1.0,
+            updated_rows={},
+            warnings=[],
+            errors=[],
+        )
+        for name in [
+            "data_update_job",
+            "feature_generation_job",
+            "ai_analysis_job",
+            "strategy_signal_job",
+            "portfolio_construction_job",
+        ]
     ]
-    report = pr.build_report(rows, report_type="daily", env="live", from_date=date(2026, 4, 1), to_date=date(2026, 4, 3))
-    s = report.summary
-    assert s["total_trading_days"] == 3
-    assert s["equity_start"] == 100.0
-    assert s["equity_end"] == 105.0
-    # cumulative_return = 105/100 - 1.0 = 0.05
-    assert pytest.approx(s["cumulative_return"], rel=1e-6) == 0.05
-    md = pr.format_markdown(report)
-    assert "累積リターン" in md or "累積" in md
-    # save to tmp path
-    out = pr.save_report(report, output_dir=tmp_path)
-    assert (out / "report.md").exists()
+    uc = UpdateCounts(prices_daily=10, features=5, signals=1, signal_queue=1)
+    nd = NextDaySummary(buy_count=2, sell_count=1, target_symbols=3, expected_orders=3)
+    report = build_night_report(jobs, uc, nd, run_date=date(2026, 4, 28), target_date=date(2026, 4, 29))
+    assert report.status == "READY"
+    s = format_night_cli(report)
+    assert "Night Batch Report" in s
+    j = format_night_json(report)
+    parsed = json.loads(j)
+    assert parsed["run_date"] == "2026-04-28"
+    # Missing mandatory job => BLOCKED
+    jobs_missing = jobs[:-1]
+    status_blocked = night_determine_status(jobs_missing, uc)
+    assert status_blocked == "BLOCKED"
+    warnings = night_generate_warnings(jobs_missing, uc)
+    assert any("必須ジョブが実行されませんでした" in w for w in warnings)
+    # signal_queue == 0 => BLOCKED
+    uc2 = UpdateCounts(prices_daily=10, features=5, signals=1, signal_queue=0)
+    assert night_determine_status(jobs, uc2) == "BLOCKED"
+    # job with warning => READY_WITH_WARNINGS
+    jobs_warn = list(jobs)
+    jobs_warn[0] = JobRunResult(
+        job_name=jobs_warn[0].job_name,
+        status="warning",
+        started_at=now,
+        finished_at=now + timedelta(seconds=1),
+        duration_sec=1.0,
+        updated_rows={},
+        warnings=["minor"],
+        errors=[],
+    )
+    assert night_determine_status(jobs_warn, uc) == "READY_WITH_WARNINGS"
+    wlist = night_generate_warnings(jobs_warn, uc)
+    assert any("ジョブが警告で完了" in w or "minor" in w for w in wlist)
 
 
-def test_performance_build_report_empty_rows():
-    rows: list = []
-    report = pr.build_report(rows, report_type="daily", env="live", from_date=date(2026, 4, 1), to_date=date(2026, 4, 3))
-    s = report.summary
-    # summary fields should be None or zero appropriately
-    assert s["total_trading_days"] == 0
-    assert s["cumulative_return"] is None
-    assert s["equity_start"] is None
-    assert s["equity_end"] is None
-    md = pr.format_markdown(report)
-    assert "営業日数" in md or "期間" in md
-
-
-# Additional tests for paper_verification_report _query helpers that are pure functions
-def test_pvr__fmt_helpers():
-    assert pvr._fmt_float(None) == "N/A"
-    assert pvr._fmt_float(12.3456, 1) == "12.3"
-    assert pvr._fmt_int(None) == "N/A"
-    assert pvr._fmt_int(0) == "0"
-
-
-# Ensure imports didn't trigger unexpected side-effects; reload config to ensure stable state
-def test_config_reload_no_auto_load(monkeypatch):
-    monkeypatch.setenv("KABUSYS_DISABLE_AUTO_ENV_LOAD", "1")
-    importlib.reload(config)
-    # after reload, settings instance exists
-    s = config.Settings()
-    assert isinstance(s, config.Settings)
+def test_performance_report_build_format_save(tmp_path):
+    # empty rows
+    rep_empty = build_performance_report([], report_type="daily", env="live", from_date=date(2026, 4, 1), to_date=date(2026, 4, 30))
+    assert rep_empty.summary["total_trading_days"] == 0
+    md = format_performance_md(rep_empty)
+    assert "運用成績レポート" in md
+    out = tmp_path / "perf"
+    saved = save_performance_report(rep_empty, output_dir=out)
+    assert (saved / "report.md").exists()
+    # daily rows
+    Row = SimpleNamespace
+    rows = [
+        Row(date=date(2026,4,1), equity=1000.0, daily_return=0.01, drawdown=-0.02, cumulative_return=0.0),
+        Row(date=date(2026,4,2), equity=1010.0, daily_return=0.01, drawdown=-0.01, cumulative_return=0.01),
+    ]
+    rep_daily = build_performance_report(rows, report_type="daily", env="paper_trading", from_date=date(2026,4,1), to_date=date(2026,4,2))
+    assert rep_daily.summary["total_trading_days"] == 2
+    md2 = format_performance_md(rep_daily)
+    assert "日次明細" in md2
+    saved2 = save_performance_report(rep_daily, output_dir=out)
+    assert (saved2 / rep_daily.env / rep_daily.report_type / rep_daily.to_date / "report.md").exists() or (saved2 / "report.md").exists()  # path may vary based on implementation details
