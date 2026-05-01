@@ -150,7 +150,8 @@ class TestGenerateSignalsScope:
         ).fetchall()
         codes = {r[0] for r in rows}
         assert "9999" not in codes, "scope 外の銘柄がシグナルに含まれている"
-        assert codes.intersection({"1234", "5678"}), "scope 内銘柄のシグナルがない"
+        assert "1234" in codes, "scope 内銘柄 1234 のシグナルがない"
+        assert "5678" in codes, "scope 内銘柄 5678 のシグナルがない"
 
     def test_scope_default_universe_same_as_none(self, bt_conn):
         """`mode='default_universe'` → scope=None と同じく全銘柄が対象。"""
