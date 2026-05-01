@@ -2,16 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
-import io
-from datetime import date
-from unittest.mock import patch
-
-import pytest
-
 from kabusys.backtest.engine import BacktestResult, BacktestScope
 from kabusys.backtest.metrics import BacktestMetrics
-from kabusys.data.schema import init_schema
 
 
 def _make_metrics() -> BacktestMetrics:

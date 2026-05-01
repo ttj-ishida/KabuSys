@@ -44,7 +44,7 @@ class BacktestResult:
     history: list[DailySnapshot]
     trades: list[TradeRecord]
     metrics: BacktestMetrics
-    scope_mode: str = "default_universe"
+    scope_mode: Literal["default_universe", "manual_codes"] = "default_universe"
     scope_codes: list[str] | None = None
     preserve_universe_filters: bool = True
     effective_universe_size: int | None = None
