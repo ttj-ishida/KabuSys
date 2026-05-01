@@ -239,6 +239,7 @@ class TestRunBacktestScope:
         # DB が空なので全コードが除外される
         assert set(result.excluded_codes) == {"1234", "5678"}
         assert result.effective_universe_size == 0
+        assert result.preserve_universe_filters is True
 
     def test_run_backtest_scope_preserve_false_reason_string(self):
         """`preserve_universe_filters=False` → 除外理由が 'data not available' になる。"""

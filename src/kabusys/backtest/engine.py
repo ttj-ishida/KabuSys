@@ -402,9 +402,13 @@ def run_backtest(
         lot_size:          単元株数（デフォルト 100）。日本株の標準単元。
         event_dates:       {event_date: event_name} のイベント日辞書。翌営業日がイベント日の
                            場合、BUY サイズを 50% に縮小する。None は空辞書と同義。
+        backtest_scope:    バックテスト対象スコープ。None または mode="default_universe" のとき
+                           既存の全銘柄対象動作。mode="manual_codes" のとき codes で指定した
+                           銘柄のみを features フィルタ対象とし、スコープメタデータを
+                           BacktestResult に記録する。
 
     Returns:
-        BacktestResult（history, trades, metrics）。
+        BacktestResult（history, trades, metrics および scope_mode/excluded_codes 等のスコープメタデータ）。
     """
     _VALID_ALLOCATION_METHODS = {"equal", "score", "risk_based"}
     if allocation_method not in _VALID_ALLOCATION_METHODS:
@@ -434,9 +438,9 @@ def run_backtest(
     _scope_mode: Literal["default_universe", "manual_codes"] = (
         backtest_scope.mode if backtest_scope else "default_universe"
     )
-    _scope_codes: list[str] | None = (
-        backtest_scope.codes if backtest_scope and backtest_scope.codes else None
-    )
+    _scope_codes: list[str] | None = None
+    if backtest_scope is not None and backtest_scope.mode == "manual_codes":
+        _scope_codes = backtest_scope.codes if backtest_scope.codes is not None else []
     _preserve_filters: bool = (
         backtest_scope.preserve_universe_filters if backtest_scope else True
     )
@@ -465,28 +469,31 @@ def run_backtest(
         )
 
         # スコープメタデータを計算（manual_codes モード時）
-        if _scope_mode == "manual_codes" and _scope_codes:
-            placeholders = ", ".join(["?" for _ in _scope_codes])
-            available_rows = bt_conn.execute(
-                f"SELECT DISTINCT code FROM features WHERE date >= ? AND date <= ? AND code IN ({placeholders})",
-                [start_date, end_date, *_scope_codes],
-            ).fetchall()
-            available: set[str] = {r[0] for r in available_rows}
-            _effective_universe_size = len(available)
-            for code in _scope_codes:
-                if code not in available:
-                    _excluded_codes.append(code)
-                    _excluded_reasons[code] = (
-                        "not in features (universe filter)"
-                        if _preserve_filters
-                        else "not in features (data not available)"
+        if _scope_mode == "manual_codes" and _scope_codes is not None:
+            if not _scope_codes:
+                _effective_universe_size = 0
+            else:
+                placeholders = ", ".join(["?" for _ in _scope_codes])
+                available_rows = bt_conn.execute(
+                    f"SELECT DISTINCT code FROM features WHERE date >= ? AND date <= ? AND code IN ({placeholders})",
+                    [start_date, end_date, *_scope_codes],
+                ).fetchall()
+                available: set[str] = {r[0] for r in available_rows}
+                _effective_universe_size = len(available)
+                for code in _scope_codes:
+                    if code not in available:
+                        _excluded_codes.append(code)
+                        _excluded_reasons[code] = (
+                            "not in features (universe filter)"
+                            if _preserve_filters
+                            else "not in features (data not available)"
+                        )
+                if _excluded_codes:
+                    logger.warning(
+                        "run_backtest: scope で指定された %d 件が features に存在しません: %s",
+                        len(_excluded_codes),
+                        _excluded_codes,
                     )
-            if _excluded_codes:
-                logger.warning(
-                    "run_backtest: scope で指定された %d 件が features に存在しません: %s",
-                    len(_excluded_codes),
-                    _excluded_codes,
-                )
 
         # sector_map はバックテスト開始前に一度だけ取得（銘柄のセクターは日次変化しない）
         sector_map = _fetch_sector_map(bt_conn)
