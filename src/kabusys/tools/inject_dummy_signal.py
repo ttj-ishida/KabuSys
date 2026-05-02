@@ -65,36 +65,50 @@ def inject_signal(
         conn:        DuckDB 接続。
         target_date: シグナルの対象日。
         code:        銘柄コード（例: "7203"）。
-        side:        売買区分（"buy" または "sell"）。
-        qty:         注文数量。デフォルト 100。
+        side:        売買区分（"buy" / "sell"、大文字も受け付ける）。
+        qty:         注文数量（1 以上）。デフォルト 100。
         force:       True のとき既存レコードを上書きする。
 
     Returns:
         挿入または更新した signal_id。
 
     Raises:
+        ValueError: side が buy/sell 以外、または qty が 1 未満の場合。
         DuplicateSignalError: force=False かつ同一 signal_id が既に存在する場合。
     """
+    side = side.lower()
+    if side not in ("buy", "sell"):
+        raise ValueError(f"side は 'buy' または 'sell' を指定してください: {side!r}")
+    if qty <= 0:
+        raise ValueError(f"qty は 1 以上の整数を指定してください: {qty}")
+
     signal_id = build_signal_id(target_date, code, side)
 
-    existing = conn.execute(
-        "SELECT signal_id FROM signal_queue WHERE signal_id = ?", [signal_id]
-    ).fetchone()
+    conn.execute("BEGIN")
+    try:
+        existing = conn.execute(
+            "SELECT 1 FROM signal_queue WHERE signal_id = ?", [signal_id]
+        ).fetchone()
 
-    if existing is not None:
-        if not force:
-            raise DuplicateSignalError(
-                f"signal_id={signal_id!r} は既に存在します。上書きするには --force を指定してください。"
-            )
-        conn.execute("DELETE FROM signal_queue WHERE signal_id = ?", [signal_id])
+        if existing is not None:
+            if not force:
+                raise DuplicateSignalError(
+                    f"signal_id={signal_id!r} は既に存在します。上書きするには --force を指定してください。"
+                )
+            conn.execute("DELETE FROM signal_queue WHERE signal_id = ?", [signal_id])
 
-    conn.execute(
-        """
-        INSERT INTO signal_queue (signal_id, date, code, side, size, order_type, price, status)
-        VALUES (?, ?, ?, ?, ?, 'market', NULL, 'pending')
-        """,
-        [signal_id, target_date, code, side, qty],
-    )
+        conn.execute(
+            """
+            INSERT INTO signal_queue (signal_id, date, code, side, size, order_type, price, status)
+            VALUES (?, ?, ?, ?, ?, 'market', NULL, 'pending')
+            """,
+            [signal_id, target_date, code, side, qty],
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
     return signal_id
 
 

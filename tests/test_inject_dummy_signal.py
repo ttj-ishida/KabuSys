@@ -129,3 +129,28 @@ class TestInjectSignal:
             "SELECT COUNT(*) FROM signal_queue WHERE code='7203'"
         ).fetchone()[0]
         assert count == 2
+
+    def test_side_uppercase_normalized_to_lowercase(self, conn):
+        """大文字 BUY/SELL が渡されても小文字に正規化されて挿入される。"""
+        inject_signal(conn, target_date=date(2026, 5, 7), code="7203", side="BUY")
+        row = conn.execute("SELECT side FROM signal_queue WHERE code='7203'").fetchone()
+        assert row[0] == "buy"
+
+    def test_invalid_side_raises_value_error(self, conn):
+        """buy/sell 以外の side は ValueError を送出する。"""
+        with pytest.raises(ValueError, match="buy.*sell"):
+            inject_signal(conn, target_date=date(2026, 5, 7), code="7203", side="long")
+
+    def test_zero_qty_raises_value_error(self, conn):
+        """qty=0 は ValueError を送出する。"""
+        with pytest.raises(ValueError, match="1 以上"):
+            inject_signal(
+                conn, target_date=date(2026, 5, 7), code="7203", side="buy", qty=0
+            )
+
+    def test_negative_qty_raises_value_error(self, conn):
+        """負数 qty は ValueError を送出する。"""
+        with pytest.raises(ValueError, match="1 以上"):
+            inject_signal(
+                conn, target_date=date(2026, 5, 7), code="7203", side="buy", qty=-1
+            )
