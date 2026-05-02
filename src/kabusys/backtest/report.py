@@ -11,7 +11,7 @@ import csv
 import json
 import re
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -45,6 +45,12 @@ class ReportMeta:
     stop_loss_pct: float
     lot_size: int
     report_type: str = "portfolio_backtest"
+    # scope fields
+    min_holding_days: int = 5
+    scope_mode: str = "default_universe"
+    scope_codes: list[str] | None = None
+    effective_universe_size: int | None = None
+    excluded_codes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -124,6 +130,7 @@ def build_report(
     risk_pct: float = 0.005,
     stop_loss_pct: float = 0.08,
     lot_size: int = 100,
+    min_holding_days: int = 5,
 ) -> BacktestReport:
     """BacktestResult から BacktestReport を構築する。
 
@@ -139,6 +146,17 @@ def build_report(
     """
     if run_id is None:
         run_id = str(uuid.uuid4())
+
+    # Derive scope/report_type from result
+    report_type = (
+        "targeted_backtest"
+        if getattr(result, "scope_mode", "default_universe") == "manual_codes"
+        else "portfolio_backtest"
+    )
+    scope_mode = getattr(result, "scope_mode", "default_universe")
+    scope_codes = getattr(result, "scope_codes", None)
+    effective_universe_size = getattr(result, "effective_universe_size", None)
+    excluded_codes = getattr(result, "excluded_codes", [])
 
     m = result.metrics
     history = result.history
@@ -174,6 +192,12 @@ def build_report(
         risk_pct=risk_pct,
         stop_loss_pct=stop_loss_pct,
         lot_size=lot_size,
+        report_type=report_type,
+        min_holding_days=min_holding_days,
+        scope_mode=scope_mode,
+        scope_codes=scope_codes,
+        effective_universe_size=effective_universe_size,
+        excluded_codes=list(excluded_codes),
     )
     headline = HeadlineMetrics(
         initial_cash=initial_cash,
@@ -226,6 +250,14 @@ def format_cli_summary(report: BacktestReport) -> str:
         f"\n{'=' * 50}",
         f"  Backtest Report  {m.start_date} -> {m.end_date}",
         f"  run_id: {m.run_id}",
+    ]
+    if m.scope_mode == "manual_codes":
+        lines.append(f"  Report Type      : {m.report_type}")
+        codes_str = ", ".join(m.scope_codes) if m.scope_codes else "—"
+        lines.append(f"  Scope Codes      : {codes_str}")
+        eff = m.effective_universe_size
+        lines.append(f"  Universe Size    : {eff if eff is not None else '—'}")
+    lines += [
         f"{'=' * 50}",
         f"  Initial Cash     : {h.initial_cash:>14,.0f} JPY",
         f"  Final Value      : {h.final_value:>14,.0f} JPY",
@@ -283,12 +315,15 @@ def format_markdown(report: BacktestReport) -> str:
     ]
 
     # 2. Scope / Config
-    lines += [
+    scope_rows: list[str] = [
         "## 2. Scope / Config",
         "",
         "| Parameter | Value |",
         "|-----------|-------|",
         f"| Initial Cash | {m.initial_cash:,.0f} JPY |",
+        f"| Report Type | {m.report_type} |",
+        f"| Scope Mode | {m.scope_mode} |",
+        f"| Min Holding Days | {m.min_holding_days} |",
         f"| Allocation Method | {m.allocation_method} |",
         f"| Max Position % | {m.max_position_pct:.0%} |",
         f"| Max Utilization | {m.max_utilization:.0%} |",
@@ -298,8 +333,16 @@ def format_markdown(report: BacktestReport) -> str:
         f"| Risk % (risk_based) | {m.risk_pct:.3f} |",
         f"| Stop Loss % | {m.stop_loss_pct:.0%} |",
         f"| Lot Size | {m.lot_size} |",
-        "",
     ]
+    if m.scope_mode == "manual_codes":
+        codes_str = ", ".join(m.scope_codes) if m.scope_codes else "—"
+        scope_rows.append(f"| Scope Codes | {codes_str} |")
+        eff = m.effective_universe_size
+        scope_rows.append(f"| Effective Universe | {eff if eff is not None else '—'} |")
+        if m.excluded_codes:
+            scope_rows.append(f"| Excluded Codes | {len(m.excluded_codes)} |")
+    scope_rows.append("")
+    lines += scope_rows
 
     # 3. Headline Metrics
     lines += [
@@ -449,6 +492,12 @@ def save_report(
         for s in sorted(result.history, key=lambda s: s.date):
             writer.writerow([s.date.isoformat(), s.cash, s.portfolio_value])
 
+    # warnings.json
+    (run_dir / "warnings.json").write_text(
+        json.dumps(report.warnings, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
     return run_dir
 
 
@@ -523,5 +572,27 @@ def _generate_warnings(result: "BacktestResult") -> list[str]:
                     f"銘柄 {top_code} が利益合計の {max_contrib / total_pos:.0%} を占めています。"
                     "特定銘柄への依存が過大な可能性があります。"
                 )
+
+    # targeted_backtest: warn against using as portfolio strategy evaluation
+    scope_mode = getattr(result, "scope_mode", "default_universe")
+    if scope_mode == "manual_codes":
+        warnings.append(
+            "このレポートは個別銘柄指定バックテストです。"
+            "ポートフォリオ戦略全体の採否判断の根拠として使用しないでください。"
+        )
+
+    # excluded codes
+    excluded = getattr(result, "excluded_codes", [])
+    if excluded:
+        warnings.append(
+            f"指定銘柄のうち {len(excluded)} 件が features に存在せず除外されました: {excluded}"
+        )
+
+    # low effective universe size
+    eff_size = getattr(result, "effective_universe_size", None)
+    if eff_size is not None and eff_size < 3:
+        warnings.append(
+            f"有効ユニバースが {eff_size} 件と少ないです。統計的信頼性が低い可能性があります。"
+        )
 
     return warnings

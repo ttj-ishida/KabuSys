@@ -694,3 +694,143 @@ def test_save_report_equity_csv_is_date_sorted(tmp_path):
         rows = list(csv_mod.DictReader(f))
     dates = [r["date"] for r in rows]
     assert dates == sorted(dates)
+
+
+# ---------------------------------------------------------------------------
+# Issue #228: scope info, min_holding_days, warnings.json
+# ---------------------------------------------------------------------------
+
+
+class TestBacktestReportScopeIntegration:
+    def _make_scoped_result(self, scope_mode="manual_codes", excluded=None):
+        """scope 情報を持つ BacktestResult を生成する。"""
+        from kabusys.backtest.engine import BacktestResult
+        from kabusys.backtest.metrics import calc_metrics
+
+        history = _make_history([1_000_000] * 200)
+        trades = [_make_trade(pnl=500.0, day_offset=i) for i in range(15)]
+        metrics = calc_metrics(history, trades)
+        result = BacktestResult(history=history, trades=trades, metrics=metrics)
+        result.scope_mode = scope_mode
+        result.scope_codes = ["1234", "5678"] if scope_mode == "manual_codes" else None
+        result.effective_universe_size = 2 if scope_mode == "manual_codes" else None
+        result.excluded_codes = excluded or []
+        result.excluded_reasons = {c: "not in features" for c in (excluded or [])}
+        return result
+
+    def test_report_type_auto_derived_targeted(self):
+        """scope_mode='manual_codes' → report_type='targeted_backtest'"""
+        from kabusys.backtest.report import build_report
+
+        result = self._make_scoped_result(scope_mode="manual_codes")
+        report = build_report(
+            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
+        )
+        assert report.meta.report_type == "targeted_backtest"
+
+    def test_report_type_auto_derived_portfolio(self):
+        """scope_mode='default_universe' → report_type='portfolio_backtest'"""
+        from kabusys.backtest.report import build_report
+
+        result = self._make_scoped_result(scope_mode="default_universe")
+        report = build_report(
+            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
+        )
+        assert report.meta.report_type == "portfolio_backtest"
+
+    def test_meta_has_scope_fields(self):
+        """ReportMeta に scope_mode / scope_codes / effective_universe_size が含まれる"""
+        from kabusys.backtest.report import build_report
+
+        result = self._make_scoped_result()
+        report = build_report(
+            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
+        )
+        assert report.meta.scope_mode == "manual_codes"
+        assert report.meta.scope_codes == ["1234", "5678"]
+        assert report.meta.effective_universe_size == 2
+
+    def test_meta_has_min_holding_days(self):
+        """ReportMeta に min_holding_days が含まれる"""
+        from kabusys.backtest.report import build_report
+
+        result = self._make_scoped_result()
+        report = build_report(
+            result,
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 7, 18),
+            min_holding_days=3,
+        )
+        assert report.meta.min_holding_days == 3
+
+    def test_scope_warning_generated_for_manual_codes(self):
+        """manual_codes モードのとき scope warning が生成される"""
+        from kabusys.backtest.report import build_report
+
+        result = self._make_scoped_result(scope_mode="manual_codes")
+        report = build_report(
+            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
+        )
+        assert any("個別銘柄指定" in w for w in report.warnings)
+
+    def test_excluded_codes_warning(self):
+        """excluded_codes がある場合に警告が生成される"""
+        from kabusys.backtest.report import build_report
+
+        result = self._make_scoped_result(excluded=["9999"])
+        report = build_report(
+            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
+        )
+        assert any("除外" in w for w in report.warnings)
+
+    def test_save_report_creates_warnings_json(self, tmp_path):
+        """save_report() で warnings.json が生成される"""
+        from kabusys.backtest.report import build_report, save_report
+
+        result = self._make_scoped_result()
+        report = build_report(
+            result,
+            run_id="scope-test",
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 7, 18),
+        )
+        run_dir = save_report(report, result, output_dir=tmp_path)
+        assert (run_dir / "warnings.json").exists()
+        import json
+
+        data = json.loads((run_dir / "warnings.json").read_text(encoding="utf-8"))
+        assert isinstance(data, list)
+
+    def test_cli_summary_shows_scope_info_for_manual(self):
+        """manual_codes モードのとき CLI サマリにスコープ情報が含まれる"""
+        from kabusys.backtest.report import build_report, format_cli_summary
+
+        result = self._make_scoped_result()
+        report = build_report(
+            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
+        )
+        summary = format_cli_summary(report)
+        assert "targeted_backtest" in summary or "manual_codes" in summary
+
+    def test_markdown_contains_scope_mode(self):
+        """Markdown レポートに scope_mode が含まれる"""
+        from kabusys.backtest.report import build_report, format_markdown
+
+        result = self._make_scoped_result()
+        report = build_report(
+            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
+        )
+        md = format_markdown(report)
+        assert "manual_codes" in md or "Scope" in md
+
+    def test_json_contains_scope_mode(self):
+        """JSON に scope_mode が含まれる"""
+        from kabusys.backtest.report import build_report, format_json
+        import json
+
+        result = self._make_scoped_result()
+        report = build_report(
+            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
+        )
+        data = json.loads(format_json(report))
+        assert data["meta"]["scope_mode"] == "manual_codes"

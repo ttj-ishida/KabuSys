@@ -212,6 +212,7 @@ def main() -> None:
         risk_pct=args.risk_pct,
         stop_loss_pct=args.stop_loss_pct,
         lot_size=args.lot_size,
+        min_holding_days=args.min_holding_days,
     )
 
     fmt = args.output_format
