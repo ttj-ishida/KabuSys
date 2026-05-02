@@ -21,6 +21,13 @@ from datetime import date
 logger = logging.getLogger(__name__)
 
 
+def _non_negative_int(x: str) -> int:
+    v = int(x)
+    if v < 0:
+        raise argparse.ArgumentTypeError(f"0 以上の整数を指定してください: {x!r}")
+    return v
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -114,6 +121,15 @@ def main() -> None:
             "scope filtering is always features-based regardless of this flag."
         ),
     )
+    parser.add_argument(
+        "--min-holding-days",
+        type=_non_negative_int,
+        default=5,
+        help=(
+            "Minimum holding days before non-stop-loss SELL is allowed. "
+            "Ignored during bear regime. [default: %(default)s]"
+        ),
+    )
     parser.add_argument("--db", required=True, help="DuckDB file path")
     parser.add_argument(
         "--output-format",
@@ -177,6 +193,7 @@ def main() -> None:
             stop_loss_pct=args.stop_loss_pct,
             lot_size=args.lot_size,
             backtest_scope=scope,
+            min_holding_days=args.min_holding_days,
         )
     finally:
         conn.close()

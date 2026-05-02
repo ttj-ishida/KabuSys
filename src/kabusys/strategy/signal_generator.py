@@ -387,6 +387,7 @@ def _generate_sell_signals(
     score_map: dict[str, float],
     threshold: float,
     is_bear: bool = False,
+    min_holding_days: int = _MIN_HOLDING_DAYS,
 ) -> list[dict[str, Any]]:
     """保有ポジションに対してエグジット条件を判定し、SELL シグナルを返す。
 
@@ -399,11 +400,12 @@ def _generate_sell_signals(
       - 時間決済（保有 60 営業日超過）
 
     Args:
-        conn:        DuckDB 接続。
-        target_date: シグナル生成対象日。
-        score_map:   {code: final_score} の辞書。
-        threshold:   BUY/SELL 判定の閾値。
-        is_bear:     True のとき最低保有日数チェックをスキップする（Bear レジーム例外）。
+        conn:             DuckDB 接続。
+        target_date:      シグナル生成対象日。
+        score_map:        {code: final_score} の辞書。
+        threshold:        BUY/SELL 判定の閾値。
+        is_bear:          True のとき最低保有日数チェックをスキップする（Bear レジーム例外）。
+        min_holding_days: SELL を抑制する最低保有営業日数（デフォルト: _MIN_HOLDING_DAYS）。
 
     Returns:
         [{"code": str, "score": float, "reason": str}, ...] のリスト。
@@ -493,12 +495,12 @@ def _generate_sell_signals(
             )
         else:
             held = _held_days(conn, code, target_date)
-            if held is not None and held < _MIN_HOLDING_DAYS:
+            if held is not None and held < min_holding_days:
                 logger.debug(
                     "_generate_sell_signals: %s 保有 %d 営業日（最低 %d 日）— SELL 抑制 date=%s",
                     code,
                     held,
-                    _MIN_HOLDING_DAYS,
+                    min_holding_days,
                     target_date,
                 )
                 continue
@@ -531,24 +533,31 @@ def generate_signals(
     weights: dict[str, float] | None = None,
     event_dates: dict[date, str] | None = None,
     scope: BacktestScope | None = None,
+    min_holding_days: int = _MIN_HOLDING_DAYS,
 ) -> int:
     """features テーブルを読み込み、売買シグナルを生成して signals テーブルへ書き込む。
 
     target_date 分をすべて削除してから挿入する日付単位の置換（冪等）。
 
     Args:
-        conn:        DuckDB 接続。features / ai_scores / positions テーブルを参照する。
-        target_date: シグナル生成日。
-        threshold:   BUY シグナル生成の final_score 閾値（デフォルト 0.60）。
-        weights:     ファクター重みの辞書（デフォルトは StrategyModel.md Section 4.1 の値）。
-        event_dates: {event_date: event_name} の辞書。翌営業日がイベント日の場合、
-                     BUY の size_multiplier を 0.5 に縮小する。省略時はイベントなし扱い。
-        scope:       BacktestScope インスタンス。mode='manual_codes' かつ codes が指定されている場合、
-                     features クエリを指定銘柄に絞る。省略時（None）は全銘柄が対象。
+        conn:             DuckDB 接続。features / ai_scores / positions テーブルを参照する。
+        target_date:      シグナル生成日。
+        threshold:        BUY シグナル生成の final_score 閾値（デフォルト 0.60）。
+        weights:          ファクター重みの辞書（デフォルトは StrategyModel.md Section 4.1 の値）。
+        event_dates:      {event_date: event_name} の辞書。翌営業日がイベント日の場合、
+                          BUY の size_multiplier を 0.5 に縮小する。省略時はイベントなし扱い。
+        scope:            BacktestScope インスタンス。mode='manual_codes' かつ codes が指定されている場合、
+                          features クエリを指定銘柄に絞る。省略時（None）は全銘柄が対象。
+        min_holding_days: SELL を抑制する最低保有営業日数（デフォルト: _MIN_HOLDING_DAYS）。
+                          ストップロスと Bear レジーム時は保有日数に関わらず SELL が発生する。
 
     Returns:
         signals テーブルへ書き込んだシグナル数（BUY + SELL の合計）。
     """
+    if min_holding_days < 0:
+        raise ValueError(
+            f"min_holding_days は 0 以上を指定してください: {min_holding_days}"
+        )
     # weights を _DEFAULT_WEIGHTS でフォールバック補完し、合計が 1.0 でなければ再スケール
     # 未知キー・非数値・NaN/Inf・負値は無視して既知キー（_DEFAULT_WEIGHTS）のみを受け付ける
     allowed = set(_DEFAULT_WEIGHTS)
@@ -791,7 +800,12 @@ def generate_signals(
 
     # 7. SELL シグナル生成（エグジット条件）
     sell_signals = _generate_sell_signals(
-        conn, target_date, score_map, threshold, is_bear=regime_is_bear
+        conn,
+        target_date,
+        score_map,
+        threshold,
+        is_bear=regime_is_bear,
+        min_holding_days=min_holding_days,
     )
 
     # SELL 対象銘柄は BUY から除外し、ランクを連番で再付与（SELL 優先ポリシー）

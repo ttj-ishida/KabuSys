@@ -388,6 +388,7 @@ def run_backtest(
     lot_size: int = 100,
     event_dates: dict[date, str] | None = None,
     backtest_scope: BacktestScope | None = None,
+    min_holding_days: int = 5,
 ) -> BacktestResult:
     """バックテストを実行し結果を返す。
 
@@ -411,6 +412,8 @@ def run_backtest(
                            既存の全銘柄対象動作。mode="manual_codes" のとき codes で指定した
                            銘柄のみを features フィルタ対象とし、スコープメタデータを
                            BacktestResult に記録する。
+        min_holding_days:  ストップロス・Bear レジーム以外の SELL を抑制する最低保有営業日数
+                           （デフォルト 5）。0 を指定すると即日 SELL が可能になる。
 
     Returns:
         BacktestResult（history, trades, metrics および scope_mode/excluded_codes 等のスコープメタデータ）。
@@ -438,6 +441,10 @@ def run_backtest(
         raise ValueError(f"risk_pct は (0, 1) の範囲で指定してください: {risk_pct}")
     if lot_size < 1:
         raise ValueError(f"lot_size は 1 以上を指定してください: {lot_size}")
+    if min_holding_days < 0:
+        raise ValueError(
+            f"min_holding_days は 0 以上を指定してください: {min_holding_days}"
+        )
 
     # try ブロック外でも参照できるようデフォルト初期化
     _scope_mode: Literal["default_universe", "manual_codes"] = (
@@ -535,6 +542,7 @@ def run_backtest(
                 target_date=trading_day,
                 event_dates=event_dates or {},
                 scope=backtest_scope,
+                min_holding_days=min_holding_days,
             )
 
             # Step 5: ポートフォリオ構築（Phase 5 モジュール使用）
