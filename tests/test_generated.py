@@ -291,7 +291,7 @@ def test_validate_config_checks_and_yaml(monkeypatch, tmp_path):
     good_yaml = fake_config / "system_config.yaml"
     good_yaml.write_text("ok: true", encoding="utf-8")
     bad_yaml = fake_config / "risk_config.yaml"
-    bad_yaml.write_text(":::bad:::")
+    bad_yaml.write_text("{unclosed")
     # monkeypatch the module _CONFIG_DIR
     monkeypatch.setattr(validate_config, "_CONFIG_DIR", fake_config)
     # Run validate
