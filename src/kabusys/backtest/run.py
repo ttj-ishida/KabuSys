@@ -127,7 +127,7 @@ def main() -> None:
         default=5,
         help=(
             "Minimum holding days before non-stop-loss SELL is allowed. "
-            "Ignored during bear regime. [default: 5]"
+            "Ignored during bear regime. [default: %(default)s]"
         ),
     )
     parser.add_argument("--db", required=True, help="DuckDB file path")

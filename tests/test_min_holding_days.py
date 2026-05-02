@@ -124,6 +124,32 @@ class TestMinHoldingDaysSuppressSell:
         )
 
 
+class TestMinHoldingDaysBoundary:
+    def test_sell_fires_when_held_equals_min_holding_days(self, conn):
+        """held == min_holding_days のとき（境界値）、SELL が発生する（抑制されない）。"""
+        # entry_date=月曜, target_date=火曜 → 連続する2営業日 → held=1
+        entry_date = date(2026, 4, 6)  # 月曜
+        target_date = date(2026, 4, 7)  # 火曜
+        code = "5555"
+        _insert_regime(conn, target_date, label="bull")
+        _insert_breadth(conn, target_date, stop=False)
+        _insert_feature_low_score(conn, code, target_date)
+        _insert_price(conn, code, target_date, close=1050.0)
+        _insert_position(conn, code, target_date, avg_price=1000.0)
+        _insert_position_entry(conn, code, entry_date=entry_date)
+
+        generate_signals(conn, target_date, min_holding_days=1)
+
+        rows = conn.execute(
+            "SELECT code FROM signals WHERE date = ? AND side = 'sell'",
+            [target_date],
+        ).fetchall()
+        sell_codes = {r[0] for r in rows}
+        assert code in sell_codes, (
+            f"held=1 == min_holding_days=1 のとき SELL が発生すべき (got {sell_codes})"
+        )
+
+
 class TestMinHoldingDaysExceptions:
     def test_stop_loss_fires_regardless_of_min_holding_days(self, conn):
         """ストップロス条件を満たすとき、min_holding_days=5 でも entry 当日に SELL が発生する。"""

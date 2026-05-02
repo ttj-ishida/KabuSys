@@ -549,6 +549,7 @@ def generate_signals(
         scope:            BacktestScope インスタンス。mode='manual_codes' かつ codes が指定されている場合、
                           features クエリを指定銘柄に絞る。省略時（None）は全銘柄が対象。
         min_holding_days: SELL を抑制する最低保有営業日数（デフォルト: _MIN_HOLDING_DAYS）。
+                          ストップロスと Bear レジーム時は保有日数に関わらず SELL が発生する。
 
     Returns:
         signals テーブルへ書き込んだシグナル数（BUY + SELL の合計）。
