@@ -42,39 +42,151 @@ KabuSys は J-Quants / kabuステーション 等を用いた日本株向け自�
 
 ## セットアップ手順
 
-1. リポジトリをクローンし、ソースルートへ
-   - (この README は `src/` 配下のモジュールを想定しています)
+### ステップ 1: リポジトリをチェックアウト
 
-2. Python 仮想環境を作成して有効化
-   - python3 -m venv .venv
-   - source .venv/bin/activate  (Windows: .venv\Scripts\activate)
+```
+git clone <repo-url>
+cd KabuSys
+```
 
-3. 必要パッケージをインストール
-   - requirements.txt がある場合:
-     - pip install -r requirements.txt
-   - 最低限必要なパッケージ例:
-     - pip install duckdb pyyaml
-   - SQLite は標準ライブラリで提供されます。
+### ステップ 2: 仮想環境の作成・有効化
 
-4. 環境変数 / .env の準備
-   - リポジトリルートに `.env` を作成するか、ウィザードを利用:
-     - python -m kabusys.config_setup
-   - もしくは手動で必要な環境変数を設定します（下の「環境変数一覧」を参照）。
+```
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS / Linux:
+source .venv/bin/activate
+```
 
-5. 設定の検証（任意）
-   - python -m kabusys.validate_config
-   - 警告も FAIL 扱いにする場合:
-     - python -m kabusys.validate_config --strict
+### ステップ 3: 依存パッケージのインストール
 
-6. データディレクトリや DB ファイルの場所を確認（必要に応じてディレクトリを作成）
-   - デフォルトの DB パス:
-     - DuckDB: data/kabusys.duckdb
-     - SQLite (監視): data/monitoring.db
-     - Paper Trading SQLite: data/paper_trading.db
+```
+pip install -r requirements.txt
+```
 
-備考:
-- 自動で .env を読み込む仕組みが組み込まれています（.env, .env.local）。  
-  自動読み込みを無効にするには環境変数 `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定してください。
+SQLite は Python 標準ライブラリに含まれるため追加インストール不要です。
+
+### ステップ 4: .env の作成
+
+対話式ウィザードを使うと必要な環境変数を一通り設定できます:
+
+```
+python -m kabusys.config_setup
+```
+
+最低限必要な環境変数（.env に記載）:
+
+```
+JQUANTS_REFRESH_TOKEN=<J-Quants リフレッシュトークン>
+JQUANTS_BULK_API_KEY=<J-Quants Bulk API キー>
+KABU_API_PASSWORD=<kabuステーション API パスワード>
+KABU_TRADE_PASSWORD=<kabuステーション 取引パスワード>
+KABUSYS_ENV=development    # paper_trading / live
+```
+
+.env はプロジェクトルートに置いてください。パッケージ読み込み時に自動ロードされます（`.env.local` で上書き可能）。  
+自動ロードを無効にするには `KABUSYS_DISABLE_AUTO_ENV_LOAD=1` を設定してください。
+
+### ステップ 5: config/*.yaml の生成
+
+```
+python scripts/generate_config.py
+```
+
+`config/` 以下に risk_config.yaml・strategy_config.yaml 等のテンプレートを生成します。  
+既存ファイルは上書きしません（強制上書きは `--overwrite`）。
+
+### ステップ 6: 設定の検証
+
+```
+python -m kabusys.validate_config
+```
+
+.env の値・config/*.yaml のパース可否・DB パスの親ディレクトリ存在などをチェックします。  
+`--strict` を付けると警告も失敗扱いになります。
+
+### ステップ 7: データベースの初期化
+
+DuckDB（市場データ・シグナル・ポジション等）と SQLite（監視ログ）を初期化します。  
+各 DB はファイルが存在しない場合は自動作成されます（data/ ディレクトリも自動生成）。
+
+```python
+# 以下を一度だけ実行します（例: python init_db.py として保存して実行）
+from kabusys.config import Settings
+from kabusys.data.schema import init_schema
+from kabusys.monitoring.monitoring_db import init_monitoring_db
+import sqlite3
+
+settings = Settings()
+
+# DuckDB 初期化（市場データ・シグナル・ポジション・バックテスト用）
+conn = init_schema(settings.duckdb_path)
+conn.close()
+
+# 監視用 SQLite 初期化（system_status / trade_logs / risk_logs 等）
+conn = sqlite3.connect(str(settings.sqlite_path))
+init_monitoring_db(conn)
+conn.close()
+```
+
+Paper Trading を使う場合は追加で:
+
+```python
+from kabusys.execution.order_repository import init_orders_db
+import sqlite3
+
+conn = sqlite3.connect(str(settings.paper_sqlite_path))
+init_orders_db(conn)
+conn.close()
+```
+
+### ステップ 8: 初期データ投入（J-Quants Bootstrap）
+
+初回セットアップ時は J-Quants Bulk Download API から過去の株価・財務・銘柄マスタ等を一括取得します。  
+`JQUANTS_BULK_API_KEY` が必要です。
+
+まず件数確認（ダウンロードなし）:
+
+```
+python -m kabusys.data.bootstrap --dry-run
+```
+
+問題なければ本番実行（初回は数分〜十数分かかります）:
+
+```
+python -m kabusys.data.bootstrap
+```
+
+特定エンドポイントのみ再取得する場合:
+
+```
+python -m kabusys.data.bootstrap --endpoint /equities/bars/daily
+```
+
+取得済みファイルはスキップされます（`bootstrap_load_history` テーブルで管理）。
+
+### ステップ 9: 夜間バッチの初回実行（任意）
+
+Bootstrap 後、特徴量・AI スコア・シグナルを生成してから Execution を起動することを推奨します。  
+夜間バッチスクリプトは個別に実行できます:
+
+```
+python scripts/run_data_update.py             # 当日株価・ニュース更新
+python scripts/run_feature_gen.py             # 特徴量生成
+python scripts/run_ai_analysis.py             # AI スコア・市場レジーム判定
+python scripts/run_strategy_signal.py         # 売買シグナル生成
+python scripts/run_portfolio_construction.py  # ポートフォリオ構築
+```
+
+### ステップ 10: システム起動
+
+```
+python scripts/start_system.py
+```
+
+Execution エンジンと Monitoring を起動します。  
+停止するには `data/stop_requested.flag` ファイルを作成してください。
 
 ## 環境変数（主なもの）
 
@@ -142,6 +254,12 @@ KabuSys は J-Quants / kabuステーション 等を用いた日本株向け自�
   - Performance Report（daily/weekly/monthly）
     - python -m kabusys.run_performance_report --type daily --env live --from 2026-01-01 --to 2026-04-30 --save
 
+- バックテスト
+  - python -m kabusys.backtest.run --db PATH --start YYYY-MM-DD --end YYYY-MM-DD
+  - 銘柄指定スコープ（manual_codes）:
+    - python -m kabusys.backtest.run --db PATH --start YYYY-MM-DD --end YYYY-MM-DD --scope-mode manual_codes --codes 7203 9984 6758
+  - --no-preserve-universe-filters: 診断用フラグ（excluded_reasons のメッセージ表現を変更。実際のフィルタ動作は変わらない）
+
 - Paper Trading 検証レポート（ツール）
   - python -m kabusys.tools.paper_verification_report --from 2026-04-01 --to 2026-04-11
   - --db オプションで SQLite パスを指定可能（環境変数 PAPER_TRADING_SQLITE_PATH でも可）
@@ -183,8 +301,6 @@ KabuSys は J-Quants / kabuステーション 等を用いた日本株向け自�
     - run_pre_market_report.py
     - run_market_close_report.py
     - run_performance_report.py
-    - run_performance_report.py
-    - run_performance_report.py
     - operations/                — 各種レポート生成ロジック（pure functions）
       - signal_queue_report.py
       - performance_report.py
@@ -193,8 +309,9 @@ KabuSys は J-Quants / kabuステーション 等を用いた日本株向け自�
       - market_close_report.py
       - execution_startup_report.py
       - night_batch_report.py
-      - position_reconciliation_report.py (参照/利用)
-      - intraday_collector.py (参照)
+      - position_reconciliation_report.py
+      - intraday_collector.py
+      - notifier.py              — LINE Messaging API push 通知（LineNotifier / build_notifier）
     - execution/                 — Execution 関連（Engine, OrderManager, RiskManager, BrokerFactory 等）
     - monitoring/                — 監視 DB 初期化や SystemMonitor 実装
     - tools/
