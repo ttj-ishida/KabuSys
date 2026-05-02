@@ -27,9 +27,12 @@ from __future__ import annotations
 import logging
 import math
 from datetime import date
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import duckdb
+
+if TYPE_CHECKING:
+    from kabusys.backtest.engine import BacktestScope
 
 from kabusys.data.calendar_management import get_trading_days, next_trading_day
 
@@ -527,6 +530,7 @@ def generate_signals(
     threshold: float = _DEFAULT_THRESHOLD,
     weights: dict[str, float] | None = None,
     event_dates: dict[date, str] | None = None,
+    scope: BacktestScope | None = None,
 ) -> int:
     """features テーブルを読み込み、売買シグナルを生成して signals テーブルへ書き込む。
 
@@ -539,6 +543,8 @@ def generate_signals(
         weights:     ファクター重みの辞書（デフォルトは StrategyModel.md Section 4.1 の値）。
         event_dates: {event_date: event_name} の辞書。翌営業日がイベント日の場合、
                      BUY の size_multiplier を 0.5 に縮小する。省略時はイベントなし扱い。
+        scope:       BacktestScope インスタンス。mode='manual_codes' かつ codes が指定されている場合、
+                     features クエリを指定銘柄に絞る。省略時（None）は全銘柄が対象。
 
     Returns:
         signals テーブルへ書き込んだシグナル数（BUY + SELL の合計）。
@@ -577,15 +583,36 @@ def generate_signals(
     event_dates = event_dates or {}
     size_multiplier = _get_event_size_multiplier(event_dates, target_date, conn)
 
-    # 1. features 読み込み
-    feat_rows = conn.execute(
-        """
-        SELECT code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev
-        FROM features
-        WHERE date = ?
-        """,
-        [target_date],
-    ).fetchall()
+    # 1. features 読み込み（scope.mode="manual_codes" の場合は対象銘柄に限定）
+    _scope_codes: frozenset[str] | None = None
+    if scope is not None and scope.mode == "manual_codes":
+        # codes が指定されている場合（空リストを含む）
+        _scope_codes = frozenset(scope.codes) if scope.codes else frozenset()
+
+    if _scope_codes is not None:
+        if _scope_codes:
+            # codes が空でない場合
+            placeholders = ", ".join(["?" for _ in _scope_codes])
+            feat_rows = conn.execute(
+                f"""
+                SELECT code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev
+                FROM features
+                WHERE date = ? AND code IN ({placeholders})
+                """,
+                [target_date, *_scope_codes],
+            ).fetchall()
+        else:
+            # codes が空リストの場合 → 銘柄なし → 空結果
+            feat_rows = []
+    else:
+        feat_rows = conn.execute(
+            """
+            SELECT code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev
+            FROM features
+            WHERE date = ?
+            """,
+            [target_date],
+        ).fetchall()
     feat_cols = [
         "code",
         "momentum_20",
