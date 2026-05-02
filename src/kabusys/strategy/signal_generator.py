@@ -69,6 +69,9 @@ _MIN_HOLDING_DAYS: int = 5  # BUY 後この営業日数を経過するまで非�
 _MAX_HOLDING_DAYS: int = (
     60  # この営業日数を超えた保有は time_exit SELL を発動（最大保有期間）
 )
+_TRAILING_STOP_ATR_MULT: float = (
+    2.0  # peak_close から ATR × N 下落で trailing_stop SELL を発動
+)
 _REENTRY_COOLDOWN_DAYS: int = (
     5  # SELL 後この営業日数を経過するまで同一銘柄の BUY を禁止
 )
@@ -297,6 +300,82 @@ def _calc_sector_strengths(
         target_date,
     )
     return top_sectors, bottom_sectors, sector_map
+
+
+# ---------------------------------------------------------------------------
+# ATR / ピーク価格ヘルパー（トレーリングストップ用）
+# ---------------------------------------------------------------------------
+
+
+def _atr_20d(
+    conn: duckdb.DuckDBPyConnection,
+    code: str,
+    target_date: date,
+) -> float | None:
+    """直近 20 本の Average True Range（ATR）を返す。
+
+    True Range = GREATEST(high − low, |high − prev_close|, |low − prev_close|)
+    20 本未満のデータしかない場合は None を返す。
+    """
+    row = conn.execute(
+        """
+        WITH recent AS (
+            SELECT date, high, low, close
+            FROM prices_daily
+            WHERE code = ? AND date <= ?
+            ORDER BY date DESC
+            LIMIT 21
+        ),
+        with_prev AS (
+            SELECT
+                high,
+                low,
+                LAG(close) OVER (ORDER BY date) AS prev_close
+            FROM recent
+        ),
+        tr AS (
+            SELECT GREATEST(
+                high - low,
+                ABS(high - prev_close),
+                ABS(low  - prev_close)
+            ) AS true_range
+            FROM with_prev
+            WHERE prev_close IS NOT NULL
+        )
+        SELECT AVG(true_range), COUNT(*) FROM tr
+        """,
+        [code, target_date],
+    ).fetchone()
+    if row is None or row[1] is None or int(row[1]) < 20:
+        return None
+    return float(row[0])
+
+
+def _peak_close(
+    conn: duckdb.DuckDBPyConnection,
+    code: str,
+    target_date: date,
+) -> float | None:
+    """エントリー日（最古のオープンエントリー）以降 target_date までの最高 close を返す。
+
+    オープンな position_entries が存在しない場合は None を返す。
+    """
+    row = conn.execute(
+        """
+        SELECT MAX(pd.close)
+        FROM position_entries pe
+        JOIN prices_daily pd
+          ON pd.code = pe.code
+         AND pd.date >= pe.entry_date
+         AND pd.date <= ?
+        WHERE pe.code = ?
+          AND pe.sell_date IS NULL
+        """,
+        [target_date, code],
+    ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return float(row[0])
 
 
 # ---------------------------------------------------------------------------
