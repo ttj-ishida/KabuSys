@@ -553,6 +553,10 @@ def generate_signals(
     Returns:
         signals テーブルへ書き込んだシグナル数（BUY + SELL の合計）。
     """
+    if min_holding_days < 0:
+        raise ValueError(
+            f"min_holding_days は 0 以上を指定してください: {min_holding_days}"
+        )
     # weights を _DEFAULT_WEIGHTS でフォールバック補完し、合計が 1.0 でなければ再スケール
     # 未知キー・非数値・NaN/Inf・負値は無視して既知キー（_DEFAULT_WEIGHTS）のみを受け付ける
     allowed = set(_DEFAULT_WEIGHTS)

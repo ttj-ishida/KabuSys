@@ -441,6 +441,10 @@ def run_backtest(
         raise ValueError(f"risk_pct は (0, 1) の範囲で指定してください: {risk_pct}")
     if lot_size < 1:
         raise ValueError(f"lot_size は 1 以上を指定してください: {lot_size}")
+    if min_holding_days < 0:
+        raise ValueError(
+            f"min_holding_days は 0 以上を指定してください: {min_holding_days}"
+        )
 
     # try ブロック外でも参照できるようデフォルト初期化
     _scope_mode: Literal["default_universe", "manual_codes"] = (
