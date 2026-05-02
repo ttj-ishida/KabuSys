@@ -589,6 +589,14 @@ def generate_signals(
         raise ValueError(
             f"max_holding_days は 1 以上を指定してください: {max_holding_days}"
         )
+    if max_holding_days <= min_holding_days:
+        logger.warning(
+            "max_holding_days (%d) が min_holding_days (%d) 以下です。"
+            " time_exit が min_holding_days チェックより先に発火するため、"
+            " min_holding_days は実質的に無効になります。",
+            max_holding_days,
+            min_holding_days,
+        )
     # weights を _DEFAULT_WEIGHTS でフォールバック補完し、合計が 1.0 でなければ再スケール
     # 未知キー・非数値・NaN/Inf・負値は無視して既知キー（_DEFAULT_WEIGHTS）のみを受け付ける
     allowed = set(_DEFAULT_WEIGHTS)

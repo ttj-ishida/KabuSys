@@ -228,6 +228,36 @@ class TestTimeExitPriority:
 
 
 # ---------------------------------------------------------------------------
+# Bear レジームでも time_exit は発火する
+# ---------------------------------------------------------------------------
+
+
+class TestTimeExitInBearRegime:
+    def test_time_exit_fires_in_bear_regime(self, conn):
+        """Bear レジームであっても held >= max_holding_days のとき time_exit SELL が発生する。"""
+        # Bear レジームでは min_holding_days チェックがスキップされるが
+        # time_exit（max_holding_days）は Bear 中でも発火することを確認
+        entry_date = date(2026, 4, 6)
+        target_date = date(2026, 4, 7)
+        code = "5001"
+        conn.execute(
+            "INSERT INTO market_regime (date, regime_score, regime_label) VALUES (?, ?, ?)",
+            [target_date, -0.8, "bear"],
+        )
+        _insert_breadth(conn, target_date, stop=False)
+        _insert_feature_high_score(conn, code, target_date)
+        _insert_price(conn, code, target_date, close=1050.0)
+        _insert_position(conn, code, target_date, avg_price=1000.0)
+        _insert_position_entry(conn, code, entry_date=entry_date)
+
+        generate_signals(conn, target_date, max_holding_days=1)
+
+        assert code in _sell_codes(conn, target_date), (
+            "Bear レジームでも held >= max_holding_days のとき time_exit SELL が発生すべき"
+        )
+
+
+# ---------------------------------------------------------------------------
 # バリデーション
 # ---------------------------------------------------------------------------
 
