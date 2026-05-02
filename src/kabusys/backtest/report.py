@@ -250,9 +250,10 @@ def format_cli_summary(report: BacktestReport) -> str:
         f"\n{'=' * 50}",
         f"  Backtest Report  {m.start_date} -> {m.end_date}",
         f"  run_id: {m.run_id}",
+        f"  Report Type      : {m.report_type}",
+        f"  Scope Mode       : {m.scope_mode}",
     ]
     if m.scope_mode == "manual_codes":
-        lines.append(f"  Report Type      : {m.report_type}")
         codes_str = ", ".join(m.scope_codes) if m.scope_codes else "—"
         lines.append(f"  Scope Codes      : {codes_str}")
         eff = m.effective_universe_size
@@ -584,8 +585,10 @@ def _generate_warnings(result: "BacktestResult") -> list[str]:
     # excluded codes
     excluded = getattr(result, "excluded_codes", [])
     if excluded:
+        codes_csv = ", ".join(map(str, excluded[:20]))
+        suffix = " ..." if len(excluded) > 20 else ""
         warnings.append(
-            f"指定銘柄のうち {len(excluded)} 件が features に存在せず除外されました: {excluded}"
+            f"指定銘柄のうち {len(excluded)} 件が features に存在せず除外されました: {codes_csv}{suffix}"
         )
 
     # low effective universe size

@@ -834,3 +834,63 @@ class TestBacktestReportScopeIntegration:
         )
         data = json.loads(format_json(report))
         assert data["meta"]["scope_mode"] == "manual_codes"
+
+    def test_low_universe_warning_for_non_manual_scope(self):
+        """scope_mode が default_universe でも effective_universe_size < 3 のとき警告が出る"""
+        from kabusys.backtest.report import _generate_warnings
+        from kabusys.backtest.engine import BacktestResult
+        from kabusys.backtest.metrics import calc_metrics
+
+        history = _make_history([1_000_000] * 400)
+        trades = [_make_trade(pnl=500.0, day_offset=i) for i in range(15)]
+        metrics = calc_metrics(history, trades)
+        result = BacktestResult(history=history, trades=trades, metrics=metrics)
+        result.scope_mode = "default_universe"
+        result.scope_codes = None
+        result.effective_universe_size = 2  # < 3 → 警告対象
+        result.excluded_codes = []
+        result.excluded_reasons = {}
+
+        warnings = _generate_warnings(result)
+        assert any("有効ユニバース" in w for w in warnings)
+
+    def test_excluded_codes_message_csv_format(self):
+        """excluded_codes の警告メッセージがリスト表現ではなく CSV 形式で出力される"""
+        from kabusys.backtest.report import _generate_warnings
+        from kabusys.backtest.engine import BacktestResult
+        from kabusys.backtest.metrics import calc_metrics
+
+        history = _make_history([1_000_000] * 400)
+        trades = [_make_trade(pnl=500.0, day_offset=i) for i in range(15)]
+        metrics = calc_metrics(history, trades)
+        result = BacktestResult(history=history, trades=trades, metrics=metrics)
+        result.scope_mode = "manual_codes"
+        result.scope_codes = ["1111", "2222"]
+        result.effective_universe_size = 0
+        result.excluded_codes = ["1111", "2222"]
+        result.excluded_reasons = {}
+
+        warnings = _generate_warnings(result)
+        excluded_warning = next((w for w in warnings if "除外" in w), None)
+        assert excluded_warning is not None
+        # Python のリスト表現（['1111', '2222']）ではなく CSV 形式
+        assert "['" not in excluded_warning
+        assert "1111, 2222" in excluded_warning
+
+    def test_cli_summary_always_shows_report_type(self):
+        """portfolio_backtest モードでも CLI サマリに Report Type が常に表示される"""
+        from kabusys.backtest.report import build_report, format_cli_summary
+        from kabusys.backtest.engine import BacktestResult
+        from kabusys.backtest.metrics import calc_metrics
+
+        history = _make_history([1_000_000] * 200)
+        trades = [_make_trade(pnl=500.0, day_offset=i) for i in range(15)]
+        metrics = calc_metrics(history, trades)
+        result = BacktestResult(history=history, trades=trades, metrics=metrics)
+
+        report = build_report(
+            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
+        )
+        summary = format_cli_summary(report)
+        assert "portfolio_backtest" in summary
+        assert "default_universe" in summary
