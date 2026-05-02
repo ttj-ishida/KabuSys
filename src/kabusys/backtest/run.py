@@ -114,6 +114,12 @@ def main() -> None:
             "scope filtering is always features-based regardless of this flag."
         ),
     )
+    parser.add_argument(
+        "--min-holding-days",
+        type=int,
+        default=5,
+        help="Minimum holding days before non-stop-loss SELL is allowed [default: 5]",
+    )
     parser.add_argument("--db", required=True, help="DuckDB file path")
     parser.add_argument(
         "--output-format",
@@ -177,6 +183,7 @@ def main() -> None:
             stop_loss_pct=args.stop_loss_pct,
             lot_size=args.lot_size,
             backtest_scope=scope,
+            min_holding_days=args.min_holding_days,
         )
     finally:
         conn.close()
