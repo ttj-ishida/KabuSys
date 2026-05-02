@@ -389,6 +389,7 @@ def run_backtest(
     event_dates: dict[date, str] | None = None,
     backtest_scope: BacktestScope | None = None,
     min_holding_days: int = 5,
+    max_holding_days: int = 60,
 ) -> BacktestResult:
     """バックテストを実行し結果を返す。
 
@@ -414,6 +415,8 @@ def run_backtest(
                            BacktestResult に記録する。
         min_holding_days:  ストップロス・Bear レジーム以外の SELL を抑制する最低保有営業日数
                            （デフォルト 5）。0 を指定すると即日 SELL が可能になる。
+        max_holding_days:  この営業日数以上保有した銘柄に time_exit SELL を発動（デフォルト 60）。
+                           1 以上を指定すること。min_holding_days を上回る値を推奨。
 
     Returns:
         BacktestResult（history, trades, metrics および scope_mode/excluded_codes 等のスコープメタデータ）。
@@ -444,6 +447,10 @@ def run_backtest(
     if min_holding_days < 0:
         raise ValueError(
             f"min_holding_days は 0 以上を指定してください: {min_holding_days}"
+        )
+    if max_holding_days < 1:
+        raise ValueError(
+            f"max_holding_days は 1 以上を指定してください: {max_holding_days}"
         )
 
     # try ブロック外でも参照できるようデフォルト初期化
@@ -543,6 +550,7 @@ def run_backtest(
                 event_dates=event_dates or {},
                 scope=backtest_scope,
                 min_holding_days=min_holding_days,
+                max_holding_days=max_holding_days,
             )
 
             # Step 5: ポートフォリオ構築（Phase 5 モジュール使用）
