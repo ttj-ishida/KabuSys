@@ -153,6 +153,12 @@ validate_config は .env の値や config/*.yaml の存在・パース可否、D
   - python -m kabusys.tools.paper_verification_report [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--db PATH]
   - 環境変数 PAPER_TRADING_SQLITE_PATH で DB を指定可能
 
+- バックテスト
+  - python -m kabusys.backtest.run --db PATH --start YYYY-MM-DD --end YYYY-MM-DD
+  - 銘柄指定スコープ（manual_codes）:
+    - python -m kabusys.backtest.run --db PATH --start YYYY-MM-DD --end YYYY-MM-DD --scope-mode manual_codes --codes 7203 9984 6758
+  - --no-preserve-universe-filters: 診断用フラグ（excluded_reasons のメッセージ表現を変更。実際のフィルタ動作は変わらない）
+
 - 設定ウィザード
   - python -m kabusys.config_setup
 
@@ -231,7 +237,6 @@ validate_config は .env の値や config/*.yaml の存在・パース可否、D
   - run_signal_queue_report.py
   - run_position_reconciliation_report.py
   - run_performance_report.py
-  - run_performance_report.py
   - operations/
     - pre_market_collector.py / pre_market_report.py
     - market_close_collector.py / market_close_report.py
@@ -241,6 +246,7 @@ validate_config は .env の値や config/*.yaml の存在・パース可否、D
     - performance_collector.py / performance_report.py
     - night_batch_report.py
     - intraday_collector.py
+    - notifier.py             — LINE Messaging API push 通知（LineNotifier / build_notifier）
   - execution/
     - broker_factory.py
     - execution_engine.py
