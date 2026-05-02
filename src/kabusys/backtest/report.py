@@ -47,6 +47,7 @@ class ReportMeta:
     report_type: str = "portfolio_backtest"
     # scope fields
     min_holding_days: int = 5
+    max_holding_days: int = 60
     scope_mode: str = "default_universe"
     scope_codes: list[str] | None = None
     effective_universe_size: int | None = None
@@ -131,6 +132,7 @@ def build_report(
     stop_loss_pct: float = 0.08,
     lot_size: int = 100,
     min_holding_days: int = 5,
+    max_holding_days: int = 60,
 ) -> BacktestReport:
     """BacktestResult から BacktestReport を構築する。
 
@@ -194,6 +196,7 @@ def build_report(
         lot_size=lot_size,
         report_type=report_type,
         min_holding_days=min_holding_days,
+        max_holding_days=max_holding_days,
         scope_mode=scope_mode,
         scope_codes=scope_codes,
         effective_universe_size=effective_universe_size,
@@ -325,6 +328,7 @@ def format_markdown(report: BacktestReport) -> str:
         f"| Report Type | {m.report_type} |",
         f"| Scope Mode | {m.scope_mode} |",
         f"| Min Holding Days | {m.min_holding_days} |",
+        f"| Max Holding Days | {m.max_holding_days} |",
         f"| Allocation Method | {m.allocation_method} |",
         f"| Max Position % | {m.max_position_pct:.0%} |",
         f"| Max Utilization | {m.max_utilization:.0%} |",

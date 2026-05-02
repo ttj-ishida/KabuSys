@@ -66,6 +66,9 @@ _GAP_THRESHOLD_EPSILON: float = 1e-9
 _SECTOR_BOOST: float = 0.03  # 上位 _SECTOR_QUARTILE セクター銘柄への final_score 加算量
 _SECTOR_QUARTILE: float = 0.25  # 上位・下位の区切り割合（各 ceil(N×0.25) セクター）
 _MIN_HOLDING_DAYS: int = 5  # BUY 後この営業日数を経過するまで非ストップロス SELL を抑制
+_MAX_HOLDING_DAYS: int = (
+    60  # この営業日数を超えた保有は time_exit SELL を発動（最大保有期間）
+)
 _REENTRY_COOLDOWN_DAYS: int = (
     5  # SELL 後この営業日数を経過するまで同一銘柄の BUY を禁止
 )
@@ -388,24 +391,27 @@ def _generate_sell_signals(
     threshold: float,
     is_bear: bool = False,
     min_holding_days: int = _MIN_HOLDING_DAYS,
+    max_holding_days: int = _MAX_HOLDING_DAYS,
 ) -> list[dict[str, Any]]:
     """保有ポジションに対してエグジット条件を判定し、SELL シグナルを返す。
 
     実装済みの条件 (StrategyModel.md Section 5.2):
       1. ストップロス: 終値 / avg_price - 1 < -8%
-      2. スコア低下: final_score が threshold 未満
+      2. 時間決済: 保有営業日数 >= max_holding_days
+      3. スコア低下: final_score が threshold 未満
 
-    未実装の条件（positions テーブルに peak_price / entry_date が必要）:
+    未実装の条件:
       - トレーリングストップ（直近最高値から -10%）
-      - 時間決済（保有 60 営業日超過）
 
     Args:
-        conn:             DuckDB 接続。
-        target_date:      シグナル生成対象日。
-        score_map:        {code: final_score} の辞書。
-        threshold:        BUY/SELL 判定の閾値。
-        is_bear:          True のとき最低保有日数チェックをスキップする（Bear レジーム例外）。
-        min_holding_days: SELL を抑制する最低保有営業日数（デフォルト: _MIN_HOLDING_DAYS）。
+        conn:              DuckDB 接続。
+        target_date:       シグナル生成対象日。
+        score_map:         {code: final_score} の辞書。
+        threshold:         BUY/SELL 判定の閾値。
+        is_bear:           True のとき最低保有日数チェックをスキップする（Bear レジーム例外）。
+        min_holding_days:  SELL を抑制する最低保有営業日数（デフォルト: _MIN_HOLDING_DAYS）。
+        max_holding_days:  この営業日数以上保有した銘柄に time_exit SELL を発動（デフォルト: _MAX_HOLDING_DAYS）。
+                           ストップロス・決算回避より低優先。min_holding_days は無視して発火する。
 
     Returns:
         [{"code": str, "score": float, "reason": str}, ...] のリスト。
@@ -486,6 +492,25 @@ def _generate_sell_signals(
             )
             continue
 
+        # 時間決済（最大保有期間超過）: min_holding_days を無視して発火
+        held = _held_days(conn, code, target_date)
+        if held is not None and held >= max_holding_days:
+            logger.debug(
+                "_generate_sell_signals: %s 保有 %d 営業日 >= max %d — time_exit date=%s",
+                code,
+                held,
+                max_holding_days,
+                target_date,
+            )
+            sell_signals.append(
+                {
+                    "code": code,
+                    "score": final_score,
+                    "reason": "time_exit",
+                }
+            )
+            continue
+
         # 最低保有日数チェック（Bear レジーム時はスキップ）
         if is_bear:
             logger.debug(
@@ -494,7 +519,6 @@ def _generate_sell_signals(
                 target_date,
             )
         else:
-            held = _held_days(conn, code, target_date)
             if held is not None and held < min_holding_days:
                 logger.debug(
                     "_generate_sell_signals: %s 保有 %d 営業日（最低 %d 日）— SELL 抑制 date=%s",
@@ -534,22 +558,25 @@ def generate_signals(
     event_dates: dict[date, str] | None = None,
     scope: BacktestScope | None = None,
     min_holding_days: int = _MIN_HOLDING_DAYS,
+    max_holding_days: int = _MAX_HOLDING_DAYS,
 ) -> int:
     """features テーブルを読み込み、売買シグナルを生成して signals テーブルへ書き込む。
 
     target_date 分をすべて削除してから挿入する日付単位の置換（冪等）。
 
     Args:
-        conn:             DuckDB 接続。features / ai_scores / positions テーブルを参照する。
-        target_date:      シグナル生成日。
-        threshold:        BUY シグナル生成の final_score 閾値（デフォルト 0.60）。
-        weights:          ファクター重みの辞書（デフォルトは StrategyModel.md Section 4.1 の値）。
-        event_dates:      {event_date: event_name} の辞書。翌営業日がイベント日の場合、
-                          BUY の size_multiplier を 0.5 に縮小する。省略時はイベントなし扱い。
-        scope:            BacktestScope インスタンス。mode='manual_codes' かつ codes が指定されている場合、
-                          features クエリを指定銘柄に絞る。省略時（None）は全銘柄が対象。
-        min_holding_days: SELL を抑制する最低保有営業日数（デフォルト: _MIN_HOLDING_DAYS）。
-                          ストップロスと Bear レジーム時は保有日数に関わらず SELL が発生する。
+        conn:              DuckDB 接続。features / ai_scores / positions テーブルを参照する。
+        target_date:       シグナル生成日。
+        threshold:         BUY シグナル生成の final_score 閾値（デフォルト 0.60）。
+        weights:           ファクター重みの辞書（デフォルトは StrategyModel.md Section 4.1 の値）。
+        event_dates:       {event_date: event_name} の辞書。翌営業日がイベント日の場合、
+                           BUY の size_multiplier を 0.5 に縮小する。省略時はイベントなし扱い。
+        scope:             BacktestScope インスタンス。mode='manual_codes' かつ codes が指定されている場合、
+                           features クエリを指定銘柄に絞る。省略時（None）は全銘柄が対象。
+        min_holding_days:  SELL を抑制する最低保有営業日数（デフォルト: _MIN_HOLDING_DAYS）。
+                           ストップロスと Bear レジーム時は保有日数に関わらず SELL が発生する。
+        max_holding_days:  この営業日数以上保有した銘柄に time_exit SELL を発動（デフォルト: _MAX_HOLDING_DAYS）。
+                           1 以上を指定すること。
 
     Returns:
         signals テーブルへ書き込んだシグナル数（BUY + SELL の合計）。
@@ -557,6 +584,18 @@ def generate_signals(
     if min_holding_days < 0:
         raise ValueError(
             f"min_holding_days は 0 以上を指定してください: {min_holding_days}"
+        )
+    if max_holding_days < 1:
+        raise ValueError(
+            f"max_holding_days は 1 以上を指定してください: {max_holding_days}"
+        )
+    if max_holding_days <= min_holding_days:
+        logger.warning(
+            "max_holding_days (%d) が min_holding_days (%d) 以下です。"
+            " time_exit が min_holding_days チェックより先に発火するため、"
+            " min_holding_days は実質的に無効になります。",
+            max_holding_days,
+            min_holding_days,
         )
     # weights を _DEFAULT_WEIGHTS でフォールバック補完し、合計が 1.0 でなければ再スケール
     # 未知キー・非数値・NaN/Inf・負値は無視して既知キー（_DEFAULT_WEIGHTS）のみを受け付ける
@@ -806,6 +845,7 @@ def generate_signals(
         threshold,
         is_bear=regime_is_bear,
         min_holding_days=min_holding_days,
+        max_holding_days=max_holding_days,
     )
 
     # SELL 対象銘柄は BUY から除外し、ランクを連番で再付与（SELL 優先ポリシー）

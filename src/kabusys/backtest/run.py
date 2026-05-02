@@ -130,6 +130,16 @@ def main() -> None:
             "Ignored during bear regime. [default: %(default)s]"
         ),
     )
+    parser.add_argument(
+        "--max-holding-days",
+        type=int,
+        default=60,
+        help=(
+            "Maximum holding days (time exit). Position held this many or more business days "
+            "triggers a time_exit SELL regardless of score or min-holding-days. "
+            "[default: %(default)s]"
+        ),
+    )
     parser.add_argument("--db", required=True, help="DuckDB file path")
     parser.add_argument(
         "--output-format",
@@ -194,6 +204,7 @@ def main() -> None:
             lot_size=args.lot_size,
             backtest_scope=scope,
             min_holding_days=args.min_holding_days,
+            max_holding_days=args.max_holding_days,
         )
     finally:
         conn.close()
@@ -213,6 +224,7 @@ def main() -> None:
         stop_loss_pct=args.stop_loss_pct,
         lot_size=args.lot_size,
         min_holding_days=getattr(args, "min_holding_days", 5),
+        max_holding_days=getattr(args, "max_holding_days", 60),
     )
 
     fmt = args.output_format
