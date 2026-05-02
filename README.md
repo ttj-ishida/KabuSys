@@ -82,12 +82,64 @@ KabuSys は、J-Quants / kabuステーション 等の API を利用して夜間
    - python -m kabusys.validate_config
    - 必要に応じて厳格モード: python -m kabusys.validate_config --strict
 
-6. データベースの準備
-   - デフォルトのパス:
-     - DuckDB: data/kabusys.duckdb
-     - SQLite（監視）: data/monitoring.db
-     - Paper Trading SQLite: data/paper_trading.db（KABUSYS_ENV=paper_trading 時に使用）
-   - 必要なスキーマや初期データは夜間バッチスクリプト等で生成される想定です。
+6. config/*.yaml テンプレートの生成
+   - python scripts/generate_config.py
+   - config/ 以下に risk_config.yaml・strategy_config.yaml 等を生成します（既存ファイルは上書きしません）
+   - 強制上書きは --overwrite オプション
+
+7. データベースの初期化
+   各 DB はファイルが存在しない場合に自動作成されます（data/ ディレクトリも自動生成）。
+   以下を一度だけ実行してください（例: python init_db.py として保存して実行）:
+
+   ```python
+   from kabusys.config import Settings
+   from kabusys.data.schema import init_schema
+   from kabusys.monitoring.monitoring_db import init_monitoring_db
+   import sqlite3
+
+   settings = Settings()
+
+   # DuckDB（市場データ・シグナル・ポジション・バックテスト用）
+   conn = init_schema(settings.duckdb_path)
+   conn.close()
+
+   # 監視用 SQLite（system_status / trade_logs / risk_logs 等）
+   conn = sqlite3.connect(str(settings.sqlite_path))
+   init_monitoring_db(conn)
+   conn.close()
+   ```
+
+   Paper Trading を使う場合は追加で:
+
+   ```python
+   from kabusys.execution.order_repository import init_orders_db
+   import sqlite3
+
+   conn = sqlite3.connect(str(settings.paper_sqlite_path))
+   init_orders_db(conn)
+   conn.close()
+   ```
+
+8. 初期データ投入（J-Quants Bootstrap）
+   J-Quants Bulk Download API から過去の株価・財務・銘柄マスタ等を一括取得します。
+   JQUANTS_BULK_API_KEY が必要です。
+   - まず件数確認（ダウンロードなし）: python -m kabusys.data.bootstrap --dry-run
+   - 本番実行（初回は数分〜十数分）: python -m kabusys.data.bootstrap
+   - 特定エンドポイントのみ再取得: python -m kabusys.data.bootstrap --endpoint /equities/bars/daily
+   - 取得済みファイルはスキップされます（bootstrap_load_history テーブルで管理）
+
+9. 夜間バッチの初回実行（任意）
+   Bootstrap 後、特徴量・AI スコア・シグナルを生成してから Execution を起動することを推奨します:
+   - python scripts/run_data_update.py             # 当日株価・ニュース更新
+   - python scripts/run_feature_gen.py             # 特徴量生成
+   - python scripts/run_ai_analysis.py             # AI スコア・市場レジーム判定
+   - python scripts/run_strategy_signal.py         # 売買シグナル生成
+   - python scripts/run_portfolio_construction.py  # ポートフォリオ構築
+
+10. システム起動
+    - python scripts/start_system.py
+    - Execution エンジンと Monitoring を起動します
+    - 停止するには data/stop_requested.flag ファイルを作成してください
 
 ---
 
@@ -95,12 +147,7 @@ KabuSys は、J-Quants / kabuステーション 等の API を利用して夜間
 
 各スクリプトは Python モジュールとして直接実行できます（プロジェクトルートで実行するのが推奨）。
 
-- 環境ウィザード
-  - python -m kabusys.config_setup
-
-- 設定検証
-  - python -m kabusys.validate_config
-  - --strict オプションで警告も失敗扱い
+> `config_setup`（.env ウィザード）と `validate_config`（設定検証）は初回セットアップ専用です。上記セットアップ手順のステップ 4・5 を参照してください。
 
 - Execution（自動執行エンジン）起動
   - python -m kabusys.run_execution
@@ -189,9 +236,6 @@ KabuSys は、J-Quants / kabuステーション 等の API を利用して夜間
   - run_performance_report.py     — 運用成績サマリ CLI
   - run_position_reconciliation_report.py — ポジション照合 CLI
   - run_signal_queue_report.py    — Signal Queue 確認 CLI
-  - run_performance_report.py
-  - run_pre_market_report.py
-  - run_monitoring.py
   - operations/                    — レポート生成ロジック（純粋関数群）
     - pre_market_report.py
     - market_close_report.py
@@ -200,11 +244,11 @@ KabuSys は、J-Quants / kabuステーション 等の API を利用して夜間
     - signal_queue_report.py
     - execution_startup_report.py
     - night_batch_report.py
-    - position_reconciliation_report.py (呼び出し元あり)
+    - position_reconciliation_report.py
     - intraday_collector.py
+    - notifier.py                  — LINE Messaging API push 通知
   - execution/                     — ExecutionEngine 関連（BrokerFactory, Engine, OrderManager 等）
   - monitoring/                    — monitoring DB 初期化や SystemMonitor 実装
-  - operations/                    — 各種データ収集 & レポートビルド
   - tools/                         — 補助ツール（paper_verification_report.py）
   - utils/                         — logging_setup, process_priority などユーティリティ
 
