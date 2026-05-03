@@ -121,7 +121,7 @@ J-Quants Bulk API
 | `/equities/master`             | —                 | `stocks`              | 最新日のみ取得             |
 | `/fins/summary`                | `raw_financials`  | `fundamentals`        | 既存スキーマに対応         |
 | `/markets/calendar`            | —                 | `market_calendar`     | 既存スキーマに対応         |
-| `/fins/dividend`               | —                 | `dividends`（新規）   | 戦略で活用可能             |
+| `/fins/dividend`               | —                 | `dividends`           | 配当利回り計算に使用（Issue #185）。差分 ETL は `run_dividends_etl()` |
 | `/indices/bars/daily/topix`    | —                 | `topix_daily`（新規） | regime_detector が参照     |
 
 #### 冪等性・エラー方針
