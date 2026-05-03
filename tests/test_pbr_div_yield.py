@@ -60,7 +60,7 @@ class TestSchema:
 
     def test_strategy_toml_loads_and_has_required_keys(self):
         """config/strategy.toml が存在し、必要なキーを持つこと。"""
-        toml_path = Path("config/strategy.toml")
+        toml_path = Path(__file__).resolve().parents[1] / "config" / "strategy.toml"
         assert toml_path.exists(), "config/strategy.toml が存在しない"
         with open(toml_path, "rb") as f:
             cfg = tomllib.load(f)
