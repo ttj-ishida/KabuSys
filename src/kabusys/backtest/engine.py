@@ -390,6 +390,7 @@ def run_backtest(
     backtest_scope: BacktestScope | None = None,
     min_holding_days: int = 5,
     max_holding_days: int = 60,
+    trailing_stop_atr: float = 2.0,
 ) -> BacktestResult:
     """バックテストを実行し結果を返す。
 
@@ -417,6 +418,9 @@ def run_backtest(
                            （デフォルト 5）。0 を指定すると即日 SELL が可能になる。
         max_holding_days:  この営業日数以上保有した銘柄に time_exit SELL を発動（デフォルト 60）。
                            1 以上を指定すること。min_holding_days を上回る値を推奨。
+        trailing_stop_atr: トレーリングストップの ATR 乗数（デフォルト 2.0）。
+                           close < peak_close - trailing_stop_atr × ATR_20d のとき SELL 発動。
+                           正の値を指定すること。
 
     Returns:
         BacktestResult（history, trades, metrics および scope_mode/excluded_codes 等のスコープメタデータ）。
@@ -452,6 +456,8 @@ def run_backtest(
         raise ValueError(
             f"max_holding_days は 1 以上を指定してください: {max_holding_days}"
         )
+    if trailing_stop_atr <= 0:
+        raise ValueError(f"trailing_stop_atr は正の値を指定してください: {trailing_stop_atr}")
 
     # try ブロック外でも参照できるようデフォルト初期化
     _scope_mode: Literal["default_universe", "manual_codes"] = (
@@ -551,6 +557,7 @@ def run_backtest(
                 scope=backtest_scope,
                 min_holding_days=min_holding_days,
                 max_holding_days=max_holding_days,
+                trailing_stop_atr=trailing_stop_atr,
             )
 
             # Step 5: ポートフォリオ構築（Phase 5 モジュール使用）
