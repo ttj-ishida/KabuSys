@@ -1,11 +1,16 @@
 # tests/test_pbr_div_yield.py
 import tomllib
+from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 import duckdb
-import pytest
 
+from kabusys.data import jquants_client as jq
+from kabusys.data.pipeline import run_dividends_etl
 from kabusys.data.schema import init_schema
+from kabusys.research.factor_research import calc_value
+from kabusys.strategy.signal_generator import _compute_value_score, _load_value_config
 
 
 # ---------------------------------------------------------------------------
@@ -77,8 +82,6 @@ class TestSchema:
 # Task 2: BPS 抽出
 # ---------------------------------------------------------------------------
 
-from kabusys.data import jquants_client as jq
-
 
 class TestBpsExtraction:
     def test_save_financial_statements_stores_bps(self):
@@ -131,10 +134,6 @@ class TestBpsExtraction:
 # ---------------------------------------------------------------------------
 # Task 3: 配当 ETL
 # ---------------------------------------------------------------------------
-
-from unittest.mock import patch
-
-from kabusys.data.pipeline import run_dividends_etl
 
 
 def _insert_dividends(conn, rows: list[tuple]) -> None:
@@ -197,7 +196,6 @@ class TestDividendsEtl:
 
     def test_run_dividends_etl_calls_fetch_and_save(self):
         """run_dividends_etl が fetch_dividends / save_dividends を呼び出すこと。"""
-        from datetime import date
         conn = init_schema(":memory:")
         fake_records = [
             {
@@ -229,10 +227,6 @@ class TestDividendsEtl:
 # ---------------------------------------------------------------------------
 # Task 4: 特徴量計算
 # ---------------------------------------------------------------------------
-
-from datetime import date, timedelta
-
-from kabusys.research.factor_research import calc_value
 
 
 def _insert_prices(conn, rows: list[tuple]) -> None:
@@ -333,8 +327,6 @@ class TestCalcValueDivYield:
 # ---------------------------------------------------------------------------
 # Task 5: バリュースコア
 # ---------------------------------------------------------------------------
-
-from kabusys.strategy.signal_generator import _compute_value_score, _load_value_config
 
 
 def _default_config() -> dict:
