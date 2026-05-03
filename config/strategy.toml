@@ -1,0 +1,13 @@
+# config/strategy.toml
+# バリュースコアの重みと正規化基準値
+# _compute_value_score() が読み込む。変更後は次回シグナル生成から反映される。
+
+[value_score.weights]
+per       = 0.50   # PER の重み
+pbr       = 0.30   # PBR の重み
+div_yield = 0.20   # 配当利回りの重み（合計 1.0）
+
+[value_score.normalization]
+per_mid       = 20.0  # PER がこの値のとき score = 0.5（東証平均水準）
+pbr_mid       = 1.5   # PBR がこの値のとき score = 0.5（東証平均付近）
+div_yield_max = 3.0   # この配当利回り(%)で score = 1.0（上限）

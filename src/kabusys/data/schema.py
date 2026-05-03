@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS raw_financials (
     net_income      DECIMAL(20,4),
     eps             DECIMAL(18,4),
     roe             DECIMAL(10,6),
+    bps             DECIMAL(18,4),
     fetched_at      TIMESTAMP   NOT NULL DEFAULT current_timestamp,
     PRIMARY KEY (code, report_date, period_type)
 )
@@ -390,6 +391,8 @@ _MIGRATIONS: list[str] = [
     "ALTER TABLE raw_prices ADD COLUMN adj_factor DECIMAL(18,6)",
     # v0.x → v0.y: portfolio_performance に env を追加
     "ALTER TABLE portfolio_performance ADD COLUMN env VARCHAR NOT NULL DEFAULT 'live'",
+    # Issue #185: raw_financials に bps を追加
+    "ALTER TABLE raw_financials ADD COLUMN bps DECIMAL(18,4)",
 ]
 
 # ---------------------------------------------------------------------------
