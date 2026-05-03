@@ -144,6 +144,8 @@ def build_features(
                 "atr_pct": v.get("atr_pct"),
                 "volume_ratio": v.get("volume_ratio"),
                 "per": f.get("per"),
+                "pbr": f.get("pbr"),          # 追加
+                "div_yield": f.get("div_yield"),  # 追加
             }
         )
 
@@ -172,6 +174,8 @@ def build_features(
             r.get("atr_pct"),
             r.get("volume_ratio"),
             r.get("per"),
+            r.get("pbr"),          # 追加
+            r.get("div_yield"),    # 追加
             r.get("ma200_dev"),
         )
         for r in normalized
@@ -184,8 +188,8 @@ def build_features(
                 """
                 INSERT INTO features
                     (date, code, momentum_20, momentum_60, volatility_20, volume_ratio,
-                     per, ma200_dev, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
+                     per, pbr, div_yield, ma200_dev, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
                 """,
                 params,
             )

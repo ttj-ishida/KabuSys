@@ -224,3 +224,107 @@ class TestDividendsEtl:
         assert fetched == 1
         assert saved == 1
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Task 4: 特徴量計算
+# ---------------------------------------------------------------------------
+
+from datetime import date, timedelta
+
+from kabusys.research.factor_research import calc_value
+
+
+def _insert_prices(conn, rows: list[tuple]) -> None:
+    """(date, code, open, high, low, close, volume, turnover) を prices_daily に挿入。"""
+    conn.executemany(
+        """
+        INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT DO NOTHING
+        """,
+        rows,
+    )
+
+
+def _insert_financials_with_bps(conn, rows: list[tuple]) -> None:
+    """(code, report_date, period_type, eps, roe, bps) を raw_financials に挿入。"""
+    conn.executemany(
+        """
+        INSERT INTO raw_financials
+            (code, report_date, period_type, eps, roe, bps, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, current_timestamp)
+        ON CONFLICT DO NOTHING
+        """,
+        rows,
+    )
+
+
+class TestCalcValuePbr:
+    def test_pbr_calculation(self):
+        """PBR = close / bps が正しく計算されること。"""
+        conn = init_schema(":memory:")
+        d = date(2024, 5, 1)
+        _insert_prices(conn, [(d, "8001", 1500.0, 1510.0, 1490.0, 1500.0, 1000, 1500000.0)])
+        _insert_financials_with_bps(conn, [("8001", date(2024, 3, 31), "Q4", 100.0, 0.10, 1000.0)])
+        result = calc_value(conn, d)
+        row = next(r for r in result if r["code"] == "8001")
+        assert row["pbr"] is not None
+        assert abs(row["pbr"] - 1.5) < 0.01  # 1500 / 1000 = 1.5
+        conn.close()
+
+    def test_pbr_none_when_bps_zero(self):
+        """BPS が 0 の場合 pbr は None。"""
+        conn = init_schema(":memory:")
+        d = date(2024, 5, 2)
+        _insert_prices(conn, [(d, "8002", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)])
+        _insert_financials_with_bps(conn, [("8002", date(2024, 3, 31), "Q4", 50.0, 0.05, 0.0)])
+        result = calc_value(conn, d)
+        row = next(r for r in result if r["code"] == "8002")
+        assert row["pbr"] is None
+        conn.close()
+
+
+class TestCalcValueDivYield:
+    def test_div_yield_calculation(self):
+        """直近12ヶ月の配当合計 / close × 100 が div_yield になること。"""
+        conn = init_schema(":memory:")
+        d = date(2024, 5, 1)
+        _insert_prices(conn, [(d, "9001", 2000.0, 2010.0, 1990.0, 2000.0, 1000, 2000000.0)])
+        # 直近12ヶ月に2回配当（合計60円）
+        _insert_dividends(conn, [
+            ("9001", "2023-09-01", "001", "2023-09-27", "2023-09-30", "2023-12-01", 30.0),
+            ("9001", "2024-03-01", "002", "2024-03-27", "2024-03-31", "2024-06-01", 30.0),
+        ])
+        result = calc_value(conn, d)
+        row = next(r for r in result if r["code"] == "9001")
+        assert row["div_yield"] is not None
+        assert abs(row["div_yield"] - 3.0) < 0.01  # (30+30) / 2000 * 100 = 3.0%
+        conn.close()
+
+    def test_div_yield_none_when_no_dividends(self):
+        """配当レコードがない場合 div_yield は None。"""
+        conn = init_schema(":memory:")
+        d = date(2024, 5, 3)
+        _insert_prices(conn, [(d, "9002", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)])
+        result = calc_value(conn, d)
+        row = next((r for r in result if r["code"] == "9002"), None)
+        assert row is not None
+        assert row["div_yield"] is None
+        conn.close()
+
+    def test_div_yield_excludes_old_dividends(self):
+        """13ヶ月前の配当は集計対象外になること。"""
+        conn = init_schema(":memory:")
+        d = date(2024, 5, 1)
+        _insert_prices(conn, [(d, "9003", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)])
+        # 13ヶ月前の配当（対象外）と直近12ヶ月内（対象）
+        _insert_dividends(conn, [
+            ("9003", "2023-01-01", "001", "2023-03-27", "2023-03-31", "2023-06-01", 100.0),  # 対象外
+            ("9003", "2024-03-01", "002", "2024-03-27", "2024-03-31", "2024-06-01", 20.0),   # 対象
+        ])
+        result = calc_value(conn, d)
+        row = next(r for r in result if r["code"] == "9003")
+        assert row["div_yield"] is not None
+        assert abs(row["div_yield"] - 2.0) < 0.01  # 20 / 1000 * 100 = 2.0%（100円は除外）
+        conn.close()
