@@ -328,3 +328,100 @@ class TestCalcValueDivYield:
         assert row["div_yield"] is not None
         assert abs(row["div_yield"] - 2.0) < 0.01  # 20 / 1000 * 100 = 2.0%（100円は除外）
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Task 5: バリュースコア
+# ---------------------------------------------------------------------------
+
+from kabusys.strategy.signal_generator import _compute_value_score, _load_value_config
+
+
+def _default_config() -> dict:
+    """テスト用デフォルト設定を返す。"""
+    return {
+        "weights": {"per": 0.50, "pbr": 0.30, "div_yield": 0.20},
+        "normalization": {"per_mid": 20.0, "pbr_mid": 1.5, "div_yield_max": 3.0},
+    }
+
+
+class TestValueScoreAllThree:
+    def test_all_three_indicators(self):
+        """3指標すべて有効なとき加重平均が正しいこと。"""
+        cfg = _default_config()
+        feat = {"per": 20.0, "pbr": 1.5, "div_yield": 3.0}
+        score = _compute_value_score(feat, cfg)
+        # per=20 → 0.5, pbr=1.5 → 0.5, div_yield=3.0 → 1.0
+        # 0.50*0.5 + 0.30*0.5 + 0.20*1.0 = 0.25 + 0.15 + 0.20 = 0.60
+        assert score is not None
+        assert abs(score - 0.60) < 1e-9
+
+    def test_low_per_high_score(self):
+        """PER が低いほどスコアが高いこと。"""
+        cfg = _default_config()
+        score_low = _compute_value_score({"per": 10.0}, cfg)
+        score_high = _compute_value_score({"per": 40.0}, cfg)
+        assert score_low is not None and score_high is not None
+        assert score_low > score_high
+
+    def test_low_pbr_high_score(self):
+        """PBR が低いほどスコアが高いこと。"""
+        cfg = _default_config()
+        score_low = _compute_value_score({"pbr": 0.5}, cfg)
+        score_high = _compute_value_score({"pbr": 3.0}, cfg)
+        assert score_low is not None and score_high is not None
+        assert score_low > score_high
+
+    def test_high_div_yield_high_score(self):
+        """配当利回りが高いほどスコアが高いこと（上限 1.0）。"""
+        cfg = _default_config()
+        score_low = _compute_value_score({"div_yield": 1.0}, cfg)
+        score_high = _compute_value_score({"div_yield": 5.0}, cfg)
+        assert score_low is not None and score_high is not None
+        assert score_low < score_high
+        # 上限チェック: div_yield >= div_yield_max で score=1.0
+        score_cap = _compute_value_score({"div_yield": 10.0}, cfg)
+        assert abs(score_cap - 1.0) < 1e-9
+
+
+class TestValueScorePartial:
+    def test_pbr_missing_uses_per_and_div_yield(self):
+        """PBR 欠損のとき PER と配当利回りで重み正規化して計算すること。"""
+        cfg = _default_config()
+        feat = {"per": 20.0, "div_yield": 3.0}  # pbr なし
+        score = _compute_value_score(feat, cfg)
+        # per=20 → 0.5, div_yield=3.0 → 1.0
+        # total_w = 0.50 + 0.20 = 0.70
+        # (0.50*0.5 + 0.20*1.0) / 0.70 = 0.45 / 0.70 ≈ 0.6429
+        assert score is not None
+        assert abs(score - 0.45 / 0.70) < 1e-6
+
+    def test_all_missing_returns_none(self):
+        """3指標すべて欠損のとき None を返すこと。"""
+        cfg = _default_config()
+        assert _compute_value_score({}, cfg) is None
+        assert _compute_value_score({"per": None, "pbr": None, "div_yield": None}, cfg) is None
+
+
+class TestValueScoreConfigDriven:
+    def test_changing_per_mid_changes_score(self):
+        """per_mid を変更するとスコアが変わること。"""
+        feat = {"per": 20.0}
+        cfg_default = _default_config()
+        cfg_strict = {
+            "weights": {"per": 0.50, "pbr": 0.30, "div_yield": 0.20},
+            "normalization": {"per_mid": 10.0, "pbr_mid": 1.5, "div_yield_max": 3.0},
+        }
+        score_default = _compute_value_score(feat, cfg_default)
+        score_strict = _compute_value_score(feat, cfg_strict)
+        # per_mid=20 → score=0.5; per_mid=10 → 1/(1+20/10)=1/3≈0.333
+        assert score_default is not None and score_strict is not None
+        assert score_default > score_strict
+
+    def test_load_value_config_returns_dict_with_required_keys(self):
+        """_load_value_config が weights と normalization キーを持つ dict を返すこと。"""
+        cfg = _load_value_config()
+        assert "weights" in cfg
+        assert "normalization" in cfg
+        assert "per" in cfg["weights"]
+        assert "per_mid" in cfg["normalization"]

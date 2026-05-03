@@ -106,15 +106,54 @@ def _compute_momentum_score(feat: dict[str, Any]) -> float | None:
     )
 
 
-def _compute_value_score(feat: dict[str, Any]) -> float | None:
-    """バリュースコア（PER が低いほど高スコア）。
+def _load_value_config() -> dict:
+    """config/strategy.toml からバリュースコア設定を読み込む。
 
-    PER = 20 で 0.5、PER → 0 で 1.0、PER → ∞ で 0.0 に近似。
+    ファイルが存在しない場合はデフォルト値を返す（設定ファイル任意）。
+
+    Returns:
+        {"weights": {...}, "normalization": {...}} 形式の辞書。
     """
+    import tomllib
+    from pathlib import Path
+
+    config_path = Path("config/strategy.toml")
+    if config_path.exists():
+        with open(config_path, "rb") as f:
+            return tomllib.load(f)["value_score"]
+    return {
+        "weights": {"per": 0.50, "pbr": 0.30, "div_yield": 0.20},
+        "normalization": {"per_mid": 20.0, "pbr_mid": 1.5, "div_yield_max": 3.0},
+    }
+
+
+def _compute_value_score(feat: dict[str, Any], config: dict) -> float | None:
+    """バリュースコア（PER・PBR・配当利回りの加重平均）。
+
+    各指標を 0〜1 に正規化し、config["weights"] で加重平均する。
+    欠損指標は除外して残りの有効指標で重み正規化する（全欠損時は None）。
+    重みと正規化基準値は config/strategy.toml で管理する。
+    """
+    w = config["weights"]
+    n = config["normalization"]
+    scores: dict[str, float] = {}
+
     per = feat.get("per")
-    if per is None or per <= 0 or not math.isfinite(per):
+    if per is not None and per > 0 and math.isfinite(per):
+        scores["per"] = 1.0 / (1.0 + per / n["per_mid"])
+
+    pbr = feat.get("pbr")
+    if pbr is not None and pbr > 0 and math.isfinite(pbr):
+        scores["pbr"] = 1.0 / (1.0 + pbr / n["pbr_mid"])
+
+    dy = feat.get("div_yield")
+    if dy is not None and dy > 0 and math.isfinite(dy):
+        scores["div_yield"] = min(dy / n["div_yield_max"], 1.0)
+
+    if not scores:
         return None
-    return 1.0 / (1.0 + per / 20.0)
+    total_w = sum(w[k] for k in scores)
+    return sum(w[k] * v for k, v in scores.items()) / total_w
 
 
 def _compute_volatility_score(feat: dict[str, Any]) -> float | None:
@@ -712,11 +751,13 @@ def generate_signals(
         )
 
     # 4. 各銘柄の final_score 計算（Section 4.1）
+    # バリュースコア設定を読み込む（ループ外で1回のみ）
+    value_config = _load_value_config()
     scored: list[dict[str, Any]] = []
     for feat in features:
         code = feat["code"]
         s_mom = _compute_momentum_score(feat)
-        s_val = _compute_value_score(feat)
+        s_val = _compute_value_score(feat, value_config)
         s_vol = _compute_volatility_score(feat)
         s_liq = _compute_liquidity_score(feat)
 
