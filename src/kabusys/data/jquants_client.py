@@ -502,6 +502,7 @@ def save_financial_statements(
             _to_float(r.get("Profit")),
             _to_float(r.get("EarningsPerShare")),
             _to_float(r.get("ROE")),
+            _to_float(r.get("BookValuePerShare")),  # 追加
             fetched_at,
         )
         for r in records
@@ -519,14 +520,15 @@ def save_financial_statements(
         """
         INSERT INTO raw_financials
             (code, report_date, period_type, revenue, operating_profit,
-             net_income, eps, roe, fetched_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             net_income, eps, roe, bps, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (code, report_date, period_type) DO UPDATE SET
             revenue          = excluded.revenue,
             operating_profit = excluded.operating_profit,
             net_income       = excluded.net_income,
             eps              = excluded.eps,
             roe              = excluded.roe,
+            bps              = excluded.bps,
             fetched_at       = excluded.fetched_at
         """,
         rows,

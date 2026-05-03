@@ -71,3 +71,58 @@ class TestSchema:
         assert "per_mid" in n
         assert "pbr_mid" in n
         assert "div_yield_max" in n
+
+
+# ---------------------------------------------------------------------------
+# Task 2: BPS 抽出
+# ---------------------------------------------------------------------------
+
+from kabusys.data import jquants_client as jq
+
+
+class TestBpsExtraction:
+    def test_save_financial_statements_stores_bps(self):
+        """save_financial_statements が BookValuePerShare を raw_financials.bps に保存すること。"""
+        conn = init_schema(":memory:")
+        records = [
+            {
+                "LocalCode": "72030",
+                "DisclosedDate": "2024-03-31",
+                "TypeOfDocument": "Q4",
+                "NetSales": "1000000",
+                "OperatingProfit": "200000",
+                "Profit": "150000",
+                "EarningsPerShare": "100.0",
+                "ROE": "0.15",
+                "BookValuePerShare": "1500.0",
+            }
+        ]
+        saved = jq.save_financial_statements(conn, records)
+        assert saved == 1
+        row = conn.execute(
+            "SELECT bps FROM raw_financials WHERE code = '72030'"
+        ).fetchone()
+        assert row is not None
+        assert abs(float(row[0]) - 1500.0) < 0.01
+        conn.close()
+
+    def test_save_financial_statements_handles_missing_bps(self):
+        """BookValuePerShare がない場合 bps は NULL になること。"""
+        conn = init_schema(":memory:")
+        records = [
+            {
+                "LocalCode": "72031",
+                "DisclosedDate": "2024-03-31",
+                "TypeOfDocument": "Q4",
+                "EarningsPerShare": "50.0",
+                "ROE": "0.10",
+                # BookValuePerShare なし
+            }
+        ]
+        jq.save_financial_statements(conn, records)
+        row = conn.execute(
+            "SELECT bps FROM raw_financials WHERE code = '72031'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] is None
+        conn.close()
