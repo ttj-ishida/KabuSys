@@ -216,7 +216,11 @@ class TestDividendsEtl:
             fetched, saved = run_dividends_etl(
                 conn, target_date=date(2024, 4, 1), id_token="dummy"
             )
-        mock_fetch.assert_called_once()
+        mock_fetch.assert_called_once_with(
+            id_token="dummy",
+            date_from=date(2017, 1, 1),  # _MIN_DATA_DATE (empty DB, no prior dividends)
+            date_to=date(2024, 4, 1),
+        )
         assert fetched == 1
         assert saved == 1
         conn.close()

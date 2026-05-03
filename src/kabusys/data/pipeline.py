@@ -486,8 +486,9 @@ def run_daily_etl(
       1. 市場カレンダーETL（lookahead_days 先まで取得）
       2. 株価日足ETL（差分更新 + backfill）
       3. 財務データETL（差分更新 + backfill）
-      4. 決算カレンダーETL（翌30日分を先読み取得・冪等保存）
-      5. 品質チェック（オプション）
+      4. 配当データETL（差分更新 + backfill）
+      5. 決算カレンダーETL（翌30日分を先読み取得・冪等保存）
+      6. 品質チェック（オプション）
 
     Args:
         conn:                    DuckDB 接続。
@@ -540,7 +541,7 @@ def run_daily_etl(
         logger.exception("run_financials_etl 失敗")
         result.errors.append("run_financials_etl 失敗")
 
-    # 3b. 配当データETL（Issue #185）
+    # 4. 配当データETL（差分更新 + backfill）
     try:
         fetched, saved = run_dividends_etl(
             conn, trading_day, id_token=id_token, backfill_days=backfill_days
@@ -551,7 +552,7 @@ def run_daily_etl(
         logger.exception("run_dividends_etl 失敗")
         result.errors.append("run_dividends_etl 失敗")
 
-    # 4. 決算カレンダー（翌30日分を先読み取得・冪等保存）
+    # 5. 決算カレンダー（翌30日分を先読み取得・冪等保存）
     try:
         ec_records = jq.fetch_earnings_calendar(
             id_token=id_token,
@@ -565,7 +566,7 @@ def run_daily_etl(
         result.errors.append(f"earnings_calendar: {exc}")
         logger.warning("決算カレンダー取得失敗（ETL継続）: %s", exc)
 
-    # 5. 品質チェック
+    # 6. 品質チェック
     if run_quality_checks:
         try:
             result.quality_issues = quality.run_all_checks(
@@ -582,6 +583,7 @@ def run_daily_etl(
         "run_daily_etl 完了: date=%s "
         "prices fetched=%d saved=%d "
         "financials fetched=%d saved=%d "
+        "dividends fetched=%d saved=%d "
         "calendar fetched=%d saved=%d "
         "earnings_calendar fetched=%d saved=%d "
         "quality_issues=%d errors=%d",
@@ -590,6 +592,8 @@ def run_daily_etl(
         result.prices_saved,
         result.financials_fetched,
         result.financials_saved,
+        result.dividends_fetched,
+        result.dividends_saved,
         result.calendar_fetched,
         result.calendar_saved,
         result.earnings_calendar_fetched,
