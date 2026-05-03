@@ -66,6 +66,8 @@ class ETLResult:
         calendar_saved:              DBに保存したカレンダーレコード数。
         earnings_calendar_fetched:   取得した決算カレンダーレコード数。
         earnings_calendar_saved:     DBに保存を試みた決算カレンダーレコード数。
+        dividends_fetched:           取得した配当レコード数。
+        dividends_saved:             DBに保存した配当レコード数。
         quality_issues:              品質チェックで検出された問題のリスト。
         errors:                      処理中に発生したエラーの概要メッセージのリスト。
     """
@@ -79,6 +81,8 @@ class ETLResult:
     calendar_saved: int = 0
     earnings_calendar_fetched: int = 0
     earnings_calendar_saved: int = 0
+    dividends_fetched: int = 0
+    dividends_saved: int = 0
     quality_issues: list[quality.QualityIssue] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -251,6 +255,18 @@ def get_last_calendar_date(conn: duckdb.DuckDBPyConnection) -> date | None:
     return _get_max_date(conn, "market_calendar", "date")
 
 
+def get_last_dividend_date(conn: duckdb.DuckDBPyConnection) -> date | None:
+    """dividends テーブルの最終取得日（pub_date）を返す。
+
+    Args:
+        conn: DuckDB 接続。
+
+    Returns:
+        最終取得日。テーブル未作成または空の場合は None。
+    """
+    return _get_max_date(conn, "dividends", "pub_date")
+
+
 # ---------------------------------------------------------------------------
 # 個別ETLジョブ
 # ---------------------------------------------------------------------------
@@ -349,6 +365,54 @@ def run_financials_etl(
     )
     saved = jq.save_financial_statements(conn, records)
     logger.info("run_financials_etl: fetched=%d saved=%d", len(records), saved)
+    return len(records), saved
+
+
+def run_dividends_etl(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+    id_token: str | None = None,
+    date_from: date | None = None,
+    backfill_days: int = _DEFAULT_BACKFILL_DAYS,
+) -> tuple[int, int]:
+    """配当データの差分ETLを実行する。
+
+    差分更新: date_from が指定されていない場合、DBの最終取得日から
+    backfill_days 日前を date_from として再取得する。
+
+    Args:
+        conn:          DuckDB 接続。
+        target_date:   取得終了日。
+        id_token:      J-Quants 認証トークン。
+        date_from:     取得開始日。省略時は最終取得日 - backfill_days + 1。
+        backfill_days: 最終取得日の何日前から再取得するか（デフォルト 3 日）。
+
+    Returns:
+        (取得レコード数, 保存レコード数) のタプル。
+    """
+    if date_from is None:
+        last = get_last_dividend_date(conn)
+        if last is not None:
+            date_from = max(_MIN_DATA_DATE, last - timedelta(days=backfill_days - 1))
+        else:
+            date_from = _MIN_DATA_DATE
+
+    if date_from > target_date:
+        logger.info(
+            "run_dividends_etl: すでに最新 date_from=%s target=%s",
+            date_from,
+            target_date,
+        )
+        return 0, 0
+
+    logger.info("run_dividends_etl: date_from=%s date_to=%s", date_from, target_date)
+    records = jq.fetch_dividends(
+        id_token=id_token,
+        date_from=date_from,
+        date_to=target_date,
+    )
+    saved = jq.save_dividends(conn, records)
+    logger.info("run_dividends_etl: fetched=%d saved=%d", len(records), saved)
     return len(records), saved
 
 
@@ -475,6 +539,17 @@ def run_daily_etl(
     except Exception:
         logger.exception("run_financials_etl 失敗")
         result.errors.append("run_financials_etl 失敗")
+
+    # 3b. 配当データETL（Issue #185）
+    try:
+        fetched, saved = run_dividends_etl(
+            conn, trading_day, id_token=id_token, backfill_days=backfill_days
+        )
+        result.dividends_fetched = fetched
+        result.dividends_saved = saved
+    except Exception:
+        logger.exception("run_dividends_etl 失敗")
+        result.errors.append("run_dividends_etl 失敗")
 
     # 4. 決算カレンダー（翌30日分を先読み取得・冪等保存）
     try:

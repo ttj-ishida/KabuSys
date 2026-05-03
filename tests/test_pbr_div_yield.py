@@ -126,3 +126,97 @@ class TestBpsExtraction:
         assert row is not None
         assert row[0] is None
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Task 3: 配当 ETL
+# ---------------------------------------------------------------------------
+
+from unittest.mock import patch
+
+from kabusys.data.pipeline import run_dividends_etl
+
+
+def _insert_dividends(conn, rows: list[tuple]) -> None:
+    """(code, pub_date, ref_no, ex_date, record_date, pay_date, div_rate) を dividends に挿入。"""
+    conn.executemany(
+        """
+        INSERT INTO dividends
+            (code, pub_date, ref_no, ex_date, record_date, pay_date, div_rate, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, current_timestamp)
+        ON CONFLICT (code, pub_date, ref_no) DO UPDATE SET
+            div_rate = excluded.div_rate, fetched_at = excluded.fetched_at
+        """,
+        rows,
+    )
+
+
+class TestDividendsEtl:
+    def test_save_dividends_stores_records(self):
+        """save_dividends が dividends テーブルに div_rate を保存すること。"""
+        conn = init_schema(":memory:")
+        records = [
+            {
+                "Code": "72030",
+                "PubDate": "2024-01-15",
+                "RefNo": "001",
+                "ExDate": "2024-03-27",
+                "RecDate": "2024-03-31",
+                "PayDate": "2024-06-01",
+                "DivRate": "50.0",
+            }
+        ]
+        saved = jq.save_dividends(conn, records)
+        assert saved == 1
+        row = conn.execute(
+            "SELECT div_rate FROM dividends WHERE code = '72030' AND ref_no = '001'"
+        ).fetchone()
+        assert row is not None
+        assert abs(float(row[0]) - 50.0) < 0.01
+        conn.close()
+
+    def test_save_dividends_is_idempotent(self):
+        """同じレコードを2回保存しても重複しないこと（upsert）。"""
+        conn = init_schema(":memory:")
+        record = {
+            "Code": "72030",
+            "PubDate": "2024-01-15",
+            "RefNo": "001",
+            "ExDate": "2024-03-27",
+            "RecDate": "2024-03-31",
+            "PayDate": "2024-06-01",
+            "DivRate": "50.0",
+        }
+        jq.save_dividends(conn, [record])
+        record["DivRate"] = "60.0"  # 値を更新
+        jq.save_dividends(conn, [record])
+        rows = conn.execute("SELECT div_rate FROM dividends WHERE code = '72030'").fetchall()
+        assert len(rows) == 1
+        assert abs(float(rows[0][0]) - 60.0) < 0.01  # 更新後の値
+        conn.close()
+
+    def test_run_dividends_etl_calls_fetch_and_save(self):
+        """run_dividends_etl が fetch_dividends / save_dividends を呼び出すこと。"""
+        from datetime import date
+        conn = init_schema(":memory:")
+        fake_records = [
+            {
+                "Code": "72030",
+                "PubDate": "2024-01-15",
+                "RefNo": "001",
+                "ExDate": "2024-03-27",
+                "RecDate": "2024-03-31",
+                "PayDate": "2024-06-01",
+                "DivRate": "50.0",
+            }
+        ]
+        with patch(
+            "kabusys.data.pipeline.jq.fetch_dividends", return_value=fake_records
+        ) as mock_fetch:
+            fetched, saved = run_dividends_etl(
+                conn, target_date=date(2024, 4, 1), id_token="dummy"
+            )
+        mock_fetch.assert_called_once()
+        assert fetched == 1
+        assert saved == 1
+        conn.close()

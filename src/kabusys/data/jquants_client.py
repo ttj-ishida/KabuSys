@@ -537,6 +537,104 @@ def save_financial_statements(
     return len(rows)
 
 
+def fetch_dividends(
+    id_token: str | None = None,
+    code: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> list[dict[str, Any]]:
+    """配当データを取得する（ページネーション対応）。
+
+    Args:
+        id_token:  認証トークン。省略時はキャッシュを使用。
+        code:      銘柄コード（省略時は全銘柄）。
+        date_from: 取得開始日。
+        date_to:   取得終了日。
+
+    Returns:
+        配当レコードのリスト。
+    """
+    params: dict[str, str] = {}
+    if code:
+        params["code"] = code
+    if date_from:
+        params["dateFrom"] = date_from.strftime("%Y%m%d")
+    if date_to:
+        params["dateTo"] = date_to.strftime("%Y%m%d")
+
+    result: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    while True:
+        data = _request("/fins/dividend", params=params, id_token=id_token)
+        result.extend(data.get("dividends", []))
+        pagination_key = data.get("pagination_key")
+        if not pagination_key or pagination_key in seen_keys:
+            break
+        seen_keys.add(pagination_key)
+        params["pagination_key"] = pagination_key
+
+    logger.info("fetch_dividends: %d レコード取得", len(result))
+    return result
+
+
+def save_dividends(
+    conn: duckdb.DuckDBPyConnection,
+    records: list[dict[str, Any]],
+) -> int:
+    """配当データを dividends テーブルに保存する（冪等）。
+
+    Args:
+        conn:    DuckDB 接続。
+        records: fetch_dividends() の戻り値。
+                 期待フィールド: Code, PubDate, RefNo, ExDate, RecDate, PayDate, DivRate
+
+    Returns:
+        挿入・更新したレコード数。
+    """
+    if not records:
+        return 0
+
+    fetched_at = (
+        datetime.now(tz=timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+    rows = [
+        (
+            str(r.get("Code", "") or ""),
+            r.get("PubDate"),
+            str(r.get("RefNo", "") or ""),
+            r.get("ExDate") or None,
+            r.get("RecDate") or None,
+            r.get("PayDate") or None,
+            _to_float(r.get("DivRate")),
+            fetched_at,
+        )
+        for r in records
+        if r.get("Code") and r.get("PubDate") and r.get("RefNo")
+    ]
+    skipped = len(records) - len(rows)
+    if skipped:
+        logger.warning("save_dividends: %d 件を PK 欠損によりスキップ", skipped)
+
+    conn.executemany(
+        """
+        INSERT INTO dividends
+            (code, pub_date, ref_no, ex_date, record_date, pay_date, div_rate, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (code, pub_date, ref_no) DO UPDATE SET
+            ex_date     = excluded.ex_date,
+            record_date = excluded.record_date,
+            pay_date    = excluded.pay_date,
+            div_rate    = excluded.div_rate,
+            fetched_at  = excluded.fetched_at
+        """,
+        rows,
+    )
+    logger.info("save_dividends: %d 件を dividends に保存", len(rows))
+    return len(rows)
+
+
 def save_market_calendar(
     conn: duckdb.DuckDBPyConnection,
     records: list[dict[str, Any]],
