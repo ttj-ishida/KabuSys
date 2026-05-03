@@ -477,26 +477,26 @@ def _generate_sell_signals(
     is_bear: bool = False,
     min_holding_days: int = _MIN_HOLDING_DAYS,
     max_holding_days: int = _MAX_HOLDING_DAYS,
+    trailing_stop_atr: float = _TRAILING_STOP_ATR_MULT,
 ) -> list[dict[str, Any]]:
     """保有ポジションに対してエグジット条件を判定し、SELL シグナルを返す。
 
     実装済みの条件 (StrategyModel.md Section 5.2):
       1. ストップロス: 終値 / avg_price - 1 < -8%
       2. 時間決済: 保有営業日数 >= max_holding_days
-      3. スコア低下: final_score が threshold 未満
-
-    未実装の条件:
-      - トレーリングストップ（直近最高値から -10%）
+      3. トレーリングストップ: close < peak_close − trailing_stop_atr × ATR_20d（含み益あり時）
+      4. スコア低下: final_score が threshold 未満
 
     Args:
-        conn:              DuckDB 接続。
-        target_date:       シグナル生成対象日。
-        score_map:         {code: final_score} の辞書。
-        threshold:         BUY/SELL 判定の閾値。
-        is_bear:           True のとき最低保有日数チェックをスキップする（Bear レジーム例外）。
-        min_holding_days:  SELL を抑制する最低保有営業日数（デフォルト: _MIN_HOLDING_DAYS）。
-        max_holding_days:  この営業日数以上保有した銘柄に time_exit SELL を発動（デフォルト: _MAX_HOLDING_DAYS）。
-                           ストップロス・決算回避より低優先。min_holding_days は無視して発火する。
+        conn:                DuckDB 接続。
+        target_date:         シグナル生成対象日。
+        score_map:           {code: final_score} の辞書。
+        threshold:           BUY/SELL 判定の閾値。
+        is_bear:             True のとき最低保有日数チェックをスキップする（Bear レジーム例外）。
+        min_holding_days:    SELL を抑制する最低保有営業日数（デフォルト: _MIN_HOLDING_DAYS）。
+        max_holding_days:    この営業日数以上保有した銘柄に time_exit SELL を発動（デフォルト: _MAX_HOLDING_DAYS）。
+                             ストップロス・決算回避より低優先。min_holding_days は無視して発火する。
+        trailing_stop_atr:   ATR 乗数。peak_close − N×ATR を下回ったら trailing_stop SELL（含み益ありの場合のみ）。
 
     Returns:
         [{"code": str, "score": float, "reason": str}, ...] のリスト。
@@ -577,6 +577,31 @@ def _generate_sell_signals(
             )
             continue
 
+        # トレーリングストップ（含み益保護）: min_holding_days を無視して発火
+        # peak_close > avg_price のとき（含み益あり）のみ適用
+        _peak = _peak_close(conn, code, target_date)
+        if _peak is not None and _peak > avg_price:
+            _atr = _atr_20d(conn, code, target_date)
+            if _atr is not None and close < _peak - trailing_stop_atr * _atr:
+                logger.debug(
+                    "_generate_sell_signals: %s trailing_stop"
+                    " close=%.2f peak=%.2f atr=%.2f mult=%.1f date=%s",
+                    code,
+                    close,
+                    _peak,
+                    _atr,
+                    trailing_stop_atr,
+                    target_date,
+                )
+                sell_signals.append(
+                    {
+                        "code": code,
+                        "score": final_score,
+                        "reason": "trailing_stop",
+                    }
+                )
+                continue
+
         # 時間決済（最大保有期間超過）: min_holding_days を無視して発火
         held = _held_days(conn, code, target_date)
         if held is not None and held >= max_holding_days:
@@ -644,6 +669,7 @@ def generate_signals(
     scope: BacktestScope | None = None,
     min_holding_days: int = _MIN_HOLDING_DAYS,
     max_holding_days: int = _MAX_HOLDING_DAYS,
+    trailing_stop_atr: float = _TRAILING_STOP_ATR_MULT,
 ) -> int:
     """features テーブルを読み込み、売買シグナルを生成して signals テーブルへ書き込む。
 
@@ -662,6 +688,8 @@ def generate_signals(
                            ストップロスと Bear レジーム時は保有日数に関わらず SELL が発生する。
         max_holding_days:  この営業日数以上保有した銘柄に time_exit SELL を発動（デフォルト: _MAX_HOLDING_DAYS）。
                            1 以上を指定すること。
+        trailing_stop_atr: ATR 乗数。peak_close − N×ATR を下回ったら trailing_stop SELL。
+                           正の値を指定すること（デフォルト: _TRAILING_STOP_ATR_MULT）。
 
     Returns:
         signals テーブルへ書き込んだシグナル数（BUY + SELL の合計）。
@@ -681,6 +709,10 @@ def generate_signals(
             " min_holding_days は実質的に無効になります。",
             max_holding_days,
             min_holding_days,
+        )
+    if trailing_stop_atr <= 0:
+        raise ValueError(
+            f"trailing_stop_atr は正の値を指定してください: {trailing_stop_atr}"
         )
     # weights を _DEFAULT_WEIGHTS でフォールバック補完し、合計が 1.0 でなければ再スケール
     # 未知キー・非数値・NaN/Inf・負値は無視して既知キー（_DEFAULT_WEIGHTS）のみを受け付ける
@@ -931,6 +963,7 @@ def generate_signals(
         is_bear=regime_is_bear,
         min_holding_days=min_holding_days,
         max_holding_days=max_holding_days,
+        trailing_stop_atr=trailing_stop_atr,
     )
 
     # SELL 対象銘柄は BUY から除外し、ランクを連番で再付与（SELL 優先ポリシー）
