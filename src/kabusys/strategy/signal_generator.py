@@ -579,17 +579,17 @@ def _generate_sell_signals(
 
         # トレーリングストップ（含み益保護）: min_holding_days を無視して発火
         # peak_close > avg_price のとき（含み益あり）のみ適用
-        _peak = _peak_close(conn, code, target_date)
-        if _peak is not None and _peak > avg_price:
-            _atr = _atr_20d(conn, code, target_date)
-            if _atr is not None and close < _peak - trailing_stop_atr * _atr:
+        peak = _peak_close(conn, code, target_date)
+        if peak is not None and peak > avg_price:
+            atr = _atr_20d(conn, code, target_date)
+            if atr is not None and close < peak - trailing_stop_atr * atr:
                 logger.debug(
                     "_generate_sell_signals: %s trailing_stop"
                     " close=%.2f peak=%.2f atr=%.2f mult=%.1f date=%s",
                     code,
                     close,
-                    _peak,
-                    _atr,
+                    peak,
+                    atr,
                     trailing_stop_atr,
                     target_date,
                 )
