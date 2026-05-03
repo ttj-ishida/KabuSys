@@ -457,7 +457,9 @@ def run_backtest(
             f"max_holding_days は 1 以上を指定してください: {max_holding_days}"
         )
     if trailing_stop_atr <= 0:
-        raise ValueError(f"trailing_stop_atr は正の値を指定してください: {trailing_stop_atr}")
+        raise ValueError(
+            f"trailing_stop_atr は正の値を指定してください: {trailing_stop_atr}"
+        )
 
     # try ブロック外でも参照できるようデフォルト初期化
     _scope_mode: Literal["default_universe", "manual_codes"] = (
