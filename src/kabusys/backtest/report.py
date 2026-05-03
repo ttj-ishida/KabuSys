@@ -48,6 +48,7 @@ class ReportMeta:
     # scope fields
     min_holding_days: int = 5
     max_holding_days: int = 60
+    trailing_stop_atr: float = 2.0
     scope_mode: str = "default_universe"
     scope_codes: list[str] | None = None
     effective_universe_size: int | None = None
@@ -133,6 +134,7 @@ def build_report(
     lot_size: int = 100,
     min_holding_days: int = 5,
     max_holding_days: int = 60,
+    trailing_stop_atr: float = 2.0,
 ) -> BacktestReport:
     """BacktestResult から BacktestReport を構築する。
 
@@ -197,6 +199,7 @@ def build_report(
         report_type=report_type,
         min_holding_days=min_holding_days,
         max_holding_days=max_holding_days,
+        trailing_stop_atr=trailing_stop_atr,
         scope_mode=scope_mode,
         scope_codes=scope_codes,
         effective_universe_size=effective_universe_size,
@@ -329,6 +332,7 @@ def format_markdown(report: BacktestReport) -> str:
         f"| Scope Mode | {m.scope_mode} |",
         f"| Min Holding Days | {m.min_holding_days} |",
         f"| Max Holding Days | {m.max_holding_days} |",
+        f"| Trailing Stop ATR | {m.trailing_stop_atr} |",
         f"| Allocation Method | {m.allocation_method} |",
         f"| Max Position % | {m.max_position_pct:.0%} |",
         f"| Max Utilization | {m.max_utilization:.0%} |",
