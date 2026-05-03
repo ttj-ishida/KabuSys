@@ -65,6 +65,20 @@ class TestAtr20d:
         result = _atr_20d(conn, code, target)
         assert result is None
 
+    def test_returns_none_at_boundary_19_tr_values(self, conn):
+        """TR が 19 本（境界値 -1）のとき None を返す。"""
+        code = "ATR3"
+        target = date(2026, 4, 6)
+        # 19 days before + target = 20 rows → 19 TR values (oldest has NULL prev_close) → None
+        for d in _weekdays_before(target, 19) + [target]:
+            conn.execute(
+                "INSERT INTO prices_daily (date, code, open, high, low, close, volume) "
+                "VALUES (?, ?, 1000.0, 1010.0, 990.0, 1000.0, 1000000)",
+                [d, code],
+            )
+        result = _atr_20d(conn, code, target)
+        assert result is None
+
 
 # ---------------------------------------------------------------------------
 # _peak_close ヘルパー

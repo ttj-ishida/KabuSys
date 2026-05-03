@@ -328,6 +328,7 @@ def _atr_20d(
         ),
         with_prev AS (
             SELECT
+                date,
                 high,
                 low,
                 LAG(close) OVER (ORDER BY date) AS prev_close
@@ -356,22 +357,27 @@ def _peak_close(
     code: str,
     target_date: date,
 ) -> float | None:
-    """エントリー日（最古のオープンエントリー）以降 target_date までの最高 close を返す。
+    """すべてのオープンエントリーの最古のエントリー日以降 target_date までの最高 close を返す。
 
     オープンな position_entries が存在しない場合は None を返す。
     """
     row = conn.execute(
         """
+        WITH first_entry AS (
+            SELECT MIN(entry_date) AS entry_date
+            FROM position_entries
+            WHERE code = ?
+              AND sell_date IS NULL
+        )
         SELECT MAX(pd.close)
-        FROM position_entries pe
+        FROM first_entry fe
         JOIN prices_daily pd
-          ON pd.code = pe.code
-         AND pd.date >= pe.entry_date
+          ON pd.date >= fe.entry_date
          AND pd.date <= ?
-        WHERE pe.code = ?
-          AND pe.sell_date IS NULL
+         AND pd.code = ?
+        WHERE fe.entry_date IS NOT NULL
         """,
-        [target_date, code],
+        [code, target_date, code],
     ).fetchone()
     if row is None or row[0] is None:
         return None
