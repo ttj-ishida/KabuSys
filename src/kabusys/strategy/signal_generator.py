@@ -481,11 +481,13 @@ def _generate_sell_signals(
 ) -> list[dict[str, Any]]:
     """保有ポジションに対してエグジット条件を判定し、SELL シグナルを返す。
 
-    実装済みの条件 (StrategyModel.md Section 5.2):
-      1. ストップロス: 終値 / avg_price - 1 < -8%
-      2. 時間決済: 保有営業日数 >= max_holding_days
-      3. トレーリングストップ: close < peak_close − trailing_stop_atr × ATR_20d（含み益あり時）
-      4. スコア低下: final_score が threshold 未満
+    実装済みの条件と優先順序 (StrategyModel.md Section 5.2):
+      1. ストップロス: 終値 / avg_price - 1 < -8%（最優先・min_holding_days バイパス）
+      2. 決算回避 (earnings_avoidance): 翌営業日が決算発表日（min_holding_days バイパス）
+      3. トレーリングストップ: close < peak_close - trailing_stop_atr x ATR_20d（含み益あり時・min_holding_days バイパス）
+      4. 時間決済 (time_exit): 保有営業日数 >= max_holding_days（min_holding_days バイパス）
+      5. 最低保有日数 (min_holding_days): 上記1-4 はバイパスされる
+      6. スコア低下: final_score が threshold 未満
 
     Args:
         conn:                DuckDB 接続。
