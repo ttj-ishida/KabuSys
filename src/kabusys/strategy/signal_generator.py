@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import logging
 import math
+import tomllib
 from datetime import date
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import duckdb
@@ -114,10 +116,7 @@ def _load_value_config() -> dict:
     Returns:
         {"weights": {...}, "normalization": {...}} 形式の辞書。
     """
-    import tomllib
-    from pathlib import Path
-
-    config_path = Path("config/strategy.toml")
+    config_path = Path(__file__).resolve().parents[3] / "config" / "strategy.toml"
     if config_path.exists():
         with open(config_path, "rb") as f:
             return tomllib.load(f)["value_score"]
@@ -682,7 +681,7 @@ def generate_signals(
             placeholders = ", ".join(["?" for _ in _scope_codes])
             feat_rows = conn.execute(
                 f"""
-                SELECT code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev
+                SELECT code, momentum_20, momentum_60, volatility_20, volume_ratio, per, pbr, div_yield, ma200_dev
                 FROM features
                 WHERE date = ? AND code IN ({placeholders})
                 """,
@@ -694,7 +693,7 @@ def generate_signals(
     else:
         feat_rows = conn.execute(
             """
-            SELECT code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev
+            SELECT code, momentum_20, momentum_60, volatility_20, volume_ratio, per, pbr, div_yield, ma200_dev
             FROM features
             WHERE date = ?
             """,
@@ -707,6 +706,8 @@ def generate_signals(
         "volatility_20",
         "volume_ratio",
         "per",
+        "pbr",
+        "div_yield",
         "ma200_dev",
     ]
     features = [dict(zip(feat_cols, r)) for r in feat_rows]
