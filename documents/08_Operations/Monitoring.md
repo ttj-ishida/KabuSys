@@ -170,8 +170,21 @@ AIスコア分布 | 偏り検知 |
 
 | 方法 | 内容 |
 |----|----|
-LINE通知 | 推奨 |
-ログ | 必須 |
+LINE通知 | 推奨（`LINE_NOTIFY_ENABLED=true` かつ認証情報設定時のみ有効） |
+ログ | 必須（常に有効） |
+
+### LINE 通知アーキテクチャ（Null Object パターン）
+
+LINE 通知は `src/kabusys/operations/notifier.py` の `build_notifier(settings)` で構築する。
+Core コードは返り値の型を意識せず `.send(message)` を呼ぶだけでよい。
+
+| 条件 | 返り値 | `send()` の動作 |
+|---|---|---|
+| `LINE_NOTIFY_ENABLED=false`（デフォルト） | `NullNotifier` | 何もせず `False` を返す（例外なし） |
+| `LINE_NOTIFY_ENABLED=true` かつ認証情報欠落 | `NullNotifier`（フォールバック） | 同上 |
+| `LINE_NOTIFY_ENABLED=true` かつ認証情報あり | `LineNotifier` | LINE Messaging API にプッシュ送信 |
+
+**設計原則**: LINE API が障害中・未設定の場合でも Core の発注・監視ループが停止しない。
 
 ---
 

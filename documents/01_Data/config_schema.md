@@ -224,7 +224,7 @@ monitoring:
 
 alerts:
 
-  line_notify_enabled: true
+  line_notify_enabled: false  # デフォルト false（安全側）。true にするには LINE_NOTIFY_ENABLED=true を .env に設定
 
   max_drawdown_alert: 0.10
 
@@ -239,7 +239,24 @@ logging:
 
 ------------------------------------------------------------------------
 
-# 9. 設定読み込みインターフェース
+# 9. 環境変数ベースの Feature Toggle（`.env`）
+
+YAML 設定ファイルとは別に、以下の拡張機能フラグは **環境変数（`.env` ファイル）** で管理する。`Settings` クラス（`src/kabusys/config.py`）が自動読み込みする。
+
+| 環境変数 | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `ENABLE_AI_SENTIMENT` | bool | `false` | AI センチメント分析の有効化。`false` の場合 `news_nlp` / `regime_detector` は即座に `0` を返す |
+| `LINE_NOTIFY_ENABLED` | bool | `false` | LINE Messaging API 通知の有効化。`false` の場合 `NullNotifier` が使用され Core に影響しない |
+| `LINE_CHANNEL_ACCESS_TOKEN` | str | `""` | LINE チャンネルアクセストークン（`LINE_NOTIFY_ENABLED=true` の場合に必要） |
+| `LINE_USER_ID` | str | `""` | LINE ユーザーID（`LINE_NOTIFY_ENABLED=true` の場合に必要） |
+
+**許容リスト方式**: bool フラグは `"1"/"true"/"yes"/"on"`（大文字小文字無視）のみ `True` と解釈する。空文字・`"off"`・`"disabled"` などはすべて `False` となる（意図せぬ有効化を防ぐ設計）。
+
+`.env.example` を参照のこと。
+
+---
+
+# 10. 設定読み込みインターフェース
 
 Python例
 
@@ -254,7 +271,7 @@ def load_config(path):
 
 ------------------------------------------------------------------------
 
-# 10. 設定変更ポリシー
+# 11. 設定変更ポリシー
 
 設定変更は以下ルールに従う。
 
@@ -268,7 +285,7 @@ def load_config(path):
 
 ------------------------------------------------------------------------
 
-# 11. 環境分離
+# 12. 環境分離
 
 将来拡張として
 
@@ -281,7 +298,7 @@ def load_config(path):
 
 ------------------------------------------------------------------------
 
-# 12. まとめ
+# 13. まとめ
 
 Config Schemaは以下を管理する。
 

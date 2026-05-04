@@ -106,5 +106,23 @@ regime_score = clip(raw_score, -1.0, 1.0)
 
 AIはクラウドAPIの制約やハルシネーションにより、ブラックボックス化しやすい性質を持つ。API障害や出力フォーマット崩れ（JSONパースエラー等）が発生した場合の振る舞いを厳格に定義する。
 
-- **フォールバック（縮退運転）**: AIから有効なスコアが取得できない場合、システムは異常終了せず、その銘柄（または全銘柄）の AIスコアを強制的に `0.0 (ニュートラル)` として扱う。
-- 財務・テクニカルスコアのみでの運用（ルールベース戦略）に一時的に自動縮退し、取引機会の完全な逸失を防ぎつつ、意図せぬ暴走を隔離する。
+### 4.1 Feature Toggle（機能フラグ）
+
+環境変数 `ENABLE_AI_SENTIMENT`（デフォルト: `false`）で AI センチメント機能全体を制御する。
+
+| `ENABLE_AI_SENTIMENT` | 動作 |
+|---|---|
+| `false`（未設定を含む） | `score_news()` / `score_regime()` が即座に `0` を返す。API 呼び出しなし。Core に一切影響しない。 |
+| `true` | 通常通り OpenAI API を呼び出してスコアを生成する。 |
+
+設定は `Settings().enable_ai_sentiment`（許容リスト方式: `"1"/"true"/"yes"/"on"` のみ `True`）で読み込む（`src/kabusys/config.py`）。
+
+### 4.2 フォールバック（縮退運転）
+
+`ENABLE_AI_SENTIMENT=true` の場合でも、以下の条件ではスコアを `0.0（ニュートラル）` として扱い、異常終了しない:
+
+- **OpenAI API キー未設定**: `score_news()` / `score_regime()` は WARNING ログを出力し `0` を返す
+- **API 障害・JSONパースエラー**: 例外をキャッチし `0` を返す
+- **AI スコアが DB に存在しない**: `signal_generator.generate_signals()` は `ai_enabled=True` のときのみ WARNING を出力してデフォルト値（`0.5`）でシグナルを生成する。`ai_enabled=False` の場合は WARNING を出さない（期待された欠損）。
+
+財務・テクニカルスコアのみでの運用（ルールベース戦略）に一時的に自動縮退し、取引機会の完全な逸失を防ぎつつ、意図せぬ暴走を隔離する。
