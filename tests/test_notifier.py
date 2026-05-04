@@ -6,9 +6,19 @@ from kabusys.config import Settings
 
 
 class TestLineNotifyEnabled:
-    def test_defaults_to_true_when_not_set(self, monkeypatch):
-        """LINE_NOTIFY_ENABLED 未設定 → True"""
+    def test_defaults_to_false_when_not_set(self, monkeypatch):
+        """LINE_NOTIFY_ENABLED 未設定 → False（安全側デフォルト）"""
         monkeypatch.delenv("LINE_NOTIFY_ENABLED", raising=False)
+        assert Settings().line_notify_enabled is False
+
+    def test_true_when_set_to_true(self, monkeypatch):
+        """LINE_NOTIFY_ENABLED=true → True"""
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "true")
+        assert Settings().line_notify_enabled is True
+
+    def test_true_when_set_to_1(self, monkeypatch):
+        """LINE_NOTIFY_ENABLED=1 → True"""
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "1")
         assert Settings().line_notify_enabled is True
 
     def test_false_when_set_to_false(self, monkeypatch):
@@ -16,20 +26,15 @@ class TestLineNotifyEnabled:
         monkeypatch.setenv("LINE_NOTIFY_ENABLED", "false")
         assert Settings().line_notify_enabled is False
 
-    def test_false_when_set_to_0(self, monkeypatch):
-        """LINE_NOTIFY_ENABLED=0 → False"""
-        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "0")
+    def test_false_when_set_to_off(self, monkeypatch):
+        """LINE_NOTIFY_ENABLED=off → False（許容リスト方式）"""
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "off")
         assert Settings().line_notify_enabled is False
 
-    def test_false_when_set_to_no(self, monkeypatch):
-        """LINE_NOTIFY_ENABLED=no → False"""
-        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "no")
+    def test_false_when_empty_string(self, monkeypatch):
+        """LINE_NOTIFY_ENABLED=（空文字）→ False（許容リスト方式）"""
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "")
         assert Settings().line_notify_enabled is False
-
-    def test_true_when_set_to_true(self, monkeypatch):
-        """LINE_NOTIFY_ENABLED=true → True"""
-        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "true")
-        assert Settings().line_notify_enabled is True
 
 
 import requests  # noqa: E402
@@ -116,24 +121,56 @@ class TestLineNotifierSend:
         assert sent_text.endswith("...(省略)")
 
 
-from kabusys.operations.notifier import build_notifier  # noqa: E402
+from kabusys.operations.notifier import NullNotifier, build_notifier  # noqa: E402
+
+
+class TestNullNotifier:
+    def test_send_always_returns_false(self):
+        """NullNotifier.send() は常に False を返し例外を発生させない"""
+        n = NullNotifier()
+        assert n.send("any message") is False
+
+    def test_send_empty_message(self):
+        """空メッセージでも False を返す"""
+        assert NullNotifier().send("") is False
 
 
 class TestBuildNotifier:
-    def test_build_notifier_from_settings(self, monkeypatch):
-        """`build_notifier()` が Settings から正しく構築される"""
+    def test_build_notifier_enabled_returns_line_notifier(self, monkeypatch):
+        """`LINE_NOTIFY_ENABLED=true` かつ認証情報あり → LineNotifier を返す"""
         monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "mytoken")
         monkeypatch.setenv("LINE_USER_ID", "myuserid")
         monkeypatch.setenv("LINE_NOTIFY_ENABLED", "true")
         n = build_notifier(Settings())
+        assert isinstance(n, LineNotifier)
         assert n._token == "mytoken"
         assert n._user_id == "myuserid"
-        assert n._enabled is True
 
-    def test_build_notifier_disabled_when_env_false(self, monkeypatch):
-        """`LINE_NOTIFY_ENABLED=false` → enabled=False"""
-        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "tok")
-        monkeypatch.setenv("LINE_USER_ID", "uid")
+    def test_build_notifier_disabled_returns_null_notifier(self, monkeypatch):
+        """`LINE_NOTIFY_ENABLED=false` → NullNotifier を返す"""
         monkeypatch.setenv("LINE_NOTIFY_ENABLED", "false")
         n = build_notifier(Settings())
-        assert n._enabled is False
+        assert isinstance(n, NullNotifier)
+
+    def test_build_notifier_null_notifier_send_safe(self, monkeypatch):
+        """`LINE_NOTIFY_ENABLED=false` → send() が例外を出さない"""
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "false")
+        n = build_notifier(Settings())
+        assert n.send("test") is False
+
+    def test_build_notifier_missing_token_falls_back_to_null(self, monkeypatch):
+        """`LINE_NOTIFY_ENABLED=true` だがトークン未設定 → NullNotifier にフォールバック"""
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "true")
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+        monkeypatch.setenv("LINE_USER_ID", "uid")
+        n = build_notifier(Settings())
+        assert isinstance(n, NullNotifier)
+
+    def test_build_notifier_missing_user_id_falls_back_to_null(self, monkeypatch):
+        """`LINE_NOTIFY_ENABLED=true` だがユーザーID未設定 → NullNotifier にフォールバック"""
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "true")
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("LINE_USER_ID", "")
+        n = build_notifier(Settings())
+        assert isinstance(n, NullNotifier)
+        assert n.send("msg") is False

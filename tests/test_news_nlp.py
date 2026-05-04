@@ -26,6 +26,16 @@ from kabusys.data.schema import init_schema
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def enable_ai_sentiment(monkeypatch):
+    """テストファイル全体で ENABLE_AI_SENTIMENT=true に設定する。
+
+    score_news() は ENABLE_AI_SENTIMENT=false（デフォルト）の場合に即座に 0 を返す。
+    このファイルの既存テストは AI 機能有効前提のため、autouse で上書きする。
+    """
+    monkeypatch.setenv("ENABLE_AI_SENTIMENT", "true")
+
+
 @pytest.fixture
 def conn():
     """インメモリ DuckDB 接続（テスト毎に新規作成）。"""
@@ -283,18 +293,13 @@ def test_score_news_partial_chunk_failure(conn):
     assert codes[20] not in saved_codes
 
 
-def test_score_news_no_api_key(conn):
-    """api_key 未設定・環境変数なし → ValueError。"""
-    import os
+def test_score_news_no_api_key(conn, monkeypatch):
+    """api_key 未設定・環境変数なし → 0 を返し例外を出さない（フェイルセーフ）。"""
     from kabusys.ai.news_nlp import score_news
 
-    env_backup = os.environ.pop("OPENAI_API_KEY", None)
-    try:
-        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-            score_news(conn, TARGET_DATE, api_key=None)
-    finally:
-        if env_backup is not None:
-            os.environ["OPENAI_API_KEY"] = env_backup
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    count = score_news(conn, TARGET_DATE, api_key=None)
+    assert count == 0
 
 
 def test_score_news_response_validation_missing_key(conn):
@@ -431,3 +436,33 @@ def test_score_news_text_truncation(conn):
     stock_text_start = captured["user"].index("銘柄9984: ") + len("銘柄9984: ")
     stock_text = captured["user"][stock_text_start:]
     assert len(stock_text) <= _MAX_CHARS_PER_STOCK + 1  # +1 は '…'
+
+
+# ---------------------------------------------------------------------------
+# Feature toggle テスト
+# ---------------------------------------------------------------------------
+
+
+def test_score_news_skips_when_ai_disabled(conn, monkeypatch):
+    """ENABLE_AI_SENTIMENT=false の場合 score_news() は 0 を返しスキップすること。"""
+    monkeypatch.setenv("ENABLE_AI_SENTIMENT", "false")
+    from kabusys.ai.news_nlp import score_news
+
+    _insert_article(conn, "art_toggle", _WINDOW_DT, "テスト記事")
+    _link_code(conn, "art_toggle", "7203")
+
+    with patch("kabusys.ai.news_nlp._call_openai_api") as mock_api:
+        count = score_news(conn, TARGET_DATE, api_key="test-key")
+
+    assert count == 0
+    mock_api.assert_not_called()
+
+
+def test_score_news_skips_without_api_key(conn, monkeypatch):
+    """ENABLE_AI_SENTIMENT=true かつ API キー未設定の場合 0 を返し例外を出さないこと。"""
+    monkeypatch.setenv("ENABLE_AI_SENTIMENT", "true")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from kabusys.ai.news_nlp import score_news
+
+    count = score_news(conn, TARGET_DATE, api_key=None)
+    assert count == 0

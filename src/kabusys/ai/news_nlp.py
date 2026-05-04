@@ -119,16 +119,25 @@ def score_news(
 
     Returns:
         ai_scores テーブルへ書き込んだ銘柄数。
-
-    Raises:
-        ValueError: api_key が未設定かつ環境変数 OPENAI_API_KEY も未設定の場合。
+        ENABLE_AI_SENTIMENT=false または API キー未設定の場合は 0 を返す。
     """
+    # 0. Feature toggle チェック（ENABLE_AI_SENTIMENT=false でスキップ）
+    from kabusys.config import Settings
+
+    if not Settings().enable_ai_sentiment:
+        logger.info(
+            "score_news: AI センチメント分析は無効 (ENABLE_AI_SENTIMENT=false) — スキップ"
+        )
+        return 0
+
     # 1. API キー解決
     resolved_key = api_key or os.environ.get("OPENAI_API_KEY")
     if not resolved_key:
-        raise ValueError(
-            "OpenAI API キーが未設定です。api_key 引数または環境変数 OPENAI_API_KEY を設定してください。"
+        logger.warning(
+            "score_news: OpenAI API キーが未設定です。AI スコア生成をスキップします。"
+            " OPENAI_API_KEY を設定するか ENABLE_AI_SENTIMENT=false にしてください。"
         )
+        return 0
 
     # 2. タイムウィンドウ計算
     window_start, window_end = calc_news_window(target_date)

@@ -248,6 +248,22 @@ def test_settings_paper_fill_mode_and_env_and_log_level(monkeypatch):
         _ = Settings().log_level
 
 
+def test_settings_enable_ai_sentiment(monkeypatch):
+    """ENABLE_AI_SENTIMENT の読み込みと デフォルト False を確認する。"""
+    monkeypatch.delenv("ENABLE_AI_SENTIMENT", raising=False)
+    assert Settings().enable_ai_sentiment is False
+
+    # 許容リスト（True になる値）
+    for val in ("true", "True", "TRUE", "1", "yes", "on"):
+        monkeypatch.setenv("ENABLE_AI_SENTIMENT", val)
+        assert Settings().enable_ai_sentiment is True, f"{val!r} should be True"
+
+    # それ以外はすべて False（空文字・"off"・"disabled" も含む）
+    for val in ("false", "0", "no", "", "off", "disabled", "FALSE"):
+        monkeypatch.setenv("ENABLE_AI_SENTIMENT", val)
+        assert Settings().enable_ai_sentiment is False, f"{val!r} should be False"
+
+
 def test_intraday_determine_status_and_formatting():
     # Build a snapshot-like object with required attributes
     snap = SimpleNamespace(
