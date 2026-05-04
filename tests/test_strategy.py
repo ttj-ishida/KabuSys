@@ -129,27 +129,35 @@ def test_compute_momentum_score_positive_higher():
 
 
 def test_compute_value_score_zero_per():
-    cfg = {"weights": {"per": 0.50, "pbr": 0.30, "div_yield": 0.20},
-           "normalization": {"per_mid": 20.0, "pbr_mid": 1.5, "div_yield_max": 3.0}}
+    cfg = {
+        "weights": {"per": 0.50, "pbr": 0.30, "div_yield": 0.20},
+        "normalization": {"per_mid": 20.0, "pbr_mid": 1.5, "div_yield_max": 3.0},
+    }
     assert _compute_value_score({"per": 0}, cfg) is None
 
 
 def test_compute_value_score_none():
-    cfg = {"weights": {"per": 0.50, "pbr": 0.30, "div_yield": 0.20},
-           "normalization": {"per_mid": 20.0, "pbr_mid": 1.5, "div_yield_max": 3.0}}
+    cfg = {
+        "weights": {"per": 0.50, "pbr": 0.30, "div_yield": 0.20},
+        "normalization": {"per_mid": 20.0, "pbr_mid": 1.5, "div_yield_max": 3.0},
+    }
     assert _compute_value_score({"per": None}, cfg) is None
 
 
 def test_compute_value_score_per20():
-    cfg = {"weights": {"per": 0.50, "pbr": 0.30, "div_yield": 0.20},
-           "normalization": {"per_mid": 20.0, "pbr_mid": 1.5, "div_yield_max": 3.0}}
+    cfg = {
+        "weights": {"per": 0.50, "pbr": 0.30, "div_yield": 0.20},
+        "normalization": {"per_mid": 20.0, "pbr_mid": 1.5, "div_yield_max": 3.0},
+    }
     # PER = 20 → score = 1 / (1 + 20/20) = 0.5
     assert _compute_value_score({"per": 20.0}, cfg) == pytest.approx(0.5)
 
 
 def test_compute_value_score_lower_per_higher_score():
-    cfg = {"weights": {"per": 0.50, "pbr": 0.30, "div_yield": 0.20},
-           "normalization": {"per_mid": 20.0, "pbr_mid": 1.5, "div_yield_max": 3.0}}
+    cfg = {
+        "weights": {"per": 0.50, "pbr": 0.30, "div_yield": 0.20},
+        "normalization": {"per_mid": 20.0, "pbr_mid": 1.5, "div_yield_max": 3.0},
+    }
     low_per = _compute_value_score({"per": 10.0}, cfg)
     high_per = _compute_value_score({"per": 40.0}, cfg)
     assert low_per > high_per

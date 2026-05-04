@@ -144,7 +144,7 @@ def build_features(
                 "atr_pct": v.get("atr_pct"),
                 "volume_ratio": v.get("volume_ratio"),
                 "per": f.get("per"),
-                "pbr": f.get("pbr"),          # 追加
+                "pbr": f.get("pbr"),  # 追加
                 "div_yield": f.get("div_yield"),  # 追加
             }
         )
@@ -174,8 +174,8 @@ def build_features(
             r.get("atr_pct"),
             r.get("volume_ratio"),
             r.get("per"),
-            r.get("pbr"),          # 追加
-            r.get("div_yield"),    # 追加
+            r.get("pbr"),  # 追加
+            r.get("div_yield"),  # 追加
             r.get("ma200_dev"),
         )
         for r in normalized
