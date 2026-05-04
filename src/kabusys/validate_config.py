@@ -126,6 +126,38 @@ def _check_db_paths() -> None:
     _check_path("SQLITE_PATH", "data/monitoring.db", "SQLITE_PATH")
 
 
+_KNOWN_RISK_KEYS = frozenset(
+    {
+        "max_position_pct",
+        "max_utilization",
+        "max_drawdown",
+        "rate_limit_per_sec",
+        "circuit_breaker_errors",
+        "circuit_breaker_window_sec",
+    }
+)
+
+
+def _parse_ratio(key: str, val: object) -> float:
+    """(0, 1] の比率を厳格にパースする。bool は拒否する。"""
+    if isinstance(val, bool):
+        raise TypeError(f"risk.{key} に bool 値は使用できません（{val!r}）。")
+    return float(val)  # type: ignore[arg-type]
+
+
+def _parse_positive_int(key: str, val: object) -> int:
+    """1 以上の整数を厳格にパースする。bool は拒否、小数は拒否する。"""
+    if isinstance(val, bool):
+        raise TypeError(f"risk.{key} に bool 値は使用できません（{val!r}）。")
+    if isinstance(val, float):
+        if not val.is_integer():
+            raise TypeError(
+                f"risk.{key} に小数値は使用できません（{val!r}）。整数で設定してください。"
+            )
+        return int(val)
+    return int(val)  # type: ignore[arg-type]
+
+
 def _check_risk_config_content(data: object) -> None:
     """risk_config.yaml のセマンティック検証。
 
@@ -140,29 +172,32 @@ def _check_risk_config_content(data: object) -> None:
         _error("risk_config.yaml に 'risk' セクションがありません。")
         return
 
+    # 未知キーの警告
+    for k in r:
+        if k not in _KNOWN_RISK_KEYS:
+            _warn(f"risk_config.yaml: 未知のキー 'risk.{k}' が含まれています。")
+
     # 必須キーの存在確認
-    _REQUIRED_RISK_KEYS = (
-        "max_position_pct",
-        "max_utilization",
-        "max_drawdown",
-        "rate_limit_per_sec",
-        "circuit_breaker_errors",
-        "circuit_breaker_window_sec",
-    )
-    missing = [k for k in _REQUIRED_RISK_KEYS if k not in r]
-    for k in missing:
+    missing = [k for k in _KNOWN_RISK_KEYS if k not in r]
+    for k in sorted(missing):
         _error(f"risk_config.yaml: 必須キー 'risk.{k}' がありません。")
     if missing:
         return  # 値検証は必須キーが揃っていることが前提
 
     # 値域チェック（_load_risk_config と同一ルール）
     try:
-        max_position_pct = float(r["max_position_pct"])
-        max_utilization = float(r["max_utilization"])
-        max_drawdown = float(r["max_drawdown"])
-        rate_limit_per_sec = int(r["rate_limit_per_sec"])
-        circuit_breaker_errors = int(r["circuit_breaker_errors"])
-        circuit_breaker_window_sec = int(r["circuit_breaker_window_sec"])
+        max_position_pct = _parse_ratio("max_position_pct", r["max_position_pct"])
+        max_utilization = _parse_ratio("max_utilization", r["max_utilization"])
+        max_drawdown = _parse_ratio("max_drawdown", r["max_drawdown"])
+        rate_limit_per_sec = _parse_positive_int(
+            "rate_limit_per_sec", r["rate_limit_per_sec"]
+        )
+        circuit_breaker_errors = _parse_positive_int(
+            "circuit_breaker_errors", r["circuit_breaker_errors"]
+        )
+        circuit_breaker_window_sec = _parse_positive_int(
+            "circuit_breaker_window_sec", r["circuit_breaker_window_sec"]
+        )
     except (ValueError, TypeError) as exc:
         _error(f"risk_config.yaml: 数値変換に失敗しました: {exc}")
         return
@@ -180,8 +215,8 @@ def _check_risk_config_content(data: object) -> None:
 
     if max_position_pct > max_utilization:
         _error(
-            f"risk_config.yaml: max_position_pct({max_position_pct}) は"
-            f" max_utilization({max_utilization}) 以下にしてください。"
+            f"risk_config.yaml: risk.max_position_pct({max_position_pct}) は"
+            f" risk.max_utilization({max_utilization}) 以下にしてください。"
         )
 
     for name, val in (
@@ -221,7 +256,7 @@ def _check_config_yaml_files() -> None:
 
                 with open(path, encoding="utf-8") as f:
                     data = yaml.safe_load(f)
-                _info(f"config/{filename}: OK")
+                _info(f"config/{filename}: syntax OK")
                 if filename == "risk_config.yaml":
                     _check_risk_config_content(data)
             except Exception as e:

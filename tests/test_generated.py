@@ -1,11 +1,7 @@
 import os
-import sqlite3
-import tempfile
-import textwrap
 from types import SimpleNamespace
 from pathlib import Path
 import json
-import math
 
 import pytest
 
@@ -19,9 +15,8 @@ from kabusys.operations.signal_queue_report import (
     format_json as sq_format_json,
     format_markdown as sq_format_markdown,
     save_report as sq_save_report,
-    SignalQueueReport,
 )
-from datetime import date, datetime, timezone
+from datetime import date
 
 
 def test_get_poll_interval_default_and_valid(monkeypatch):
@@ -155,7 +150,10 @@ def test_pos_value_prefers_current_price_and_fallbacks(caplog):
     val = _pos_value(p3)
     assert val == 0.0
     # Expect a warning mentioning code Z
-    found = any("code=Z" in rec.getMessage() or "Z" in rec.getMessage() for rec in caplog.records)
+    found = any(
+        "code=Z" in rec.getMessage() or "Z" in rec.getMessage()
+        for rec in caplog.records
+    )
     assert found
 
 
@@ -170,7 +168,9 @@ def test_parse_env_line_various_cases():
     assert parsed is not None
     k, v = parsed
     assert k == "SECRET"
-    assert "a'b" in v  # escape handled, newline included as literal n by our simplistic parser? ensure substring
+    assert (
+        "a'b" in v
+    )  # escape handled, newline included as literal n by our simplistic parser? ensure substring
 
     # inline comment handling: comment only recognized if preceded by space/tab
     assert _parse_env_line("K=val#notcomment") == ("K", "val#notcomment")
@@ -262,7 +262,11 @@ def test_intraday_determine_status_and_formatting():
         memory_percent=None,
     )
     # status OK
-    from kabusys.run_intraday_monitor import _determine_status, format_cli_summary, STATUS_OK
+    from kabusys.run_intraday_monitor import (
+        _determine_status,
+        format_cli_summary,
+        STATUS_OK,
+    )
 
     assert _determine_status(snap) == STATUS_OK
     formatted = format_cli_summary(snap)
@@ -419,10 +423,125 @@ risk:
     assert any("max_drawdown" in e for e in errors)
 
 
+def test_check_risk_config_bool_rejected_as_ratio(monkeypatch, tmp_path):
+    """bool 値を比率フィールドに使った場合はエラーになること。"""
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pw")
+    yaml_bool = """
+risk:
+  max_position_pct: true
+  max_utilization: 0.80
+  max_drawdown: 0.20
+  rate_limit_per_sec: 5
+  circuit_breaker_errors: 10
+  circuit_breaker_window_sec: 60
+"""
+    cfg_dir = _make_risk_config_dir(tmp_path, yaml_bool)
+    monkeypatch.setattr(validate_config, "_CONFIG_DIR", cfg_dir)
+    errors, _, _ = validate_config.validate()
+    assert any("bool" in e or "max_position_pct" in e for e in errors)
+
+
+def test_check_risk_config_bool_rejected_as_int(monkeypatch, tmp_path):
+    """bool 値を整数フィールドに使った場合はエラーになること。"""
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pw")
+    yaml_bool = """
+risk:
+  max_position_pct: 0.20
+  max_utilization: 0.80
+  max_drawdown: 0.20
+  rate_limit_per_sec: true
+  circuit_breaker_errors: 10
+  circuit_breaker_window_sec: 60
+"""
+    cfg_dir = _make_risk_config_dir(tmp_path, yaml_bool)
+    monkeypatch.setattr(validate_config, "_CONFIG_DIR", cfg_dir)
+    errors, _, _ = validate_config.validate()
+    assert any("bool" in e or "rate_limit_per_sec" in e for e in errors)
+
+
+def test_check_risk_config_float_for_int_rejected(monkeypatch, tmp_path):
+    """小数値を整数フィールドに使った場合はエラーになること（例: 1.7）。"""
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pw")
+    yaml_float = """
+risk:
+  max_position_pct: 0.20
+  max_utilization: 0.80
+  max_drawdown: 0.20
+  rate_limit_per_sec: 1.7
+  circuit_breaker_errors: 10
+  circuit_breaker_window_sec: 60
+"""
+    cfg_dir = _make_risk_config_dir(tmp_path, yaml_float)
+    monkeypatch.setattr(validate_config, "_CONFIG_DIR", cfg_dir)
+    errors, _, _ = validate_config.validate()
+    assert any("rate_limit_per_sec" in e or "小数" in e for e in errors)
+
+
+def test_check_risk_config_unknown_key_warns(monkeypatch, tmp_path):
+    """未知のキーが含まれている場合は警告になること。"""
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pw")
+    yaml_extra = """
+risk:
+  max_position_pct: 0.20
+  max_utilization: 0.80
+  max_drawdown: 0.20
+  rate_limit_per_sec: 5
+  circuit_breaker_errors: 10
+  circuit_breaker_window_sec: 60
+  unknown_future_param: 999
+"""
+    cfg_dir = _make_risk_config_dir(tmp_path, yaml_extra)
+    monkeypatch.setattr(validate_config, "_CONFIG_DIR", cfg_dir)
+    errors, warnings, _ = validate_config.validate()
+    risk_errors = [e for e in errors if "risk" in e.lower() or "max_" in e]
+    assert risk_errors == [], f"想定外のエラー: {risk_errors}"
+    assert any("unknown_future_param" in w for w in warnings)
+
+
+def test_check_risk_config_relation_error_has_risk_prefix(monkeypatch, tmp_path):
+    """max_position_pct > max_utilization のエラーメッセージに risk. 接頭辞があること。"""
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pw")
+    yaml_bad = """
+risk:
+  max_position_pct: 0.90
+  max_utilization: 0.50
+  max_drawdown: 0.20
+  rate_limit_per_sec: 5
+  circuit_breaker_errors: 10
+  circuit_breaker_window_sec: 60
+"""
+    cfg_dir = _make_risk_config_dir(tmp_path, yaml_bad)
+    monkeypatch.setattr(validate_config, "_CONFIG_DIR", cfg_dir)
+    errors, _, _ = validate_config.validate()
+    relation_errors = [
+        e for e in errors if "max_position_pct" in e and "max_utilization" in e
+    ]
+    assert relation_errors, "max_position_pct > max_utilization のエラーが見つからない"
+    assert all("risk.max_position_pct" in e for e in relation_errors)
+    assert all("risk.max_utilization" in e for e in relation_errors)
+
+
 def build_sample_signals():
     return [
-        {"code": "AAA", "side": "buy", "target_size": None, "target_weight": 0.1, "signal_rank": 1},
-        {"code": "BBB", "side": "sell", "target_size": 100, "target_weight": None, "signal_rank": 2},
+        {
+            "code": "AAA",
+            "side": "buy",
+            "target_size": None,
+            "target_weight": 0.1,
+            "signal_rank": 1,
+        },
+        {
+            "code": "BBB",
+            "side": "sell",
+            "target_size": 100,
+            "target_weight": None,
+            "signal_rank": 2,
+        },
     ]
 
 
