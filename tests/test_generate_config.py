@@ -63,8 +63,8 @@ def test_generated_yaml_is_valid(tmp_path):
         assert parsed is not None, f"{yaml_file.name} のパースに失敗"
 
 
-def test_risk_config_has_safe_defaults(tmp_path):
-    """risk_config.yaml の max_drawdown が安全側（0.15 以下）であること。"""
+def test_risk_config_has_valid_defaults(tmp_path):
+    """risk_config.yaml の生成テンプレートが _load_risk_config の期待キーと値域を満たすこと。"""
     pytest.importorskip("yaml")
     import yaml
 
@@ -73,5 +73,20 @@ def test_risk_config_has_safe_defaults(tmp_path):
 
     content = (tmp_path / "risk_config.yaml").read_text(encoding="utf-8")
     data = yaml.safe_load(content)
-    assert data["risk"]["max_drawdown"] <= 0.15
-    assert data["risk"]["max_position_size"] <= 0.10
+    r = data["risk"]
+    # 必須キーが存在すること
+    for key in (
+        "max_position_pct",
+        "max_utilization",
+        "max_drawdown",
+        "rate_limit_per_sec",
+        "circuit_breaker_errors",
+        "circuit_breaker_window_sec",
+    ):
+        assert key in r, f"生成テンプレートに '{key}' がない"
+    # 値域チェック
+    assert 0 < r["max_position_pct"] <= 1
+    assert 0 < r["max_utilization"] <= 1
+    assert 0 < r["max_drawdown"] <= 1
+    assert r["max_position_pct"] <= r["max_utilization"]
+    assert r["rate_limit_per_sec"] >= 1

@@ -303,6 +303,122 @@ def test_validate_config_checks_and_yaml(monkeypatch, tmp_path):
     assert any("JQUANTS_REFRESH_TOKEN" in i for i in infos)
 
 
+def _make_valid_risk_config_yaml() -> str:
+    return """
+risk:
+  max_position_pct: 0.20
+  max_utilization: 0.80
+  max_drawdown: 0.20
+  rate_limit_per_sec: 5
+  circuit_breaker_errors: 10
+  circuit_breaker_window_sec: 60
+"""
+
+
+def _make_risk_config_dir(tmp_path, risk_yaml: str) -> Path:
+    cfg_dir = tmp_path / "config"
+    cfg_dir.mkdir(exist_ok=True)
+    (cfg_dir / "risk_config.yaml").write_text(risk_yaml, encoding="utf-8")
+    return cfg_dir
+
+
+def test_check_risk_config_content_valid(monkeypatch, tmp_path):
+    """有効な risk_config.yaml はエラーなしで通過すること。"""
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pw")
+    cfg_dir = _make_risk_config_dir(tmp_path, _make_valid_risk_config_yaml())
+    monkeypatch.setattr(validate_config, "_CONFIG_DIR", cfg_dir)
+    errors, _, _ = validate_config.validate()
+    risk_errors = [e for e in errors if "risk" in e.lower() or "max_" in e]
+    assert risk_errors == [], f"想定外のエラー: {risk_errors}"
+
+
+def test_check_risk_config_content_missing_risk_section(monkeypatch, tmp_path):
+    """'risk' セクションがない場合はエラーになること。"""
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pw")
+    cfg_dir = _make_risk_config_dir(tmp_path, "other: {}\n")
+    monkeypatch.setattr(validate_config, "_CONFIG_DIR", cfg_dir)
+    errors, _, _ = validate_config.validate()
+    assert any("risk" in e for e in errors)
+
+
+def test_check_risk_config_content_missing_key(monkeypatch, tmp_path):
+    """必須キーが欠けている場合はエラーになること。"""
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pw")
+    yaml_missing_key = """
+risk:
+  max_position_pct: 0.20
+  max_utilization: 0.80
+  max_drawdown: 0.20
+  rate_limit_per_sec: 5
+  # circuit_breaker_errors と circuit_breaker_window_sec を省略
+"""
+    cfg_dir = _make_risk_config_dir(tmp_path, yaml_missing_key)
+    monkeypatch.setattr(validate_config, "_CONFIG_DIR", cfg_dir)
+    errors, _, _ = validate_config.validate()
+    assert any("circuit_breaker_errors" in e for e in errors)
+    assert any("circuit_breaker_window_sec" in e for e in errors)
+
+
+def test_check_risk_config_content_out_of_range(monkeypatch, tmp_path):
+    """max_position_pct > max_utilization の場合はエラーになること。"""
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pw")
+    yaml_bad_range = """
+risk:
+  max_position_pct: 0.90
+  max_utilization: 0.50
+  max_drawdown: 0.20
+  rate_limit_per_sec: 5
+  circuit_breaker_errors: 10
+  circuit_breaker_window_sec: 60
+"""
+    cfg_dir = _make_risk_config_dir(tmp_path, yaml_bad_range)
+    monkeypatch.setattr(validate_config, "_CONFIG_DIR", cfg_dir)
+    errors, _, _ = validate_config.validate()
+    assert any("max_position_pct" in e and "max_utilization" in e for e in errors)
+
+
+def test_check_risk_config_content_zero_rate_limit(monkeypatch, tmp_path):
+    """rate_limit_per_sec が 0 以下の場合はエラーになること。"""
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pw")
+    yaml_bad_rate = """
+risk:
+  max_position_pct: 0.20
+  max_utilization: 0.80
+  max_drawdown: 0.20
+  rate_limit_per_sec: 0
+  circuit_breaker_errors: 10
+  circuit_breaker_window_sec: 60
+"""
+    cfg_dir = _make_risk_config_dir(tmp_path, yaml_bad_rate)
+    monkeypatch.setattr(validate_config, "_CONFIG_DIR", cfg_dir)
+    errors, _, _ = validate_config.validate()
+    assert any("rate_limit_per_sec" in e for e in errors)
+
+
+def test_check_risk_config_content_value_out_of_01(monkeypatch, tmp_path):
+    """max_drawdown が (0, 1] 範囲外の場合はエラーになること。"""
+    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("KABU_API_PASSWORD", "pw")
+    yaml_bad = """
+risk:
+  max_position_pct: 0.20
+  max_utilization: 0.80
+  max_drawdown: 1.5
+  rate_limit_per_sec: 5
+  circuit_breaker_errors: 10
+  circuit_breaker_window_sec: 60
+"""
+    cfg_dir = _make_risk_config_dir(tmp_path, yaml_bad)
+    monkeypatch.setattr(validate_config, "_CONFIG_DIR", cfg_dir)
+    errors, _, _ = validate_config.validate()
+    assert any("max_drawdown" in e for e in errors)
+
+
 def build_sample_signals():
     return [
         {"code": "AAA", "side": "buy", "target_size": None, "target_weight": 0.1, "signal_rank": 1},
