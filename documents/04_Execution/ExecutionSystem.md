@@ -50,6 +50,15 @@
 
 Strategy層が生成したシグナルは、実行層（Execution）へ渡る直前および直後に「3段階のガード」を通過しなければならない。
 
+### 起動前検証
+
+`python -m kabusys.validate_config` を実行すると、起動前に設定の整合性を確認できる。
+`config/risk_config.yaml` については構文チェックに加え、以下のセマンティック検証を行う。
+
+- 必須キー（`max_position_pct`, `max_utilization`, `max_drawdown`, `rate_limit_per_sec`, `circuit_breaker_errors`, `circuit_breaker_window_sec`）の存在
+- 各値が有効な範囲内（比率は (0, 1]、カウント系は 1 以上）であること
+- `max_position_pct <= max_utilization` の整合性
+
 ### 設定ファイルからのパラメータ読み込み
 
 リスクパラメータはコードに直書きせず、`config/risk_config.yaml` から起動時に読み込む。実際の現金余力は broker API（kabuステーション API / MockBrokerClient）から取得する。
@@ -58,25 +67,24 @@ Strategy層が生成したシグナルは、実行層（Execution）へ渡る直
 # run_execution.py 起動時の初期資産計算
 cash = broker.get_available_cash()
 positions = broker.get_positions()
-initial_portfolio_value = cash + sum(
-    p.qty * (p.current_price if p.current_price is not None else p.avg_price)
-    for p in positions
-)
+# current_price が None / 0 以下の場合は avg_price でフォールバック
+# どちらも無効な場合は 0 として警告ログを出力
+total_assets = cash + sum(_pos_value(p) for p in positions)
 ```
 
-`initial_portfolio_value` はドローダウン計算の基準値として使用し、現金のみでなく **既存保有を含む総資産** とする。
+`initial_portfolio_value`（= `total_assets`）はドローダウン計算の基準値として使用し、現金のみでなく **既存保有を含む総資産** とする。
 
 ### 第1関門: シグナルレベル・ガード（発注前検証）
 - **余力チェック**: 現在の口座買付余力を超過していないか。
 - **重複チェック**: すでに同一銘柄の注文が `OrderAccepted` `OrderSent` 状態で存在しないか（二重発注防止）。
-- **ポジション上限**: すでに総資産に対する最大投資比率（`max_position_pct`、デフォルト20%）に達していないか。また全体の投下比率が `max_utilization`（デフォルト80%）を超えないか。
+- **ポジション上限**: すでに総資産に対する最大投資比率（`max_position_pct`、設定値 `risk_config.yaml`）に達していないか。また全体の投下比率が `max_utilization`（設定値 `risk_config.yaml`）を超えないか。
 
 ### 第2関門: エグゼキューションレベル・ガード（API送信前制限）
 - **APIレート制限**: kabuステーションの「発注系API: 毎秒 `rate_limit_per_sec` 回以内」制約をトークンバケツで厳守する。
 - **暴走防止（サーキットブレーカー）**: `circuit_breaker_window_sec` 秒以内に `circuit_breaker_errors` 回以上エラーが返却された場合、システム全体の発注機能を停止させる。
 
 ### 第3関門: メトリクスレベル・ガード（発注後監視）
-- ポートフォリオ全体のドローダウンを監視し、`max_drawdown`（デフォルト20%）を超えた場合は**キルスイッチ（Kill Switch）**を発動させる。
+- ポートフォリオ全体のドローダウンを監視し、`max_drawdown`（設定値 `risk_config.yaml`）を超えた場合は**キルスイッチ（Kill Switch）**を発動させる。
 
 ---
 
