@@ -43,54 +43,66 @@
 
 ## 3. おすすめの段階導入
 
-### Phase 1: 低コスト最小構成を固める
+### Phase 1: 低コスト最小構成を固める ✅（Issue #227 で対応完了）
 
-- [ ] `J-Quants` を市場・財務・銘柄マスタの唯一の基盤データ源として明文化する
-- [ ] `kabuステーション API` を実運用の執行・余力・保有残高・最新値の唯一の正とする
-- [ ] `Yahoo News` を補助ニュース源として位置づけ、売買判断の主役にしない方針を明文化する
-- [ ] DataPlatform.md / DataSchema.md / RuntimeJobSchedule.md の情報源記述を現実装と整合させる
+- [x] `J-Quants` を市場・財務・銘柄マスタの唯一の基盤データ源として明文化する
+  → DataPlatform.md Section 3.0 に役割分担表を追加
+- [x] `kabuステーション API` を実運用の執行・余力・保有残高・最新値の唯一の正とする
+  → 同上
+- [x] `Yahoo News` を補助ニュース源として位置づけ、売買判断の主役にしない方針を明文化する
+  → 同上（影響最大 10% に制限）
+- [x] DataPlatform.md / DataSchema.md / RuntimeJobSchedule.md の情報源記述を現実装と整合させる
+  → TDnet・EDINET を追加。RuntimeJobSchedule.md に収集ジョブ（15:35/15:40）・分類ジョブ（17:00）を追加
 
-### Phase 2: 適時開示を中核イベント源として導入する
+### Phase 2: 適時開示を中核イベント源として導入する（設計完了・実装は Issue #198）
 
-- [ ] `適時開示情報閲覧サービス` から開示一覧を取得する収集ジョブを設計する
-- [ ] 取得対象の最小項目を定義する
-- [ ] 最小項目:
-- [ ] `disclosed_at`
-- [ ] `code`
-- [ ] `company_name`
-- [ ] `title`
-- [ ] `document_url`
-- [ ] `document_type`
-- [ ] 開示一覧を自前DBへ全件保存する前提に変更する
-- [ ] `対象銘柄になってから取得する` 方式ではなく、`先に全件保存して後から参照する` 方式を明文化する
-- [ ] 31日掲載制限を前提に、取得漏れ検知と再収集方針を決める
+- [x] `適時開示情報閲覧サービス` から開示一覧を取得する収集ジョブを設計する
+  → RuntimeJobSchedule.md Section 3.1b に `tdnet_collection_job`（15:35）を追加
+- [x] 取得対象の最小項目を定義する（DataSchema.md `raw_disclosures` テーブルに定義）
+  - `id`（開示番号）/ `disclosed_at` / `code` / `company_name` / `title` / `document_url` / `document_type` / `source` / `fetched_at`
+- [x] 開示一覧を自前DBへ全件保存する前提に変更する
+  → DataPlatform.md Section 4.4 に「先に全件保存して後から参照する」方針を明文化
+- [x] `対象銘柄になってから取得する` 方式ではなく、`先に全件保存して後から参照する` 方式を明文化する
+  → 上記に同じ
+- [x] 31日掲載制限を前提に、取得漏れ検知と再収集方針を決める
+  → DataPlatform.md Section 4.4 に記載（毎日差分取得、日付ギャップ検出で漏れ検知）
 
-### Phase 3: 開示イベントのルール評価を実装する
+実装: Issue #198 で `tdnet_collection_job` を実装する
 
-- [ ] 表題ベースで `event_type` を付与する分類ルールを作る
-- [ ] 初期対象イベントを決める
-- [ ] 初期対象イベント:
-- [ ] 決算短信
-- [ ] 業績予想修正
-- [ ] 配当予想修正
-- [ ] 自己株式取得
-- [ ] 株式発行・希薄化
-- [ ] M&A / 資本業務提携
-- [ ] 訴訟・監理・不祥事系
-- [ ] `event_score` をルールベースで定義する
-- [ ] `新規買い回避` `保有継続注意` `要確認` のような運用フラグを定義する
-- [ ] ニュースNLPとは別レイヤーの `イベント評価` として扱う設計にする
+### Phase 3: 開示イベントのルール評価を実装する（設計完了・実装は Issue #198）
 
-### Phase 4: EDINET を補完層として組み込む
+- [x] 表題ベースで `event_type` を付与する分類ルールを作る
+  → DataSchema.md `disclosure_events` の event_type 分類表に定義
+- [x] 初期対象イベントを決める（DataSchema.md に定義済み）
+  - `earnings_report`（決算短信）
+  - `earnings_revision_up` / `earnings_revision_down`（業績予想修正）
+  - `dividend_revision_up` / `dividend_revision_down`（配当予想修正）
+  - `buyback`（自己株式取得）
+  - `new_share_issuance`（株式発行・希薄化）
+  - `merger_acquisition`（M&A / 資本業務提携）
+  - `litigation_scandal`（訴訟・監理・不祥事系）
+  - `other`
+- [x] `event_score` をルールベースで定義する（+1.0 / 0.0 / -1.0、DataSchema.md 参照）
+- [x] `新規買い回避` `保有継続注意` `要確認` のような運用フラグを定義する
+  → `buy_caution` / `hold_caution` / `review_required` ブール列として定義
+- [x] ニュースNLPとは別レイヤーの `イベント評価` として扱う設計にする
+  → `disclosure_events` は `ai_scores` とは独立した Processed Layer テーブルとして分離
 
-- [ ] EDINET API で補完すべき開示種別を定義する
-- [ ] 初期対象候補:
-- [ ] 有価証券報告書
-- [ ] 四半期報告書
-- [ ] 大量保有報告書
-- [ ] 臨時報告書
-- [ ] TDnet と EDINET の重複・優先順位ルールを決める
-- [ ] 同一イベントを二重評価しないための統合キー設計を行う
+実装: Issue #198 で `disclosure_classification_job`（17:00）を実装する
+
+### Phase 4: EDINET を補完層として組み込む（設計完了・実装は Issue #199）
+
+- [x] EDINET API で補完すべき開示種別を定義する（初期対象）
+  - 有価証券報告書
+  - 四半期報告書
+  - 大量保有報告書
+  - 臨時報告書
+- [x] TDnet と EDINET の重複・優先順位ルールを決める
+  → `raw_disclosures.source` カラム（'tdnet' / 'edinet'）で区別。TDnet が主、EDINET が補完
+- [x] 同一イベントを二重評価しないための統合キー設計を行う
+  → `raw_disclosures.id` は各情報源固有の ID（TDnet: 開示番号 / EDINET: docID）を使用。重複の心配なし
+
+実装: Issue #199 で `edinet_collection_job`（15:40）を実装する
 
 ### Phase 5: レポートと運用UIへ反映する
 

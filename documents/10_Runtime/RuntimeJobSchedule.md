@@ -78,6 +78,34 @@
 
 ------------------------------------------------------------------------
 
+## 3.1b 適時開示収集（Issue #198 / #199）
+
+**時刻**
+
+    15:35（TDnet） / 15:40（EDINET）
+
+ジョブ
+
+    tdnet_collection_job
+    edinet_collection_job
+
+処理
+
+-   適時開示情報閲覧サービス (TDnet) から当日の開示一覧を全件取得（先に全件保存・後から参照する方式）
+-   EDINET API から有報・四半期報告・大量保有等の法定開示を補完取得
+-   開示情報を `raw_disclosures` に保存（冪等: ON CONFLICT DO NOTHING）
+
+更新対象
+
+    raw_disclosures（source='tdnet' / 'edinet'）
+
+注意
+
+-   TDnet 閲覧サービスには31日掲載制限がある。毎日差分取得で取りこぼしを防ぐ
+-   開示分類（`disclosure_events`）は別ジョブ（17:00）で実施する
+
+------------------------------------------------------------------------
+
 ## 3.2 特徴量生成
 
 **時刻**
@@ -97,6 +125,29 @@
 保存
 
     features
+
+------------------------------------------------------------------------
+
+## 3.2b 開示イベント分類
+
+**時刻**
+
+    17:00
+
+ジョブ
+
+    disclosure_classification_job
+
+処理
+
+-   `raw_disclosures` の当日分を表題ベースの分類ルールで評価
+-   `event_type`（決算短信/業績修正上方・下方/自己株取得/増資/M&A/訴訟不祥事等）を付与
+-   `event_score`（+1.0 / 0.0 / -1.0）・`buy_caution` / `hold_caution` / `review_required` フラグを付与
+-   `disclosure_events` に UPSERT
+
+更新対象
+
+    disclosure_events
 
 ------------------------------------------------------------------------
 
@@ -260,15 +311,18 @@
 
 登録スクリプト: `scripts/setup_task_scheduler.ps1`
 
-  時刻    タスク名                       実行スクリプト
-  ------- ------------------------------ -----------------------------------------------
-  15:30   KabuSys_DataUpdate             scripts\run_data_update.py
-  16:00   KabuSys_FeatureGen             scripts\run_feature_gen.py
-  18:00   KabuSys_AiAnalysis             scripts\run_ai_analysis.py
-  20:00   KabuSys_StrategySignal         scripts\run_strategy_signal.py
-  21:00   KabuSys_PortfolioConstruction  scripts\run_portfolio_construction.py
-  08:30   KabuSys_ExecutionStart         scripts\start_system.py --component execution
-  09:00   KabuSys_MonitoringStart        scripts\start_system.py --component monitoring
+  時刻    タスク名                             実行スクリプト
+  ------- ------------------------------------ -----------------------------------------------
+  15:30   KabuSys_DataUpdate                   scripts\run_data_update.py
+  15:35   KabuSys_TDnetCollection              scripts\run_tdnet_collection.py        ※ Issue #198
+  15:40   KabuSys_EdinetCollection             scripts\run_edinet_collection.py       ※ Issue #199
+  16:00   KabuSys_FeatureGen                   scripts\run_feature_gen.py
+  17:00   KabuSys_DisclosureClassification     scripts\run_disclosure_classification.py ※ Issue #198
+  18:00   KabuSys_AiAnalysis                   scripts\run_ai_analysis.py
+  20:00   KabuSys_StrategySignal               scripts\run_strategy_signal.py
+  21:00   KabuSys_PortfolioConstruction        scripts\run_portfolio_construction.py
+  08:30   KabuSys_ExecutionStart               scripts\start_system.py --component execution
+  09:00   KabuSys_MonitoringStart              scripts\start_system.py --component monitoring
 
 登録コマンド（プロジェクトルートで実行）:
 

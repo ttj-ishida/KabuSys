@@ -264,6 +264,71 @@ Bulk API からのファイル単位の処理状態を管理する。再実行�
 
 ------------------------------------------------------------------------
 
+# 7b. 適時開示データ（Issue #198 / #199）
+
+## raw_disclosures（Raw Layer）
+
+TDnet 適時開示閲覧サービスおよび EDINET API から取得した開示情報を全件保存する。
+「先に全件保存して後から参照する」方式。
+
+  column          type      description
+  --------------- --------- -------------------------------------------------------
+  id              string    開示ID（PRIMARY KEY。TDnet: 開示番号 / EDINET: docID）
+  disclosed_at    timestamp 開示日時（JST）
+  code            string    銘柄コード（4桁。EDINET の場合は NULL の場合あり）
+  company_name    string    会社名
+  title           string    開示表題
+  document_url    string    開示資料URL / EDINET の xbrl/pdf URL
+  document_type   string    書類種別（例: "決算短信（連結）", "業績予想修正" 等。生値のまま保存）
+  source          string    'tdnet' / 'edinet'
+  fetched_at      timestamp 取込日時
+
+主キー: `(id)`
+更新方式: `ON CONFLICT DO NOTHING`（同一 id の再取得は無視）
+取得元(TDnet): 適時開示情報閲覧サービス（15:35 ジョブ）
+取得元(EDINET): EDINET API `/api/v2/documents.json`（15:40 ジョブ）
+
+------------------------------------------------------------------------
+
+## disclosure_events（Processed Layer）
+
+`raw_disclosures` を表題ベースのルールで分類したイベント評価テーブル。
+ニュース NLP とは独立した「開示イベント評価」レイヤー。
+
+  column           type      description
+  ---------------- --------- -------------------------------------------------------
+  id               string    PRIMARY KEY（= raw_disclosures.id）
+  disclosed_at     timestamp 開示日時
+  code             string    銘柄コード
+  event_type       string    イベント分類（下表参照）
+  event_score      float     ルールベーススコア（+1.0=ポジティブ / 0.0=中立 / -1.0=ネガティブ）
+  buy_caution      boolean   新規買い注意フラグ（増資・訴訟等で True）
+  hold_caution     boolean   保有継続注意フラグ
+  review_required  boolean   要確認フラグ（下方修正・不祥事等）
+  title            string    開示表題（参照用）
+  source           string    'tdnet' / 'edinet'
+  classified_at    timestamp 分類日時
+
+主キー: `(id)`
+更新方式: UPSERT（再分類時は上書き）
+
+event_type 分類（初期対象）:
+
+  event_type                  event_score  buy_caution  説明
+  --------------------------- ------------ ------------ ---------------------------------
+  earnings_report             0.0          False        決算短信（内容はNLPで評価）
+  earnings_revision_up        +1.0         False        業績予想修正（上方）
+  earnings_revision_down      -1.0         True         業績予想修正（下方）
+  dividend_revision_up        +1.0         False        配当予想修正（増配）
+  dividend_revision_down      -1.0         False        配当予想修正（減配）
+  buyback                     +0.5         False        自己株式取得
+  new_share_issuance          -0.5         True         株式発行・増資（希薄化）
+  merger_acquisition          0.0          True         M&A / 資本業務提携（要確認）
+  litigation_scandal          -1.0         True         訴訟・監理・不祥事系
+  other                       0.0          False        上記以外
+
+------------------------------------------------------------------------
+
 # 8. ニュース銘柄マッピング
 
 ## news_symbols
@@ -490,17 +555,23 @@ Executionの処理フロー:
 
 ## 日次差分更新フロー（通常運用）
 
-    J-Quants 差分 API
+    J-Quants 差分 API（15:30）
       /prices/daily_quotes  → raw_prices → prices_daily
       /fins/statements      → raw_financials → fundamentals
       /listed/info          →              stocks
       /market/trading_calendar →           market_calendar
     ↓
-    news_articles（RSS取得）
+    TDnet 適時開示（15:35）→ raw_disclosures（source='tdnet'）
+    EDINET API（15:40）    → raw_disclosures（source='edinet'）
+    news_articles（RSS取得、補助）
     ↓
-    features / ai_scores / topix_daily（regime_detector 参照）
+    features（16:00）
     ↓
-    signals
+    disclosure_events（17:00）← raw_disclosures を分類
+    ↓
+    ai_scores / market_regime（18:00、ENABLE_AI_SENTIMENT=true 時のみ）
+    ↓
+    signals（20:00）← disclosure_events の buy_caution も参照
     ↓
     portfolio_targets
     ↓
