@@ -148,12 +148,14 @@ J-Quants から取得した生の財務データ。
   revenue            float     売上
   operating_profit   float     営業利益
   net_income         float     純利益
-  eps                float     EPS
+  eps                float     EPS（1株当たり利益）
   roe                float     ROE
+  bps                float     BPS（1株純資産）※ Issue #185 追加
   fetched_at         timestamp 取込日時
 
 主キー: `(code, report_date, period_type)`
 取得元（差分 API）: J-Quants `/fins/statements`
+  BookValuePerShare→bps（Issue #185 追加）
 取得元（Bulk API）: `/fins/summary`
   DiscDate→report_date, CurPerType→period_type, Sales→revenue, OP→operating_profit
   NP→net_income, EPS→eps, Eq/TA→roe
@@ -180,23 +182,26 @@ J-Quants から取得した生の財務データ。
 
 ------------------------------------------------------------------------
 
-## dividends（新規）
+## dividends
 
-配当情報。Bulk API `/fins/dividend` から取得。
+配当情報。J-Quants `/fins/dividend` から取得。
 
   column       type      description
   ------------ --------- ---------------------------------------
   code         string    銘柄コード
   pub_date     date      公告日（PRIMARY KEY の一部）
   ref_no       string    参照番号（PRIMARY KEY の一部）
-  ex_date      date      権利落ち日
+  ex_date      date      権利落ち日（配当利回り集計の基準日）
   record_date  date      基準日
   pay_date     date      支払日
-  div_rate     float     配当率（円）
+  div_rate     float     1株当たり配当金額（円）
   fetched_at   timestamp 取込日時
 
 主キー: `(code, pub_date, ref_no)`
-取得元: Bulk API `/fins/dividend`
+取得元（初回）: Bulk API `/fins/dividend` CSV（bootstrap）
+取得元（差分）: `/fins/dividend` 差分 API（`run_dividends_etl()`）※ Issue #185 追加
+
+配当利回りの計算: `(直近12ヶ月の div_rate 合計 / close) × 100`（ex_date ベース集計）
 
 ------------------------------------------------------------------------
 

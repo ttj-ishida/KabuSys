@@ -233,26 +233,25 @@ def calc_value(
 
     raw_financials テーブルから target_date 以前の最新財務データを取得し、
     prices_daily の株価と組み合わせて以下を計算する。
-      - per : 株価 / EPS（EPS が 0 または欠損の場合は None）
-      - roe : ROE（raw_financials から直接取得）
-
-    Note:
-        PBR・配当利回りは現バージョンでは未実装。
+      - per       : 株価 / EPS（EPS が 0 または欠損の場合は None）
+      - roe       : ROE（raw_financials から直接取得）
+      - pbr       : 株価 / BPS（BPS が 0 または欠損の場合は None）
+      - div_yield : 直近12ヶ月の配当合計 / 株価 × 100（配当なしの場合は None）
 
     Args:
-        conn:        DuckDB 接続。prices_daily / raw_financials テーブルを参照する。
+        conn:        DuckDB 接続。prices_daily / raw_financials / dividends テーブルを参照。
         target_date: 計算基準日。
 
     Returns:
-        [{"date": date, "code": str, "per": float|None, "roe": float|None}, ...] のリスト。
+        [{"date": date, "code": str, "per": float|None, "roe": float|None,
+          "pbr": float|None, "div_yield": float|None}, ...] のリスト。
     """
     rows = conn.execute(
         """
         WITH latest_fin AS (
-            -- target_date 以前の最新財務レコードを銘柄ごとに1件取得（DuckDB 互換: ROW_NUMBER 使用）
-            SELECT code, eps, roe
+            SELECT code, eps, roe, bps
             FROM (
-                SELECT code, eps, roe,
+                SELECT code, eps, roe, bps,
                        ROW_NUMBER() OVER (
                            PARTITION BY code ORDER BY report_date DESC, fetched_at DESC
                        ) AS rn
@@ -265,21 +264,33 @@ def calc_value(
             SELECT code, close
             FROM prices_daily
             WHERE date = ?
+        ),
+        annual_div AS (
+            SELECT code, SUM(div_rate) AS annual_div
+            FROM dividends
+            WHERE code IN (SELECT code FROM price_on_date)
+              AND ex_date BETWEEN (CAST(? AS DATE) - INTERVAL 1 YEAR) AND ?
+            GROUP BY code
         )
         SELECT
             ? AS date,
             p.code,
             CASE WHEN f.eps IS NOT NULL AND f.eps <> 0
                  THEN p.close / f.eps END AS per,
-            f.roe
+            f.roe,
+            CASE WHEN f.bps IS NOT NULL AND f.bps > 0
+                 THEN p.close / f.bps END AS pbr,
+            CASE WHEN d.annual_div IS NOT NULL AND p.close > 0
+                 THEN (d.annual_div / p.close) * 100 END AS div_yield
         FROM price_on_date p
         LEFT JOIN latest_fin f ON p.code = f.code
+        LEFT JOIN annual_div d ON p.code = d.code
         ORDER BY p.code
         """,
-        [target_date, target_date, target_date],
+        [target_date, target_date, target_date, target_date, target_date],
     ).fetchall()
 
-    cols = ["date", "code", "per", "roe"]
+    cols = ["date", "code", "per", "roe", "pbr", "div_yield"]
     result = [dict(zip(cols, r)) for r in rows]
     logger.debug("calc_value: %d 銘柄 date=%s", len(result), target_date)
     return result

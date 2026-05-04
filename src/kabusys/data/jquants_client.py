@@ -502,6 +502,7 @@ def save_financial_statements(
             _to_float(r.get("Profit")),
             _to_float(r.get("EarningsPerShare")),
             _to_float(r.get("ROE")),
+            _to_float(r.get("BookValuePerShare")),  # 追加
             fetched_at,
         )
         for r in records
@@ -519,19 +520,118 @@ def save_financial_statements(
         """
         INSERT INTO raw_financials
             (code, report_date, period_type, revenue, operating_profit,
-             net_income, eps, roe, fetched_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             net_income, eps, roe, bps, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (code, report_date, period_type) DO UPDATE SET
             revenue          = excluded.revenue,
             operating_profit = excluded.operating_profit,
             net_income       = excluded.net_income,
             eps              = excluded.eps,
             roe              = excluded.roe,
+            bps              = excluded.bps,
             fetched_at       = excluded.fetched_at
         """,
         rows,
     )
     logger.info("save_financial_statements: %d 件を raw_financials に保存", len(rows))
+    return len(rows)
+
+
+def fetch_dividends(
+    id_token: str | None = None,
+    code: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> list[dict[str, Any]]:
+    """配当データを取得する（ページネーション対応）。
+
+    Args:
+        id_token:  認証トークン。省略時はキャッシュを使用。
+        code:      銘柄コード（省略時は全銘柄）。
+        date_from: 取得開始日。
+        date_to:   取得終了日。
+
+    Returns:
+        配当レコードのリスト。
+    """
+    params: dict[str, str] = {}
+    if code:
+        params["code"] = code
+    if date_from:
+        params["dateFrom"] = date_from.strftime("%Y%m%d")
+    if date_to:
+        params["dateTo"] = date_to.strftime("%Y%m%d")
+
+    result: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    while True:
+        data = _request("/fins/dividend", params=params, id_token=id_token)
+        result.extend(data.get("dividends", []))
+        pagination_key = data.get("pagination_key")
+        if not pagination_key or pagination_key in seen_keys:
+            break
+        seen_keys.add(pagination_key)
+        params["pagination_key"] = pagination_key
+
+    logger.info("fetch_dividends: %d レコード取得", len(result))
+    return result
+
+
+def save_dividends(
+    conn: duckdb.DuckDBPyConnection,
+    records: list[dict[str, Any]],
+) -> int:
+    """配当データを dividends テーブルに保存する（冪等）。
+
+    Args:
+        conn:    DuckDB 接続。
+        records: fetch_dividends() の戻り値。
+                 期待フィールド: Code, PubDate, RefNo, ExDate, RecDate, PayDate, DivRate
+
+    Returns:
+        挿入・更新したレコード数。
+    """
+    if not records:
+        return 0
+
+    fetched_at = (
+        datetime.now(tz=timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+    rows = [
+        (
+            str(r.get("Code", "") or ""),
+            _to_date_str(r.get("PubDate")),
+            str(r.get("RefNo", "") or ""),
+            _to_date_str(r.get("ExDate")),
+            _to_date_str(r.get("RecDate")),
+            _to_date_str(r.get("PayDate")),
+            _to_float(r.get("DivRate")),
+            fetched_at,
+        )
+        for r in records
+        if r.get("Code") and r.get("PubDate") and r.get("RefNo")
+    ]
+    skipped = len(records) - len(rows)
+    if skipped:
+        logger.warning("save_dividends: %d 件を PK 欠損によりスキップ", skipped)
+
+    conn.executemany(
+        """
+        INSERT INTO dividends
+            (code, pub_date, ref_no, ex_date, record_date, pay_date, div_rate, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (code, pub_date, ref_no) DO UPDATE SET
+            ex_date     = excluded.ex_date,
+            record_date = excluded.record_date,
+            pay_date    = excluded.pay_date,
+            div_rate    = excluded.div_rate,
+            fetched_at  = excluded.fetched_at
+        """,
+        rows,
+    )
+    logger.info("save_dividends: %d 件を dividends に保存", len(rows))
     return len(rows)
 
 
@@ -655,6 +755,19 @@ def fetch_listed_info(
 # ---------------------------------------------------------------------------
 # ユーティリティ
 # ---------------------------------------------------------------------------
+
+
+def _to_date_str(value: Any) -> str | None:
+    """日付文字列を "YYYY-MM-DD" 形式に正規化する。
+
+    J-Quants API は "YYYYMMDD" と "YYYY-MM-DD" の両形式を返すことがある。
+    """
+    if not value:
+        return None
+    s = str(value).strip()
+    if len(s) == 8 and s.isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+    return s
 
 
 def _to_float(value: Any) -> float | None:

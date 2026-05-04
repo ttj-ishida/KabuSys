@@ -55,18 +55,21 @@ def _insert_prices(conn, rows: list[tuple]):
 
 
 def _insert_financials(conn, rows: list[tuple]):
-    """(code, report_date, period_type, revenue, operating_profit, net_income, eps, roe)
-    を raw_financials に挿入。"""
-    conn.executemany(
-        """
-        INSERT INTO raw_financials
-            (code, report_date, period_type, revenue, operating_profit,
-             net_income, eps, roe, fetched_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
-        ON CONFLICT DO NOTHING
-        """,
-        rows,
-    )
+    """(code, report_date, period_type, revenue, operating_profit, net_income, eps, roe[, bps])
+    を raw_financials に挿入。bps は省略可能（省略時 NULL）。"""
+    for row in rows:
+        if len(row) == 8:
+            row = row + (None,)  # bps = NULL
+        conn.execute(
+            """
+            INSERT INTO raw_financials
+                (code, report_date, period_type, revenue, operating_profit,
+                 net_income, eps, roe, bps, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
+            ON CONFLICT DO NOTHING
+            """,
+            row,
+        )
 
 
 # ---------------------------------------------------------------------------

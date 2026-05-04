@@ -57,6 +57,34 @@ intraday（ザラ場中）の新規シグナル生成は行わない。ザラ場
 ### 3.2 バリュー (Value)
 - **指標**: PER (株価収益率)、PBR (株価純資産倍率)、配当利回り
 - **傾向**: テクニカルな過熱感を抑制し、下値不安の少ない割安銘柄を評価。
+- **データ源**: `raw_financials.eps`（PER）、`raw_financials.bps`（PBR）、`dividends`（配当利回り）
+
+#### スコア計算式
+
+各指標を 0〜1 に正規化し、加重平均する。重みと基準値は `config/strategy.toml` で管理する。
+
+| 指標 | 正規化式 | デフォルト基準値 |
+|------|---------|----------------|
+| PER | `1 / (1 + PER / per_mid)` | `per_mid = 20.0`（東証平均水準） |
+| PBR | `1 / (1 + PBR / pbr_mid)` | `pbr_mid = 1.5`（東証平均付近） |
+| 配当利回り | `min(div_yield / div_yield_max, 1.0)` | `div_yield_max = 3.0`（%） |
+
+```toml
+# config/strategy.toml
+[value_score.weights]
+per       = 0.50
+pbr       = 0.30
+div_yield = 0.20
+
+[value_score.normalization]
+per_mid       = 20.0
+pbr_mid       = 1.5
+div_yield_max = 3.0
+```
+
+データが欠損した指標は除外し、残りの指標で重み正規化して計算する（全欠損時は `None`）。
+
+配当利回りの定義: `(直近12ヶ月の div_rate 合計 / close) × 100`（`dividends.ex_date` ベース）
 
 ### 3.3 ボラティリティ & 流動性 (Volatility / Liquidity)
 - **指標**: 20日ATR（Average True Range）、出来高変化率
@@ -104,8 +132,8 @@ final_score =
 以下のいずれかに抵触した時点で、翌営業日に売却シグナルを発火する。
 1. **ストップロス（絶対防衛ライン）**: 買値から -8% の下落、または 2×ATR 分の下落。最低保有日数・決算回避チェックより優先される（常に即時 SELL）。
 2. **決算前強制 SELL** （Issue #171）: 翌営業日が `earnings_calendar` の決算発表予定日に該当する保有銘柄は `reason=earnings_avoidance` で SELL する。最低保有日数の例外として扱う（5営業日未満でも SELL 許可）。
-3. **トレーリングストップ（利益確保）**: 直近の最高値から -10% の下落。**※未実装**（`positions` テーブルへの `peak_price` カラム追加が必要）。
-4. **時間決済（最大保有期間）**: 保有から 60営業日（約3ヶ月）を経過。60営業日は最大保有上限であり、中期投資の主戦略ではない。**※未実装**（`position_entries.entry_date` から営業日数カウントするロジックが必要）。
+3. **トレーリングストップ（利益確保）** （Issue #182 実装済み）: エントリー日以降の最高値（`peak_close`）から `trailing_stop_atr × ATR_20d` を超えて下落した場合に SELL（`reason=trailing_stop`）。`peak_close > avg_price`（含み益あり）のときのみ発動。`--trailing-stop-atr` CLI 引数で乗数変更可（デフォルト 2.0）。
+4. **時間決済（最大保有期間）** （Issue #183 実装済み）: 保有から 60営業日（約3ヶ月）を経過した場合に SELL（`reason=time_exit`）。`--max-holding-days` CLI 引数で変更可（デフォルト 60）。
 5. **スコア低下**: 日次の計算で `final_score` が上位圏外へ転落。ただし BUY 後 **5営業日** はストップロス・決算回避以外の理由での SELL を抑制する（Issue #174 最低保有日数）。Bear レジームへの移行時はこの制限を解除する。
 
 ---
