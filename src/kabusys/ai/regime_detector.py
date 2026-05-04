@@ -294,18 +294,28 @@ def score_regime(
         api_key:     OpenAI API キー。None の場合は環境変数 OPENAI_API_KEY を参照。
 
     Returns:
-        1（成功）
+        1（成功）、または 0（ENABLE_AI_SENTIMENT=false / API キー未設定でスキップ時）
 
     Raises:
-        ValueError: api_key が未設定かつ環境変数 OPENAI_API_KEY も未設定の場合。
         Exception:  DB 書き込み失敗時（ROLLBACK 後に上位へ伝播）。
     """
+    # [0] Feature toggle チェック（ENABLE_AI_SENTIMENT=false でスキップ）
+    from kabusys.config import Settings
+
+    if not Settings().enable_ai_sentiment:
+        logger.info(
+            "score_regime: AI センチメント分析は無効 (ENABLE_AI_SENTIMENT=false) — スキップ"
+        )
+        return 0
+
     # [1] API キー解決
     resolved_key = api_key or os.environ.get("OPENAI_API_KEY")
     if not resolved_key:
-        raise ValueError(
-            "OpenAI API キーが未設定です。api_key 引数または環境変数 OPENAI_API_KEY を設定してください。"
+        logger.warning(
+            "score_regime: OpenAI API キーが未設定です。レジーム判定をスキップします。"
+            " OPENAI_API_KEY を設定するか ENABLE_AI_SENTIMENT=false にしてください。"
         )
+        return 0
 
     # [2] 1321 の 200 日 MA 乖離を計算
     ma200_ratio = _calc_ma200_ratio(conn, target_date)

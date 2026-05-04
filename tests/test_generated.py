@@ -1,11 +1,7 @@
 import os
-import sqlite3
-import tempfile
-import textwrap
 from types import SimpleNamespace
 from pathlib import Path
 import json
-import math
 
 import pytest
 
@@ -19,9 +15,8 @@ from kabusys.operations.signal_queue_report import (
     format_json as sq_format_json,
     format_markdown as sq_format_markdown,
     save_report as sq_save_report,
-    SignalQueueReport,
 )
-from datetime import date, datetime, timezone
+from datetime import date
 
 
 def test_get_poll_interval_default_and_valid(monkeypatch):
@@ -155,7 +150,10 @@ def test_pos_value_prefers_current_price_and_fallbacks(caplog):
     val = _pos_value(p3)
     assert val == 0.0
     # Expect a warning mentioning code Z
-    found = any("code=Z" in rec.getMessage() or "Z" in rec.getMessage() for rec in caplog.records)
+    found = any(
+        "code=Z" in rec.getMessage() or "Z" in rec.getMessage()
+        for rec in caplog.records
+    )
     assert found
 
 
@@ -170,7 +168,9 @@ def test_parse_env_line_various_cases():
     assert parsed is not None
     k, v = parsed
     assert k == "SECRET"
-    assert "a'b" in v  # escape handled, newline included as literal n by our simplistic parser? ensure substring
+    assert (
+        "a'b" in v
+    )  # escape handled, newline included as literal n by our simplistic parser? ensure substring
 
     # inline comment handling: comment only recognized if preceded by space/tab
     assert _parse_env_line("K=val#notcomment") == ("K", "val#notcomment")
@@ -248,6 +248,24 @@ def test_settings_paper_fill_mode_and_env_and_log_level(monkeypatch):
         _ = Settings().log_level
 
 
+def test_settings_enable_ai_sentiment(monkeypatch):
+    """ENABLE_AI_SENTIMENT の読み込みと デフォルト False を確認する。"""
+    monkeypatch.delenv("ENABLE_AI_SENTIMENT", raising=False)
+    assert Settings().enable_ai_sentiment is False
+
+    monkeypatch.setenv("ENABLE_AI_SENTIMENT", "true")
+    assert Settings().enable_ai_sentiment is True
+
+    monkeypatch.setenv("ENABLE_AI_SENTIMENT", "false")
+    assert Settings().enable_ai_sentiment is False
+
+    monkeypatch.setenv("ENABLE_AI_SENTIMENT", "0")
+    assert Settings().enable_ai_sentiment is False
+
+    monkeypatch.setenv("ENABLE_AI_SENTIMENT", "1")
+    assert Settings().enable_ai_sentiment is True
+
+
 def test_intraday_determine_status_and_formatting():
     # Build a snapshot-like object with required attributes
     snap = SimpleNamespace(
@@ -262,7 +280,11 @@ def test_intraday_determine_status_and_formatting():
         memory_percent=None,
     )
     # status OK
-    from kabusys.run_intraday_monitor import _determine_status, format_cli_summary, STATUS_OK
+    from kabusys.run_intraday_monitor import (
+        _determine_status,
+        format_cli_summary,
+        STATUS_OK,
+    )
 
     assert _determine_status(snap) == STATUS_OK
     formatted = format_cli_summary(snap)
@@ -305,8 +327,20 @@ def test_validate_config_checks_and_yaml(monkeypatch, tmp_path):
 
 def build_sample_signals():
     return [
-        {"code": "AAA", "side": "buy", "target_size": None, "target_weight": 0.1, "signal_rank": 1},
-        {"code": "BBB", "side": "sell", "target_size": 100, "target_weight": None, "signal_rank": 2},
+        {
+            "code": "AAA",
+            "side": "buy",
+            "target_size": None,
+            "target_weight": 0.1,
+            "signal_rank": 1,
+        },
+        {
+            "code": "BBB",
+            "side": "sell",
+            "target_size": 100,
+            "target_weight": None,
+            "signal_rank": 2,
+        },
     ]
 
 

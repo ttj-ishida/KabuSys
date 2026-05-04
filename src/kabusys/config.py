@@ -158,6 +158,19 @@ class Settings:
     def kabu_trade_password(self) -> str | None:
         return os.environ.get("KABU_TRADE_PASSWORD") or None
 
+    # --- 拡張機能トグル ---
+    @property
+    def enable_ai_sentiment(self) -> bool:
+        """AI センチメント機能の有効フラグ（ENABLE_AI_SENTIMENT、デフォルト: False）。
+
+        False の場合、news_nlp / regime_detector は即座にリターンし Core 機能に影響しない。
+        """
+        return os.environ.get("ENABLE_AI_SENTIMENT", "false").lower() not in (
+            "false",
+            "0",
+            "no",
+        )
+
     # --- LINE Messaging API ---
     @property
     def line_channel_access_token(self) -> str:

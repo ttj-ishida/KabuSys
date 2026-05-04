@@ -914,6 +914,12 @@ def generate_signals(
         # AI ニューススコア（未登録の場合は中立 0.5 で補完）
         ai_raw = ai_map.get(code, {}).get("ai_score")
         s_news = _sigmoid(ai_raw) if ai_raw is not None else None
+        if s_news is None:
+            logger.warning(
+                "generate_signals: AI スコアが見つかりません。デフォルト値(0.5)でシグナルを生成します code=%s date=%s",
+                code,
+                feat.get("date", "unknown"),
+            )
 
         # None のコンポーネントは中立値 0.5 で補完（欠損銘柄の不当な降格を防ぐ）
         final_score = (

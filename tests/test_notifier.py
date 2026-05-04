@@ -116,24 +116,39 @@ class TestLineNotifierSend:
         assert sent_text.endswith("...(省略)")
 
 
-from kabusys.operations.notifier import build_notifier  # noqa: E402
+from kabusys.operations.notifier import NullNotifier, build_notifier  # noqa: E402
+
+
+class TestNullNotifier:
+    def test_send_always_returns_false(self):
+        """NullNotifier.send() は常に False を返し例外を発生させない"""
+        n = NullNotifier()
+        assert n.send("any message") is False
+
+    def test_send_empty_message(self):
+        """空メッセージでも False を返す"""
+        assert NullNotifier().send("") is False
 
 
 class TestBuildNotifier:
-    def test_build_notifier_from_settings(self, monkeypatch):
-        """`build_notifier()` が Settings から正しく構築される"""
+    def test_build_notifier_enabled_returns_line_notifier(self, monkeypatch):
+        """`LINE_NOTIFY_ENABLED=true` → LineNotifier を返す"""
         monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "mytoken")
         monkeypatch.setenv("LINE_USER_ID", "myuserid")
         monkeypatch.setenv("LINE_NOTIFY_ENABLED", "true")
         n = build_notifier(Settings())
+        assert isinstance(n, LineNotifier)
         assert n._token == "mytoken"
         assert n._user_id == "myuserid"
-        assert n._enabled is True
 
-    def test_build_notifier_disabled_when_env_false(self, monkeypatch):
-        """`LINE_NOTIFY_ENABLED=false` → enabled=False"""
-        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "tok")
-        monkeypatch.setenv("LINE_USER_ID", "uid")
+    def test_build_notifier_disabled_returns_null_notifier(self, monkeypatch):
+        """`LINE_NOTIFY_ENABLED=false` → NullNotifier を返す"""
         monkeypatch.setenv("LINE_NOTIFY_ENABLED", "false")
         n = build_notifier(Settings())
-        assert n._enabled is False
+        assert isinstance(n, NullNotifier)
+
+    def test_build_notifier_null_notifier_send_safe(self, monkeypatch):
+        """`LINE_NOTIFY_ENABLED=false` → send() が例外を出さない"""
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "false")
+        n = build_notifier(Settings())
+        assert n.send("test") is False

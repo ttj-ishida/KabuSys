@@ -17,6 +17,18 @@ _MAX_MESSAGE_LEN = 5000
 _TRUNCATION_SUFFIX = "...(省略)"
 
 
+class NullNotifier:
+    """通知を何もしない Null Object。
+
+    LINE_NOTIFY_ENABLED=false 時に build_notifier() が返す。
+    Core 機能は NullNotifier.send() を呼んでも例外が発生しない。
+    """
+
+    def send(self, message: str) -> bool:  # noqa: ARG002
+        logger.debug("NullNotifier: LINE 通知は無効のためスキップ")
+        return False
+
+
 class LineNotifier:
     """LINE Messaging API push message を送信する。
 
@@ -73,10 +85,17 @@ class LineNotifier:
 from kabusys.config import Settings  # noqa: E402 — モジュール末尾配置（E402 抑制）
 
 
-def build_notifier(settings: Settings) -> LineNotifier:
-    """Settings から LineNotifier を生成する。"""
+def build_notifier(settings: Settings) -> NullNotifier | LineNotifier:
+    """Settings から Notifier を生成する。
+
+    LINE_NOTIFY_ENABLED=false の場合は NullNotifier を返す。
+    Core 機能は返り値の型を意識せず .send() を呼ぶだけでよい。
+    """
+    if not settings.line_notify_enabled:
+        logger.info("build_notifier: LINE 通知は無効 (LINE_NOTIFY_ENABLED=false)")
+        return NullNotifier()
     return LineNotifier(
         token=settings.line_channel_access_token,
         user_id=settings.line_user_id,
-        enabled=settings.line_notify_enabled,
+        enabled=True,
     )

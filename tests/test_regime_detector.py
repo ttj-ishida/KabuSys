@@ -18,6 +18,16 @@ from kabusys.data.schema import init_schema
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def enable_ai_sentiment(monkeypatch):
+    """テストファイル全体で ENABLE_AI_SENTIMENT=true に設定する。
+
+    score_regime() は ENABLE_AI_SENTIMENT=false（デフォルト）の場合に即座に 0 を返す。
+    このファイルの既存テストは AI 機能有効前提のため、autouse で上書きする。
+    """
+    monkeypatch.setenv("ENABLE_AI_SENTIMENT", "true")
+
+
 @pytest.fixture
 def conn():
     """インメモリ DuckDB 接続（テスト毎に新規作成）。"""
@@ -433,19 +443,13 @@ def test_api_failure(conn):
     assert row[0] == "neutral"  # ratio=1.0, macro=0.0 → score=0.0 → neutral
 
 
-def test_no_api_key(conn):
-    """API キー未設定 → ValueError を raise。"""
+def test_no_api_key(conn, monkeypatch):
+    """API キー未設定 → 0 を返し例外を出さない（フェイルセーフ）。"""
     from kabusys.ai.regime_detector import score_regime
-    import os
 
-    # 環境変数を一時的に削除
-    env_backup = os.environ.pop("OPENAI_API_KEY", None)
-    try:
-        with pytest.raises(ValueError):
-            score_regime(conn, TARGET_DATE, api_key=None)
-    finally:
-        if env_backup is not None:
-            os.environ["OPENAI_API_KEY"] = env_backup
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    result = score_regime(conn, TARGET_DATE, api_key=None)
+    assert result == 0
 
 
 class _FailOnInsertConn:
@@ -633,3 +637,30 @@ def test_regime_clips_to_range(conn):
     ).fetchone()
     assert row is not None
     assert -1.0 <= row[0] <= 1.0, f"regime_score={row[0]} が範囲外"
+
+
+# ---------------------------------------------------------------------------
+# Feature toggle テスト
+# ---------------------------------------------------------------------------
+
+
+def test_score_regime_skips_when_ai_disabled(conn, monkeypatch):
+    """ENABLE_AI_SENTIMENT=false の場合 score_regime() は 0 を返しスキップすること。"""
+    monkeypatch.setenv("ENABLE_AI_SENTIMENT", "false")
+    from kabusys.ai.regime_detector import score_regime
+
+    with patch("kabusys.ai.regime_detector._call_openai_api") as mock_api:
+        result = score_regime(conn, TARGET_DATE, api_key="test-key")
+
+    assert result == 0
+    mock_api.assert_not_called()
+
+
+def test_score_regime_skips_without_api_key(conn, monkeypatch):
+    """ENABLE_AI_SENTIMENT=true かつ API キー未設定の場合 0 を返し例外を出さないこと。"""
+    monkeypatch.setenv("ENABLE_AI_SENTIMENT", "true")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from kabusys.ai.regime_detector import score_regime
+
+    result = score_regime(conn, TARGET_DATE, api_key=None)
+    assert result == 0
