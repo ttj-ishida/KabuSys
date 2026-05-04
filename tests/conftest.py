@@ -36,6 +36,7 @@ MINIMAL_DDL = [
         net_income      DECIMAL(20,4),
         eps             DECIMAL(18,4),
         roe             DECIMAL(10,6),
+        bps             DECIMAL(18,4),
         fetched_at      TIMESTAMP     NOT NULL DEFAULT current_timestamp,
         PRIMARY KEY (code, report_date, period_type)
     )""",

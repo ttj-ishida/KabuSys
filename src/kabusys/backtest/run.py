@@ -140,6 +140,12 @@ def main() -> None:
             "[default: %(default)s]"
         ),
     )
+    parser.add_argument(
+        "--trailing-stop-atr",
+        type=float,
+        default=2.0,
+        help="ATR multiplier for trailing stop. Position is sold when close < peak − N×ATR. [default: %(default)s]",
+    )
     parser.add_argument("--db", required=True, help="DuckDB file path")
     parser.add_argument(
         "--output-format",
@@ -205,6 +211,7 @@ def main() -> None:
             backtest_scope=scope,
             min_holding_days=args.min_holding_days,
             max_holding_days=args.max_holding_days,
+            trailing_stop_atr=args.trailing_stop_atr,
         )
     finally:
         conn.close()
@@ -225,6 +232,7 @@ def main() -> None:
         lot_size=args.lot_size,
         min_holding_days=getattr(args, "min_holding_days", 5),
         max_holding_days=getattr(args, "max_holding_days", 60),
+        trailing_stop_atr=getattr(args, "trailing_stop_atr", 2.0),
     )
 
     fmt = args.output_format
