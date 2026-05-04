@@ -901,8 +901,11 @@ def generate_signals(
         )
 
     # 4. 各銘柄の final_score 計算（Section 4.1）
-    # バリュースコア設定を読み込む（ループ外で1回のみ）
+    # バリュースコア設定・AI フラグをループ外で1回だけ評価する
+    from kabusys.config import Settings
+
     value_config = _load_value_config()
+    ai_enabled = Settings().enable_ai_sentiment
     scored: list[dict[str, Any]] = []
     for feat in features:
         code = feat["code"]
@@ -914,15 +917,12 @@ def generate_signals(
         # AI ニューススコア（未登録の場合は中立 0.5 で補完）
         ai_raw = ai_map.get(code, {}).get("ai_score")
         s_news = _sigmoid(ai_raw) if ai_raw is not None else None
-        if s_news is None:
-            from kabusys.config import Settings
-
-            if Settings().enable_ai_sentiment:
-                logger.warning(
-                    "generate_signals: AI スコアが見つかりません。デフォルト値(0.5)でシグナルを生成します code=%s date=%s",
-                    code,
-                    feat.get("date", "unknown"),
-                )
+        if s_news is None and ai_enabled:
+            logger.warning(
+                "generate_signals: AI スコアが見つかりません。デフォルト値(0.5)でシグナルを生成します code=%s date=%s",
+                code,
+                feat.get("date", "unknown"),
+            )
 
         # None のコンポーネントは中立値 0.5 で補完（欠損銘柄の不当な降格を防ぐ）
         final_score = (

@@ -6,9 +6,19 @@ from kabusys.config import Settings
 
 
 class TestLineNotifyEnabled:
-    def test_defaults_to_true_when_not_set(self, monkeypatch):
-        """LINE_NOTIFY_ENABLED 未設定 → True"""
+    def test_defaults_to_false_when_not_set(self, monkeypatch):
+        """LINE_NOTIFY_ENABLED 未設定 → False（安全側デフォルト）"""
         monkeypatch.delenv("LINE_NOTIFY_ENABLED", raising=False)
+        assert Settings().line_notify_enabled is False
+
+    def test_true_when_set_to_true(self, monkeypatch):
+        """LINE_NOTIFY_ENABLED=true → True"""
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "true")
+        assert Settings().line_notify_enabled is True
+
+    def test_true_when_set_to_1(self, monkeypatch):
+        """LINE_NOTIFY_ENABLED=1 → True"""
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "1")
         assert Settings().line_notify_enabled is True
 
     def test_false_when_set_to_false(self, monkeypatch):
@@ -16,20 +26,15 @@ class TestLineNotifyEnabled:
         monkeypatch.setenv("LINE_NOTIFY_ENABLED", "false")
         assert Settings().line_notify_enabled is False
 
-    def test_false_when_set_to_0(self, monkeypatch):
-        """LINE_NOTIFY_ENABLED=0 → False"""
-        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "0")
+    def test_false_when_set_to_off(self, monkeypatch):
+        """LINE_NOTIFY_ENABLED=off → False（許容リスト方式）"""
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "off")
         assert Settings().line_notify_enabled is False
 
-    def test_false_when_set_to_no(self, monkeypatch):
-        """LINE_NOTIFY_ENABLED=no → False"""
-        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "no")
+    def test_false_when_empty_string(self, monkeypatch):
+        """LINE_NOTIFY_ENABLED=（空文字）→ False（許容リスト方式）"""
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "")
         assert Settings().line_notify_enabled is False
-
-    def test_true_when_set_to_true(self, monkeypatch):
-        """LINE_NOTIFY_ENABLED=true → True"""
-        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "true")
-        assert Settings().line_notify_enabled is True
 
 
 import requests  # noqa: E402

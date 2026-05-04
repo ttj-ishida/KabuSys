@@ -193,7 +193,7 @@ class Settings:
 
     @property
     def line_notify_enabled(self) -> bool:
-        return _parse_bool_env("LINE_NOTIFY_ENABLED", default=True)
+        return _parse_bool_env("LINE_NOTIFY_ENABLED", default=False)
 
     # --- データベース ---
     @property

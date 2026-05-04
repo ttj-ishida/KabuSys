@@ -578,3 +578,31 @@ class TestEventSizeMultiplier:
         ).fetchone()
         assert row is not None
         assert abs(row[0] - 1.0) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# Feature Toggle: AI センチメント無効時の WARNING 抑制
+# ---------------------------------------------------------------------------
+
+
+def test_generate_signals_no_ai_warning_when_ai_disabled(conn, monkeypatch, caplog):
+    """ENABLE_AI_SENTIMENT=false の場合、AI スコア未登録でも WARNING が出ない。"""
+    import logging
+
+    from kabusys.strategy.signal_generator import generate_signals
+
+    monkeypatch.delenv("ENABLE_AI_SENTIMENT", raising=False)
+
+    _insert_regime(conn, TARGET_DATE, "bull")
+    _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+    _insert_feature(conn, "7203", TARGET_DATE, high_score=True)
+
+    with caplog.at_level(logging.WARNING, logger="kabusys.strategy.signal_generator"):
+        generate_signals(conn, TARGET_DATE)
+
+    ai_warnings = [
+        r for r in caplog.records if "AI スコアが見つかりません" in r.getMessage()
+    ]
+    assert len(ai_warnings) == 0, (
+        f"ENABLE_AI_SENTIMENT=false なのに AI 警告が {len(ai_warnings)} 件出力された"
+    )
