@@ -108,22 +108,42 @@ def _compute_momentum_score(feat: dict[str, Any]) -> float | None:
     )
 
 
+_VALUE_CONFIG_DEFAULTS: dict = {
+    "weights": {"per": 0.50, "pbr": 0.30, "div_yield": 0.20},
+    "normalization": {"per_mid": 20.0, "pbr_mid": 1.5, "div_yield_max": 3.0},
+}
+
+
 def _load_value_config() -> dict:
     """config/strategy.toml からバリュースコア設定を読み込む。
 
-    ファイルが存在しない場合はデフォルト値を返す（設定ファイル任意）。
+    ファイルが存在しない・読み込み失敗・不正値の場合はデフォルト値にフォールバック。
+    存在するキーのみファイル値でマージし、欠損キーはデフォルトで補完する。
 
     Returns:
         {"weights": {...}, "normalization": {...}} 形式の辞書。
     """
     config_path = Path(__file__).resolve().parents[3] / "config" / "strategy.toml"
+    raw: dict = {}
     if config_path.exists():
-        with open(config_path, "rb") as f:
-            return tomllib.load(f)["value_score"]
-    return {
-        "weights": {"per": 0.50, "pbr": 0.30, "div_yield": 0.20},
-        "normalization": {"per_mid": 20.0, "pbr_mid": 1.5, "div_yield_max": 3.0},
-    }
+        try:
+            with open(config_path, "rb") as f:
+                raw = tomllib.load(f).get("value_score", {})
+        except Exception as exc:
+            logger.warning("strategy.toml 読み込み失敗: %s (デフォルトを使用)", exc)
+
+    w = {**_VALUE_CONFIG_DEFAULTS["weights"], **(raw.get("weights") or {})}
+    n = {**_VALUE_CONFIG_DEFAULTS["normalization"], **(raw.get("normalization") or {})}
+
+    if sum(w.values()) <= 0:
+        logger.warning("value_score.weights の合計が 0 以下。デフォルトを使用")
+        return _VALUE_CONFIG_DEFAULTS
+
+    if any(n.get(k, 0) <= 0 for k in ("per_mid", "pbr_mid", "div_yield_max")):
+        logger.warning("value_score.normalization に 0 以下の値。デフォルトを使用")
+        return _VALUE_CONFIG_DEFAULTS
+
+    return {"weights": w, "normalization": n}
 
 
 def _compute_value_score(feat: dict[str, Any], config: dict) -> float | None:
@@ -152,6 +172,8 @@ def _compute_value_score(feat: dict[str, Any], config: dict) -> float | None:
     if not scores:
         return None
     total_w = sum(w[k] for k in scores)
+    if total_w <= 0:
+        return None
     return sum(w[k] * v for k, v in scores.items()) / total_w
 
 

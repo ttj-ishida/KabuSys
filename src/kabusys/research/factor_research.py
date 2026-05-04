@@ -260,16 +260,17 @@ def calc_value(
             ) t
             WHERE rn = 1
         ),
-        annual_div AS (
-            SELECT code, SUM(div_rate) AS annual_div
-            FROM dividends
-            WHERE ex_date BETWEEN (CAST(? AS DATE) - INTERVAL 1 YEAR) AND ?
-            GROUP BY code
-        ),
         price_on_date AS (
             SELECT code, close
             FROM prices_daily
             WHERE date = ?
+        ),
+        annual_div AS (
+            SELECT code, SUM(div_rate) AS annual_div
+            FROM dividends
+            WHERE code IN (SELECT code FROM price_on_date)
+              AND ex_date BETWEEN (CAST(? AS DATE) - INTERVAL 1 YEAR) AND ?
+            GROUP BY code
         )
         SELECT
             ? AS date,

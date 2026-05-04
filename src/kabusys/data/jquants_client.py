@@ -602,11 +602,11 @@ def save_dividends(
     rows = [
         (
             str(r.get("Code", "") or ""),
-            r.get("PubDate"),
+            _to_date_str(r.get("PubDate")),
             str(r.get("RefNo", "") or ""),
-            r.get("ExDate") or None,
-            r.get("RecDate") or None,
-            r.get("PayDate") or None,
+            _to_date_str(r.get("ExDate")),
+            _to_date_str(r.get("RecDate")),
+            _to_date_str(r.get("PayDate")),
             _to_float(r.get("DivRate")),
             fetched_at,
         )
@@ -755,6 +755,19 @@ def fetch_listed_info(
 # ---------------------------------------------------------------------------
 # ユーティリティ
 # ---------------------------------------------------------------------------
+
+
+def _to_date_str(value: Any) -> str | None:
+    """日付文字列を "YYYY-MM-DD" 形式に正規化する。
+
+    J-Quants API は "YYYYMMDD" と "YYYY-MM-DD" の両形式を返すことがある。
+    """
+    if not value:
+        return None
+    s = str(value).strip()
+    if len(s) == 8 and s.isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+    return s
 
 
 def _to_float(value: Any) -> float | None:
