@@ -20,7 +20,10 @@ _TRUNCATION_SUFFIX = "...(省略)"
 class NullNotifier:
     """通知を何もしない Null Object。
 
-    LINE_NOTIFY_ENABLED=false 時に build_notifier() が返す。
+    以下のいずれかの場合に build_notifier() が返す:
+    - LINE_NOTIFY_ENABLED=false（通知無効）
+    - LINE_CHANNEL_ACCESS_TOKEN / LINE_USER_ID が未設定（認証情報欠落フォールバック）
+
     Core 機能は NullNotifier.send() を呼んでも例外が発生しない。
     """
 
