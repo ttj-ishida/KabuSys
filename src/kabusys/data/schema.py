@@ -392,7 +392,7 @@ _MIGRATIONS: list[str] = [
     # v0.x → v0.y: portfolio_performance に env を追加
     "ALTER TABLE portfolio_performance ADD COLUMN env VARCHAR NOT NULL DEFAULT 'live'",
     # Issue #185: raw_financials に bps を追加
-    "ALTER TABLE raw_financials ADD COLUMN bps DECIMAL(18,4)",
+    "ALTER TABLE raw_financials ADD COLUMN IF NOT EXISTS bps DECIMAL(18,4)",
 ]
 
 # ---------------------------------------------------------------------------

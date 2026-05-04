@@ -135,15 +135,23 @@ def _load_value_config() -> dict:
     w = {**_VALUE_CONFIG_DEFAULTS["weights"], **(raw.get("weights") or {})}
     n = {**_VALUE_CONFIG_DEFAULTS["normalization"], **(raw.get("normalization") or {})}
 
-    if sum(w.values()) <= 0:
-        logger.warning("value_score.weights の合計が 0 以下。デフォルトを使用")
-        return _VALUE_CONFIG_DEFAULTS
+    if any(v < 0 for v in w.values()) or sum(w.values()) <= 0:
+        logger.warning(
+            "value_score.weights が不正（負値または合計<=0）。デフォルトを使用"
+        )
+        return {
+            "weights": dict(_VALUE_CONFIG_DEFAULTS["weights"]),
+            "normalization": dict(_VALUE_CONFIG_DEFAULTS["normalization"]),
+        }
 
     if any(n.get(k, 0) <= 0 for k in ("per_mid", "pbr_mid", "div_yield_max")):
         logger.warning("value_score.normalization に 0 以下の値。デフォルトを使用")
-        return _VALUE_CONFIG_DEFAULTS
+        return {
+            "weights": dict(_VALUE_CONFIG_DEFAULTS["weights"]),
+            "normalization": dict(_VALUE_CONFIG_DEFAULTS["normalization"]),
+        }
 
-    return {"weights": w, "normalization": n}
+    return {"weights": dict(w), "normalization": dict(n)}
 
 
 def _compute_value_score(feat: dict[str, Any], config: dict) -> float | None:
