@@ -1,8 +1,19 @@
 # TODO: 現金余力・投下上限ルールの設定ファイル統合
 
-- ステータス: 未着手
+- ステータス: **完了**
+- 完了 PR: #206（コア実装）、#240（起動前検証・generate_config 整合）
 - 目的: `どこまで使ってよいかの上限ルールは設定で管理する` を正しい設計とし、Execution 実装をその方針に合わせて修正する
 - 対象: `RiskManager`, `run_execution.py`, 設定読み込み、関連ドキュメント
+
+## 完了内容（実装済み）
+
+| 項目 | 実装 | PR |
+|---|---|---|
+| `risk_config.yaml` からの `RiskConfig` 構築（`_load_risk_config`） | `run_execution.py` | #206 |
+| `initial_portfolio_value = cash + 保有評価額` の総資産計算 | `run_execution.py` (`_pos_value`) | #206 |
+| `paper_trading` / `live` で同一設定ファイル経路 | `_RISK_CONFIG` 定数で統一 | #206 |
+| `validate_config` による起動前セマンティック検証 | `validate_config.py` | #240 |
+| `generate_config.py` テンプレートのキー名統一 | `scripts/generate_config.py` | #240 |
 
 ---
 

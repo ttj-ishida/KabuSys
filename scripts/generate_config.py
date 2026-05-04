@@ -75,20 +75,21 @@ ai_overlay:
   max_influence: 0.10
 """,
     "risk_config.yaml": """\
-# risk_config.yaml — リスク管理設定（安全側の初期値）
+# risk_config.yaml — リスク管理設定
+# キー名は RiskConfig データクラスのフィールド名に対応する
 risk:
-  # 1銘柄最大ウェイト（ポートフォリオ対比）
-  max_position_size: 0.05
-  # ポートフォリオ総投資比率上限
-  max_portfolio_exposure: 1.0
-  # 日次最大損失率（超過で Kill Switch 検討）
-  max_daily_loss: 0.02
-  # 最大ドローダウン（超過で Kill Switch 自動発動）
-  max_drawdown: 0.15
-
-position_sizing:
-  risk_per_trade: 0.01
-  volatility_adjustment: true
+  # 1銘柄最大投資比率（総資産比）。max_utilization 以下に設定すること
+  max_position_pct: 0.20
+  # 全ポジション投下上限（現金最低20%維持）
+  max_utilization: 0.80
+  # キルスイッチ発動ドローダウン閾値
+  max_drawdown: 0.20
+  # API レート制限（毎秒）
+  rate_limit_per_sec: 5
+  # サーキットブレーカー発動エラー数上限
+  circuit_breaker_errors: 10
+  # サーキットブレーカーカウントウィンドウ（秒）
+  circuit_breaker_window_sec: 60
 """,
     "execution_config.yaml": """\
 # execution_config.yaml — 発注システム設定

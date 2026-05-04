@@ -126,8 +126,113 @@ def _check_db_paths() -> None:
     _check_path("SQLITE_PATH", "data/monitoring.db", "SQLITE_PATH")
 
 
+_KNOWN_RISK_KEYS = frozenset(
+    {
+        "max_position_pct",
+        "max_utilization",
+        "max_drawdown",
+        "rate_limit_per_sec",
+        "circuit_breaker_errors",
+        "circuit_breaker_window_sec",
+    }
+)
+
+
+def _parse_ratio(key: str, val: object) -> float:
+    """(0, 1] の比率を厳格にパースする。bool は拒否する。"""
+    if isinstance(val, bool):
+        raise TypeError(f"risk.{key} に bool 値は使用できません（{val!r}）。")
+    return float(val)  # type: ignore[arg-type]
+
+
+def _parse_positive_int(key: str, val: object) -> int:
+    """1 以上の整数を厳格にパースする。bool は拒否、小数は拒否する。"""
+    if isinstance(val, bool):
+        raise TypeError(f"risk.{key} に bool 値は使用できません（{val!r}）。")
+    if isinstance(val, float):
+        if not val.is_integer():
+            raise TypeError(
+                f"risk.{key} に小数値は使用できません（{val!r}）。整数で設定してください。"
+            )
+        return int(val)
+    return int(val)  # type: ignore[arg-type]
+
+
+def _check_risk_config_content(data: object) -> None:
+    """risk_config.yaml のセマンティック検証。
+
+    _load_risk_config() と同じルールを事前検証として適用する。
+    エラー・警告は _error / _warn に追記する（例外は送出しない）。
+    """
+    if not isinstance(data, dict):
+        _error("risk_config.yaml のトップレベルが dict ではありません。")
+        return
+    r = data.get("risk")
+    if not isinstance(r, dict):
+        _error("risk_config.yaml に 'risk' セクションがありません。")
+        return
+
+    # 未知キーの警告
+    for k in r:
+        if k not in _KNOWN_RISK_KEYS:
+            _warn(f"risk_config.yaml: 未知のキー 'risk.{k}' が含まれています。")
+
+    # 必須キーの存在確認
+    missing = [k for k in _KNOWN_RISK_KEYS if k not in r]
+    for k in sorted(missing):
+        _error(f"risk_config.yaml: 必須キー 'risk.{k}' がありません。")
+    if missing:
+        return  # 値検証は必須キーが揃っていることが前提
+
+    # 値域チェック（_load_risk_config と同一ルール）
+    try:
+        max_position_pct = _parse_ratio("max_position_pct", r["max_position_pct"])
+        max_utilization = _parse_ratio("max_utilization", r["max_utilization"])
+        max_drawdown = _parse_ratio("max_drawdown", r["max_drawdown"])
+        rate_limit_per_sec = _parse_positive_int(
+            "rate_limit_per_sec", r["rate_limit_per_sec"]
+        )
+        circuit_breaker_errors = _parse_positive_int(
+            "circuit_breaker_errors", r["circuit_breaker_errors"]
+        )
+        circuit_breaker_window_sec = _parse_positive_int(
+            "circuit_breaker_window_sec", r["circuit_breaker_window_sec"]
+        )
+    except (ValueError, TypeError) as exc:
+        _error(f"risk_config.yaml: 数値変換に失敗しました: {exc}")
+        return
+
+    for name, val in (
+        ("max_position_pct", max_position_pct),
+        ("max_utilization", max_utilization),
+        ("max_drawdown", max_drawdown),
+    ):
+        if not (0 < val <= 1):
+            _error(
+                f"risk_config.yaml: risk.{name} は (0, 1] の範囲で設定してください"
+                f"（現在値: {val}）"
+            )
+
+    if max_position_pct > max_utilization:
+        _error(
+            f"risk_config.yaml: risk.max_position_pct({max_position_pct}) は"
+            f" risk.max_utilization({max_utilization}) 以下にしてください。"
+        )
+
+    for name, val in (
+        ("rate_limit_per_sec", rate_limit_per_sec),
+        ("circuit_breaker_errors", circuit_breaker_errors),
+        ("circuit_breaker_window_sec", circuit_breaker_window_sec),
+    ):
+        if val < 1:
+            _error(
+                f"risk_config.yaml: risk.{name} は 1 以上で設定してください"
+                f"（現在値: {val}）"
+            )
+
+
 def _check_config_yaml_files() -> None:
-    """config/*.yaml の存在確認。"""
+    """config/*.yaml の存在・構文確認。risk_config.yaml はセマンティック検証も行う。"""
     try:
         import yaml  # type: ignore[import]
 
@@ -150,8 +255,10 @@ def _check_config_yaml_files() -> None:
                 import yaml  # type: ignore[import]
 
                 with open(path, encoding="utf-8") as f:
-                    yaml.safe_load(f)
-                _info(f"config/{filename}: OK")
+                    data = yaml.safe_load(f)
+                _info(f"config/{filename}: syntax OK")
+                if filename == "risk_config.yaml":
+                    _check_risk_config_content(data)
             except Exception as e:
                 _error(f"config/{filename} のパースに失敗しました: {e}")
 
