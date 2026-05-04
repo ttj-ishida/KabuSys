@@ -132,7 +132,7 @@ class TestNullNotifier:
 
 class TestBuildNotifier:
     def test_build_notifier_enabled_returns_line_notifier(self, monkeypatch):
-        """`LINE_NOTIFY_ENABLED=true` → LineNotifier を返す"""
+        """`LINE_NOTIFY_ENABLED=true` かつ認証情報あり → LineNotifier を返す"""
         monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "mytoken")
         monkeypatch.setenv("LINE_USER_ID", "myuserid")
         monkeypatch.setenv("LINE_NOTIFY_ENABLED", "true")
@@ -152,3 +152,20 @@ class TestBuildNotifier:
         monkeypatch.setenv("LINE_NOTIFY_ENABLED", "false")
         n = build_notifier(Settings())
         assert n.send("test") is False
+
+    def test_build_notifier_missing_token_falls_back_to_null(self, monkeypatch):
+        """`LINE_NOTIFY_ENABLED=true` だがトークン未設定 → NullNotifier にフォールバック"""
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "true")
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+        monkeypatch.setenv("LINE_USER_ID", "uid")
+        n = build_notifier(Settings())
+        assert isinstance(n, NullNotifier)
+
+    def test_build_notifier_missing_user_id_falls_back_to_null(self, monkeypatch):
+        """`LINE_NOTIFY_ENABLED=true` だがユーザーID未設定 → NullNotifier にフォールバック"""
+        monkeypatch.setenv("LINE_NOTIFY_ENABLED", "true")
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("LINE_USER_ID", "")
+        n = build_notifier(Settings())
+        assert isinstance(n, NullNotifier)
+        assert n.send("msg") is False

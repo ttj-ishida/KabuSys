@@ -132,6 +132,20 @@ def _require(key: str) -> str:
 _VALID_ENVS = frozenset({"development", "paper_trading", "live"})
 _VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
+_BOOL_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def _parse_bool_env(key: str, default: bool = False) -> bool:
+    """環境変数をブール値として厳格に解釈する（許容リスト方式）。
+
+    "1" / "true" / "yes" / "on"（大文字小文字無視）のみ True とし、
+    それ以外（空文字・"off"・"disabled" など）はすべて default を返す。
+    """
+    raw = os.environ.get(key)
+    if raw is None:
+        return default
+    return raw.strip().lower() in _BOOL_TRUE_VALUES
+
 
 class Settings:
     """アプリケーション設定。環境変数から値を取得する。"""
@@ -163,13 +177,10 @@ class Settings:
     def enable_ai_sentiment(self) -> bool:
         """AI センチメント機能の有効フラグ（ENABLE_AI_SENTIMENT、デフォルト: False）。
 
+        "1" / "true" / "yes" / "on" のみ True。空文字や "off" / "disabled" は False。
         False の場合、news_nlp / regime_detector は即座にリターンし Core 機能に影響しない。
         """
-        return os.environ.get("ENABLE_AI_SENTIMENT", "false").lower() not in (
-            "false",
-            "0",
-            "no",
-        )
+        return _parse_bool_env("ENABLE_AI_SENTIMENT", default=False)
 
     # --- LINE Messaging API ---
     @property
@@ -182,11 +193,7 @@ class Settings:
 
     @property
     def line_notify_enabled(self) -> bool:
-        return os.environ.get("LINE_NOTIFY_ENABLED", "true").lower() not in (
-            "false",
-            "0",
-            "no",
-        )
+        return _parse_bool_env("LINE_NOTIFY_ENABLED", default=True)
 
     # --- データベース ---
     @property

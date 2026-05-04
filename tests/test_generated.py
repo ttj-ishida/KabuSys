@@ -253,17 +253,15 @@ def test_settings_enable_ai_sentiment(monkeypatch):
     monkeypatch.delenv("ENABLE_AI_SENTIMENT", raising=False)
     assert Settings().enable_ai_sentiment is False
 
-    monkeypatch.setenv("ENABLE_AI_SENTIMENT", "true")
-    assert Settings().enable_ai_sentiment is True
+    # 許容リスト（True になる値）
+    for val in ("true", "True", "TRUE", "1", "yes", "on"):
+        monkeypatch.setenv("ENABLE_AI_SENTIMENT", val)
+        assert Settings().enable_ai_sentiment is True, f"{val!r} should be True"
 
-    monkeypatch.setenv("ENABLE_AI_SENTIMENT", "false")
-    assert Settings().enable_ai_sentiment is False
-
-    monkeypatch.setenv("ENABLE_AI_SENTIMENT", "0")
-    assert Settings().enable_ai_sentiment is False
-
-    monkeypatch.setenv("ENABLE_AI_SENTIMENT", "1")
-    assert Settings().enable_ai_sentiment is True
+    # それ以外はすべて False（空文字・"off"・"disabled" も含む）
+    for val in ("false", "0", "no", "", "off", "disabled", "FALSE"):
+        monkeypatch.setenv("ENABLE_AI_SENTIMENT", val)
+        assert Settings().enable_ai_sentiment is False, f"{val!r} should be False"
 
 
 def test_intraday_determine_status_and_formatting():

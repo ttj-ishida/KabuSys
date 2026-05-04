@@ -88,14 +88,23 @@ from kabusys.config import Settings  # noqa: E402 — モジュール末尾配�
 def build_notifier(settings: Settings) -> NullNotifier | LineNotifier:
     """Settings から Notifier を生成する。
 
-    LINE_NOTIFY_ENABLED=false の場合は NullNotifier を返す。
+    以下のいずれかに該当する場合は NullNotifier を返す:
+    - LINE_NOTIFY_ENABLED=false
+    - トークンまたはユーザーIDが未設定
+
     Core 機能は返り値の型を意識せず .send() を呼ぶだけでよい。
     """
     if not settings.line_notify_enabled:
         logger.info("build_notifier: LINE 通知は無効 (LINE_NOTIFY_ENABLED=false)")
         return NullNotifier()
-    return LineNotifier(
-        token=settings.line_channel_access_token,
-        user_id=settings.line_user_id,
-        enabled=True,
-    )
+
+    token = settings.line_channel_access_token
+    user_id = settings.line_user_id
+    if not token or not user_id:
+        logger.warning(
+            "build_notifier: LINE_NOTIFY_ENABLED=true だが"
+            " LINE_CHANNEL_ACCESS_TOKEN / LINE_USER_ID が未設定のため NullNotifier にフォールバックします"
+        )
+        return NullNotifier()
+
+    return LineNotifier(token=token, user_id=user_id, enabled=True)
