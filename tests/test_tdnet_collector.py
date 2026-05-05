@@ -1,4 +1,5 @@
 """TDnet 開示収集モジュールのユニットテスト"""
+
 from __future__ import annotations
 
 import duckdb
@@ -124,6 +125,7 @@ _SAMPLE_HTML = """\
 def test_parse_tdnet_html_returns_disclosures():
     """_parse_tdnet_html が HTML テーブルから開示リストを返すことを確認する。"""
     from datetime import date
+
     disclosures = _parse_tdnet_html(_SAMPLE_HTML, target_date=date(2024, 9, 1))
     assert len(disclosures) == 2
     assert disclosures[0]["id"] == "140120240901400001"
@@ -137,6 +139,7 @@ def test_parse_tdnet_html_empty_table():
     """行がない HTML テーブルで空リストを返すことを確認する。"""
     html = "<html><body><table><tr><th>時刻</th></tr></table></body></html>"
     from datetime import date
+
     result = _parse_tdnet_html(html, target_date=date(2024, 9, 1))
     assert result == []
 
@@ -144,13 +147,16 @@ def test_parse_tdnet_html_empty_table():
 def test_extract_disclosure_id_from_href():
     """PDF href から開示IDを抽出できることを確認する。"""
     assert _extract_disclosure_id("140120241031413060.pdf") == "140120241031413060"
-    assert _extract_disclosure_id("/inbs/140120241031413060.pdf") == "140120241031413060"
+    assert (
+        _extract_disclosure_id("/inbs/140120241031413060.pdf") == "140120241031413060"
+    )
     assert _extract_disclosure_id("") is None
 
 
 def test_save_raw_disclosures_idempotent(disc_db):
     """同じ開示を2回 save しても重複しないことを確認する。"""
     from datetime import datetime
+
     disclosures = [
         RawDisclosure(
             id="TDN001",
@@ -186,3 +192,61 @@ def test_run_tdnet_collection_mocked(disc_db, monkeypatch):
     assert saved == 2
     rows = disc_db.execute("SELECT COUNT(*) FROM raw_disclosures").fetchone()[0]
     assert rows == 2
+
+
+# ---------------------------------------------------------------------------
+# Task 5: 統合テスト（パイプライン全体確認）
+# ---------------------------------------------------------------------------
+
+from kabusys.data.disclosure_classifier import run_disclosure_classification
+
+
+_PIPELINE_HTML = """\
+<html><body><table>
+<tr><th>時刻</th><th>コード</th><th>会社名</th><th>表題</th><th>PDF</th></tr>
+<tr>
+  <td>09:00</td><td>7203</td><td>トヨタ自動車</td>
+  <td>業績予想の修正（上方修正）に関するお知らせ</td>
+  <td><a href="140120240901400001.pdf">PDF</a></td>
+</tr>
+<tr>
+  <td>10:00</td><td>6758</td><td>ソニーグループ</td>
+  <td>訴訟の提起に関するお知らせ</td>
+  <td><a href="140120240901400002.pdf">PDF</a></td>
+</tr>
+</table></body></html>
+"""
+
+
+def test_full_pipeline_collection_to_classification(monkeypatch):
+    """収集 → 保存 → 分類の一連フローが正しく動くことを確認する。"""
+    from datetime import date
+    from kabusys.data.schema import init_schema
+    from kabusys.data import tdnet_collector
+
+    conn = init_schema(":memory:")
+
+    def mock_fetch_page(url, timeout=30):
+        if "I_list_001" in url:
+            return _PIPELINE_HTML
+        return "<html><body><table></table></body></html>"
+
+    monkeypatch.setattr(tdnet_collector, "_fetch_page", mock_fetch_page)
+
+    target = date(2024, 9, 1)
+    saved_raw = run_tdnet_collection(conn, target_date=target)
+    assert saved_raw == 2
+
+    count = conn.execute("SELECT COUNT(*) FROM raw_disclosures").fetchone()[0]
+    assert count == 2
+
+    saved_events = run_disclosure_classification(conn, target_date=target)
+    assert saved_events == 2
+
+    rows = conn.execute(
+        "SELECT id, event_type, event_score, buy_caution FROM disclosure_events ORDER BY id"
+    ).fetchall()
+    assert rows[0] == ("140120240901400001", "earnings_revision_up", 1.0, False)
+    assert rows[1] == ("140120240901400002", "litigation_scandal", -1.0, True)
+
+    conn.close()
