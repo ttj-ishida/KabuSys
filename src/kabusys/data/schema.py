@@ -81,6 +81,20 @@ CREATE TABLE IF NOT EXISTS raw_executions (
 )
 """
 
+_RAW_DISCLOSURES = """
+CREATE TABLE IF NOT EXISTS raw_disclosures (
+    id              VARCHAR   NOT NULL PRIMARY KEY,
+    disclosed_at    TIMESTAMP NOT NULL,
+    code            VARCHAR,
+    company_name    VARCHAR,
+    title           VARCHAR,
+    document_url    VARCHAR,
+    document_type   VARCHAR,
+    source          VARCHAR   NOT NULL CHECK (source IN ('tdnet', 'edinet')),
+    fetched_at      TIMESTAMP NOT NULL DEFAULT current_timestamp
+)
+"""
+
 # ---- Processed Layer -------------------------------------------------------
 
 _PRICES_DAILY = """
@@ -140,6 +154,22 @@ CREATE TABLE IF NOT EXISTS news_symbols (
     -- Note: ON DELETE CASCADE は DuckDB 1.5.0 非サポートのため省略。
     --       raw_news 削除時はアプリ側で先に news_symbols を削除すること。
     FOREIGN KEY (news_id) REFERENCES raw_news(id)
+)
+"""
+
+_DISCLOSURE_EVENTS = """
+CREATE TABLE IF NOT EXISTS disclosure_events (
+    id               VARCHAR   NOT NULL PRIMARY KEY,
+    disclosed_at     TIMESTAMP NOT NULL,
+    code             VARCHAR,
+    event_type       VARCHAR   NOT NULL,
+    event_score      DOUBLE    NOT NULL,
+    buy_caution      BOOLEAN   NOT NULL DEFAULT false,
+    hold_caution     BOOLEAN   NOT NULL DEFAULT false,
+    review_required  BOOLEAN   NOT NULL DEFAULT false,
+    title            VARCHAR,
+    source           VARCHAR   NOT NULL CHECK (source IN ('tdnet', 'edinet')),
+    classified_at    TIMESTAMP NOT NULL DEFAULT current_timestamp
 )
 """
 
@@ -378,6 +408,10 @@ _INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_raw_news_datetime ON raw_news(datetime)",
     "CREATE INDEX IF NOT EXISTS idx_position_entries_code_sell ON position_entries(code, sell_date)",
     "CREATE INDEX IF NOT EXISTS idx_position_entries_code_entry ON position_entries(code, entry_date)",
+    "CREATE INDEX IF NOT EXISTS idx_raw_disclosures_code ON raw_disclosures(code)",
+    "CREATE INDEX IF NOT EXISTS idx_raw_disclosures_disclosed_at ON raw_disclosures(disclosed_at)",
+    "CREATE INDEX IF NOT EXISTS idx_disclosure_events_code ON disclosure_events(code)",
+    "CREATE INDEX IF NOT EXISTS idx_disclosure_events_disclosed_at ON disclosure_events(disclosed_at)",
 ]
 
 # ---------------------------------------------------------------------------
@@ -405,12 +439,14 @@ _ALL_DDL: list[str] = [
     _RAW_FINANCIALS,
     _RAW_NEWS,
     _RAW_EXECUTIONS,
+    _RAW_DISCLOSURES,
     # Processed
     _PRICES_DAILY,
     _MARKET_CALENDAR,
     _FUNDAMENTALS,
     _NEWS_ARTICLES,
     _NEWS_SYMBOLS,
+    _DISCLOSURE_EVENTS,
     # Master
     _STOCKS,
     # Feature
