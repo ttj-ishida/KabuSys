@@ -230,7 +230,7 @@ def _fetch_page(url: str, timeout: int = 30) -> str:
     """
     _validate_url_scheme(url)
     parsed = urllib.parse.urlparse(url)
-    if _is_private_host(parsed.hostname):
+    if not parsed.hostname or _is_private_host(parsed.hostname):
         raise ValueError(f"許可されていないホスト（プライベートアドレス）: url={url!r}")
 
     req = urllib.request.Request(
