@@ -1,0 +1,248 @@
+# C. テスト運用（ペーパートレード） — WebManual
+
+- **対象**: KabuSys のペーパートレード（仮想売買）環境での運用
+- **想定読者**: 本番運用前に動作確認を行いたい運用者・管理者
+- **目的**: 実際の資金を使わずにシステムの挙動・成績・連携を安全に検証できるようにする
+
+---
+
+## C-1. ペーパートレードの仕組みと制約
+
+### ペーパートレードとは
+
+KabuSys の「ペーパートレード（仮想売買）」とは、**実際の証券口座を使わずに自動売買ロジックをテストする機能**です。
+本番と同じ Execution Engine・Risk Manager・Signal Queue の仕組みを使いながら、発注・約定をシミュレーション（模擬）するため、実際の資金リスクなくシステムの挙動を確認できます。
+
+### 2 種類のペーパートレードモード
+
+KabuSys では、目的に応じて 2 種類のペーパートレードモードをサポートします（②は開発予定）。
+
+| モード | 概要 | kabu ステーション起動 | 用途 |
+|---|---|---|---|
+| **① Pure Mock モード** | システム内部の MockBrokerClient で発注・約定を完全シミュレート | 不要 | 発注ロジック・Risk Manager の動作確認 |
+| **② 検証環境モード** *(開発予定)* | kabuステーション検証環境（ポート 18081）に実際に接続してテスト | 必要（検証用ログイン） | API 接続・認証・約定フローの E2E テスト |
+
+> **現在実装済みなのは① Pure Mock モードのみです。**
+> ②の検証環境モードは `TODO_PaperTradingE2E.md` の TODO-5 として開発予定です。
+
+### Pure Mock モードの仕組み
+
+```
+夜間バッチ → Signal Queue (DuckDB)
+                     ↓
+              ExecutionEngine
+                     ↓
+            MockBrokerClient（kabu API には繋がない）
+            ・send_order()  → FILL_MODE に従い即時 or 部分約定
+            ・get_positions() → メモリ上のポジションを返す
+            ・get_available_cash() → メモリ上の現金残高を返す
+                     ↓
+            paper_trading.db (SQLite) に注文・約定を記録
+```
+
+### ペーパートレードの主な制約
+
+| 制約 | 詳細 |
+|---|---|
+| 価格は模擬 | Pure Mock モードでは実際の市場価格に連動しない（約定価格は発注時の指定値 or 0円） |
+| 現金は仮想 | MockBrokerClient の初期資金は固定値（デフォルト: 1,000 万円） |
+| 日次再起動でリセット *(課題)* | 毎日 Execution を再起動するとモック口座の状態（現金・ポジション）がリセットされる（→ TODO-3 で解決予定）|
+| 夜間バッチは本番と共用 | Signal Queue の生成は本番 DuckDB を使用。データ更新・特徴量生成は本番と同じ |
+
+---
+
+## C-2. ペーパートレード環境のセットアップ
+
+### 事前準備
+
+ペーパートレードを開始する前に、以下が完了していることを確認してください。
+
+- [ ] `python scripts/setup_db.py --paper` を実行し、`data/paper_trading.db` が作成済み
+- [ ] 夜間バッチが少なくとも 1 回以上正常に完了し、DuckDB に市場データが存在する
+- [ ] `python -m kabusys.validate_config` でエラーが出ないこと
+
+### 環境変数（`.env`）の設定
+
+`.env` ファイルに以下を設定します。
+
+```env
+# ペーパートレードモードで起動
+KABUSYS_ENV=paper_trading
+
+# 約定シミュレーション方式（下記いずれか）
+# instant : 発注した瞬間に全数量が即時約定（デフォルト・速い検証向け）
+# partial : 数量の半分だけ約定するシミュレーション
+# never   : 発注されるが約定しない（未約定注文のテスト向け）
+# reject  : 発注を拒否する（エラーハンドリングのテスト向け）
+PAPER_FILL_MODE=instant
+
+# ペーパートレード用 SQLite DB のパス（本番 DB と分離）
+PAPER_TRADING_SQLITE_PATH=data/paper_trading.db
+```
+
+> ⚠️ `KABUSYS_ENV=paper_trading` では Execution の注文・約定は `paper_trading.db` に記録されますが、Monitoring は引き続き本番の `data/monitoring.db` を使用します。
+
+---
+
+## C-3. テスト用シグナルの注入（任意の銘柄を指定して検証）
+
+> ⚠️ **このセクションの機能は開発予定です（TODO-1）。現在は未実装です。**
+
+通常、ペーパートレードでは夜間バッチが生成したシグナルを使います。
+しかし特定の銘柄について「買い・売りが正しく処理されるか」をピンポイントでテストしたい場合は、ダミーシグナルを注入する CLI ツールを使います。
+
+### 使用方法（実装後）
+
+**1. ダミーシグナルを注入する**
+
+```bash
+# 銘柄 7203（トヨタ）を 100 株 BUY するシグナルを注入
+python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100
+
+# 日付を指定して注入
+python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100 --date 2026-05-06
+
+# SELL シグナルを注入（保有銘柄の売りテスト）
+python -m kabusys.tools.inject_dummy_signal --code 7203 --side SELL --qty 100
+```
+
+**2. 注入されたことを Signal Queue レポートで確認する**
+
+```bash
+python -m kabusys.run_signal_queue_report
+```
+
+`pending` 状態でシグナルが表示されれば注入成功です。
+
+---
+
+## C-4. ペーパートレードの日次運用手順
+
+ペーパートレードは本番と同じ `TradingRunbook.md` の運用フローに従います。
+以下は、ペーパートレード固有の差分のみを説明します。
+
+### 朝の確認（08:00）
+
+本番と同様に Pre-Market Report で確認します。
+
+```bash
+python -m kabusys.run_pre_market_report
+```
+
+| 確認項目 | ペーパートレードでの確認内容 |
+|---|---|
+| Signal Queue | `pending` のシグナルが存在するか（または手動注入するか） |
+| DB 状態 | `data/paper_trading.db` が存在するか |
+| 停止フラグ | `data/stop_requested.flag` が存在しないか |
+| kabuステーション | Pure Mock モードでは**不要**（②検証環境モードでは必要） |
+
+### Execution の起動（08:30）
+
+**Pure Mock モードで起動する場合：**
+
+```powershell
+$env:KABUSYS_ENV="paper_trading"
+python -m kabusys.run_execution
+```
+
+または `.env` に `KABUSYS_ENV=paper_trading` を設定済みであれば：
+
+```bash
+python -m kabusys.run_execution
+```
+
+**② 検証環境モードで起動する場合（開発予定）：**
+
+```powershell
+# .env に以下を設定した上で起動
+# KABUSYS_ENV=paper_trading
+# KABU_USE_SANDBOX=true
+# KABU_SANDBOX_API_PASSWORD=（検証用パスワード）
+python -m kabusys.run_execution
+```
+
+### 停止
+
+本番と同じく停止フラグで安全に停止できます。
+
+```powershell
+python scripts/stop_system.py
+```
+
+または手動でフラグファイルを作成：
+
+```bash
+# PowerShell
+New-Item data/stop_requested.flag -ItemType File
+```
+
+---
+
+## C-5. 仮想売買の結果確認（検証レポートの見方）
+
+### Paper Trading 専用の検証レポート
+
+ペーパートレードの稼働・注文成功率・レイテンシを確認するための専用レポートがあります。
+
+```powershell
+# 直近の集計
+python -m kabusys.tools.paper_verification_report
+
+# 期間を指定して集計
+python -m kabusys.tools.paper_verification_report --from 2026-05-01 --to 2026-05-07
+```
+
+このレポートでは以下を確認できます。
+
+| 確認項目 | 見るべきポイント |
+|---|---|
+| 注文成功率 | `filled` 比率が FILL_MODE の設定通りか |
+| レイテンシ | 発注から約定記録までの時間に異常がないか |
+| エラー件数 | `rejected` / `error` ステータスの注文がないか |
+| ポジション一覧 | 意図した銘柄が保有されているか |
+
+### 成績レポート（ペーパートレード環境指定）
+
+日次・週次・月次の運用成績を paper_trading 環境として集計できます。
+
+```bash
+# 日次成績
+python -m kabusys.run_performance_report --type daily --env paper_trading
+
+# 週次成績
+python -m kabusys.run_performance_report --type weekly --env paper_trading
+```
+
+---
+
+## C-6. テスト環境のリセット
+
+> ⚠️ **このセクションの機能は開発予定です（TODO-4）。現在は未実装です。**
+
+テスト運用を繰り返すと `paper_trading.db` にデータが蓄積します。
+ただし、`--paper-reset` は現状まだ未実装です。クリーンな状態でやり直したい場合は、取引時間外に `paper_trading.db` を退避または削除してから `python scripts/setup_db.py --paper` を再実行してください。
+
+> ⚠️ `paper_trading.db` を削除すると、ペーパートレードの注文・ポジション履歴は失われます。TODO-4 のワンコマンド初期化は未実装です。
+
+---
+
+## C-7. 今後追加予定の機能（ロードマップ）
+
+以下の機能は `TODO_PaperTradingE2E.md` に記録されており、順次実装が予定されています。
+
+| 機能 | TODO | 概要 |
+|---|---|---|
+| ダミーシグナル注入 CLI | TODO-1 | 任意の銘柄・数量の BUY/SELL シグナルを signal_queue に直接注入 |
+| 仮想資金の設定化 | TODO-2 | `PAPER_TRADING_INITIAL_CASH` 環境変数で MockBrokerClient の初期資金を設定可能に |
+| モック口座の状態復元 | TODO-3 | 毎日の再起動後にも前日のポジション・現金残高が引き継がれるようにする |
+| テスト DB リセット機能 | TODO-4 | ワンコマンドで paper_trading.db をクリーンな状態に初期化 |
+| kabuステーション検証環境対応 | TODO-5 | `KABU_USE_SANDBOX=true` でポート 18081 の検証環境に接続し、本番と同じ API コードパスをテスト |
+
+---
+
+## 参考リンク
+
+- [kabuステーション API ドキュメント](https://kabucom.github.io/kabusapi/ptal/add-in.html) — 検証用ポート（18081）の説明あり
+- `documents/08_Operations/TradingRunbook.md` — 日次運用の詳細な手順（本番・ペーパー共通）
+- `documents/08_Operations/TODO_PaperTradingE2E.md` — ペーパートレード機能の実装要件一覧
+- `documents/08_Operations/FailureRecovery.md` — 異常時の対応手順
