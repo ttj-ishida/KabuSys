@@ -347,7 +347,7 @@ def test_fetch_edinet_disclosures_returns_list(monkeypatch):
 
     raw = json.dumps(_SAMPLE_RESPONSE).encode("utf-8")
     monkeypatch.setattr(
-        edinet_collector, "_fetch_edinet_json", lambda url, api_key, timeout=30: raw
+        edinet_collector, "_fetch_edinet_json", lambda url, timeout=30: raw
     )
 
     result = fetch_edinet_disclosures(date(2024, 9, 1), api_key="test-key")
@@ -361,7 +361,7 @@ def test_fetch_edinet_disclosures_subscription_key_in_url(monkeypatch):
 
     captured_urls: list[str] = []
 
-    def fake_fetch(url, api_key, timeout=30):
+    def fake_fetch(url, timeout=30):
         captured_urls.append(url)
         return json.dumps({"metadata": {"status": "200"}, "results": []}).encode(
             "utf-8"
@@ -380,7 +380,7 @@ def test_fetch_edinet_disclosures_no_api_key_no_subscription_param(monkeypatch):
 
     captured_urls: list[str] = []
 
-    def fake_fetch(url, api_key, timeout=30):
+    def fake_fetch(url, timeout=30):
         captured_urls.append(url)
         return json.dumps({"metadata": {"status": "200"}, "results": []}).encode(
             "utf-8"
@@ -394,11 +394,12 @@ def test_fetch_edinet_disclosures_no_api_key_no_subscription_param(monkeypatch):
 
 def test_fetch_edinet_disclosures_http_401_logs_error(monkeypatch, caplog):
     """HTTP 401 が発生した場合、認証エラーログを出して空リストを返すことを確認する。"""
-    import urllib.error
-    from kabusys.data import edinet_collector
     import logging
+    import urllib.error
 
-    def raise_401(url, api_key, timeout=30):
+    from kabusys.data import edinet_collector
+
+    def raise_401(url, timeout=30):
         raise urllib.error.HTTPError(url, 401, "Unauthorized", {}, None)
 
     monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", raise_401)
@@ -411,11 +412,12 @@ def test_fetch_edinet_disclosures_http_401_logs_error(monkeypatch, caplog):
 
 def test_fetch_edinet_disclosures_http_403_logs_error(monkeypatch, caplog):
     """HTTP 403 が発生した場合、認証エラーログを出して空リストを返すことを確認する。"""
-    import urllib.error
-    from kabusys.data import edinet_collector
     import logging
+    import urllib.error
 
-    def raise_403(url, api_key, timeout=30):
+    from kabusys.data import edinet_collector
+
+    def raise_403(url, timeout=30):
         raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
 
     monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", raise_403)
@@ -430,7 +432,7 @@ def test_fetch_edinet_disclosures_generic_error_returns_empty(monkeypatch):
     """一般的な例外が発生した場合、空リストを返すことを確認する。"""
     from kabusys.data import edinet_collector
 
-    def raise_error(url, api_key, timeout=30):
+    def raise_error(url, timeout=30):
         raise RuntimeError("network error")
 
     monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", raise_error)
@@ -449,7 +451,7 @@ def test_run_edinet_collection_saves_disclosures(disc_db, monkeypatch):
 
     raw = json.dumps(_SAMPLE_RESPONSE).encode("utf-8")
     monkeypatch.setattr(
-        edinet_collector, "_fetch_edinet_json", lambda url, api_key, timeout=30: raw
+        edinet_collector, "_fetch_edinet_json", lambda url, timeout=30: raw
     )
 
     saved = run_edinet_collection(disc_db, target_date=date(2024, 9, 1))
@@ -464,7 +466,7 @@ def test_run_edinet_collection_idempotent(disc_db, monkeypatch):
 
     raw = json.dumps(_SAMPLE_RESPONSE).encode("utf-8")
     monkeypatch.setattr(
-        edinet_collector, "_fetch_edinet_json", lambda url, api_key, timeout=30: raw
+        edinet_collector, "_fetch_edinet_json", lambda url, timeout=30: raw
     )
 
     first = run_edinet_collection(disc_db, target_date=date(2024, 9, 1))
@@ -481,7 +483,7 @@ def test_run_edinet_collection_default_date(disc_db, monkeypatch):
 
     captured_urls: list[str] = []
 
-    def fake_fetch(url, api_key, timeout=30):
+    def fake_fetch(url, timeout=30):
         captured_urls.append(url)
         return json.dumps({"metadata": {"status": "200"}, "results": []}).encode(
             "utf-8"
@@ -500,7 +502,7 @@ def test_run_edinet_collection_source_edinet_in_db(disc_db, monkeypatch):
 
     raw = json.dumps(_SAMPLE_RESPONSE).encode("utf-8")
     monkeypatch.setattr(
-        edinet_collector, "_fetch_edinet_json", lambda url, api_key, timeout=30: raw
+        edinet_collector, "_fetch_edinet_json", lambda url, timeout=30: raw
     )
 
     run_edinet_collection(disc_db, target_date=date(2024, 9, 1))

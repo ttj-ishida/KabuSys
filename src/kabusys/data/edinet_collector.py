@@ -98,9 +98,10 @@ class _EdinetDocument(TypedDict):
 # ---------------------------------------------------------------------------
 
 
-def _fetch_edinet_json(url: str, api_key: str, timeout: int = 30) -> bytes:
+def _fetch_edinet_json(url: str, timeout: int = 30) -> bytes:
     """EDINET API から JSON を取得して bytes を返す。
 
+    Subscription-Key は呼び出し元でクエリパラメータとして URL に含まれている。
     SSRF 保護を適用する。テストでは monkeypatch でこの関数を差し替える。
     """
     _validate_url_scheme(url)
@@ -230,7 +231,7 @@ def fetch_edinet_disclosures(
     logger.info("fetch_edinet_disclosures: date=%s", date_str)
 
     try:
-        raw = _fetch_edinet_json(url, api_key=api_key, timeout=timeout)
+        raw = _fetch_edinet_json(url, timeout=timeout)
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
             logger.error(

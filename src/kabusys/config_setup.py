@@ -145,7 +145,7 @@ _ITEMS: list[dict] = [
         "secret": True,
         "description": (
             "  EDINET API v2 の利用に必要（ENABLE_EDINET=true の場合のみ使用）\n"
-            "  https://disclosure.edinet-api.go.jp/ から無料取得"
+            "  https://disclosure2.edinet-fsa.go.jp/ から無料取得"
         ),
     },
     {
