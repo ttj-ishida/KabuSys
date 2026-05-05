@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 TDNET_BASE_URL = "https://www.release.tdnet.info/inbs"
-MAX_PAGES = 50
+MAX_PAGES = 200
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 _INSERT_CHUNK_SIZE = 500
 
@@ -145,10 +145,11 @@ def _extract_disclosure_id(href: str | None) -> str | None:
 
     例: "140120241031413060.pdf" → "140120241031413060"
         "/inbs/140120241031413060.pdf" → "140120241031413060"
+        "140120241031413060.pdf?foo=bar" → "140120241031413060"
     """
     if not href:
         return None
-    filename = href.rsplit("/", 1)[-1]
+    filename = href.split("?", 1)[0].rsplit("/", 1)[-1]
     m = _DOC_ID_PATTERN.search(filename)
     return m.group(1) if m else None
 
@@ -157,11 +158,8 @@ def _build_document_url(href: str | None) -> str | None:
     """href を完全な TDnet ドキュメント URL に変換する。"""
     if not href:
         return None
-    if href.startswith("http"):
-        return href
-    if href.startswith("/"):
-        return f"https://www.release.tdnet.info{href}"
-    return f"{TDNET_BASE_URL}/{href}"
+    clean = href.split("?", 1)[0]
+    return urllib.parse.urljoin(f"{TDNET_BASE_URL}/", clean)
 
 
 def _parse_tdnet_html(html: str, target_date: date) -> list[RawDisclosure]:
@@ -297,6 +295,12 @@ def fetch_tdnet_disclosures(
         all_disclosures.extend(page_disclosures)
         logger.info(
             "fetch_tdnet_disclosures: page=%d fetched=%d", page, len(page_disclosures)
+        )
+    else:
+        logger.warning(
+            "fetch_tdnet_disclosures: MAX_PAGES到達 date=%s total=%d",
+            target_date,
+            len(all_disclosures),
         )
 
     logger.info(

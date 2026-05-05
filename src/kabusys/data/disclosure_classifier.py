@@ -101,7 +101,8 @@ _RULES: list[tuple[str, float, bool, bool, bool, re.Pattern[str]]] = [
         False,
         False,
         re.compile(
-            r"(新株式発行|公募増資|第三者割当|新株予約権|公募|増資)", re.IGNORECASE
+            r"(新株式発行|公募増資|公募売出し|第三者割当(による)?新株式発行|新株予約権(の発行)?)",
+            re.IGNORECASE,
         ),
     ),
     # merger_acquisition
@@ -231,6 +232,7 @@ def classify_disclosures(
                 "  buy_caution = EXCLUDED.buy_caution, "
                 "  hold_caution = EXCLUDED.hold_caution, "
                 "  review_required = EXCLUDED.review_required, "
+                "  title = EXCLUDED.title, "
                 "  classified_at = EXCLUDED.classified_at",
                 flat,
             )

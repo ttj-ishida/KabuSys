@@ -118,6 +118,9 @@ def _insert_raw(conn, id, title, code="7203", source="tdnet"):
         # litigation_scandal
         ("訴訟の提起に関するお知らせ", "litigation_scandal", -1.0, True),
         ("不祥事に関する調査結果について", "litigation_scandal", -1.0, True),
+        # other（new_share_issuance の誤検出防止: 公募社債・増資単独はマッチしない）
+        ("公募社債の発行に関するお知らせ", "other", 0.0, False),
+        ("増資に関するお知らせ", "other", 0.0, False),
         # other
         ("代表取締役の異動に関するお知らせ", "other", 0.0, False),
         ("定時株主総会招集ご通知", "other", 0.0, False),

@@ -174,6 +174,10 @@ def test_extract_disclosure_id_from_href():
         _extract_disclosure_id("/inbs/140120241031413060.pdf") == "140120241031413060"
     )
     assert _extract_disclosure_id("") is None
+    # クエリ文字列付き href でも正しく抽出できること
+    assert (
+        _extract_disclosure_id("140120241031413060.pdf?foo=bar") == "140120241031413060"
+    )
 
 
 def test_save_raw_disclosures_idempotent(disc_db):
