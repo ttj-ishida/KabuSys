@@ -88,5 +88,3 @@ def test_load_latest_system_status_returns_latest(mon_conn):
 
     assert result is not None
     assert result["cpu_percent"] == pytest.approx(90.0)
-
-
