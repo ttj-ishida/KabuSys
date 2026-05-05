@@ -1,4 +1,6 @@
-"""streamlit_dashboard.py — KabuSys 監視ダッシュボード。
+"""streamlit_dashboard.py — KabuSys 監視ダッシュボード（Home ページ）。
+
+マルチページ構成のエントリーポイント。pages/ 配下のページが自動的にサイドバーに表示される。
 
 起動方法:
     streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
@@ -15,6 +17,7 @@ from pathlib import Path
 import streamlit as st
 
 from kabusys.config import Settings
+from kabusys.monitoring.dashboard_data import load_error_logs
 from kabusys.monitoring.monitoring_db import MonitoringDB
 from kabusys.operations.intraday_collector import (
     _MONITORING_PID,
@@ -55,22 +58,15 @@ def load_latest_system_status(conn: sqlite3.Connection) -> dict | None:
     return dict(row) if row else None
 
 
-def load_recent_risk_logs(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
-    conn.row_factory = sqlite3.Row
-    cursor = conn.execute(
-        "SELECT * FROM risk_logs ORDER BY logged_at DESC LIMIT ?", (limit,)
-    )
-    return [dict(row) for row in cursor.fetchall()]
-
-
 def main(db_path: str) -> None:
-    st.set_page_config(page_title="KabuSys Monitor", layout="wide")
-    st.title("KabuSys 監視ダッシュボード")
+    st.set_page_config(page_title="KabuSys Monitor", layout="wide", page_icon="🏠")
+    st.title("🏠 KabuSys 監視ダッシュボード — Home")
 
     settings = Settings()
 
     with st.sidebar:
-        if st.button("Refresh"):
+        st.caption(f"環境: **{settings.env}**")
+        if st.button("🔄 Refresh"):
             st.rerun()
         refresh_interval = st.selectbox("自動更新間隔", [30, 60, 120], index=0)
         st.caption(f"{refresh_interval}秒ごとに自動更新")
@@ -91,11 +87,20 @@ def main(db_path: str) -> None:
         )
 
         with tab_overview:
+            # --- システム状態サマリ ---
             kill_active, kill_reason = check_kill_switch(Path(settings.kill_flag_path))
+            exec_ok = check_pid_file(Path(settings.pid_file_path))
+            mon_ok = check_pid_file(_MONITORING_PID)
+
+            col_k, col_e, col_m = st.columns(3)
             if kill_active:
-                st.error(f"🚫 Kill Switch 発動中: {kill_reason}")
+                col_k.error(f"🚫 Kill Switch: {kill_reason}")
             else:
-                st.success("✅ Kill Switch: 発動なし")
+                col_k.success("✅ Kill Switch: 発動なし")
+            col_e.metric("Execution Engine", "🟢 UP" if exec_ok else "🔴 DOWN")
+            col_m.metric("Monitoring", "🟢 UP" if mon_ok else "🔴 DOWN")
+
+            st.divider()
 
             dashboard = db.get_dashboard()
             if dashboard:
@@ -125,6 +130,14 @@ def main(db_path: str) -> None:
             else:
                 st.info("No dashboard data yet.")
 
+            st.divider()
+            st.subheader("🚨 直近の ERROR / CRITICAL イベント")
+            error_logs = load_error_logs(conn)
+            if error_logs:
+                st.dataframe(error_logs, use_container_width=True)
+            else:
+                st.success("直近のエラーイベントはありません。")
+
         with tab_positions:
             positions = load_positions(conn)
             if positions:
@@ -140,12 +153,6 @@ def main(db_path: str) -> None:
                 st.info("No trade events yet.")
 
         with tab_system:
-            exec_ok = check_pid_file(Path(settings.pid_file_path))
-            mon_ok = check_pid_file(_MONITORING_PID)
-            pid_col1, pid_col2 = st.columns(2)
-            pid_col1.metric("Execution", "OK" if exec_ok else "DOWN")
-            pid_col2.metric("Monitoring", "OK" if mon_ok else "DOWN")
-
             status = load_latest_system_status(conn)
             if status:
                 col1, col2, col3, col4 = st.columns(4)
@@ -156,11 +163,6 @@ def main(db_path: str) -> None:
                 st.caption(f"Recorded: {status['recorded_at']}")
             else:
                 st.info("No system status yet.")
-
-            risk_logs = load_recent_risk_logs(conn)
-            if risk_logs:
-                st.subheader("Recent Risk Events")
-                st.dataframe(risk_logs, use_container_width=True)
 
         time.sleep(refresh_interval)
         st.rerun()

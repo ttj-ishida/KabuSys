@@ -88,11 +88,3 @@ def test_load_latest_system_status_returns_latest(mon_conn):
 
     assert result is not None
     assert result["cpu_percent"] == pytest.approx(90.0)
-
-
-def test_load_recent_risk_logs_empty(mon_conn):
-    """risk_logs が空の場合は空リストを返す"""
-    from kabusys.monitoring.streamlit_dashboard import load_recent_risk_logs
-
-    result = load_recent_risk_logs(mon_conn)
-    assert result == []
