@@ -70,36 +70,67 @@ class RawDisclosure(TypedDict):
 class _TDnetTableParser(HTMLParser):
     """TDnet 開示一覧ページの HTML テーブルをパースする。
 
-    列順: 時刻 | コード | 会社名 | 表題 | PDF/HTML リンク
+    対象テーブル: id="main-list-table"
+    実際の列構成（CSS クラス名で識別）:
+      kjTime   : 時刻
+      kjCode   : 銘柄コード（4〜5桁）
+      kjName   : 会社名
+      kjTitle  : 表題（<a href="...">タイトル</a> 形式。href が PDF リンク）
+      kjXbrl   : XBRL（無視）
+      kjPlace  : 市場区分（無視）
+      kjHistroy: 更新履歴（無視）
     """
+
+    # パース対象とするセマンティッククラス名
+    _TARGET_CLASSES = frozenset({"kjTime", "kjCode", "kjName", "kjTitle"})
 
     def __init__(self) -> None:
         super().__init__()
+        self._in_main_table = False
         self._in_td = False
+        self._current_sem_class: str | None = None  # kjTime / kjCode / kjName / kjTitle
         self._cell_texts: list[str] = []
         self._cell_href: str | None = None
-        self._current_row: list[tuple[str, str | None]] = []
-        self.rows: list[list[tuple[str, str | None]]] = []
+        # 現在行のデータ: {semantic_class: (text, href)}
+        self._current_data: dict[str, tuple[str, str | None]] = {}
+        self.rows: list[dict[str, tuple[str, str | None]]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "td":
-            self._in_td = True
-            self._cell_texts = []
-            self._cell_href = None
+        attrs_dict = dict(attrs)
+        if tag == "table":
+            if attrs_dict.get("id") == "main-list-table":
+                self._in_main_table = True
+        elif tag == "tr" and self._in_main_table:
+            self._current_data = {}
+        elif tag == "td" and self._in_main_table:
+            cls_str = attrs_dict.get("class", "")
+            sem = next(
+                (c for c in cls_str.split() if c in self._TARGET_CLASSES), None
+            )
+            if sem:
+                self._in_td = True
+                self._current_sem_class = sem
+                self._cell_texts = []
+                self._cell_href = None
         elif tag == "a" and self._in_td:
-            href = dict(attrs).get("href")
+            href = attrs_dict.get("href")
             if href:
                 self._cell_href = href
 
     def handle_endtag(self, tag: str) -> None:
-        if tag == "td" and self._in_td:
-            text = "".join(self._cell_texts).strip()
-            self._current_row.append((text, self._cell_href))
+        if tag == "table" and self._in_main_table:
+            self._in_main_table = False
+        elif tag == "td" and self._in_td:
+            sem = self._current_sem_class
+            if sem:
+                text = "".join(self._cell_texts).strip()
+                self._current_data[sem] = (text, self._cell_href)
             self._in_td = False
-        elif tag == "tr":
-            if self._current_row:
-                self.rows.append(self._current_row)
-                self._current_row = []
+            self._current_sem_class = None
+        elif tag == "tr" and self._in_main_table:
+            if self._current_data:
+                self.rows.append(self._current_data)
+                self._current_data = {}
 
     def handle_data(self, data: str) -> None:
         if self._in_td:
@@ -138,24 +169,26 @@ def _build_document_url(href: str | None) -> str | None:
 def _parse_tdnet_html(html: str, target_date: date) -> list[RawDisclosure]:
     """TDnet 開示一覧 HTML をパースして RawDisclosure リストを返す。
 
-    列解釈: 列0=時刻, 列1=コード, 列2=会社名, 列3=表題, 列4=PDFリンク
-    コードが4桁数字でない行（ヘッダー等）はスキップする。
+    id="main-list-table" の各行から CSS クラス名で値を取得する。
+    タイトルと PDF href は同一セル（kjTitle の <a href>）にある。
+    コードが数字のみでない行はスキップする（念のため保険）。
     """
     parser = _TDnetTableParser()
     parser.feed(html)
 
     disclosures: list[RawDisclosure] = []
-    for row in parser.rows:
-        if len(row) < 4:
+    for row_data in parser.rows:
+        # kjCode と kjTitle が揃っていない行はスキップ
+        if "kjCode" not in row_data or "kjTitle" not in row_data:
             continue
 
-        time_str, _ = row[0]
-        code_str, _ = row[1]
-        company_str, _ = row[2]
-        title_str, _ = row[3]
-        href = row[4][1] if len(row) >= 5 else None
+        time_str, _ = row_data.get("kjTime", ("", None))
+        code_str, _ = row_data.get("kjCode", ("", None))
+        company_str, _ = row_data.get("kjName", ("", None))
+        title_str, href = row_data.get("kjTitle", ("", None))
 
-        if not re.fullmatch(r"\d{4}", code_str.strip()):
+        # コードが数字以外の場合はスキップ（ヘッダー行等の保険）
+        if not code_str.strip().isdigit():
             continue
 
         doc_id = _extract_disclosure_id(href)
@@ -206,7 +239,15 @@ def _fetch_page(url: str, timeout: int = 30) -> str:
 
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "KabuSys-TDnetCollector/1.0"},
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
+        },
     )
     opener = urllib.request.build_opener(_SSRFBlockRedirectHandler)
     with opener.open(req, timeout=timeout) as resp:

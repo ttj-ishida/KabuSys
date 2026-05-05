@@ -99,23 +99,30 @@ from kabusys.data.tdnet_collector import (
 # Task 2: TDnet パーサーテスト
 # ---------------------------------------------------------------------------
 
+# 実際の TDnet HTML 構造に準拠したサンプル:
+#   - id="main-list-table" の 7列テーブル
+#   - タイトルと PDF href は同一セル（kjTitle の <a href>）
+#   - CSS クラス名: kjTime / kjCode / kjName / kjTitle / kjXbrl / kjPlace / kjHistroy
 _SAMPLE_HTML = """\
 <html><body>
-<table>
-<tr><th>時刻</th><th>コード</th><th>会社名</th><th>表題</th><th>PDF</th></tr>
+<table id="main-list-table">
 <tr>
-  <td>09:00</td>
-  <td>7203</td>
-  <td>トヨタ自動車株式会社</td>
-  <td>業績予想の修正に関するお知らせ</td>
-  <td><a href="140120240901400001.pdf">PDF</a></td>
+  <td class="oddnew-L kjTime" noWrap>09:00</td>
+  <td class="oddnew-M kjCode" noWrap>7203</td>
+  <td class="oddnew-M kjName" noWrap>トヨタ自動車株式会社</td>
+  <td class="oddnew-M kjTitle" align="left"><a href="140120240901400001.pdf" target="_blank">業績予想の修正に関するお知らせ</a></td>
+  <td class="oddnew-M kjXbrl" noWrap align="center"> </td>
+  <td class="oddnew-M kjPlace" noWrap align="left">東</td>
+  <td class="oddnew-R kjHistroy" align="left">　</td>
 </tr>
 <tr>
-  <td>09:10</td>
-  <td>6758</td>
-  <td>ソニーグループ株式会社</td>
-  <td>自己株式取得結果に関するお知らせ</td>
-  <td><a href="140120240901400002.pdf">PDF</a></td>
+  <td class="evennew-L kjTime" noWrap>09:10</td>
+  <td class="evennew-M kjCode" noWrap>6758</td>
+  <td class="evennew-M kjName" noWrap>ソニーグループ株式会社</td>
+  <td class="evennew-M kjTitle" align="left"><a href="140120240901400002.pdf" target="_blank">自己株式取得結果に関するお知らせ</a></td>
+  <td class="evennew-M kjXbrl" noWrap align="center"> </td>
+  <td class="evennew-M kjPlace" noWrap align="left">東</td>
+  <td class="evennew-R kjHistroy" align="left">　</td>
 </tr>
 </table>
 </body></html>
@@ -136,8 +143,28 @@ def test_parse_tdnet_html_returns_disclosures():
 
 
 def test_parse_tdnet_html_empty_table():
-    """行がない HTML テーブルで空リストを返すことを確認する。"""
-    html = "<html><body><table><tr><th>時刻</th></tr></table></body></html>"
+    """id="main-list-table" に有効なデータ行がない場合、空リストを返すことを確認する。"""
+    html = '<html><body><table id="main-list-table"></table></body></html>'
+    from datetime import date
+
+    result = _parse_tdnet_html(html, target_date=date(2024, 9, 1))
+    assert result == []
+
+
+def test_parse_tdnet_html_ignores_other_tables():
+    """id="main-list-table" 以外のテーブルを無視することを確認する。"""
+    html = """\
+<html><body>
+<table id="list-head">
+  <tr>
+    <td class="kjCode">9999</td>
+    <td class="kjTitle"><a href="SHOULD_NOT_APPEAR.pdf">無視されるべき行</a></td>
+  </tr>
+</table>
+<table id="main-list-table">
+</table>
+</body></html>
+"""
     from datetime import date
 
     result = _parse_tdnet_html(html, target_date=date(2024, 9, 1))
@@ -202,19 +229,28 @@ from kabusys.data.disclosure_classifier import run_disclosure_classification
 
 
 _PIPELINE_HTML = """\
-<html><body><table>
-<tr><th>時刻</th><th>コード</th><th>会社名</th><th>表題</th><th>PDF</th></tr>
+<html><body>
+<table id="main-list-table">
 <tr>
-  <td>09:00</td><td>7203</td><td>トヨタ自動車</td>
-  <td>業績予想の修正（上方修正）に関するお知らせ</td>
-  <td><a href="140120240901400001.pdf">PDF</a></td>
+  <td class="oddnew-L kjTime" noWrap>09:00</td>
+  <td class="oddnew-M kjCode" noWrap>7203</td>
+  <td class="oddnew-M kjName" noWrap>トヨタ自動車</td>
+  <td class="oddnew-M kjTitle" align="left"><a href="140120240901400001.pdf" target="_blank">業績予想の修正（上方修正）に関するお知らせ</a></td>
+  <td class="oddnew-M kjXbrl" noWrap align="center"> </td>
+  <td class="oddnew-M kjPlace" noWrap align="left">東</td>
+  <td class="oddnew-R kjHistroy" align="left">　</td>
 </tr>
 <tr>
-  <td>10:00</td><td>6758</td><td>ソニーグループ</td>
-  <td>訴訟の提起に関するお知らせ</td>
-  <td><a href="140120240901400002.pdf">PDF</a></td>
+  <td class="evennew-L kjTime" noWrap>10:00</td>
+  <td class="evennew-M kjCode" noWrap>6758</td>
+  <td class="evennew-M kjName" noWrap>ソニーグループ</td>
+  <td class="evennew-M kjTitle" align="left"><a href="140120240901400002.pdf" target="_blank">訴訟の提起に関するお知らせ</a></td>
+  <td class="evennew-M kjXbrl" noWrap align="center"> </td>
+  <td class="evennew-M kjPlace" noWrap align="left">東</td>
+  <td class="evennew-R kjHistroy" align="left">　</td>
 </tr>
-</table></body></html>
+</table>
+</body></html>
 """
 
 
