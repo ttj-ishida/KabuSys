@@ -7,7 +7,6 @@ import duckdb
 import pytest
 
 from kabusys.data.disclosure_classifier import (
-    ClassificationResult,
     classify_title,
     classify_disclosures,
     run_disclosure_classification,

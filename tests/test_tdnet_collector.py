@@ -2,8 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
+
 import duckdb
 import pytest
+
+from kabusys.data.tdnet_collector import (
+    RawDisclosure,
+    _extract_disclosure_id,
+    _parse_tdnet_html,
+    save_raw_disclosures,
+    run_tdnet_collection,
+)
+from kabusys.data.disclosure_classifier import run_disclosure_classification
 
 
 # ---------------------------------------------------------------------------
@@ -86,15 +97,6 @@ def test_disclosure_events_table_exists(disc_db):
     assert "review_required" in columns
 
 
-from kabusys.data.tdnet_collector import (
-    RawDisclosure,
-    _extract_disclosure_id,
-    _parse_tdnet_html,
-    save_raw_disclosures,
-    run_tdnet_collection,
-)
-
-
 # ---------------------------------------------------------------------------
 # Task 2: TDnet パーサーテスト
 # ---------------------------------------------------------------------------
@@ -131,8 +133,6 @@ _SAMPLE_HTML = """\
 
 def test_parse_tdnet_html_returns_disclosures():
     """_parse_tdnet_html が HTML テーブルから開示リストを返すことを確認する。"""
-    from datetime import date
-
     disclosures = _parse_tdnet_html(_SAMPLE_HTML, target_date=date(2024, 9, 1))
     assert len(disclosures) == 2
     assert disclosures[0]["id"] == "140120240901400001"
@@ -145,8 +145,6 @@ def test_parse_tdnet_html_returns_disclosures():
 def test_parse_tdnet_html_empty_table():
     """id="main-list-table" に有効なデータ行がない場合、空リストを返すことを確認する。"""
     html = '<html><body><table id="main-list-table"></table></body></html>'
-    from datetime import date
-
     result = _parse_tdnet_html(html, target_date=date(2024, 9, 1))
     assert result == []
 
@@ -165,8 +163,6 @@ def test_parse_tdnet_html_ignores_other_tables():
 </table>
 </body></html>
 """
-    from datetime import date
-
     result = _parse_tdnet_html(html, target_date=date(2024, 9, 1))
     assert result == []
 
@@ -182,8 +178,6 @@ def test_extract_disclosure_id_from_href():
 
 def test_save_raw_disclosures_idempotent(disc_db):
     """同じ開示を2回 save しても重複しないことを確認する。"""
-    from datetime import datetime
-
     disclosures = [
         RawDisclosure(
             id="TDN001",
@@ -206,7 +200,6 @@ def test_save_raw_disclosures_idempotent(disc_db):
 
 def test_run_tdnet_collection_mocked(disc_db, monkeypatch):
     """run_tdnet_collection が HTTP をモックして保存件数を返すことを確認する。"""
-    from datetime import date
     from kabusys.data import tdnet_collector
 
     def mock_fetch_page(url, timeout=30):
@@ -224,9 +217,6 @@ def test_run_tdnet_collection_mocked(disc_db, monkeypatch):
 # ---------------------------------------------------------------------------
 # Task 5: 統合テスト（パイプライン全体確認）
 # ---------------------------------------------------------------------------
-
-from kabusys.data.disclosure_classifier import run_disclosure_classification
-
 
 _PIPELINE_HTML = """\
 <html><body>
@@ -256,7 +246,6 @@ _PIPELINE_HTML = """\
 
 def test_full_pipeline_collection_to_classification(monkeypatch):
     """収集 → 保存 → 分類の一連フローが正しく動くことを確認する。"""
-    from datetime import date
     from kabusys.data.schema import init_schema
     from kabusys.data import tdnet_collector
 
