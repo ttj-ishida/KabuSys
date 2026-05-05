@@ -236,3 +236,54 @@ def test_run_disclosure_classification_runs_when_enabled():
         run_disclosure_classification.main()
 
     mock_fn.assert_called_once()
+
+
+# ---------- run_edinet_collection ----------
+
+
+def test_run_edinet_collection_skipped_when_disabled():
+    """ENABLE_EDINET=false のとき run_edinet_collection を呼ばずにリターンする。"""
+    import run_edinet_collection
+
+    with (
+        patch("run_edinet_collection.Settings") as mock_settings,
+        patch("run_edinet_collection.run_edinet_collection") as mock_fn,
+    ):
+        mock_settings.return_value.enable_edinet = False
+        run_edinet_collection.main()
+
+    mock_fn.assert_not_called()
+
+
+def test_run_edinet_collection_runs_when_enabled():
+    """ENABLE_EDINET=true のとき run_edinet_collection が実行される。"""
+    import run_edinet_collection
+
+    with (
+        patch("run_edinet_collection.Settings") as mock_settings,
+        patch("run_edinet_collection.duckdb.connect"),
+        patch("run_edinet_collection.run_edinet_collection", return_value=5) as mock_fn,
+    ):
+        mock_settings.return_value.enable_edinet = True
+        mock_settings.return_value.edinet_api_key = "test-key"
+        mock_settings.return_value.duckdb_path = Path("/fake.duckdb")
+        run_edinet_collection.main()
+
+    mock_fn.assert_called_once()
+
+
+def test_run_edinet_collection_exits_when_api_key_missing():
+    """ENABLE_EDINET=true かつ EDINET_API_KEY 未設定のとき sys.exit(1) すること。"""
+    import run_edinet_collection
+
+    with (
+        patch("run_edinet_collection.Settings") as mock_settings,
+        patch("run_edinet_collection.run_edinet_collection") as mock_fn,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_settings.return_value.enable_edinet = True
+        mock_settings.return_value.edinet_api_key = ""
+        run_edinet_collection.main()
+
+    assert exc_info.value.code == 1
+    mock_fn.assert_not_called()

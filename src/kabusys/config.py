@@ -191,6 +191,24 @@ class Settings:
         """
         return _parse_bool_env("ENABLE_TDNET", default=False)
 
+    # --- EDINET ---
+    @property
+    def enable_edinet(self) -> bool:
+        """EDINET 法定開示収集機能の有効フラグ（ENABLE_EDINET、デフォルト: False）。
+
+        "1" / "true" / "yes" / "on" のみ True。デフォルト無効。
+        False の場合、edinet_collection ジョブはスキップされる。
+        """
+        return _parse_bool_env("ENABLE_EDINET", default=False)
+
+    @property
+    def edinet_api_key(self) -> str:
+        """EDINET API サブスクリプションキー（EDINET_API_KEY）。
+
+        EDINET API v2 の利用に必要。ENABLE_EDINET=true の場合に設定すること。
+        """
+        return os.environ.get("EDINET_API_KEY", "")
+
     # --- LINE Messaging API ---
     @property
     def line_channel_access_token(self) -> str:
