@@ -91,6 +91,36 @@ _ITEMS: list[dict] = [
         "description": "  アラート送信先 LINE ユーザー ID（空欄でスキップ）",
     },
     {
+        "key": "LINE_NOTIFY_ENABLED",
+        "label": "LINE 通知の有効化",
+        "choices": ["true", "false"],
+        "default": "false",
+        "description": (
+            "  LINE Messaging API でアラートを通知する（LINE_CHANNEL_ACCESS_TOKEN / LINE_USER_ID が必要）\n"
+            "  false の場合 NullNotifier が使われ Core 機能に影響しない"
+        ),
+    },
+    {
+        "key": "ENABLE_AI_SENTIMENT",
+        "label": "AI センチメント分析の有効化",
+        "choices": ["true", "false"],
+        "default": "false",
+        "description": (
+            "  Yahoo ニュースを OpenAI で分析し売買判断に加味する（OPENAI_API_KEY が別途必要・有料）\n"
+            "  false の場合 news_nlp / regime_detector はスキップされ Core 機能に影響しない"
+        ),
+    },
+    {
+        "key": "ENABLE_TDNET",
+        "label": "TDnet 適時開示収集の有効化",
+        "choices": ["true", "false"],
+        "default": "false",
+        "description": (
+            "  TDnet から当日の開示一覧を収集・分類する（無料）\n"
+            "  false の場合 tdnet_collection / disclosure_classification ジョブはスキップされる"
+        ),
+    },
+    {
         "key": "LOG_LEVEL",
         "label": "ログレベル",
         "choices": ["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -157,6 +187,11 @@ def _write_env(path: Path, values: dict[str, str]) -> None:
         "# --- システム設定 ---",
         f"KABUSYS_ENV={values.get('KABUSYS_ENV', 'development')}",
         f"LOG_LEVEL={values.get('LOG_LEVEL', 'INFO')}",
+        "",
+        "# --- 拡張機能トグル ---",
+        f"LINE_NOTIFY_ENABLED={values.get('LINE_NOTIFY_ENABLED', 'false')}",
+        f"ENABLE_AI_SENTIMENT={values.get('ENABLE_AI_SENTIMENT', 'false')}",
+        f"ENABLE_TDNET={values.get('ENABLE_TDNET', 'false')}",
         "",
         "# --- Kill Switch ---",
         f"KILL_FLAG_CLEAR_ON_START={values.get('KILL_FLAG_CLEAR_ON_START', '0')}",
