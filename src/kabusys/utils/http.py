@@ -71,6 +71,9 @@ def is_private_host(
             return not ip.is_global
         return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
 
+    # 角括弧付き IPv6 リテラル（[::1]）を正規化
+    if hostname.startswith("[") and hostname.endswith("]"):
+        hostname = hostname[1:-1]
     # ゾーンインデックスを除去して IP アドレスとして解析
     hostname_clean = hostname.split("%", 1)[0]
     try:
@@ -80,13 +83,17 @@ def is_private_host(
         pass
     # ホスト名の場合: DNS 解決して全 A/AAAA レコードを検査
     try:
-        for info in socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP):
-            ip_str = info[4][0].split("%", 1)[0]
-            ip = ipaddress.ip_address(ip_str)
-            if _is_blocked(ip):
-                return True
-    except (OSError, ValueError):
+        infos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+    except OSError:
         return fail_closed
+    for info in infos:
+        ip_str = info[4][0].split("%", 1)[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+        if _is_blocked(ip):
+            return True
     return False
 
 

@@ -152,6 +152,26 @@ def test_is_private_host_strict_public_ip_passes():
     assert is_private_host("1.1.1.1", strict=True) is False
 
 
+def test_is_private_host_bracketed_ipv6_loopback():
+    """角括弧付き IPv6 リテラル [::1] が正しくブロックされることを確認する。"""
+    assert is_private_host("[::1]") is True
+
+
+def test_is_private_host_bracketed_ipv6_link_local():
+    """角括弧付き IPv6 リンクローカル [fe80::1] がブロックされることを確認する。"""
+    assert is_private_host("[fe80::1]") is True
+
+
+def test_is_private_host_bad_dns_record_does_not_trigger_fail_closed():
+    """DNS 応答に不正な IP 文字列が含まれていても他のレコードの判定を継続することを確認する。"""
+    fake_addrs = [
+        (None, None, None, None, ("not-an-ip", 0)),  # 不正レコード → スキップ
+        (None, None, None, None, ("8.8.8.8", 0)),  # 正常なパブリック IP
+    ]
+    with patch("socket.getaddrinfo", return_value=fake_addrs):
+        assert is_private_host("example.com") is False
+
+
 # ---------------------------------------------------------------------------
 # SSRFBlockRedirectHandler
 # ---------------------------------------------------------------------------
