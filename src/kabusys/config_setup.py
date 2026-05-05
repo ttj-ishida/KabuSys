@@ -21,6 +21,7 @@ _TOGGLE_DEFAULTS: dict[str, str] = {
     "LINE_NOTIFY_ENABLED": "false",
     "ENABLE_AI_SENTIMENT": "false",
     "ENABLE_TDNET": "false",
+    "ENABLE_EDINET": "false",
 }
 
 # ---------------------------------------------------------------------------
@@ -126,6 +127,25 @@ _ITEMS: list[dict] = [
         "description": (
             "  TDnet から当日の開示一覧を収集・分類する（無料）\n"
             "  false の場合 tdnet_collection / disclosure_classification ジョブはスキップされる"
+        ),
+    },
+    {
+        "key": "ENABLE_EDINET",
+        "label": "EDINET 法定開示収集の有効化",
+        "choices": ["true", "false"],
+        "default": "false",
+        "description": (
+            "  EDINET API から有報・四半期報・大量保有報告等を収集する（無料・APIキー要）\n"
+            "  false の場合 edinet_collection ジョブはスキップされる"
+        ),
+    },
+    {
+        "key": "EDINET_API_KEY",
+        "label": "EDINET API サブスクリプションキー",
+        "secret": True,
+        "description": (
+            "  EDINET API v2 の利用に必要（ENABLE_EDINET=true の場合のみ使用）\n"
+            "  https://disclosure.edinet-api.go.jp/ から無料取得"
         ),
     },
     {
