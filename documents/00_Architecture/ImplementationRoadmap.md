@@ -209,16 +209,22 @@
 
     monitoring/
         monitoring_db.py        ← SQLite 永続化層（Issue #36）
+        monitoring_engine.py    ← 監視エンジン統括
         system_monitor.py       ← システム状態監視（Issue #37）
         risk_monitor.py         ← リスク監視（Issue #38）
         alert_manager.py        ← LINE 通知（Issue #196）
-        order_monitor.py        ← 発注監視（Issue #40）
-        dashboard_app.py        ← Streamlit ダッシュボード（Issue #35）
+        trade_monitor.py        ← 発注監視（Issue #40）
+        streamlit_dashboard.py  ← Streamlit Home ページ（Issue #35）
+        dashboard_data.py       ← 全ページ共通データロード（Issue #231）
+        pages/
+            2_Signal_Queue.py   ← 発注キュー・シグナルページ（Issue #231）
+            3_Performance.py    ← パフォーマンスページ（Issue #231）
+            4_Strategy_Lab.py   ← 戦略分析ページ（Issue #231）
 
 成果物
 
     monitoring.db（system_status, trade_logs, positions, risk_logs, dashboard）
-    Streamlit ダッシュボード
+    Streamlit 4ページ マルチページ ダッシュボード（Issue #231）
     LINE アラート
 
 ------------------------------------------------------------------------

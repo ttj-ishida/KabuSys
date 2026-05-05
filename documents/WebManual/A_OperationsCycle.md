@@ -136,11 +136,20 @@ python -m kabusys.run_intraday_monitor --watch
 streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
 ```
 
+ダッシュボードは 4 ページ構成です。
+
+| ページ（サイドバー） | 主な確認内容 |
+|---|---|
+| **Home** | Kill Switch 状態 / Execution・Monitoring プロセス UP 確認 / ドローダウン / 直近エラーイベント |
+| **Signal Queue** | 翌営業日の発注キュー（pending 件数）/ ポートフォリオ目標 / 直近シグナル |
+| **Performance** | エクイティカーブ / 保有ポジション / 取引履歴 |
+| **Strategy Lab** | 市場レジームスコア / AI スコアランキング / シグナル推移 |
+
 確認項目:
 
-- ステータスが `OK` であれば継続監視
-- `WARNING` の場合は Warnings 内容を確認し、必要に応じて対処する
-- `CRITICAL` の場合は即時対応（Kill Switch 発動 / Execution プロセス停止）
+- **Home > Overview** で Kill Switch が「発動なし」、Execution が「🟢 UP」であれば継続監視
+- **Home > Overview** の直近エラーイベントに `ORDER_ERROR` / `RISK_BREACH` が表示されている場合は即時対応
+- ドローダウンが -10% 超の場合は警告バナーが表示される（Kill Switch 発動を検討）
 
 ザラ場中の基本方針は、**売買判断と執行はシステム、継続運転の最終監督はユーザー** です。
 

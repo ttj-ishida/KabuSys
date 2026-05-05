@@ -192,13 +192,14 @@ Core コードは返り値の型を意識せず `.send(message)` を呼ぶだけ
 
 監視ダッシュボードを用意する。
 
-表示項目
+**Phase 1 実装（Issue #231）:** Streamlit マルチページ構成（4ページ）
 
-- 資産推移
-- ポートフォリオ構成
-- ドローダウン
-- 注文状態
-- APIエラー
+| ページ | ファイル | 表示内容 |
+|---|---|---|
+| Home | `streamlit_dashboard.py` | Kill Switch / Execution / Monitoring 状態、ドローダウン、エラーログ |
+| Signal Queue | `pages/2_Signal_Queue.py` | 発注キュー・ポートフォリオ目標・シグナル（直近7日） |
+| Performance | `pages/3_Performance.py` | エクイティカーブ・ポジション・取引履歴 |
+| Strategy Lab | `pages/4_Strategy_Lab.py` | 市場レジーム・AI スコア・シグナル推移 |
 
 推奨
 
@@ -266,7 +267,7 @@ Windows 1台での稼働を前提とし、オーバーヘッドの少ない構�
 | 種類 | ツール / 技術 | 用途・保存先 |
 |----|----|----|
 | データベース | SQLite | `monitoring.db` (テーブル: `system_status`, `trade_logs`, `positions`, `risk_logs`, `dashboard`) |
-| ダッシュボード | Streamlit | Equity, Positions, Orders, Drawdownの画面 |
+| ダッシュボード | Streamlit | 4ページ構成（Home / Signal Queue / Performance / Strategy Lab）|
 | アラート | LINE | LINE Messaging API 経由での異常通知 |
 
 ### SQLite テーブル設計（Phase 7 実装）
@@ -394,9 +395,9 @@ MonitoringEngine(system_monitor, trade_monitor, risk_monitor, interval_sec=60)
 
 ---
 
-### StreamlitDashboard（Phase 7 実装、Issue #35）
+### StreamlitDashboard（Phase 7 実装 Issue #35、Issue #231 で拡張）
 
-`src/kabusys/monitoring/streamlit_dashboard.py` に実装。`MonitoringDB` を直接読み取り、サイドバーの Refresh ボタンで手動更新する。`MonitoringEngine` と独立して動作する。
+Streamlit マルチページ構成で実装。ページファイルは `pages/` 配下に配置され、自動的にサイドバーへ表示される。データロードロジックは `dashboard_data.py` に集約し Streamlit 非依存・単体テスト可能な設計とする。
 
 **起動方法:**
 
@@ -404,14 +405,38 @@ MonitoringEngine(system_monitor, trade_monitor, risk_monitor, interval_sec=60)
 streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
 ```
 
-**4タブ構成:**
+**ファイル構成:**
 
-| タブ | 表示内容 | データソース |
-|---|---|---|
-| Overview | portfolio_value / cash / drawdown_pct | `dashboard` テーブル |
-| Positions | 保有ポジション一覧（code / qty / avg_price / current_price） | `positions` テーブル |
-| Orders | trade_logs 最新20件（logged_at / event_type / code / side / qty / state） | `trade_logs` テーブル |
-| System | system_status 最新状態 + risk_logs 最新10件 | `system_status` / `risk_logs` テーブル |
+| ファイル | 役割 |
+|---|---|
+| `streamlit_dashboard.py` | Home ページ（エントリーポイント）。SQLite `monitoring.db` を読み取り |
+| `dashboard_data.py` | 全ページ共通のデータロード関数群（Streamlit 非依存） |
+| `pages/2_Signal_Queue.py` | 発注キュー・ポートフォリオ目標・シグナル確認 |
+| `pages/3_Performance.py` | エクイティカーブ・ポジション・取引履歴 |
+| `pages/4_Strategy_Lab.py` | 市場レジーム・AI スコア・シグナル推移 |
+
+**ページ別表示内容:**
+
+| ページ | タブ | 表示内容 | データソース |
+|---|---|---|---|
+| Home | Overview | Kill Switch / Execution / Monitoring 状態、portfolio_value / cash / drawdown_pct、エラーログ（直近） | SQLite `dashboard` / `risk_logs` |
+| Home | Positions | 保有ポジション一覧 | SQLite `positions` |
+| Home | Orders | trade_logs 最新20件 | SQLite `trade_logs` |
+| Home | System | system_status 最新状態 | SQLite `system_status` |
+| Signal Queue | 発注キュー | signal_queue 全件（status 別集計） | DuckDB `signal_queue` |
+| Signal Queue | ポートフォリオ目標 | 最新日の target_weight / target_size | DuckDB `portfolio_targets` |
+| Signal Queue | シグナル（直近7日） | signals テーブル | DuckDB `signals` |
+| Performance | エクイティカーブ | equity / cash / drawdown / daily_return 推移 | DuckDB `portfolio_performance` |
+| Performance | ポジション | 最新日の保有ポジション（position_size ≠ 0） | DuckDB `positions` |
+| Performance | 取引履歴 | 直近50件の取引 | DuckDB `trades` |
+| Strategy Lab | 市場レジーム | regime_score / regime_label 推移 | DuckDB `market_regime` |
+| Strategy Lab | AI スコア | 最新日の ai_score ランキング | DuckDB `ai_scores` |
+| Strategy Lab | シグナル推移 | 日別 buy/sell 件数集計 | DuckDB `signals` |
+
+**データソース分離:**
+
+- Home ページ: SQLite `monitoring.db`（read-only URI モード）
+- Signal Queue / Performance / Strategy Lab: DuckDB `kabusys.duckdb`（`read_only=True`）
 
 **依存ライブラリ:** `psutil`（SystemMonitor）、`streamlit`（ダッシュボード UI）— `requirements.txt` に追加すること。
 

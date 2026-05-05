@@ -215,16 +215,24 @@ AI関連コード。
 監視システム。
 
     monitoring/
-    ├ system_monitor.py
-    ├ trade_monitor.py
-    ├ risk_monitor.py
-    └ alert_manager.py
+    ├ monitoring_db.py          ← SQLite 永続化層（MonitoringDB / init_monitoring_db）
+    ├ monitoring_engine.py      ← 各 Monitor を統括するポーリングエンジン
+    ├ system_monitor.py         ← CPU / メモリ / ディスク / プロセス監視
+    ├ trade_monitor.py          ← 発注状態監視
+    ├ risk_monitor.py           ← DD / ポジション上限 / Circuit Breaker 監視
+    ├ alert_manager.py          ← LINE アラート送信
+    ├ streamlit_dashboard.py    ← Streamlit Home ページ（エントリーポイント）
+    ├ dashboard_data.py         ← 全ページ共通データロード関数（Streamlit 非依存）
+    └ pages/
+        ├ 2_Signal_Queue.py     ← 発注キュー・シグナル確認ページ
+        ├ 3_Performance.py      ← エクイティカーブ・ポジション・取引履歴ページ
+        └ 4_Strategy_Lab.py     ← 市場レジーム・AI スコア・シグナル推移ページ
 
 役割:
 
--   システム監視
--   注文監視
--   リスク監視
+-   システム監視（CPU / メモリ / プロセス）
+-   発注・リスク監視
+-   Streamlit 4ページ マルチページ ダッシュボード（Issue #231）
 
 ------------------------------------------------------------------------
 
