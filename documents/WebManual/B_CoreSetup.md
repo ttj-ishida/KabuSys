@@ -83,6 +83,7 @@ python -m kabusys.config_setup
 | `PAPER_FILL_MODE` | ペーパートレードの約定方式 | `instant` |
 | `LINE_NOTIFY_ENABLED` | LINE 通知の有効化 | `false` |
 | `ENABLE_AI_SENTIMENT` | AI センチメントの有効化 | `false` |
+| `ENABLE_TDNET` | TDnet 適時開示収集の有効化 | `false` |
 | `LOG_LEVEL` | ログの詳細レベル | `INFO` |
 
 ### B-1-4. 設定の検証
@@ -155,12 +156,16 @@ powershell -File scripts\setup_task_scheduler.ps1
 | 時刻 | 処理 | スクリプト |
 |---|---|---|
 | 15:30 | 市場データ更新 | `scripts/run_data_update.py` |
+| 15:35 | TDnet 適時開示収集（オプション） | `scripts/run_tdnet_collection.py` |
 | 16:00 | 特徴量計算 | `scripts/run_feature_gen.py` |
+| 17:00 | 開示イベント分類（オプション） | `scripts/run_disclosure_classification.py` |
 | 18:00 | AI 分析（オプション） | `scripts/run_ai_analysis.py` |
 | 20:00 | 売買シグナル生成 | `scripts/run_strategy_signal.py` |
 | 21:00 | ポートフォリオ構築 | `scripts/run_portfolio_construction.py` |
 | 08:30 | Execution Engine 起動 | `python -m kabusys.run_execution` |
 | 09:00 | Monitoring 起動 | `python -m kabusys.run_monitoring` |
+
+> TDnet 収集・開示イベント分類は `ENABLE_TDNET=false`（デフォルト）のときスキップされます。有効化手順は [B-2-3](#b-2-3-tdnet-適時開示収集の設定) を参照してください。
 
 > 詳細は `documents/10_Runtime/RuntimeJobSchedule.md` を参照してください。
 
@@ -206,6 +211,28 @@ ENABLE_AI_SENTIMENT=true
 OPENAI_API_KEY=sk-...
 ```
 
+### B-2-3. TDnet 適時開示収集の設定
+
+TDnet（適時開示情報閲覧サービス）から当日の開示一覧を自動収集し、決算短信・業績修正・自己株取得などのイベントを分類・スコア化します。
+
+**必要なもの:**
+- 特になし（無料で利用可能）
+
+**`.env` に以下を追加:**
+
+```env
+ENABLE_TDNET=true
+```
+
+有効化すると以下の2ジョブが毎日自動実行されます。
+
+| 時刻 | 処理 | 保存先 |
+|---|---|---|
+| 15:35 | TDnet から当日の開示一覧を取得・保存 | `raw_disclosures` |
+| 17:00 | 開示タイトルを分類してイベントスコアを付与 | `disclosure_events` |
+
+> ℹ️ `ENABLE_TDNET=false`（デフォルト）の場合、両ジョブは即座にスキップされ Core 機能（自動売買）に影響しません。
+
 ---
 
 ## B-3. 導入完了チェックリスト
@@ -230,6 +257,7 @@ OPENAI_API_KEY=sk-...
 
 - [ ] LINE 通知: テストメッセージが LINE に届く
 - [ ] AI センチメント: `ENABLE_AI_SENTIMENT=true` で AI 分析バッチが正常完了する
+- [ ] TDnet 収集: `ENABLE_TDNET=true` で `run_tdnet_collection.py` が正常完了する
 
 ---
 

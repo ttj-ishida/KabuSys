@@ -80,6 +80,8 @@
 
 ## 3.1b 適時開示収集（Issue #198 / #199）
 
+> ⚠️ **オプション機能** — `ENABLE_TDNET=true`（`.env`）のときのみ実行されます。デフォルトはスキップ。
+
 **時刻**
 
     15:35（TDnet） / 15:40（EDINET）
@@ -101,6 +103,7 @@
 
 注意
 
+-   `ENABLE_TDNET=false`（デフォルト）の場合、`run_tdnet_collection.py` は即座にスキップされ Core 機能に影響しない
 -   TDnet 閲覧サービスには31日掲載制限がある。毎日差分取得で取りこぼしを防ぐ
 -   開示分類（`disclosure_events`）は別ジョブ（17:00）で実施する
 
@@ -129,6 +132,8 @@
 ------------------------------------------------------------------------
 
 ## 3.2b 開示イベント分類
+
+> ⚠️ **オプション機能** — `ENABLE_TDNET=true`（`.env`）のときのみ実行されます。デフォルトはスキップ。
 
 **時刻**
 
@@ -314,10 +319,10 @@
   時刻    タスク名                             実行スクリプト
   ------- ------------------------------------ -----------------------------------------------
   15:30   KabuSys_DataUpdate                   scripts\run_data_update.py
-  15:35   KabuSys_TDnetCollection              scripts\run_tdnet_collection.py        ※ Issue #198
+  15:35   KabuSys_TDnetCollection              scripts\run_tdnet_collection.py        ※ オプション (ENABLE_TDNET=true 時のみ実行)
   15:40   KabuSys_EdinetCollection             scripts\run_edinet_collection.py       ※ Issue #199
   16:00   KabuSys_FeatureGen                   scripts\run_feature_gen.py
-  17:00   KabuSys_DisclosureClassification     scripts\run_disclosure_classification.py ※ Issue #198
+  17:00   KabuSys_DisclosureClassification     scripts\run_disclosure_classification.py ※ オプション (ENABLE_TDNET=true 時のみ実行)
   18:00   KabuSys_AiAnalysis                   scripts\run_ai_analysis.py
   20:00   KabuSys_StrategySignal               scripts\run_strategy_signal.py
   21:00   KabuSys_PortfolioConstruction        scripts\run_portfolio_construction.py
