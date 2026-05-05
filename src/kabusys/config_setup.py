@@ -15,6 +15,14 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _ENV_PATH = _PROJECT_ROOT / ".env"
 
+# 拡張機能トグルのキーとデフォルト値。_ITEMS と _write_env の両方がここを参照する。
+# 新しいトグルを追加する場合はここだけ編集すればよい。
+_TOGGLE_DEFAULTS: dict[str, str] = {
+    "LINE_NOTIFY_ENABLED": "false",
+    "ENABLE_AI_SENTIMENT": "false",
+    "ENABLE_TDNET": "false",
+}
+
 # ---------------------------------------------------------------------------
 # 設定項目定義
 # ---------------------------------------------------------------------------
@@ -189,9 +197,7 @@ def _write_env(path: Path, values: dict[str, str]) -> None:
         f"LOG_LEVEL={values.get('LOG_LEVEL', 'INFO')}",
         "",
         "# --- 拡張機能トグル ---",
-        f"LINE_NOTIFY_ENABLED={values.get('LINE_NOTIFY_ENABLED', 'false')}",
-        f"ENABLE_AI_SENTIMENT={values.get('ENABLE_AI_SENTIMENT', 'false')}",
-        f"ENABLE_TDNET={values.get('ENABLE_TDNET', 'false')}",
+        *[f"{k}={values.get(k, v)}" for k, v in _TOGGLE_DEFAULTS.items()],
         "",
         "# --- Kill Switch ---",
         f"KILL_FLAG_CLEAR_ON_START={values.get('KILL_FLAG_CLEAR_ON_START', '0')}",

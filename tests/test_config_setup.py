@@ -65,11 +65,31 @@ def test_write_env_respects_toggle_values(tmp_path):
     from kabusys.config_setup import _write_env
 
     env_file = tmp_path / ".env"
-    _write_env(env_file, {"ENABLE_TDNET": "true", "ENABLE_AI_SENTIMENT": "true"})
+    _write_env(
+        env_file,
+        {
+            "ENABLE_TDNET": "true",
+            "ENABLE_AI_SENTIMENT": "true",
+            "LINE_NOTIFY_ENABLED": "true",
+        },
+    )
 
     content = env_file.read_text(encoding="utf-8")
     assert "ENABLE_TDNET=true" in content
     assert "ENABLE_AI_SENTIMENT=true" in content
+    assert "LINE_NOTIFY_ENABLED=true" in content
+
+
+def test_write_env_toggle_keys_match_toggle_defaults(tmp_path):
+    """_write_env が _TOGGLE_DEFAULTS のすべてのキーを書き出すこと（定数追加時のリグレッション防止）。"""
+    from kabusys.config_setup import _TOGGLE_DEFAULTS, _write_env
+
+    env_file = tmp_path / ".env"
+    _write_env(env_file, {})
+
+    content = env_file.read_text(encoding="utf-8")
+    for key in _TOGGLE_DEFAULTS:
+        assert key in content, f"{key} が .env に書き出されていない"
 
 
 def test_write_env_roundtrip(tmp_path):
