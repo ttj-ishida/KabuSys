@@ -198,7 +198,7 @@ def test_load_signals_empty(duck_conn):
 def test_load_portfolio_performance_empty(duck_conn):
     from kabusys.monitoring.dashboard_data import load_portfolio_performance
 
-    df = load_portfolio_performance(duck_conn, days=90)
+    df = load_portfolio_performance(duck_conn, env="live", days=90)
     assert df.empty
 
 
@@ -209,9 +209,22 @@ def test_load_portfolio_performance_returns_rows(duck_conn):
         INSERT INTO portfolio_performance (date, env, equity, cash, drawdown, daily_return)
         VALUES (current_date, 'live', 10000000, 2000000, -0.02, 0.005)
     """)
-    df = load_portfolio_performance(duck_conn, days=90)
+    df = load_portfolio_performance(duck_conn, env="live", days=90)
     assert len(df) == 1
     assert float(df.iloc[0]["equity"]) == pytest.approx(10000000.0)
+
+
+def test_load_portfolio_performance_filters_env(duck_conn):
+    from kabusys.monitoring.dashboard_data import load_portfolio_performance
+
+    duck_conn.execute("""
+        INSERT INTO portfolio_performance (date, env, equity, cash)
+        VALUES (current_date, 'live',  10000000, 2000000),
+               (current_date, 'paper',  5000000, 1000000)
+    """)
+    df = load_portfolio_performance(duck_conn, env="live", days=90)
+    assert len(df) == 1
+    assert df.iloc[0]["env"] == "live"
 
 
 def test_load_open_positions_empty(duck_conn):

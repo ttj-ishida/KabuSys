@@ -58,14 +58,6 @@ def load_latest_system_status(conn: sqlite3.Connection) -> dict | None:
     return dict(row) if row else None
 
 
-def load_recent_risk_logs(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
-    conn.row_factory = sqlite3.Row
-    cursor = conn.execute(
-        "SELECT * FROM risk_logs ORDER BY logged_at DESC LIMIT ?", (limit,)
-    )
-    return [dict(row) for row in cursor.fetchall()]
-
-
 def main(db_path: str) -> None:
     st.set_page_config(page_title="KabuSys Monitor", layout="wide", page_icon="🏠")
     st.title("🏠 KabuSys 監視ダッシュボード — Home")
@@ -171,11 +163,6 @@ def main(db_path: str) -> None:
                 st.caption(f"Recorded: {status['recorded_at']}")
             else:
                 st.info("No system status yet.")
-
-            risk_logs = load_recent_risk_logs(conn)
-            if risk_logs:
-                st.subheader("Recent Risk Events")
-                st.dataframe(risk_logs, use_container_width=True)
 
         time.sleep(refresh_interval)
         st.rerun()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import duckdb
+import pandas as pd
 import streamlit as st
 
 from kabusys.config import Settings
@@ -34,7 +35,7 @@ try:
     )
 
     with tab_perf:
-        df = load_portfolio_performance(conn, days=days)
+        df = load_portfolio_performance(conn, env=settings.env, days=days)
         if df.empty:
             st.info("パフォーマンスデータがありません。")
         else:
@@ -42,11 +43,8 @@ try:
             col1, col2, col3 = st.columns(3)
             col1.metric("Equity", f"¥{float(latest['equity']):,.0f}")
             col2.metric("Cash", f"¥{float(latest['cash']):,.0f}")
-            dd = (
-                float(latest["drawdown"]) * 100
-                if latest["drawdown"] is not None
-                else 0.0
-            )
+            dd_val = latest.get("drawdown")
+            dd = 0.0 if pd.isna(dd_val) else float(dd_val) * 100
             col3.metric("Drawdown", f"{dd:.2f}%")
 
             st.subheader("エクイティカーブ")
@@ -69,7 +67,9 @@ try:
             st.info("保有ポジションはありません。")
         else:
             st.caption(f"基準日: {df['date'].iloc[0]}")
-            total_mv = float(df["market_value"].sum())
+            total_mv = float(
+                pd.to_numeric(df["market_value"], errors="coerce").fillna(0).sum()
+            )
             st.metric("時価総額合計", f"¥{total_mv:,.0f}")
             st.dataframe(df, use_container_width=True)
 

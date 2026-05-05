@@ -7,6 +7,7 @@ Streamlit に依存しないため単体テスト可能。
 from __future__ import annotations
 
 import sqlite3
+from datetime import date, timedelta
 
 import duckdb
 import pandas as pd
@@ -19,14 +20,14 @@ import pandas as pd
 
 def load_error_logs(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
     """ERROR / CRITICAL レベルのリスクイベントを返す。"""
-    conn.row_factory = sqlite3.Row
-    cursor = conn.execute(
+    cur = conn.execute(
         """SELECT * FROM risk_logs
            WHERE event_type IN ('CRITICAL', 'ORDER_ERROR', 'RISK_BREACH', 'KILL_SWITCH')
            ORDER BY logged_at DESC LIMIT ?""",
         (limit,),
     )
-    return [dict(row) for row in cursor.fetchall()]
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
 # ---------------------------------------------------------------------------
@@ -46,11 +47,13 @@ def load_signal_queue(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
 
 def load_signals(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     """直近7日分の signals テーブルを返す。"""
+    cutoff = (date.today() - timedelta(days=7)).isoformat()
     return conn.execute(
         """SELECT date, code, side, score, signal_rank, size_multiplier
            FROM signals
-           WHERE date >= current_date - INTERVAL 7 DAY
-           ORDER BY date DESC, signal_rank ASC"""
+           WHERE date >= ?::DATE
+           ORDER BY date DESC, signal_rank ASC""",
+        [cutoff],
     ).df()
 
 
@@ -70,15 +73,17 @@ def load_portfolio_targets(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
 
 
 def load_portfolio_performance(
-    conn: duckdb.DuckDBPyConnection, days: int = 90
+    conn: duckdb.DuckDBPyConnection, env: str, days: int = 90
 ) -> pd.DataFrame:
-    """直近 N 日分の portfolio_performance を返す。"""
+    """指定 env の直近 N 日分の portfolio_performance を返す。"""
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
     return conn.execute(
         """SELECT date, env, equity, cash, drawdown, daily_return
            FROM portfolio_performance
-           WHERE date >= current_date - INTERVAL (?) DAY
+           WHERE env = ?
+             AND date >= ?::DATE
            ORDER BY date ASC""",
-        [days],
+        [env, cutoff],
     ).df()
 
 
@@ -113,12 +118,13 @@ def load_recent_trades(
 
 def load_market_regime(conn: duckdb.DuckDBPyConnection, days: int = 30) -> pd.DataFrame:
     """直近 N 日分の market_regime を返す。"""
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
     return conn.execute(
         """SELECT date, regime_score, regime_label, ma200_ratio, macro_sentiment
            FROM market_regime
-           WHERE date >= current_date - INTERVAL (?) DAY
+           WHERE date >= ?::DATE
            ORDER BY date ASC""",
-        [days],
+        [cutoff],
     ).df()
 
 
@@ -136,13 +142,14 @@ def load_signal_summary(
     conn: duckdb.DuckDBPyConnection, days: int = 30
 ) -> pd.DataFrame:
     """直近 N 日のシグナル集計（日別 buy/sell 件数）を返す。"""
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
     return conn.execute(
         """SELECT date,
                   COUNT(*) FILTER (WHERE side='buy')  AS buy_count,
                   COUNT(*) FILTER (WHERE side='sell') AS sell_count
            FROM signals
-           WHERE date >= current_date - INTERVAL (?) DAY
+           WHERE date >= ?::DATE
            GROUP BY date
            ORDER BY date ASC""",
-        [days],
+        [cutoff],
     ).df()
