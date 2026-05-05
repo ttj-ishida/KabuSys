@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 # 定数
 # ---------------------------------------------------------------------------
 
-EDINET_API_BASE = "https://disclosure.edinet-api.go.jp/api/v2"
+EDINET_API_BASE = "https://api.edinet-fsa.go.jp/api/v2"
 EDINET_DOCUMENTS_URL = f"{EDINET_API_BASE}/documents.json"
 EDINET_DOCUMENT_URL_TEMPLATE = f"{EDINET_API_BASE}/documents/{{doc_id}}"
 
