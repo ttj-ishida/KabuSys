@@ -41,6 +41,11 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 - ザラ場監視 CLI: `python -m kabusys.run_intraday_monitor`
   - 単発または監視モード（`--watch`）で実行状態 / リスク / システム指標を表示
 
+- Streamlit 監視ダッシュボード: `streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db`
+  - 4ページ構成（Home / Signal Queue / Performance / Strategy Lab）
+  - Home: Kill Switch・Execution / Monitoring プロセス状態・エラーログ（SQLite）
+  - Signal Queue / Performance / Strategy Lab: DuckDB（`kabusys.duckdb`）を読み取り専用で参照
+
 - 各種レポート生成:
   - Pre-Market Report: `python -m kabusys.run_pre_market_report`（--save / --json）
   - Market Close Summary: `python -m kabusys.run_market_close_report`（--date / --save / --json）
@@ -322,6 +327,26 @@ python -m kabusys.run_monitoring
 
 ---
 
+### Streamlit 監視ダッシュボード
+
+**目的:** ブラウザでシステム状態・運用成績・シグナルを一覧監視するための GUI ツールです。  
+`MonitoringEngine` とは独立して起動します。
+
+```
+streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
+```
+
+| ページ | 主な確認内容 |
+|---|---|
+| **Home** | Kill Switch / Execution・Monitoring プロセス状態 / ドローダウン / 直近エラーイベント |
+| **Signal Queue** | 翌営業日の発注キュー（pending 件数）/ ポートフォリオ目標 / 直近シグナル |
+| **Performance** | エクイティカーブ / 保有ポジション / 取引履歴 |
+| **Strategy Lab** | 市場レジームスコア / AI スコアランキング / シグナル推移 |
+
+- Home は SQLite `monitoring.db`、その他3ページは DuckDB `kabusys.duckdb` を読み取り専用で参照します。
+
+---
+
 ### ザラ場監視 CLI
 
 **目的:** ザラ場中にターミナルからシステム状態をリアルタイム確認するためのツールです。  
@@ -474,9 +499,16 @@ touch data/stop_requested.flag
     - order_repository.py
     - reconciler.py
     - risk_manager.py
-  - monitoring/                    — Monitoring 関連（SystemMonitor, monitoring DB 初期化）
-    - monitoring_db.py
-    - system_monitor.py
+  - monitoring/                    — Monitoring 関連
+    - monitoring_db.py             — SQLite 永続化層（MonitoringDB / init_monitoring_db）
+    - monitoring_engine.py         — 各 Monitor を統括するポーリングエンジン
+    - system_monitor.py            — CPU / メモリ / プロセス監視
+    - streamlit_dashboard.py       — Streamlit Home ページ（SQLite 参照）
+    - dashboard_data.py            — 全ページ共通データロード関数（DuckDB / SQLite）
+    - pages/
+      - 2_Signal_Queue.py          — 発注キュー・シグナル確認
+      - 3_Performance.py           — エクイティカーブ・ポジション・取引履歴
+      - 4_Strategy_Lab.py          — 市場レジーム・AI スコア・シグナル推移
   - tools/
     - paper_verification_report.py
   - utils/
