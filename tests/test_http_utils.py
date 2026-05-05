@@ -121,12 +121,10 @@ def test_ssrf_handler_blocks_non_http_scheme():
         handler.redirect_request(req, None, 302, "Found", {}, "ftp://example.com/file")
 
 
-def test_ssrf_handler_resolves_relative_redirect():
-    """相対リダイレクトを絶対 URL に正規化してから検査することを確認する。"""
+def test_ssrf_handler_blocks_absolute_private_redirect():
+    """絶対 URL のプライベートアドレスへのリダイレクトをブロックすることを確認する。"""
     handler = SSRFBlockRedirectHandler()
     req = _make_req("https://example.com/start")
-    # 相対パスへのリダイレクトでプライベートIPに解決されないケースはそのまま通過
-    # ここでは相対パスが private IP に解決されるケースをテスト
     with pytest.raises(urllib.error.URLError, match="プライベートアドレス"):
         handler.redirect_request(req, None, 302, "Found", {}, "http://10.0.0.1/path")
 
