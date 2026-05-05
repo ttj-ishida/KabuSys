@@ -11,7 +11,10 @@ SSRF 対策の設計方針:
   - IPv6 ゾーンインデックス（fe80::1%eth0 等）は % 以降を除去して判定
   - リダイレクト時も同様の検証を適用（SSRFBlockRedirectHandler）
   - 相対リダイレクト URL は urljoin で絶対化してから検査
-  - DNS 解決失敗時は fail-open（非プライベートとみなして通過）— 意図的な設計
+  - DNS 解決失敗時のデフォルト挙動は fail-open（非プライベートとみなして通過）
+    → fail_closed=True で fail-closed に切り替え可能
+  - strict=True でブロック条件を「グローバル到達不可なものすべて」に強化
+    （unspecified / reserved / documentation / CGNAT 等も対象になる）
 """
 
 from __future__ import annotations
@@ -38,26 +41,41 @@ def validate_url_scheme(url: str) -> None:
         raise ValueError(f"許可されていないURLスキーム: {scheme!r} (url={url!r})")
 
 
-def is_private_host(hostname: str | None) -> bool:
+def is_private_host(
+    hostname: str | None,
+    *,
+    strict: bool = False,
+    fail_closed: bool = False,
+) -> bool:
     """ホスト/IP がプライベート・ループバック・リンクローカルかを判定する。
 
     IP アドレスは直接判定し、ホスト名は DNS 解決して全 A/AAAA レコードを検査する。
     IPv6 ゾーンインデックス（fe80::1%eth0）は % 以降を除去してから解析する。
-    DNS 解決失敗時は安全側（非プライベート）とみなして通過させる（fail-open）。
 
     Args:
-        hostname: 検査対象のホスト名または IP アドレス文字列。None の場合は True を返す。
+        hostname:    検査対象のホスト名または IP アドレス文字列。None の場合は True を返す。
+        strict:      True のとき「グローバル到達不可（not ip.is_global）」を基準にする。
+                     unspecified / reserved / documentation / CGNAT 等も追加でブロックされる。
+                     False（デフォルト）は private / loopback / link-local / multicast のみ。
+        fail_closed: True のとき DNS 解決失敗をブロック（True を返す）。
+                     False（デフォルト）は fail-open（解決失敗時は通過）。
 
     Returns:
-        プライベート/ループバック/リンクローカル/マルチキャストの場合 True。
+        ブロック対象と判定した場合 True。
     """
     if not hostname:
         return True
+
+    def _is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+        if strict:
+            return not ip.is_global
+        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+
     # ゾーンインデックスを除去して IP アドレスとして解析
     hostname_clean = hostname.split("%", 1)[0]
     try:
         ip = ipaddress.ip_address(hostname_clean)
-        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+        return _is_blocked(ip)
     except ValueError:
         pass
     # ホスト名の場合: DNS 解決して全 A/AAAA レコードを検査
@@ -65,10 +83,10 @@ def is_private_host(hostname: str | None) -> bool:
         for info in socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP):
             ip_str = info[4][0].split("%", 1)[0]
             ip = ipaddress.ip_address(ip_str)
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast:
+            if _is_blocked(ip):
                 return True
     except (OSError, ValueError):
-        pass
+        return fail_closed
     return False
 
 

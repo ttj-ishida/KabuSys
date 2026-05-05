@@ -86,6 +86,13 @@ def test_is_private_host_dns_failure_is_fail_open():
     assert result is False
 
 
+def test_is_private_host_dns_failure_fail_closed():
+    """fail_closed=True のとき DNS 解決失敗で True を返すことを確認する。"""
+    with patch("socket.getaddrinfo", side_effect=OSError("NXDOMAIN")):
+        result = is_private_host("nonexistent.invalid", fail_closed=True)
+    assert result is True
+
+
 def test_is_private_host_mixed_records_returns_true():
     """DNS が public/private 混在で返す場合は True を返すことを確認する。"""
     fake_addrs = [
@@ -94,6 +101,55 @@ def test_is_private_host_mixed_records_returns_true():
     ]
     with patch("socket.getaddrinfo", return_value=fake_addrs):
         assert is_private_host("mixed.example.com") is True
+
+
+# ---------------------------------------------------------------------------
+# is_private_host: strict モード
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "hostname",
+    [
+        "0.0.0.0",  # unspecified
+        "::",  # unspecified IPv6
+        "100.64.0.1",  # CGNAT
+        "192.0.2.1",  # documentation (TEST-NET-1)
+        "198.51.100.1",  # documentation (TEST-NET-2)
+        "203.0.113.1",  # documentation (TEST-NET-3)
+        "240.0.0.1",  # reserved
+    ],
+)
+def test_is_private_host_strict_blocks_non_global(hostname):
+    """strict=True のとき unspecified/CGNAT/documentation/reserved もブロックされることを確認する。"""
+    # デフォルトでは通過するが strict では拒否される
+    assert is_private_host(hostname, strict=True) is True
+
+
+def test_is_private_host_default_allows_cgnat():
+    """デフォルト（strict=False）では CGNAT（100.64.0.0/10）が通過することを確認する。
+
+    Python 3.11+ では is_private の定義が拡張されているが、
+    CGNAT は is_private=False のため strict=False では通過する。
+    strict=True（not ip.is_global）ではブロックされる。
+    """
+    assert is_private_host("100.64.0.1", strict=False) is False
+    assert is_private_host("100.64.0.1", strict=True) is True
+
+
+def test_is_private_host_strict_dns_fail_closed():
+    """strict=True かつ fail_closed=True のとき DNS 失敗でブロックされることを確認する。"""
+    with patch("socket.getaddrinfo", side_effect=OSError("NXDOMAIN")):
+        assert (
+            is_private_host("nonexistent.invalid", strict=True, fail_closed=True)
+            is True
+        )
+
+
+def test_is_private_host_strict_public_ip_passes():
+    """strict=True でもグローバル IP はブロックされないことを確認する。"""
+    assert is_private_host("8.8.8.8", strict=True) is False
+    assert is_private_host("1.1.1.1", strict=True) is False
 
 
 # ---------------------------------------------------------------------------
