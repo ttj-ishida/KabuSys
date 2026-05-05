@@ -104,9 +104,7 @@ class _TDnetTableParser(HTMLParser):
             self._current_data = {}
         elif tag == "td" and self._in_main_table:
             cls_str = attrs_dict.get("class", "")
-            sem = next(
-                (c for c in cls_str.split() if c in self._TARGET_CLASSES), None
-            )
+            sem = next((c for c in cls_str.split() if c in self._TARGET_CLASSES), None)
             if sem:
                 self._in_td = True
                 self._current_sem_class = sem
