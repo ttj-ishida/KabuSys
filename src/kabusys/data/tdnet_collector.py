@@ -25,10 +25,10 @@ from typing import TypedDict
 
 import duckdb
 
-from kabusys.data.news_collector import (
-    _SSRFBlockRedirectHandler,
-    _is_private_host,
-    _validate_url_scheme,
+from kabusys.utils.http import (
+    SSRFBlockRedirectHandler as _SSRFBlockRedirectHandler,
+    is_private_host as _is_private_host,
+    validate_url_scheme as _validate_url_scheme,
 )
 
 logger = logging.getLogger(__name__)
