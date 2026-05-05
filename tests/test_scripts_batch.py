@@ -167,3 +167,72 @@ def test_portfolio_construction_no_signals_exits_0():
     ):
         mock_settings.return_value.duckdb_path = Path("/fake.duckdb")
         run_portfolio_construction.main()  # SystemExit が起きないこと
+
+
+# ---------- run_tdnet_collection ----------
+
+
+def test_run_tdnet_collection_skipped_when_disabled():
+    """ENABLE_TDNET=false のとき run_tdnet_collection を呼ばずにリターンする。"""
+    import run_tdnet_collection
+
+    with (
+        patch("run_tdnet_collection.Settings") as mock_settings,
+        patch("run_tdnet_collection.run_tdnet_collection") as mock_fn,
+    ):
+        mock_settings.return_value.enable_tdnet = False
+        run_tdnet_collection.main()
+
+    mock_fn.assert_not_called()
+
+
+def test_run_tdnet_collection_runs_when_enabled():
+    """ENABLE_TDNET=true のとき run_tdnet_collection が実行される。"""
+    import run_tdnet_collection
+
+    with (
+        patch("run_tdnet_collection.Settings") as mock_settings,
+        patch("run_tdnet_collection.duckdb.connect"),
+        patch("run_tdnet_collection.run_tdnet_collection", return_value=3) as mock_fn,
+    ):
+        mock_settings.return_value.enable_tdnet = True
+        mock_settings.return_value.duckdb_path = Path("/fake.duckdb")
+        run_tdnet_collection.main()
+
+    mock_fn.assert_called_once()
+
+
+# ---------- run_disclosure_classification ----------
+
+
+def test_run_disclosure_classification_skipped_when_disabled():
+    """ENABLE_TDNET=false のとき run_disclosure_classification を呼ばずにリターンする。"""
+    import run_disclosure_classification
+
+    with (
+        patch("run_disclosure_classification.Settings") as mock_settings,
+        patch("run_disclosure_classification.run_disclosure_classification") as mock_fn,
+    ):
+        mock_settings.return_value.enable_tdnet = False
+        run_disclosure_classification.main()
+
+    mock_fn.assert_not_called()
+
+
+def test_run_disclosure_classification_runs_when_enabled():
+    """ENABLE_TDNET=true のとき run_disclosure_classification が実行される。"""
+    import run_disclosure_classification
+
+    with (
+        patch("run_disclosure_classification.Settings") as mock_settings,
+        patch("run_disclosure_classification.duckdb.connect"),
+        patch(
+            "run_disclosure_classification.run_disclosure_classification",
+            return_value=2,
+        ) as mock_fn,
+    ):
+        mock_settings.return_value.enable_tdnet = True
+        mock_settings.return_value.duckdb_path = Path("/fake.duckdb")
+        run_disclosure_classification.main()
+
+    mock_fn.assert_called_once()
