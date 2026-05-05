@@ -123,9 +123,7 @@ def _fetch_edinet_json(url: str, api_key: str, timeout: int = 30) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def _parse_edinet_response(
-    raw: bytes, target_date: date
-) -> list[RawDisclosure]:
+def _parse_edinet_response(raw: bytes, target_date: date) -> list[RawDisclosure]:
     """EDINET API レスポンスをパースして RawDisclosure リストを返す。
 
     - withdrawalStatus != "0" の取り下げ済み書類は除外する
@@ -259,7 +257,9 @@ def run_edinet_collection(
     if target_date is None:
         target_date = date_cls.today()
 
-    disclosures = fetch_edinet_disclosures(target_date, api_key=api_key, timeout=timeout)
+    disclosures = fetch_edinet_disclosures(
+        target_date, api_key=api_key, timeout=timeout
+    )
     saved = save_raw_disclosures(conn, disclosures)
     logger.info("run_edinet_collection: date=%s saved=%d", target_date, saved)
     return saved
