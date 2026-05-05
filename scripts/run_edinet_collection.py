@@ -28,6 +28,12 @@ def main() -> None:
             "EDINET 収集はオプション機能です（ENABLE_EDINET=false）。スキップします。"
         )
         return
+    if not settings.edinet_api_key:
+        logger.error(
+            "ENABLE_EDINET=true ですが EDINET_API_KEY が未設定です。"
+            ".env に EDINET_API_KEY を設定してください。"
+        )
+        sys.exit(1)
     conn = duckdb.connect(str(settings.duckdb_path))
     try:
         saved = run_edinet_collection(conn, api_key=settings.edinet_api_key)

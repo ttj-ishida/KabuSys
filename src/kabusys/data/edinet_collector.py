@@ -15,12 +15,15 @@ raw_disclosures テーブルに保存する。
   120: 有価証券報告書
   130: 四半期報告書
   140: 臨時報告書
+  150: 訂正臨時報告書
   170: 大量保有報告書
+  171: 大量保有報告書（特例対象）
+  172: 変更報告書
 
 EDINET API v2 エンドポイント:
-  GET https://disclosure.edinet-api.go.jp/api/v2/documents.json
-  パラメータ: date=YYYY-MM-DD, type=2
-  認証: Ocp-Apim-Subscription-Key ヘッダー
+  GET https://api.edinet-fsa.go.jp/api/v2/documents.json
+  パラメータ: date=YYYY-MM-DD, type=2, Subscription-Key=<api_key>
+  認証: Subscription-Key クエリパラメータ
 """
 
 from __future__ import annotations
@@ -67,6 +70,9 @@ _TARGET_DOC_TYPES: frozenset[str] = frozenset(
     }
 )
 
+# submitDateTime のパース順序（秒付き → 分まで → ISO形式）
+_SUBMIT_DT_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M")
+
 
 # ---------------------------------------------------------------------------
 # 型
@@ -102,13 +108,7 @@ def _fetch_edinet_json(url: str, api_key: str, timeout: int = 30) -> bytes:
     if not parsed.hostname or _is_private_host(parsed.hostname):
         raise ValueError(f"許可されていないホスト: url={url!r}")
 
-    headers: dict[str, str] = {
-        "Accept": "application/json",
-    }
-    if api_key:
-        headers["Ocp-Apim-Subscription-Key"] = api_key
-
-    req = urllib.request.Request(url, headers=headers)
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
     opener = urllib.request.build_opener(_SSRFBlockRedirectHandler)
     with opener.open(req, timeout=timeout) as resp:
         raw = resp.read(MAX_RESPONSE_BYTES + 1)
@@ -116,6 +116,23 @@ def _fetch_edinet_json(url: str, api_key: str, timeout: int = 30) -> bytes:
         logger.warning("_fetch_edinet_json: レスポンスサイズ超過 url=%s", url)
         return b""
     return raw
+
+
+def _parse_submit_datetime(submit_dt_str: str, target_date: date) -> datetime:
+    """submitDateTime 文字列を datetime に変換する。
+
+    複数フォーマットを順に試み、すべて失敗した場合は target_date の 0:00 を返す。
+    """
+    for fmt in _SUBMIT_DT_FORMATS:
+        try:
+            return datetime.strptime(submit_dt_str, fmt)
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(submit_dt_str)
+    except ValueError:
+        pass
+    return datetime.combine(target_date, datetime.min.time())
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +153,7 @@ def _parse_edinet_response(raw: bytes, target_date: date) -> list[RawDisclosure]
         logger.exception("_parse_edinet_response: JSON デコード失敗")
         return []
 
-    status = data.get("metadata", {}).get("status", "")
+    status = str(data.get("metadata", {}).get("status", ""))
     if status != "200":
         logger.warning("_parse_edinet_response: API ステータス異常 status=%s", status)
         return []
@@ -158,18 +175,16 @@ def _parse_edinet_response(raw: bytes, target_date: date) -> list[RawDisclosure]
             continue
 
         submit_dt_str: str = doc.get("submitDateTime", "")
-        try:
-            disclosed_at = datetime.strptime(submit_dt_str, "%Y-%m-%d %H:%M")
-        except ValueError:
-            disclosed_at = datetime.combine(target_date, datetime.min.time())
+        disclosed_at = _parse_submit_datetime(submit_dt_str, target_date)
 
         doc_description: str = doc.get("docDescription", "")
         filer_name: str = doc.get("filerName", "")
         pdf_flag: str = doc.get("pdfFlag", "0")
 
-        document_url = EDINET_DOCUMENT_URL_TEMPLATE.format(doc_id=doc_id)
-        if pdf_flag == "1":
-            document_url += "?type=2"
+        file_type = "2" if pdf_flag == "1" else "1"
+        document_url = (
+            f"{EDINET_DOCUMENT_URL_TEMPLATE.format(doc_id=doc_id)}?type={file_type}"
+        )
 
         disclosures.append(
             RawDisclosure(
@@ -201,20 +216,30 @@ def fetch_edinet_disclosures(
 
     Args:
         target_date: 収集対象日。
-        api_key:     EDINET API サブスクリプションキー。
+        api_key:     EDINET API サブスクリプションキー（Subscription-Key）。
         timeout:     HTTP タイムアウト秒数。
 
     Returns:
         取得した RawDisclosure リスト。API エラー時は空リスト。
     """
     date_str = target_date.strftime("%Y-%m-%d")
-    url = f"{EDINET_DOCUMENTS_URL}?date={date_str}&type=2"
-    logger.info("fetch_edinet_disclosures: url=%s", url)
+    params: dict[str, str] = {"date": date_str, "type": "2"}
+    if api_key:
+        params["Subscription-Key"] = api_key
+    url = f"{EDINET_DOCUMENTS_URL}?{urllib.parse.urlencode(params)}"
+    logger.info("fetch_edinet_disclosures: date=%s", date_str)
 
     try:
         raw = _fetch_edinet_json(url, api_key=api_key, timeout=timeout)
     except urllib.error.HTTPError as e:
-        logger.warning("fetch_edinet_disclosures: HTTPエラー code=%d", e.code)
+        if e.code in (401, 403):
+            logger.error(
+                "fetch_edinet_disclosures: EDINET API 認証エラー (HTTP %d)。"
+                "EDINET_API_KEY を確認してください。",
+                e.code,
+            )
+        else:
+            logger.warning("fetch_edinet_disclosures: HTTPエラー code=%d", e.code)
         return []
     except Exception:
         logger.exception("fetch_edinet_disclosures: 取得失敗")

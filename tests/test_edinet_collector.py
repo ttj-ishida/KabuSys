@@ -10,6 +10,7 @@ import pytest
 
 from kabusys.data.edinet_collector import (
     _parse_edinet_response,
+    _parse_submit_datetime,
     fetch_edinet_disclosures,
     run_edinet_collection,
 )
@@ -40,6 +41,35 @@ def disc_db():
     conn.execute(_DISCLOSURE_DDL)
     yield conn
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# _parse_submit_datetime テスト
+# ---------------------------------------------------------------------------
+
+
+def test_parse_submit_datetime_minutes():
+    """ "%Y-%m-%d %H:%M" フォーマットを正しくパースする。"""
+    result = _parse_submit_datetime("2024-09-01 15:30", date(2024, 9, 1))
+    assert result == datetime(2024, 9, 1, 15, 30)
+
+
+def test_parse_submit_datetime_seconds():
+    """ "%Y-%m-%d %H:%M:%S" フォーマットを正しくパースする。"""
+    result = _parse_submit_datetime("2024-09-01 15:30:45", date(2024, 9, 1))
+    assert result == datetime(2024, 9, 1, 15, 30, 45)
+
+
+def test_parse_submit_datetime_iso():
+    """ISO 8601 形式を正しくパースする。"""
+    result = _parse_submit_datetime("2024-09-01T15:30:00", date(2024, 9, 1))
+    assert result == datetime(2024, 9, 1, 15, 30, 0)
+
+
+def test_parse_submit_datetime_fallback():
+    """不正フォーマットの場合、target_date の 0:00 にフォールバックする。"""
+    result = _parse_submit_datetime("invalid-datetime", date(2024, 9, 1))
+    assert result == datetime(2024, 9, 1, 0, 0, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +155,7 @@ def test_parse_edinet_response_code_is_none():
     assert all(d["code"] is None for d in result)
 
 
-def test_parse_edinet_response_pdf_url_has_type2():
+def test_parse_edinet_response_pdf_url_type2():
     """pdfFlag=1 の書類の document_url に ?type=2 が付くことを確認する。"""
     raw = json.dumps(_SAMPLE_RESPONSE).encode("utf-8")
     result = _parse_edinet_response(raw, target_date=date(2024, 9, 1))
@@ -133,12 +163,12 @@ def test_parse_edinet_response_pdf_url_has_type2():
     assert "?type=2" in abcd["document_url"]
 
 
-def test_parse_edinet_response_no_pdf_url_plain():
-    """pdfFlag=0 の書類の document_url に ?type=2 が付かないことを確認する。"""
+def test_parse_edinet_response_no_pdf_url_type1():
+    """pdfFlag=0 の書類の document_url に ?type=1 が付くことを確認する。"""
     raw = json.dumps(_SAMPLE_RESPONSE).encode("utf-8")
     result = _parse_edinet_response(raw, target_date=date(2024, 9, 1))
     wxyz = next(d for d in result if d["id"] == "S100WXYZ")
-    assert "?type=2" not in wxyz["document_url"]
+    assert "?type=1" in wxyz["document_url"]
 
 
 def test_parse_edinet_response_api_status_not_200():
@@ -147,6 +177,30 @@ def test_parse_edinet_response_api_status_not_200():
     raw = json.dumps(payload).encode("utf-8")
     result = _parse_edinet_response(raw, target_date=date(2024, 9, 1))
     assert result == []
+
+
+def test_parse_edinet_response_api_status_int_200():
+    """API ステータスが int 200 を返した場合も正常処理されることを確認する。"""
+    payload = {
+        "metadata": {"status": 200},
+        "results": [
+            {
+                "docID": "S100INT",
+                "edinetCode": "E00001",
+                "docType": "120",
+                "filerName": "テスト会社",
+                "submitDateTime": "2024-09-01 15:00",
+                "docDescription": "有価証券報告書",
+                "pdfFlag": "0",
+                "xbrlFlag": "0",
+                "withdrawalStatus": "0",
+            }
+        ],
+    }
+    raw = json.dumps(payload).encode("utf-8")
+    result = _parse_edinet_response(raw, target_date=date(2024, 9, 1))
+    assert len(result) == 1
+    assert result[0]["id"] == "S100INT"
 
 
 def test_parse_edinet_response_invalid_json():
@@ -177,6 +231,67 @@ def test_parse_edinet_response_fallback_datetime():
     result = _parse_edinet_response(raw, target_date=date(2024, 9, 1))
     assert len(result) == 1
     assert result[0]["disclosed_at"] == datetime(2024, 9, 1, 0, 0, 0)
+
+
+def test_parse_edinet_response_submit_datetime_with_seconds():
+    """submitDateTime に秒が含まれる場合も正しくパースされることを確認する。"""
+    payload = {
+        "metadata": {"status": "200"},
+        "results": [
+            {
+                "docID": "S100SEC",
+                "edinetCode": "E00001",
+                "docType": "150",
+                "filerName": "テスト会社",
+                "submitDateTime": "2024-09-01 09:15:30",
+                "docDescription": "訂正臨時報告書",
+                "pdfFlag": "0",
+                "xbrlFlag": "0",
+                "withdrawalStatus": "0",
+            }
+        ],
+    }
+    raw = json.dumps(payload).encode("utf-8")
+    result = _parse_edinet_response(raw, target_date=date(2024, 9, 1))
+    assert len(result) == 1
+    assert result[0]["disclosed_at"] == datetime(2024, 9, 1, 9, 15, 30)
+
+
+def test_parse_edinet_response_target_doc_types_171_172():
+    """対象種別 171/172 が収集されることを確認する。"""
+    payload = {
+        "metadata": {"status": "200"},
+        "results": [
+            {
+                "docID": "S100171",
+                "edinetCode": "E00001",
+                "docType": "171",
+                "filerName": "会社A",
+                "submitDateTime": "2024-09-01 10:00",
+                "docDescription": "大量保有報告書（特例対象）",
+                "pdfFlag": "0",
+                "xbrlFlag": "0",
+                "withdrawalStatus": "0",
+            },
+            {
+                "docID": "S100172",
+                "edinetCode": "E00002",
+                "docType": "172",
+                "filerName": "会社B",
+                "submitDateTime": "2024-09-01 11:00",
+                "docDescription": "変更報告書",
+                "pdfFlag": "0",
+                "xbrlFlag": "0",
+                "withdrawalStatus": "0",
+            },
+        ],
+    }
+    raw = json.dumps(payload).encode("utf-8")
+    result = _parse_edinet_response(raw, target_date=date(2024, 9, 1))
+    assert len(result) == 2
+    ids = {d["id"] for d in result}
+    assert "S100171" in ids
+    assert "S100172" in ids
 
 
 def test_parse_edinet_response_empty_results():
@@ -240,30 +355,85 @@ def test_fetch_edinet_disclosures_returns_list(monkeypatch):
     assert all(d["source"] == "edinet" for d in result)
 
 
-def test_fetch_edinet_disclosures_http_error_returns_empty(monkeypatch):
-    """HTTPError が発生した場合、空リストを返すことを確認する。"""
-    import urllib.error
+def test_fetch_edinet_disclosures_subscription_key_in_url(monkeypatch):
+    """fetch_edinet_disclosures が Subscription-Key をクエリパラメータに含めることを確認する。"""
     from kabusys.data import edinet_collector
 
-    def raise_http_error(url, api_key, timeout=30):
+    captured_urls: list[str] = []
+
+    def fake_fetch(url, api_key, timeout=30):
+        captured_urls.append(url)
+        return json.dumps({"metadata": {"status": "200"}, "results": []}).encode(
+            "utf-8"
+        )
+
+    monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", fake_fetch)
+    fetch_edinet_disclosures(date(2024, 9, 1), api_key="my-secret-key")
+
+    assert len(captured_urls) == 1
+    assert "Subscription-Key=my-secret-key" in captured_urls[0]
+
+
+def test_fetch_edinet_disclosures_no_api_key_no_subscription_param(monkeypatch):
+    """api_key が空のとき Subscription-Key クエリパラメータが含まれないことを確認する。"""
+    from kabusys.data import edinet_collector
+
+    captured_urls: list[str] = []
+
+    def fake_fetch(url, api_key, timeout=30):
+        captured_urls.append(url)
+        return json.dumps({"metadata": {"status": "200"}, "results": []}).encode(
+            "utf-8"
+        )
+
+    monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", fake_fetch)
+    fetch_edinet_disclosures(date(2024, 9, 1), api_key="")
+
+    assert "Subscription-Key" not in captured_urls[0]
+
+
+def test_fetch_edinet_disclosures_http_401_logs_error(monkeypatch, caplog):
+    """HTTP 401 が発生した場合、認証エラーログを出して空リストを返すことを確認する。"""
+    import urllib.error
+    from kabusys.data import edinet_collector
+    import logging
+
+    def raise_401(url, api_key, timeout=30):
+        raise urllib.error.HTTPError(url, 401, "Unauthorized", {}, None)
+
+    monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", raise_401)
+    with caplog.at_level(logging.ERROR):
+        result = fetch_edinet_disclosures(date(2024, 9, 1), api_key="bad-key")
+
+    assert result == []
+    assert "認証エラー" in caplog.text
+
+
+def test_fetch_edinet_disclosures_http_403_logs_error(monkeypatch, caplog):
+    """HTTP 403 が発生した場合、認証エラーログを出して空リストを返すことを確認する。"""
+    import urllib.error
+    from kabusys.data import edinet_collector
+    import logging
+
+    def raise_403(url, api_key, timeout=30):
         raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
 
-    monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", raise_http_error)
-    result = fetch_edinet_disclosures(date(2024, 9, 1))
+    monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", raise_403)
+    with caplog.at_level(logging.ERROR):
+        result = fetch_edinet_disclosures(date(2024, 9, 1))
+
     assert result == []
+    assert "認証エラー" in caplog.text
 
 
 def test_fetch_edinet_disclosures_generic_error_returns_empty(monkeypatch):
     """一般的な例外が発生した場合、空リストを返すことを確認する。"""
     from kabusys.data import edinet_collector
 
-    monkeypatch.setattr(
-        edinet_collector,
-        "_fetch_edinet_json",
-        lambda url, api_key, timeout=30: (_ for _ in ()).throw(
-            RuntimeError("network error")
-        ),
-    )
+    def raise_error(url, api_key, timeout=30):
+        raise RuntimeError("network error")
+
+    monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", raise_error)
     result = fetch_edinet_disclosures(date(2024, 9, 1))
     assert result == []
 

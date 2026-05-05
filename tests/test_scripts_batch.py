@@ -270,3 +270,20 @@ def test_run_edinet_collection_runs_when_enabled():
         run_edinet_collection.main()
 
     mock_fn.assert_called_once()
+
+
+def test_run_edinet_collection_exits_when_api_key_missing():
+    """ENABLE_EDINET=true かつ EDINET_API_KEY 未設定のとき sys.exit(1) すること。"""
+    import run_edinet_collection
+
+    with (
+        patch("run_edinet_collection.Settings") as mock_settings,
+        patch("run_edinet_collection.run_edinet_collection") as mock_fn,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_settings.return_value.enable_edinet = True
+        mock_settings.return_value.edinet_api_key = ""
+        run_edinet_collection.main()
+
+    assert exc_info.value.code == 1
+    mock_fn.assert_not_called()
