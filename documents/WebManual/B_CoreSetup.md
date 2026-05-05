@@ -84,6 +84,8 @@ python -m kabusys.config_setup
 | `LINE_NOTIFY_ENABLED` | LINE 通知の有効化 | `false` |
 | `ENABLE_AI_SENTIMENT` | AI センチメントの有効化 | `false` |
 | `ENABLE_TDNET` | TDnet 適時開示収集の有効化 | `false` |
+| `ENABLE_EDINET` | EDINET 法定開示収集の有効化 | `false` |
+| `EDINET_API_KEY` | EDINET API サブスクリプションキー | （空） |
 | `LOG_LEVEL` | ログの詳細レベル | `INFO` |
 
 ### B-1-4. 設定の検証
@@ -157,6 +159,7 @@ powershell -File scripts\setup_task_scheduler.ps1
 |---|---|---|
 | 15:30 | 市場データ更新 | `scripts/run_data_update.py` |
 | 15:35 | TDnet 適時開示収集（オプション） | `scripts/run_tdnet_collection.py` |
+| 15:40 | EDINET 法定開示収集（オプション） | `scripts/run_edinet_collection.py` |
 | 16:00 | 特徴量計算 | `scripts/run_feature_gen.py` |
 | 17:00 | 開示イベント分類（オプション） | `scripts/run_disclosure_classification.py` |
 | 18:00 | AI 分析（オプション） | `scripts/run_ai_analysis.py` |
@@ -166,6 +169,8 @@ powershell -File scripts\setup_task_scheduler.ps1
 | 09:00 | Monitoring 起動 | `python -m kabusys.run_monitoring` |
 
 > TDnet 収集・開示イベント分類は `ENABLE_TDNET=false`（デフォルト）のときスキップされます。有効化手順は [B-2-3](#b-2-3-tdnet-適時開示収集の設定) を参照してください。
+
+> EDINET 法定開示収集は `ENABLE_EDINET=false`（デフォルト）のときスキップされます。有効化手順は [B-2-4](#b-2-4-edinet-法定開示収集の設定) を参照してください。
 
 > 詳細は `documents/10_Runtime/RuntimeJobSchedule.md` を参照してください。
 
@@ -233,6 +238,36 @@ ENABLE_TDNET=true
 
 > ℹ️ `ENABLE_TDNET=false`（デフォルト）の場合、両ジョブは即座にスキップされ Core 機能（自動売買）に影響しません。
 
+### B-2-4. EDINET 法定開示収集の設定
+
+EDINET（Electronic Disclosure for Investors' NETwork）API から有価証券報告書・四半期報告書・大量保有報告書などの法定開示を自動収集します。TDnet では取得できない開示書類の補完層として機能します。
+
+**必要なもの:**
+- EDINET API サブスクリプションキー（無料、要登録）
+
+**取得先:** [https://disclosure2.edinet-fsa.go.jp/](https://disclosure2.edinet-fsa.go.jp/)
+
+**`.env` に以下を追加:**
+
+```env
+ENABLE_EDINET=true
+EDINET_API_KEY=your_subscription_key
+```
+
+有効化すると以下のジョブが毎日自動実行されます。
+
+| 時刻 | 処理 | 保存先 |
+|---|---|---|
+| 15:40 | EDINET から当日の法定開示一覧を取得・保存 | `raw_disclosures`（source='edinet'） |
+
+**収集対象書類種別:**
+- 有価証券報告書（120）
+- 四半期報告書（130）
+- 臨時報告書（140）/ 訂正臨時報告書（150）
+- 大量保有報告書（170/171/172）
+
+> ℹ️ `ENABLE_EDINET=false`（デフォルト）の場合、ジョブは即座にスキップされ Core 機能（自動売買）に影響しません。`ENABLE_EDINET=true` かつ `EDINET_API_KEY` 未設定の場合はエラーログを出力してジョブが終了します。
+
 ---
 
 ## B-3. 導入完了チェックリスト
@@ -258,6 +293,7 @@ ENABLE_TDNET=true
 - [ ] LINE 通知: テストメッセージが LINE に届く
 - [ ] AI センチメント: `ENABLE_AI_SENTIMENT=true` で AI 分析バッチが正常完了する
 - [ ] TDnet 収集: `ENABLE_TDNET=true` で `run_tdnet_collection.py` が正常完了する
+- [ ] EDINET 収集: `ENABLE_EDINET=true` で `run_edinet_collection.py` が正常完了する
 
 ---
 

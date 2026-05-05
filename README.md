@@ -77,6 +77,11 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 - PAPER_TRADING_SQLITE_PATH（paper_trading の場合の専用 DB、デフォルト `data/paper_trading.db`）
 - LOG_LEVEL（`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`）
 - LINE_CHANNEL_ACCESS_TOKEN, LINE_USER_ID（任意; アラート用）
+- ENABLE_AI_SENTIMENT（`true` で AI ニュースセンチメント分析を有効化; デフォルト `false`）
+- OPENAI_API_KEY（ENABLE_AI_SENTIMENT=true 時に必須）
+- ENABLE_TDNET（`true` で TDnet 適時開示収集を有効化; デフォルト `false`）
+- ENABLE_EDINET（`true` で EDINET 法定開示収集を有効化; デフォルト `false`）
+- EDINET_API_KEY（ENABLE_EDINET=true 時に必須; EDINET API サブスクリプションキー）
 
 その他:
 - MONITOR_POLL_INTERVAL（run_monitoring のポーリング間隔、秒; デフォルト 60）

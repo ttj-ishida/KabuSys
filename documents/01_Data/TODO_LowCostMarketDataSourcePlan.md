@@ -90,19 +90,22 @@
 
 実装: Issue #198 で `disclosure_classification_job`（17:00）を実装する
 
-### Phase 4: EDINET を補完層として組み込む（設計完了・実装は Issue #199）
+### Phase 4: EDINET を補完層として組み込む（✅ 実装完了 Issue #199 / PR #253）
 
 - [x] EDINET API で補完すべき開示種別を定義する（初期対象）
-  - 有価証券報告書
-  - 四半期報告書
-  - 大量保有報告書
-  - 臨時報告書
+  - 有価証券報告書（120）
+  - 四半期報告書（130）
+  - 臨時報告書（140）・訂正臨時報告書（150）
+  - 大量保有報告書（170/171/172）
 - [x] TDnet と EDINET の重複・優先順位ルールを決める
   → `raw_disclosures.source` カラム（'tdnet' / 'edinet'）で区別。TDnet が主、EDINET が補完
 - [x] 同一イベントを二重評価しないための統合キー設計を行う
   → `raw_disclosures.id` は各情報源固有の ID（TDnet: 開示番号 / EDINET: docID）を使用。重複の心配なし
-
-実装: Issue #199 で `edinet_collection_job`（15:40）を実装する
+- [x] `edinet_collection_job`（15:40）を実装する（`scripts/run_edinet_collection.py`）
+  → ENABLE_EDINET=true でのみ動作するオプション機能
+  → 認証: `Subscription-Key` クエリパラメータ（EDINET_API_KEY）
+  → エンドポイント: `https://api.edinet-fsa.go.jp/api/v2/documents.json`
+  → ON CONFLICT DO NOTHING による冪等な挿入
 
 ### Phase 5: レポートと運用UIへ反映する
 

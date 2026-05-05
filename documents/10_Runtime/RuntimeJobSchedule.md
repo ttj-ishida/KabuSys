@@ -320,7 +320,7 @@
   ------- ------------------------------------ -----------------------------------------------
   15:30   KabuSys_DataUpdate                   scripts\run_data_update.py
   15:35   KabuSys_TDnetCollection              scripts\run_tdnet_collection.py        ※ オプション (ENABLE_TDNET=true 時のみ実行)
-  15:40   KabuSys_EdinetCollection             scripts\run_edinet_collection.py       ※ Issue #199
+  15:40   KabuSys_EdinetCollection             scripts\run_edinet_collection.py       ※ オプション (ENABLE_EDINET=true 時のみ実行)
   16:00   KabuSys_FeatureGen                   scripts\run_feature_gen.py
   17:00   KabuSys_DisclosureClassification     scripts\run_disclosure_classification.py ※ オプション (ENABLE_TDNET=true 時のみ実行)
   18:00   KabuSys_AiAnalysis                   scripts\run_ai_analysis.py
