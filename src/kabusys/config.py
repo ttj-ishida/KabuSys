@@ -182,6 +182,15 @@ class Settings:
         """
         return _parse_bool_env("ENABLE_AI_SENTIMENT", default=False)
 
+    @property
+    def enable_tdnet(self) -> bool:
+        """TDnet 適時開示収集機能の有効フラグ（ENABLE_TDNET、デフォルト: False）。
+
+        "1" / "true" / "yes" / "on" のみ True。デフォルト無効。
+        False の場合、tdnet_collection / disclosure_classification ジョブはスキップされる。
+        """
+        return _parse_bool_env("ENABLE_TDNET", default=False)
+
     # --- LINE Messaging API ---
     @property
     def line_channel_access_token(self) -> str:
