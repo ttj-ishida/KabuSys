@@ -279,7 +279,7 @@ def _check_strategy_config_content(data: object) -> None:
             if not isinstance(v, bool) and isinstance(v, (int, float)) and float(v) >= 0
         ]
         if valid_vals and sum(valid_vals) == 0:
-            _error("strategy_config.yaml: strategy.weights の合計が 0 以下です。")
+            _error("strategy_config.yaml: strategy.weights の合計が 0 です。")
 
     # threshold
     t = s.get("threshold")
