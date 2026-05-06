@@ -1,15 +1,39 @@
 # strategy_config.yaml — 売買戦略パラメータ
+# 変更後は次回 run_strategy_signal.py 実行から反映される（再起動不要）
+
 strategy:
-  name: momentum_strategy
-  universe_size: 500
-  rebalance_frequency: daily
+  # ファクター重み（合計が 1.0 でない場合は自動正規化される）
+  weights:
+    momentum: 0.40
+    value: 0.20
+    volatility: 0.15
+    liquidity: 0.15
+    news: 0.10
+  # BUY シグナル生成の final_score 閾値
+  threshold: 0.60
+  # ストップロス閾値（終値 / avg_price - 1 がこれ以下で SELL）
+  stop_loss_rate: -0.08
+  # 最低保有営業日数（スコア低下による SELL を抑制する日数）
+  min_holding_days: 5
+  # 最大保有営業日数（これを超えると time_exit SELL を発動）
+  max_holding_days: 60
+  # トレーリングストップの ATR 乗数
+  trailing_stop_atr_mult: 2.0
+  # 同一銘柄の再エントリー禁止期間（営業日数）
+  reentry_cooldown_days: 5
+  # ギャップアップ閾値（この比率を超えた寄り高は BUY 抑制）
+  gap_up_threshold: 0.05
+  # ギャップダウン閾値（この比率以下の寄り安は BUY 抑制）
+  gap_down_threshold: -0.03
 
-factors:
-  momentum_20_weight: 0.5
-  momentum_60_weight: 0.3
-  volume_factor_weight: 0.2
-
-ai_overlay:
-  enabled: true
-  # AIオーバーレイの影響度上限（RiskManagement.md §6 に準拠）
-  max_influence: 0.10
+value_score:
+  # バリュースコア計算の重み（合計 1.0）
+  weights:
+    per: 0.50
+    pbr: 0.30
+    div_yield: 0.20
+  # 正規化基準値
+  normalization:
+    per_mid: 20.0
+    pbr_mid: 1.5
+    div_yield_max: 3.0

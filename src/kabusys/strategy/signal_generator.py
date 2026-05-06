@@ -80,6 +80,129 @@ _REENTRY_COOLDOWN_DAYS: int = (
 
 
 # ---------------------------------------------------------------------------
+# 設定ファイル読み込み
+# ---------------------------------------------------------------------------
+
+_STRATEGY_CONFIG_DEFAULTS: dict = {
+    "weights": {k: v for k, v in _DEFAULT_WEIGHTS.items()},
+    "threshold": _DEFAULT_THRESHOLD,
+    "stop_loss_rate": _STOP_LOSS_RATE,
+    "gap_up_threshold": _GAP_UP_THRESHOLD,
+    "gap_down_threshold": _GAP_DOWN_THRESHOLD,
+    "min_holding_days": _MIN_HOLDING_DAYS,
+    "max_holding_days": _MAX_HOLDING_DAYS,
+    "trailing_stop_atr_mult": _TRAILING_STOP_ATR_MULT,
+    "reentry_cooldown_days": _REENTRY_COOLDOWN_DAYS,
+}
+
+_STRATEGY_CONFIG_PATH = (
+    Path(__file__).resolve().parents[3] / "config" / "strategy_config.yaml"
+)
+
+
+def _load_strategy_config() -> dict:
+    """config/strategy_config.yaml から戦略パラメータを読み込む。
+
+    ファイルが存在しない・読み込み失敗の場合はデフォルト値にフォールバック。
+    各キーは個別に検証し、不正値のみデフォルトで補完する。
+
+    Returns:
+        {
+            "weights": dict[str, float],
+            "threshold": float,
+            "stop_loss_rate": float,
+            "gap_up_threshold": float,
+            "gap_down_threshold": float,
+            "min_holding_days": int,
+            "max_holding_days": int,
+            "trailing_stop_atr_mult": float,
+            "reentry_cooldown_days": int,
+        }
+    """
+    import yaml  # PyYAML（既存の依存パッケージ）
+
+    def _defaults() -> dict:
+        d = dict(_STRATEGY_CONFIG_DEFAULTS)
+        d["weights"] = dict(_STRATEGY_CONFIG_DEFAULTS["weights"])
+        return d
+
+    if not _STRATEGY_CONFIG_PATH.exists():
+        logger.debug(
+            "strategy_config.yaml が見つかりません。デフォルトを使用します: %s",
+            _STRATEGY_CONFIG_PATH,
+        )
+        return _defaults()
+
+    try:
+        with open(_STRATEGY_CONFIG_PATH, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except Exception as exc:
+        logger.warning("strategy_config.yaml 読み込み失敗: %s (デフォルトを使用)", exc)
+        return _defaults()
+
+    if not isinstance(data, dict):
+        logger.warning(
+            "strategy_config.yaml のトップレベルが dict ではありません。デフォルトを使用します"
+        )
+        return _defaults()
+
+    result = _defaults()
+    s = data.get("strategy")
+    if not isinstance(s, dict):
+        return result
+
+    # weights — 既知キーのみ受け付け、負値は無視、合計 0 以下ならデフォルト
+    raw_w = s.get("weights")
+    if isinstance(raw_w, dict):
+        merged: dict[str, float] = {}
+        for key in result["weights"]:
+            v = raw_w.get(key)
+            if (
+                v is not None
+                and isinstance(v, (int, float))
+                and not isinstance(v, bool)
+                and math.isfinite(float(v))
+                and float(v) >= 0
+            ):
+                merged[key] = float(v)
+            else:
+                merged[key] = result["weights"][key]
+        if sum(merged.values()) > 0:
+            result["weights"] = merged
+        else:
+            logger.warning(
+                "strategy_config.yaml: strategy.weights の合計が 0 以下。デフォルトを使用"
+            )
+
+    # float スカラーパラメータ
+    for key in (
+        "threshold",
+        "stop_loss_rate",
+        "gap_up_threshold",
+        "gap_down_threshold",
+        "trailing_stop_atr_mult",
+    ):
+        v = s.get(key)
+        if (
+            v is not None
+            and isinstance(v, (int, float))
+            and not isinstance(v, bool)
+            and math.isfinite(float(v))
+        ):
+            result[key] = float(v)
+
+    # int スカラーパラメータ（0 以上）
+    for key in ("min_holding_days", "max_holding_days", "reentry_cooldown_days"):
+        v = s.get(key)
+        if v is not None and isinstance(v, (int, float)) and not isinstance(v, bool):
+            iv = int(v)
+            if iv >= 0:
+                result[key] = iv
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # スコア計算ユーティリティ
 # ---------------------------------------------------------------------------
 
@@ -118,41 +241,71 @@ _VALUE_CONFIG_DEFAULTS: dict = {
 
 
 def _load_value_config() -> dict:
-    """config/strategy.toml からバリュースコア設定を読み込む。
+    """strategy_config.yaml の value_score セクションからバリュースコア設定を読み込む。
 
+    value_score セクションが存在しない場合は strategy.toml にフォールバック（後方互換）。
     ファイルが存在しない・読み込み失敗・不正値の場合はデフォルト値にフォールバック。
-    存在するキーのみファイル値でマージし、欠損キーはデフォルトで補完する。
-
-    Returns:
-        {"weights": {...}, "normalization": {...}} 形式の辞書。
     """
-    config_path = Path(__file__).resolve().parents[3] / "config" / "strategy.toml"
-    raw: dict = {}
-    if config_path.exists():
+    import yaml  # PyYAML
+
+    def _defaults() -> dict:
+        return {
+            "weights": dict(_VALUE_CONFIG_DEFAULTS["weights"]),
+            "normalization": dict(_VALUE_CONFIG_DEFAULTS["normalization"]),
+        }
+
+    # 1. strategy_config.yaml の value_score セクションを試みる
+    if _STRATEGY_CONFIG_PATH.exists():
         try:
-            with open(config_path, "rb") as f:
-                raw = tomllib.load(f).get("value_score", {})
+            with open(_STRATEGY_CONFIG_PATH, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            if isinstance(data, dict) and isinstance(data.get("value_score"), dict):
+                raw = data["value_score"]
+                w = {**_VALUE_CONFIG_DEFAULTS["weights"], **(raw.get("weights") or {})}
+                n = {
+                    **_VALUE_CONFIG_DEFAULTS["normalization"],
+                    **(raw.get("normalization") or {}),
+                }
+                if any(v < 0 for v in w.values()) or sum(w.values()) <= 0:
+                    logger.warning(
+                        "strategy_config.yaml: value_score.weights が不正。デフォルトを使用"
+                    )
+                    return _defaults()
+                if any(
+                    n.get(k, 0) <= 0 for k in ("per_mid", "pbr_mid", "div_yield_max")
+                ):
+                    logger.warning(
+                        "strategy_config.yaml: value_score.normalization に 0 以下の値。デフォルトを使用"
+                    )
+                    return _defaults()
+                return {"weights": dict(w), "normalization": dict(n)}
+        except Exception as exc:
+            logger.warning("strategy_config.yaml (value_score) 読み込み失敗: %s", exc)
+
+    # 2. 後方互換: strategy.toml フォールバック
+    toml_path = Path(__file__).resolve().parents[3] / "config" / "strategy.toml"
+    raw_toml: dict = {}
+    if toml_path.exists():
+        try:
+            with open(toml_path, "rb") as f:
+                raw_toml = tomllib.load(f).get("value_score", {})
         except Exception as exc:
             logger.warning("strategy.toml 読み込み失敗: %s (デフォルトを使用)", exc)
 
-    w = {**_VALUE_CONFIG_DEFAULTS["weights"], **(raw.get("weights") or {})}
-    n = {**_VALUE_CONFIG_DEFAULTS["normalization"], **(raw.get("normalization") or {})}
+    w = {**_VALUE_CONFIG_DEFAULTS["weights"], **(raw_toml.get("weights") or {})}
+    n = {
+        **_VALUE_CONFIG_DEFAULTS["normalization"],
+        **(raw_toml.get("normalization") or {}),
+    }
 
     if any(v < 0 for v in w.values()) or sum(w.values()) <= 0:
         logger.warning(
             "value_score.weights が不正（負値または合計<=0）。デフォルトを使用"
         )
-        return {
-            "weights": dict(_VALUE_CONFIG_DEFAULTS["weights"]),
-            "normalization": dict(_VALUE_CONFIG_DEFAULTS["normalization"]),
-        }
-
+        return _defaults()
     if any(n.get(k, 0) <= 0 for k in ("per_mid", "pbr_mid", "div_yield_max")):
         logger.warning("value_score.normalization に 0 以下の値。デフォルトを使用")
-        return {
-            "weights": dict(_VALUE_CONFIG_DEFAULTS["weights"]),
-            "normalization": dict(_VALUE_CONFIG_DEFAULTS["normalization"]),
-        }
+        return _defaults()
 
     return {"weights": dict(w), "normalization": dict(n)}
 
