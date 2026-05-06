@@ -391,6 +391,56 @@ CREATE TABLE IF NOT EXISTS bootstrap_load_history (
 )
 """
 
+# ---- Backtest Layer --------------------------------------------------------
+
+_BACKTEST_RUNS = """
+CREATE TABLE IF NOT EXISTS backtest_runs (
+    run_id                  VARCHAR       PRIMARY KEY,
+    created_at              TIMESTAMP     NOT NULL DEFAULT current_timestamp,
+    start_date              DATE          NOT NULL,
+    end_date                DATE          NOT NULL,
+    initial_cash            DECIMAL(18,2) NOT NULL,
+    scope_mode              VARCHAR       NOT NULL,
+    scope_codes_json        VARCHAR,
+    params_json             VARCHAR       NOT NULL,
+    cagr                    DOUBLE,
+    sharpe                  DOUBLE,
+    max_drawdown            DOUBLE,
+    win_rate                DOUBLE,
+    payoff_ratio            DOUBLE,
+    profit_factor           DOUBLE,
+    annual_volatility       DOUBLE,
+    calmar_ratio            DOUBLE,
+    avg_holding_days        DOUBLE,
+    total_trades            INTEGER,
+    effective_universe_size INTEGER
+)
+"""
+
+_BACKTEST_TRADES = """
+CREATE TABLE IF NOT EXISTS backtest_trades (
+    run_id        VARCHAR       NOT NULL,
+    date          DATE          NOT NULL,
+    code          VARCHAR       NOT NULL,
+    side          VARCHAR       NOT NULL,
+    shares        INTEGER       NOT NULL,
+    price         DECIMAL(18,4) NOT NULL,
+    commission    DECIMAL(18,4) NOT NULL,
+    realized_pnl  DECIMAL(18,4),
+    PRIMARY KEY (run_id, date, code, side)
+)
+"""
+
+_BACKTEST_DAILY_EQUITY = """
+CREATE TABLE IF NOT EXISTS backtest_daily_equity (
+    run_id           VARCHAR       NOT NULL,
+    date             DATE          NOT NULL,
+    portfolio_value  DECIMAL(18,2) NOT NULL,
+    cash             DECIMAL(18,2) NOT NULL,
+    PRIMARY KEY (run_id, date)
+)
+"""
+
 # ---------------------------------------------------------------------------
 # インデックス定義（頻出クエリパターン: 銘柄×日付範囲スキャン、ステータス検索）
 # ---------------------------------------------------------------------------
@@ -427,6 +477,10 @@ _MIGRATIONS: list[str] = [
     "ALTER TABLE portfolio_performance ADD COLUMN env VARCHAR NOT NULL DEFAULT 'live'",
     # Issue #185: raw_financials に bps を追加
     "ALTER TABLE raw_financials ADD COLUMN IF NOT EXISTS bps DECIMAL(18,4)",
+    # Issue #259: backtest 永続化テーブル追加（新規 DB は _ALL_DDL で作成済み。既存 DB 用）
+    "CREATE TABLE IF NOT EXISTS backtest_runs (run_id VARCHAR PRIMARY KEY, created_at TIMESTAMP NOT NULL DEFAULT current_timestamp, start_date DATE NOT NULL, end_date DATE NOT NULL, initial_cash DECIMAL(18,2) NOT NULL, scope_mode VARCHAR NOT NULL, scope_codes_json VARCHAR, params_json VARCHAR NOT NULL, cagr DOUBLE, sharpe DOUBLE, max_drawdown DOUBLE, win_rate DOUBLE, payoff_ratio DOUBLE, profit_factor DOUBLE, annual_volatility DOUBLE, calmar_ratio DOUBLE, avg_holding_days DOUBLE, total_trades INTEGER, effective_universe_size INTEGER)",
+    "CREATE TABLE IF NOT EXISTS backtest_trades (run_id VARCHAR NOT NULL, date DATE NOT NULL, code VARCHAR NOT NULL, side VARCHAR NOT NULL, shares INTEGER NOT NULL, price DECIMAL(18,4) NOT NULL, commission DECIMAL(18,4) NOT NULL, realized_pnl DECIMAL(18,4), PRIMARY KEY (run_id, date, code, side))",
+    "CREATE TABLE IF NOT EXISTS backtest_daily_equity (run_id VARCHAR NOT NULL, date DATE NOT NULL, portfolio_value DECIMAL(18,2) NOT NULL, cash DECIMAL(18,2) NOT NULL, PRIMARY KEY (run_id, date))",
 ]
 
 # ---------------------------------------------------------------------------
@@ -468,6 +522,10 @@ _ALL_DDL: list[str] = [
     _DIVIDENDS,
     _TOPIX_DAILY,
     _BOOTSTRAP_LOAD_HISTORY,
+    # Backtest
+    _BACKTEST_RUNS,
+    _BACKTEST_TRADES,
+    _BACKTEST_DAILY_EQUITY,
 ]
 
 
