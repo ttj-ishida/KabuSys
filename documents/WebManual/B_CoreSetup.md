@@ -86,6 +86,7 @@ python -m kabusys.config_setup
 | `ENABLE_TDNET` | TDnet 適時開示収集の有効化 | `false` |
 | `ENABLE_EDINET` | EDINET 法定開示収集の有効化 | `false` |
 | `EDINET_API_KEY` | EDINET API サブスクリプションキー | （空） |
+| `ENABLE_YAHOONEWS` | Yahoo News RSS 収集の有効化 | `false` |
 | `LOG_LEVEL` | ログの詳細レベル | `INFO` |
 
 ### B-1-4. 設定の検証
@@ -158,6 +159,7 @@ powershell -File scripts\setup_task_scheduler.ps1
 | 時刻 | 処理 | スクリプト |
 |---|---|---|
 | 15:30 | 市場データ更新 | `scripts/run_data_update.py` |
+| 15:33 | Yahoo News RSS 収集（オプション） | `scripts/run_yahoonews_collection.py` |
 | 15:35 | TDnet 適時開示収集（オプション） | `scripts/run_tdnet_collection.py` |
 | 15:40 | EDINET 法定開示収集（オプション） | `scripts/run_edinet_collection.py` |
 | 16:00 | 特徴量計算 | `scripts/run_feature_gen.py` |
@@ -171,6 +173,8 @@ powershell -File scripts\setup_task_scheduler.ps1
 > TDnet 収集・開示イベント分類は `ENABLE_TDNET=false`（デフォルト）のときスキップされます。有効化手順は [B-2-3](#b-2-3-tdnet-適時開示収集の設定) を参照してください。
 
 > EDINET 法定開示収集は `ENABLE_EDINET=false`（デフォルト）のときスキップされます。有効化手順は [B-2-4](#b-2-4-edinet-法定開示収集の設定) を参照してください。
+
+> Yahoo News RSS 収集は `ENABLE_YAHOONEWS=false`（デフォルト）のときスキップされます。有効化手順は [B-2-5](#b-2-5-yahoo-news-rss-収集の設定) を参照してください。
 
 > 詳細は `documents/10_Runtime/RuntimeJobSchedule.md` を参照してください。
 
@@ -270,6 +274,33 @@ EDINET_API_KEY=your_subscription_key
 
 ---
 
+### B-2-5. Yahoo News RSS 収集の設定
+
+Yahoo News（ビジネスカテゴリ）の RSS フィードから当日のニュースを収集し、`raw_news` テーブルへ保存します。AI センチメント分析（`ENABLE_AI_SENTIMENT=true`）の前段データソースとして機能します。
+
+**必要なもの:**
+- なし（無料、API キー不要）
+
+**`.env` に追記:**
+
+```env
+ENABLE_YAHOONEWS=true
+```
+
+**実行タイミング:**
+
+| 時刻 | 処理 | 保存先 |
+|---|---|---|
+| 15:33 | Yahoo News RSS から当日ニュースを取得・保存 | `raw_news` |
+
+**注意:**
+- AI センチメントスコアリング（`raw_news` → `ai_scores`）は `ENABLE_AI_SENTIMENT=true` を別途設定する必要があります
+- 銘柄コードとのリンク付けは `stocks` テーブルを参照します（テーブルが空の場合はリンクをスキップ）
+
+> ℹ️ `ENABLE_YAHOONEWS=false`（デフォルト）の場合、ジョブは即座にスキップされ Core 機能（自動売買）に影響しません。
+
+---
+
 ## B-3. 導入完了チェックリスト
 
 すべての項目にチェックが入れば、初期導入は完了です。
@@ -294,6 +325,7 @@ EDINET_API_KEY=your_subscription_key
 - [ ] AI センチメント: `ENABLE_AI_SENTIMENT=true` で AI 分析バッチが正常完了する
 - [ ] TDnet 収集: `ENABLE_TDNET=true` で `run_tdnet_collection.py` が正常完了する
 - [ ] EDINET 収集: `ENABLE_EDINET=true` で `run_edinet_collection.py` が正常完了する
+- [ ] Yahoo News 収集: `ENABLE_YAHOONEWS=true` で `run_yahoonews_collection.py` が正常完了する
 
 ---
 

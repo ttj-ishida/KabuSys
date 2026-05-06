@@ -55,6 +55,7 @@ _OPTIONAL_ENV_VARS = [
     "KABU_API_BASE_URL",
     "LINE_CHANNEL_ACCESS_TOKEN",
     "LINE_USER_ID",
+    "ENABLE_YAHOONEWS",
 ]
 
 _VALID_KABUSYS_ENVS = frozenset({"development", "paper_trading", "live"})

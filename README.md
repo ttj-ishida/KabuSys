@@ -82,6 +82,7 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 - ENABLE_TDNET（`true` で TDnet 適時開示収集を有効化; デフォルト `false`）
 - ENABLE_EDINET（`true` で EDINET 法定開示収集を有効化; デフォルト `false`）
 - EDINET_API_KEY（ENABLE_EDINET=true 時に必須; EDINET API サブスクリプションキー）
+- ENABLE_YAHOONEWS（`true` で Yahoo News RSS 収集を有効化; デフォルト `false`）
 
 その他:
 - MONITOR_POLL_INTERVAL（run_monitoring のポーリング間隔、秒; デフォルト 60）

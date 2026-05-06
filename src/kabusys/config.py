@@ -203,11 +203,22 @@ class Settings:
 
     @property
     def edinet_api_key(self) -> str:
+
         """EDINET API サブスクリプションキー（EDINET_API_KEY）。
 
         EDINET API v2 の利用に必要。ENABLE_EDINET=true の場合に設定すること。
         """
         return os.environ.get("EDINET_API_KEY", "")
+
+    # --- Yahoo News ---
+    @property
+    def enable_yahoonews(self) -> bool:
+        """Yahoo News RSS 収集機能の有効フラグ（ENABLE_YAHOONEWS、デフォルト: False）。
+
+        "1" / "true" / "yes" / "on" のみ True。デフォルト無効。
+        False の場合、yahoonews_collection ジョブはスキップされる。
+        """
+        return _parse_bool_env("ENABLE_YAHOONEWS", default=False)
 
     # --- LINE Messaging API ---
     @property
