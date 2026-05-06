@@ -341,14 +341,13 @@ class TestRunCliPersistence:
         result = _make_result()
         report = _make_report(result, run_id="cli-test-001")
 
-        import duckdb as _duckdb
-        conn_persist = _duckdb.connect(str(db_path))
+        conn_persist = duckdb.connect(str(db_path))
         try:
             save_backtest_to_db(conn_persist, report.meta.run_id, result, report)
         finally:
             conn_persist.close()
 
-        conn_verify = _duckdb.connect(str(db_path))
+        conn_verify = duckdb.connect(str(db_path))
         count = conn_verify.execute(
             "SELECT COUNT(*) FROM backtest_runs WHERE run_id = 'cli-test-001'"
         ).fetchone()[0]
@@ -363,14 +362,13 @@ class TestRunCliPersistence:
         result = _make_result()
         report = _make_report(result, run_id="cli-test-002")
 
-        import duckdb as _duckdb
-        conn_persist = _duckdb.connect(str(db_path))
+        conn_persist = duckdb.connect(str(db_path))
         try:
             save_backtest_to_db(conn_persist, report.meta.run_id, result, report)
         finally:
             conn_persist.close()
 
-        conn_verify = _duckdb.connect(str(db_path))
+        conn_verify = duckdb.connect(str(db_path))
         count = conn_verify.execute(
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'prices_daily'"
         ).fetchone()[0]
