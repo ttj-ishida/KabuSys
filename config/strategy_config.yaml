@@ -2,7 +2,7 @@
 # 変更後は次回 run_strategy_signal.py 実行から反映される（再起動不要）
 
 strategy:
-  # ファクター重み（合計が 1.0 でない場合は自動正規化される）
+  # ファクター重み（合計が 1.0 でない場合、generate_signals() 内で自動スケールされる）
   weights:
     momentum: 0.40
     value: 0.20

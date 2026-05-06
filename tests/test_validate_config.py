@@ -380,3 +380,52 @@ strategy:
 """
         errors, _ = self._run_with_yaml(content, tmp_path)
         assert any("strategy_config" in e and "max_holding_days" in e for e in errors)
+
+    def test_negative_reentry_cooldown_errors(self, tmp_path):
+        content = """\
+strategy:
+  weights:
+    momentum: 0.40
+    value: 0.20
+    volatility: 0.15
+    liquidity: 0.15
+    news: 0.10
+  threshold: 0.60
+  stop_loss_rate: -0.08
+  min_holding_days: 5
+  max_holding_days: 60
+  trailing_stop_atr_mult: 2.0
+  reentry_cooldown_days: -1
+  gap_up_threshold: 0.05
+  gap_down_threshold: -0.03
+"""
+        errors, _ = self._run_with_yaml(content, tmp_path)
+        assert any(
+            "strategy_config" in e and "reentry_cooldown_days" in e for e in errors
+        )
+
+    def test_min_holding_days_gte_max_warns(self, tmp_path):
+        content = """\
+strategy:
+  weights:
+    momentum: 0.40
+    value: 0.20
+    volatility: 0.15
+    liquidity: 0.15
+    news: 0.10
+  threshold: 0.60
+  stop_loss_rate: -0.08
+  min_holding_days: 60
+  max_holding_days: 5
+  trailing_stop_atr_mult: 2.0
+  reentry_cooldown_days: 5
+  gap_up_threshold: 0.05
+  gap_down_threshold: -0.03
+"""
+        _, warnings = self._run_with_yaml(content, tmp_path)
+        assert any(
+            "strategy_config" in w
+            and "min_holding_days" in w
+            and "max_holding_days" in w
+            for w in warnings
+        )

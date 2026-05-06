@@ -370,6 +370,32 @@ def _check_strategy_config_content(data: object) -> None:
                 f"strategy_config.yaml: strategy.gap_down_threshold は負の値が推奨です（現在値: {gdt}）。"
             )
 
+    # reentry_cooldown_days
+    rcd = s.get("reentry_cooldown_days")
+    if rcd is not None:
+        if isinstance(rcd, bool) or not isinstance(rcd, (int, float)):
+            _error(
+                f"strategy_config.yaml: strategy.reentry_cooldown_days は整数で設定してください（現在値: {rcd!r}）。"
+            )
+        elif int(rcd) < 0:
+            _error(
+                f"strategy_config.yaml: strategy.reentry_cooldown_days は 0 以上で設定してください（現在値: {rcd}）。"
+            )
+
+    # min/max 整合性チェック
+    mhd_valid = (
+        mhd is not None and not isinstance(mhd, bool) and isinstance(mhd, (int, float))
+    )
+    xhd_valid = (
+        xhd is not None and not isinstance(xhd, bool) and isinstance(xhd, (int, float))
+    )
+    if mhd_valid and xhd_valid and int(mhd) >= int(xhd):
+        _warn(
+            f"strategy_config.yaml: strategy.min_holding_days({int(mhd)}) >= "
+            f"max_holding_days({int(xhd)})。"
+            " time_exit が最低保有日数より先に発火するため、min_holding_days は実質的に無効になります。"
+        )
+
 
 def _check_config_yaml_files() -> None:
     """config/*.yaml の存在・構文確認。risk_config.yaml および strategy_config.yaml はセマンティック検証も行う。"""

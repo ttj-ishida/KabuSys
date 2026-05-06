@@ -99,12 +99,16 @@ _STRATEGY_CONFIG_PATH = (
     Path(__file__).resolve().parents[3] / "config" / "strategy_config.yaml"
 )
 
+_strategy_config_cache: dict | None = None
+_strategy_config_mtime: float = -1.0
+
 
 def _load_strategy_config() -> dict:
     """config/strategy_config.yaml から戦略パラメータを読み込む。
 
     ファイルが存在しない・読み込み失敗の場合はデフォルト値にフォールバック。
     各キーは個別に検証し、不正値のみデフォルトで補完する。
+    mtime ベースのキャッシュにより、同一ファイルの繰り返し読み込みを回避する。
 
     Returns:
         {
@@ -119,6 +123,7 @@ def _load_strategy_config() -> dict:
             "reentry_cooldown_days": int,
         }
     """
+    global _strategy_config_cache, _strategy_config_mtime
     import yaml  # PyYAML（既存の依存パッケージ）
 
     def _defaults() -> dict:
@@ -132,6 +137,20 @@ def _load_strategy_config() -> dict:
             _STRATEGY_CONFIG_PATH,
         )
         return _defaults()
+
+    try:
+        current_mtime = _STRATEGY_CONFIG_PATH.stat().st_mtime
+    except OSError as exc:
+        logger.warning(
+            "strategy_config.yaml の stat() に失敗: %s (デフォルトを使用)", exc
+        )
+        return _defaults()
+
+    if _strategy_config_cache is not None and current_mtime == _strategy_config_mtime:
+        cached = _strategy_config_cache
+        out = dict(cached)
+        out["weights"] = dict(cached["weights"])
+        return out
 
     try:
         with open(_STRATEGY_CONFIG_PATH, encoding="utf-8") as f:
@@ -149,7 +168,11 @@ def _load_strategy_config() -> dict:
     result = _defaults()
     s = data.get("strategy")
     if not isinstance(s, dict):
-        return result
+        _strategy_config_cache = result
+        _strategy_config_mtime = current_mtime
+        out = dict(result)
+        out["weights"] = dict(result["weights"])
+        return out
 
     # weights — 既知キーのみ受け付け、負値は無視、合計 0 以下ならデフォルト
     raw_w = s.get("weights")
@@ -199,7 +222,11 @@ def _load_strategy_config() -> dict:
             if iv >= 0:
                 result[key] = iv
 
-    return result
+    _strategy_config_cache = result
+    _strategy_config_mtime = current_mtime
+    out = dict(result)
+    out["weights"] = dict(result["weights"])
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -239,19 +266,56 @@ _VALUE_CONFIG_DEFAULTS: dict = {
     "normalization": {"per_mid": 20.0, "pbr_mid": 1.5, "div_yield_max": 3.0},
 }
 
+_value_config_cache: dict | None = None
+_value_config_cache_mtimes: tuple[float, float] = (-1.0, -1.0)
+
 
 def _load_value_config() -> dict:
     """strategy_config.yaml の value_score セクションからバリュースコア設定を読み込む。
 
     value_score セクションが存在しない場合は strategy.toml にフォールバック（後方互換）。
     ファイルが存在しない・読み込み失敗・不正値の場合はデフォルト値にフォールバック。
+    yaml/toml の mtime ベースキャッシュにより繰り返し I/O を回避する。
     """
+    global _value_config_cache, _value_config_cache_mtimes
     import yaml  # PyYAML
 
     def _defaults() -> dict:
         return {
             "weights": dict(_VALUE_CONFIG_DEFAULTS["weights"]),
             "normalization": dict(_VALUE_CONFIG_DEFAULTS["normalization"]),
+        }
+
+    def _current_mtimes() -> tuple[float, float]:
+        toml_path = _STRATEGY_CONFIG_PATH.parent / "strategy.toml"
+        y = t = -1.0
+        try:
+            if _STRATEGY_CONFIG_PATH.exists():
+                y = _STRATEGY_CONFIG_PATH.stat().st_mtime
+        except OSError:
+            pass
+        try:
+            if toml_path.exists():
+                t = toml_path.stat().st_mtime
+        except OSError:
+            pass
+        return (y, t)
+
+    mtimes = _current_mtimes()
+    if _value_config_cache is not None and mtimes == _value_config_cache_mtimes:
+        c = _value_config_cache
+        return {
+            "weights": dict(c["weights"]),
+            "normalization": dict(c["normalization"]),
+        }
+
+    def _cache_and_return(result: dict) -> dict:
+        global _value_config_cache, _value_config_cache_mtimes
+        _value_config_cache = result
+        _value_config_cache_mtimes = mtimes
+        return {
+            "weights": dict(result["weights"]),
+            "normalization": dict(result["normalization"]),
         }
 
     # 1. strategy_config.yaml の value_score セクションを試みる
@@ -270,20 +334,20 @@ def _load_value_config() -> dict:
                     logger.warning(
                         "strategy_config.yaml: value_score.weights が不正。デフォルトを使用"
                     )
-                    return _defaults()
+                    return _cache_and_return(_defaults())
                 if any(
                     n.get(k, 0) <= 0 for k in ("per_mid", "pbr_mid", "div_yield_max")
                 ):
                     logger.warning(
                         "strategy_config.yaml: value_score.normalization に 0 以下の値。デフォルトを使用"
                     )
-                    return _defaults()
-                return {"weights": dict(w), "normalization": dict(n)}
+                    return _cache_and_return(_defaults())
+                return _cache_and_return({"weights": dict(w), "normalization": dict(n)})
         except Exception as exc:
             logger.warning("strategy_config.yaml (value_score) 読み込み失敗: %s", exc)
 
     # 2. 後方互換: strategy.toml フォールバック
-    toml_path = Path(__file__).resolve().parents[3] / "config" / "strategy.toml"
+    toml_path = _STRATEGY_CONFIG_PATH.parent / "strategy.toml"
     raw_toml: dict = {}
     if toml_path.exists():
         try:
@@ -302,12 +366,12 @@ def _load_value_config() -> dict:
         logger.warning(
             "value_score.weights が不正（負値または合計<=0）。デフォルトを使用"
         )
-        return _defaults()
+        return _cache_and_return(_defaults())
     if any(n.get(k, 0) <= 0 for k in ("per_mid", "pbr_mid", "div_yield_max")):
         logger.warning("value_score.normalization に 0 以下の値。デフォルトを使用")
-        return _defaults()
+        return _cache_and_return(_defaults())
 
-    return {"weights": dict(w), "normalization": dict(n)}
+    return _cache_and_return({"weights": dict(w), "normalization": dict(n)})
 
 
 def _compute_value_score(feat: dict[str, Any], config: dict) -> float | None:

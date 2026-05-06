@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import textwrap
 from pathlib import Path
 from unittest.mock import patch
 
@@ -263,3 +264,102 @@ value_score:
         with patch("kabusys.strategy.signal_generator._STRATEGY_CONFIG_PATH", target):
             result = _load_value_config()
         assert result["normalization"] == _VALUE_CONFIG_DEFAULTS["normalization"]
+
+
+class TestLoadStrategyConfigCache:
+    """mtime キャッシュのテスト。"""
+
+    def _reset_cache(self, sg):
+        sg._strategy_config_cache = None
+        sg._strategy_config_mtime = -1.0
+
+    def test_second_call_returns_same_result(self, tmp_path):
+        """同一ファイルの二回目の呼び出しはキャッシュから返す。"""
+        yaml_content = textwrap.dedent("""\
+            strategy:
+              weights:
+                momentum: 0.40
+                value: 0.20
+                volatility: 0.15
+                liquidity: 0.15
+                news: 0.10
+              threshold: 0.65
+              stop_loss_rate: -0.08
+              min_holding_days: 5
+              max_holding_days: 60
+              trailing_stop_atr_mult: 2.0
+              reentry_cooldown_days: 5
+              gap_up_threshold: 0.05
+              gap_down_threshold: -0.03
+        """)
+        cfg_path = tmp_path / "strategy_config.yaml"
+        cfg_path.write_text(yaml_content, encoding="utf-8")
+
+        from kabusys.strategy import signal_generator as sg
+
+        self._reset_cache(sg)
+        with patch("kabusys.strategy.signal_generator._STRATEGY_CONFIG_PATH", cfg_path):
+            result1 = sg._load_strategy_config()
+            result2 = sg._load_strategy_config()
+        assert result1 == result2
+        assert result1["threshold"] == pytest.approx(0.65)
+
+    def test_cache_invalidated_on_file_change(self, tmp_path):
+        """ファイル更新後は新しい値が返る（キャッシュ無効化）。"""
+        import os
+
+        cfg_path = tmp_path / "strategy_config.yaml"
+        cfg_path.write_text(
+            textwrap.dedent("""\
+            strategy:
+              weights:
+                momentum: 0.40
+                value: 0.20
+                volatility: 0.15
+                liquidity: 0.15
+                news: 0.10
+              threshold: 0.60
+              stop_loss_rate: -0.08
+              min_holding_days: 5
+              max_holding_days: 60
+              trailing_stop_atr_mult: 2.0
+              reentry_cooldown_days: 5
+              gap_up_threshold: 0.05
+              gap_down_threshold: -0.03
+        """),
+            encoding="utf-8",
+        )
+
+        from kabusys.strategy import signal_generator as sg
+
+        self._reset_cache(sg)
+        with patch("kabusys.strategy.signal_generator._STRATEGY_CONFIG_PATH", cfg_path):
+            result1 = sg._load_strategy_config()
+            assert result1["threshold"] == pytest.approx(0.60)
+
+            # ファイルを更新し mtime を変える
+            new_mtime = cfg_path.stat().st_mtime + 1.0
+            cfg_path.write_text(
+                textwrap.dedent("""\
+                strategy:
+                  weights:
+                    momentum: 0.40
+                    value: 0.20
+                    volatility: 0.15
+                    liquidity: 0.15
+                    news: 0.10
+                  threshold: 0.75
+                  stop_loss_rate: -0.08
+                  min_holding_days: 5
+                  max_holding_days: 60
+                  trailing_stop_atr_mult: 2.0
+                  reentry_cooldown_days: 5
+                  gap_up_threshold: 0.05
+                  gap_down_threshold: -0.03
+            """),
+                encoding="utf-8",
+            )
+            os.utime(str(cfg_path), (new_mtime, new_mtime))
+
+            result2 = sg._load_strategy_config()
+        assert result2["threshold"] == pytest.approx(0.75)
