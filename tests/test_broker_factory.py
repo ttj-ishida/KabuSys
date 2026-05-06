@@ -126,6 +126,113 @@ class TestBrokerClientFactory:
             BrokerClientFactory.create(Settings())
 
 
+class TestPaperTradingInitialCash:
+    def test_default_is_ten_million(self, monkeypatch):
+        monkeypatch.delenv("PAPER_TRADING_INITIAL_CASH", raising=False)
+        assert Settings().paper_trading_initial_cash == 10_000_000.0
+
+    def test_custom_value(self, monkeypatch):
+        monkeypatch.setenv("PAPER_TRADING_INITIAL_CASH", "5000000")
+        assert Settings().paper_trading_initial_cash == 5_000_000.0
+
+    def test_invalid_raises(self, monkeypatch):
+        monkeypatch.setenv("PAPER_TRADING_INITIAL_CASH", "not_a_number")
+        with pytest.raises(ValueError):
+            Settings().paper_trading_initial_cash
+
+    def test_zero_raises(self, monkeypatch):
+        monkeypatch.setenv("PAPER_TRADING_INITIAL_CASH", "0")
+        with pytest.raises(ValueError):
+            Settings().paper_trading_initial_cash
+
+    def test_negative_raises(self, monkeypatch):
+        monkeypatch.setenv("PAPER_TRADING_INITIAL_CASH", "-1000000")
+        with pytest.raises(ValueError):
+            Settings().paper_trading_initial_cash
+
+
+class TestKabuSandbox:
+    def test_sandbox_default_false(self, monkeypatch):
+        monkeypatch.delenv("KABU_USE_SANDBOX", raising=False)
+        assert Settings().kabu_use_sandbox is False
+
+    def test_sandbox_enabled(self, monkeypatch):
+        monkeypatch.setenv("KABU_USE_SANDBOX", "true")
+        assert Settings().kabu_use_sandbox is True
+
+    def test_sandbox_password_default_empty(self, monkeypatch):
+        monkeypatch.delenv("KABU_SANDBOX_API_PASSWORD", raising=False)
+        assert Settings().kabu_sandbox_api_password == ""
+
+    def test_sandbox_password_set(self, monkeypatch):
+        monkeypatch.setenv("KABU_SANDBOX_API_PASSWORD", "sandbox_pass")
+        assert Settings().kabu_sandbox_api_password == "sandbox_pass"
+
+
+class TestBrokerClientFactoryInitialCash:
+    def test_initial_cash_applied_from_settings(self, monkeypatch):
+        monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+        monkeypatch.setenv("PAPER_TRADING_INITIAL_CASH", "3000000")
+        monkeypatch.delenv("KABU_USE_SANDBOX", raising=False)
+        broker = BrokerClientFactory.create(Settings())
+        assert isinstance(broker, MockBrokerClient)
+        assert broker.get_available_cash() == 3_000_000.0
+
+    def test_available_cash_override(self, monkeypatch):
+        monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+        monkeypatch.delenv("KABU_USE_SANDBOX", raising=False)
+        broker = BrokerClientFactory.create(Settings(), available_cash=999_000.0)
+        assert isinstance(broker, MockBrokerClient)
+        assert broker.get_available_cash() == 999_000.0
+
+    def test_initial_positions_override(self, monkeypatch):
+        from kabusys.execution.broker_api import Position
+
+        monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+        monkeypatch.delenv("KABU_USE_SANDBOX", raising=False)
+        pos = Position(code="1234", qty=100, avg_price=1500.0)
+        broker = BrokerClientFactory.create(Settings(), initial_positions=[pos])
+        assert isinstance(broker, MockBrokerClient)
+        positions = broker.get_positions()
+        assert len(positions) == 1
+        assert positions[0].code == "1234"
+
+    def test_sandbox_mode_returns_kabu_client(self, monkeypatch):
+        from kabusys.execution.kabu_client import KabuStationClient
+
+        monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+        monkeypatch.setenv("KABU_USE_SANDBOX", "true")
+        monkeypatch.setenv("KABU_API_PASSWORD", "api_pass")
+        monkeypatch.setenv("KABU_SANDBOX_API_PASSWORD", "sandbox_pass")
+        broker = BrokerClientFactory.create(Settings())
+        assert isinstance(broker, KabuStationClient)
+        broker.close()
+
+    def test_sandbox_falls_back_to_api_password(self, monkeypatch):
+        from kabusys.execution.kabu_client import KabuStationClient
+
+        monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+        monkeypatch.setenv("KABU_USE_SANDBOX", "true")
+        monkeypatch.setenv("KABU_API_PASSWORD", "api_pass")
+        monkeypatch.delenv("KABU_SANDBOX_API_PASSWORD", raising=False)
+        broker = BrokerClientFactory.create(Settings())
+        assert isinstance(broker, KabuStationClient)
+        broker.close()
+
+    def test_sandbox_uses_port_18081(self, monkeypatch):
+        from kabusys.execution.kabu_client import KabuStationClient
+        from kabusys.execution.broker_factory import _SANDBOX_BASE_URL
+
+        monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+        monkeypatch.setenv("KABU_USE_SANDBOX", "true")
+        monkeypatch.setenv("KABU_API_PASSWORD", "api_pass")
+        monkeypatch.delenv("KABU_SANDBOX_API_PASSWORD", raising=False)
+        broker = BrokerClientFactory.create(Settings())
+        assert isinstance(broker, KabuStationClient)
+        assert "18081" in _SANDBOX_BASE_URL
+        broker.close()
+
+
 class TestKabuTradePassword:
     def test_returns_none_when_not_set(self, monkeypatch):
         monkeypatch.delenv("KABU_TRADE_PASSWORD", raising=False)

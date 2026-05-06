@@ -169,3 +169,69 @@ def test_strict_mode_fails_on_warning(tmp_path):
         result = vc.main(["--strict"])
     # tmp_path には YAML がないので warning → strict では fail
     assert result == 1
+
+
+class TestSandboxConfig:
+    def test_no_warning_when_sandbox_disabled(self, tmp_path):
+        _, warnings, _ = _run_validate(
+            env_overrides={"KABU_USE_SANDBOX": "false"},
+            config_dir=tmp_path,
+        )
+        assert not any("KABU_SANDBOX" in w for w in warnings)
+
+    def test_warning_when_sandbox_enabled_without_password(self, tmp_path):
+        _, warnings, _ = _run_validate(
+            env_overrides={
+                "KABU_USE_SANDBOX": "true",
+                "KABU_SANDBOX_API_PASSWORD": "",
+            },
+            config_dir=tmp_path,
+        )
+        assert any("KABU_SANDBOX_API_PASSWORD" in w for w in warnings)
+
+    def test_no_warning_when_sandbox_enabled_with_password(self, tmp_path):
+        _, warnings, _ = _run_validate(
+            env_overrides={
+                "KABU_USE_SANDBOX": "true",
+                "KABU_SANDBOX_API_PASSWORD": "sandbox_pass",
+            },
+            config_dir=tmp_path,
+        )
+        assert not any("KABU_SANDBOX_API_PASSWORD" in w for w in warnings)
+
+
+class TestPaperTradingCashValidation:
+    def test_no_error_when_not_set(self, tmp_path):
+        errors, _, _ = _run_validate(
+            env_overrides={"PAPER_TRADING_INITIAL_CASH": ""},
+            config_dir=tmp_path,
+        )
+        assert not any("PAPER_TRADING_INITIAL_CASH" in e for e in errors)
+
+    def test_error_when_zero(self, tmp_path):
+        errors, _, _ = _run_validate(
+            env_overrides={"PAPER_TRADING_INITIAL_CASH": "0"},
+            config_dir=tmp_path,
+        )
+        assert any("PAPER_TRADING_INITIAL_CASH" in e for e in errors)
+
+    def test_error_when_negative(self, tmp_path):
+        errors, _, _ = _run_validate(
+            env_overrides={"PAPER_TRADING_INITIAL_CASH": "-500000"},
+            config_dir=tmp_path,
+        )
+        assert any("PAPER_TRADING_INITIAL_CASH" in e for e in errors)
+
+    def test_error_when_invalid_string(self, tmp_path):
+        errors, _, _ = _run_validate(
+            env_overrides={"PAPER_TRADING_INITIAL_CASH": "abc"},
+            config_dir=tmp_path,
+        )
+        assert any("PAPER_TRADING_INITIAL_CASH" in e for e in errors)
+
+    def test_no_error_when_valid(self, tmp_path):
+        errors, _, _ = _run_validate(
+            env_overrides={"PAPER_TRADING_INITIAL_CASH": "5000000"},
+            config_dir=tmp_path,
+        )
+        assert not any("PAPER_TRADING_INITIAL_CASH" in e for e in errors)

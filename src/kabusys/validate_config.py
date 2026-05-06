@@ -56,6 +56,9 @@ _OPTIONAL_ENV_VARS = [
     "LINE_CHANNEL_ACCESS_TOKEN",
     "LINE_USER_ID",
     "ENABLE_YAHOONEWS",
+    "KABU_USE_SANDBOX",
+    "KABU_SANDBOX_API_PASSWORD",
+    "PAPER_TRADING_INITIAL_CASH",
 ]
 
 _VALID_KABUSYS_ENVS = frozenset({"development", "paper_trading", "live"})
@@ -264,6 +267,36 @@ def _check_config_yaml_files() -> None:
                 _error(f"config/{filename} のパースに失敗しました: {e}")
 
 
+def _check_sandbox_config() -> None:
+    """KABU_USE_SANDBOX=true 時の追加チェック。"""
+    raw = os.environ.get("KABU_USE_SANDBOX", "false").strip().lower()
+    if raw not in ("1", "true", "yes", "on"):
+        return
+    if not os.environ.get("KABU_SANDBOX_API_PASSWORD", ""):
+        _warn(
+            "KABU_USE_SANDBOX=true ですが KABU_SANDBOX_API_PASSWORD が未設定です。"
+            " KABU_API_PASSWORD を流用します。"
+        )
+
+
+def _check_paper_trading_cash() -> None:
+    """PAPER_TRADING_INITIAL_CASH の値域チェック。"""
+    raw = os.environ.get("PAPER_TRADING_INITIAL_CASH", "").strip()
+    if not raw:
+        return
+    try:
+        val = float(raw)
+    except ValueError:
+        _error(
+            f"PAPER_TRADING_INITIAL_CASH の値が不正です: '{raw}'. 正の数値で設定してください。"
+        )
+        return
+    if val <= 0:
+        _error(
+            f"PAPER_TRADING_INITIAL_CASH は正の値で設定してください（現在値: {val}）"
+        )
+
+
 def _check_live_guards() -> None:
     """KABUSYS_ENV=live 時の追加チェック。"""
     env = os.environ.get("KABUSYS_ENV", "development").lower()
@@ -302,6 +335,8 @@ def validate() -> tuple[list[str], list[str], list[str]]:
     _check_log_level()
     _check_db_paths()
     _check_config_yaml_files()
+    _check_sandbox_config()
+    _check_paper_trading_cash()
     _check_live_guards()
 
     return list(_errors), list(_warnings), list(_infos)

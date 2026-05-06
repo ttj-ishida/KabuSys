@@ -242,6 +242,38 @@ class Settings:
         return Path(os.environ.get("SQLITE_PATH", "data/monitoring.db")).expanduser()
 
     @property
+    def paper_trading_initial_cash(self) -> float:
+        """ペーパートレード用初期資金（PAPER_TRADING_INITIAL_CASH、デフォルト: 10,000,000）。"""
+        raw = os.environ.get("PAPER_TRADING_INITIAL_CASH", "10000000")
+        try:
+            val = float(raw)
+        except ValueError as exc:
+            raise ValueError(
+                f"PAPER_TRADING_INITIAL_CASH の値が不正です: '{raw}'. 正の数値で設定してください。"
+            ) from exc
+        if val <= 0:
+            raise ValueError(
+                f"PAPER_TRADING_INITIAL_CASH は正の値で設定してください（現在値: {val}）"
+            )
+        return val
+
+    @property
+    def kabu_use_sandbox(self) -> bool:
+        """kabuステーション検証環境（ポート 18081）を使用するフラグ（KABU_USE_SANDBOX、デフォルト: False）。
+
+        True かつ is_paper のとき、MockBrokerClient の代わりに KabuStationClient（検証 URL）を使用する。
+        """
+        return _parse_bool_env("KABU_USE_SANDBOX", default=False)
+
+    @property
+    def kabu_sandbox_api_password(self) -> str:
+        """kabuステーション検証環境 API パスワード（KABU_SANDBOX_API_PASSWORD）。
+
+        KABU_USE_SANDBOX=true の場合に設定すること。
+        """
+        return os.environ.get("KABU_SANDBOX_API_PASSWORD", "")
+
+    @property
     def paper_fill_mode(self) -> str:
         """Paper Trading 時の MockBrokerClient fill_mode。
 

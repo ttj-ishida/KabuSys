@@ -17,6 +17,7 @@ import duckdb
 import yaml
 
 from kabusys.config import Settings
+from kabusys.execution.broker_api import Position
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _STOP_FLAG = _PROJECT_ROOT / "data" / "stop_requested.flag"
@@ -122,6 +123,71 @@ def _load_risk_config(path: Path, initial_portfolio_value: float) -> RiskConfig:
     return config
 
 
+def _restore_paper_state(
+    sqlite_path: Path,
+    initial_cash: float,
+) -> tuple[float, list[Position]]:
+    """paper_trading.db の約定履歴からペーパートレードの残高・ポジションを復元する。
+
+    DB が存在しない場合や読み込みに失敗した場合は (initial_cash, []) を返す。
+    """
+    if not sqlite_path.exists():
+        logger.info(
+            "paper_trading.db が存在しないため初期資金 %.0f 円で起動します。",
+            initial_cash,
+        )
+        return initial_cash, []
+
+    try:
+        conn = sqlite3.connect(str(sqlite_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT side, code, filled_qty, avg_fill_price FROM orders"
+                " WHERE filled_qty > 0 AND avg_fill_price IS NOT NULL"
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        logger.warning(
+            "paper_trading.db からの状態復元に失敗しました。初期資金で起動します。",
+            exc_info=True,
+        )
+        return initial_cash, []
+
+    # code → [buy_qty, buy_cost, sell_qty, sell_proceeds]
+    data: dict[str, list[float]] = {}
+    for row in rows:
+        code = row["code"]
+        filled_qty = int(row["filled_qty"])
+        avg_price = float(row["avg_fill_price"])
+        if code not in data:
+            data[code] = [0.0, 0.0, 0.0, 0.0]
+        if row["side"] == "buy":
+            data[code][0] += filled_qty
+            data[code][1] += filled_qty * avg_price
+        else:
+            data[code][2] += filled_qty
+            data[code][3] += filled_qty * avg_price
+
+    net_cash = initial_cash
+    positions: list[Position] = []
+    for code, (buy_qty, buy_cost, sell_qty, sell_proceeds) in data.items():
+        net_cash -= buy_cost
+        net_cash += sell_proceeds
+        net_qty = int(buy_qty) - int(sell_qty)
+        if net_qty > 0:
+            avg_price = buy_cost / buy_qty if buy_qty > 0 else 0.0
+            positions.append(Position(code=code, qty=net_qty, avg_price=avg_price))
+
+    logger.info(
+        "ペーパートレード状態復元: 残高 %.0f 円 / ポジション %d 銘柄",
+        net_cash,
+        len(positions),
+    )
+    return net_cash, positions
+
+
 def _pos_value(p: object) -> float:
     price = (
         p.current_price  # type: ignore[attr-defined]
@@ -156,8 +222,18 @@ def main() -> None:
     duckdb_conn = duckdb.connect(str(settings.duckdb_path))
 
     try:
-        # 3. ブローカークライアント
-        broker = BrokerClientFactory.create(settings)
+        # 3. ブローカークライアント（paper mode かつ非サンドボックスは前回状態を復元）
+        restored_cash: float | None = None
+        restored_positions: list[Position] | None = None
+        if settings.is_paper and not settings.kabu_use_sandbox:
+            restored_cash, restored_positions = _restore_paper_state(
+                settings.paper_sqlite_path, settings.paper_trading_initial_cash
+            )
+        broker = BrokerClientFactory.create(
+            settings,
+            available_cash=restored_cash,
+            initial_positions=restored_positions,
+        )
 
         # 4. 起動時総資産を計算（現金 + 保有評価額）
         cash = broker.get_available_cash()
