@@ -66,7 +66,15 @@ def main() -> None:
         paper_path = settings.paper_sqlite_path
         paper_path.parent.mkdir(parents=True, exist_ok=True)
         if args.paper_reset and paper_path.exists():
-            paper_path.unlink()
+            try:
+                paper_path.unlink()
+            except (PermissionError, OSError) as exc:
+                logger.error(
+                    "paper_trading.db を削除できませんでした: %s\n"
+                    "  ヒント: ExecutionEngine や Streamlit ダッシュボードが DB を開いていないか確認してください。",
+                    exc,
+                )
+                sys.exit(1)
             logger.info("SQLite (paper_trading) を削除しました: %s", paper_path)
         logger.info("SQLite (paper_trading) を初期化します: %s", paper_path)
         with sqlite3.connect(paper_path) as paper_conn:

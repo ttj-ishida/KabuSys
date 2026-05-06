@@ -160,3 +160,74 @@ class TestRestorePaperStateBrokenDb:
         cash, positions = _restore_paper_state(db_path, 10_000_000.0)
         assert cash == 10_000_000.0
         assert positions == []
+
+
+class TestRestorePaperStateSideNormalization:
+    def test_unknown_side_is_skipped(self, tmp_path):
+        """未知の side 値（"BUY" ではなく大文字など以外）は除外される。"""
+        db_path = _make_db(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO orders VALUES (?, ?, ?, ?)",
+            ("unknown_side", "1234", 100, 1000.0),
+        )
+        conn.commit()
+        conn.close()
+
+        cash, positions = _restore_paper_state(db_path, 10_000_000.0)
+        assert cash == 10_000_000.0  # 未知 side は現金に影響しない
+        assert positions == []
+
+    def test_uppercase_buy_is_treated_as_buy(self, tmp_path):
+        """大文字 "BUY" も lower() 正規化で buy として扱う。"""
+        db_path = _make_db(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO orders VALUES (?, ?, ?, ?)",
+            ("BUY", "1234", 100, 1000.0),
+        )
+        conn.commit()
+        conn.close()
+
+        cash, positions = _restore_paper_state(db_path, 10_000_000.0)
+        assert cash == 10_000_000.0 - 100 * 1000.0
+        assert len(positions) == 1
+        assert positions[0].code == "1234"
+
+    def test_uppercase_sell_is_treated_as_sell(self, tmp_path):
+        """大文字 "SELL" も lower() 正規化で sell として扱う。"""
+        db_path = _make_db(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.executemany(
+            "INSERT INTO orders VALUES (?, ?, ?, ?)",
+            [
+                ("BUY", "1234", 100, 1000.0),
+                ("SELL", "1234", 100, 1200.0),
+            ],
+        )
+        conn.commit()
+        conn.close()
+
+        cash, positions = _restore_paper_state(db_path, 10_000_000.0)
+        expected_cash = 10_000_000.0 - 100 * 1000.0 + 100 * 1200.0
+        assert cash == expected_cash
+        assert positions == []  # 全量売却後はポジション 0
+
+
+class TestRestorePaperStateShortPosition:
+    def test_net_qty_negative_position_is_skipped(self, tmp_path):
+        """sell > buy でネット数量が負（ショート）になる場合はポジション生成しない。"""
+        db_path = _make_db(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.executemany(
+            "INSERT INTO orders VALUES (?, ?, ?, ?)",
+            [
+                ("buy", "1234", 100, 1000.0),
+                ("sell", "1234", 200, 1200.0),  # 売り超過
+            ],
+        )
+        conn.commit()
+        conn.close()
+
+        cash, positions = _restore_paper_state(db_path, 10_000_000.0)
+        assert positions == []  # ショートポジションは生成しない

@@ -272,6 +272,13 @@ def _check_sandbox_config() -> None:
     raw = os.environ.get("KABU_USE_SANDBOX", "false").strip().lower()
     if raw not in ("1", "true", "yes", "on"):
         return
+    # KABU_USE_SANDBOX は paper_trading 環境のみ有効
+    env = os.environ.get("KABUSYS_ENV", "development").lower()
+    if env != "paper_trading":
+        _warn(
+            f"KABU_USE_SANDBOX=true ですが KABUSYS_ENV={env!r} です。"
+            " KABU_USE_SANDBOX は paper_trading 環境時のみ有効です。"
+        )
     if not os.environ.get("KABU_SANDBOX_API_PASSWORD", ""):
         _warn(
             "KABU_USE_SANDBOX=true ですが KABU_SANDBOX_API_PASSWORD が未設定です。"

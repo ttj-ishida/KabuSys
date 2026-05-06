@@ -193,11 +193,23 @@ class TestSandboxConfig:
         _, warnings, _ = _run_validate(
             env_overrides={
                 "KABU_USE_SANDBOX": "true",
+                "KABUSYS_ENV": "paper_trading",
                 "KABU_SANDBOX_API_PASSWORD": "sandbox_pass",
             },
             config_dir=tmp_path,
         )
         assert not any("KABU_SANDBOX_API_PASSWORD" in w for w in warnings)
+
+    def test_warning_when_sandbox_enabled_but_not_paper_env(self, tmp_path):
+        _, warnings, _ = _run_validate(
+            env_overrides={
+                "KABU_USE_SANDBOX": "true",
+                "KABUSYS_ENV": "development",
+                "KABU_SANDBOX_API_PASSWORD": "sandbox_pass",
+            },
+            config_dir=tmp_path,
+        )
+        assert any("paper_trading" in w for w in warnings)
 
 
 class TestPaperTradingCashValidation:
