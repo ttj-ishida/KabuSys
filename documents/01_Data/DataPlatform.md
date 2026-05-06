@@ -229,7 +229,7 @@ business_date (営業日)
 - `stocks`: 銘柄コード、銘柄名、セクター
 - `prices_daily`: date, code, open, high, low, close, volume, adjusted_close
 - `financials_clean`: 四半期財務データ指標（EPS, PBRベース等）
-- `news_articles`: id, published_at, title, body, source, url
+- `raw_news`: id, datetime, source, title, content, url, fetched_at
 - `ai_scores`: date, code, news_score, macro_score, confidence
 - `signal_events`: signal_id, date, code, final_score, decision (Buy/Sell/Hold)
 - `order_requests`: order_request_id, signal_id, status, requested_qty

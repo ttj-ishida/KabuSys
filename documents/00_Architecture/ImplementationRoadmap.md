@@ -61,7 +61,7 @@
 
     prices_daily
     fundamentals
-    news_articles
+    raw_news
     market_calendar
 
 ------------------------------------------------------------------------

@@ -87,7 +87,7 @@ news_data:
 
   provider: yahoo_news
 
-  table: news_articles
+  table: raw_news
 
 feature_store:
 
