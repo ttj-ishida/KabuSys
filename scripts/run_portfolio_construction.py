@@ -47,12 +47,12 @@ _MAX_UTILIZATION = 0.70
 
 
 def _get_today_return(
-    conn: duckdb.DuckDBPyConnection, target_date: date
+    conn: duckdb.DuckDBPyConnection, target_date: date, env: str
 ) -> float | None:
     row = conn.execute(
         "SELECT daily_return FROM portfolio_performance"
-        " WHERE date = ? AND env = 'live' LIMIT 1",
-        [target_date],
+        " WHERE date = ? AND env = ? LIMIT 1",
+        [target_date, env],
     ).fetchone()
     if row is None or row[0] is None:
         return None
@@ -193,9 +193,10 @@ def main() -> None:
         # LINE 通知（失敗しても例外を伝播させない）
         try:
             notifier = build_notifier(settings)
+            env = settings.env
 
             # 夜の日次通知
-            daily_return = _get_today_return(conn, target_date)
+            daily_return = _get_today_return(conn, target_date, env)
             notifier.send(
                 format_evening_message(
                     inserted=inserted,
@@ -208,11 +209,11 @@ def main() -> None:
             if target_date.weekday() == 4:
                 iso = target_date.isocalendar()
                 week_start = date.fromisocalendar(iso.year, iso.week, 1)
-                weekly_rows = collect_weekly_rows(conn, "live", week_start, target_date)
+                weekly_rows = collect_weekly_rows(conn, env, week_start, target_date)
                 weekly_report = build_report(
                     weekly_rows,
                     report_type="weekly",
-                    env="live",
+                    env=env,
                     from_date=week_start,
                     to_date=target_date,
                 )
@@ -229,12 +230,12 @@ def main() -> None:
             if target_date.day == last_day:
                 month_start = target_date.replace(day=1)
                 monthly_rows = collect_monthly_rows(
-                    conn, "live", month_start, target_date
+                    conn, env, month_start, target_date
                 )
                 monthly_report = build_report(
                     monthly_rows,
                     report_type="monthly",
-                    env="live",
+                    env=env,
                     from_date=month_start,
                     to_date=target_date,
                 )

@@ -181,6 +181,14 @@ class TestCountPendingSignals:
         result = _count_pending_signals(conn, date(2026, 5, 7))
         assert result == 0
 
+    def test_returns_zero_when_fetchone_is_none(self):
+        from kabusys.run_execution import _count_pending_signals
+
+        conn = MagicMock()
+        conn.execute.return_value.fetchone.return_value = None
+        result = _count_pending_signals(conn, date(2026, 5, 7))
+        assert result == 0
+
 
 class TestGetTodayReturn:
     def test_returns_float_when_row_exists(self):
@@ -188,7 +196,7 @@ class TestGetTodayReturn:
 
         conn = MagicMock()
         conn.execute.return_value.fetchone.return_value = (0.032,)
-        result = _get_today_return(conn, date(2026, 5, 7))
+        result = _get_today_return(conn, date(2026, 5, 7), "live")
         assert result == 0.032
 
     def test_returns_none_when_no_row(self):
@@ -196,7 +204,7 @@ class TestGetTodayReturn:
 
         conn = MagicMock()
         conn.execute.return_value.fetchone.return_value = None
-        result = _get_today_return(conn, date(2026, 5, 7))
+        result = _get_today_return(conn, date(2026, 5, 7), "live")
         assert result is None
 
     def test_returns_none_when_value_is_null(self):
@@ -204,5 +212,5 @@ class TestGetTodayReturn:
 
         conn = MagicMock()
         conn.execute.return_value.fetchone.return_value = (None,)
-        result = _get_today_return(conn, date(2026, 5, 7))
+        result = _get_today_return(conn, date(2026, 5, 7), "live")
         assert result is None
