@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import date
+from unittest.mock import MagicMock
+
 from kabusys.operations.line_reports import (
     format_evening_message,
     format_monthly_message,
@@ -161,13 +164,8 @@ class TestFormatMonthlyMessage:
 
 
 # run_execution の朝通知ヘルパーのテスト
-from unittest.mock import MagicMock
-
-
 class TestCountPendingSignals:
     def test_returns_count_from_db(self):
-        from datetime import date
-
         from kabusys.run_execution import _count_pending_signals
 
         conn = MagicMock()
@@ -176,8 +174,6 @@ class TestCountPendingSignals:
         assert result == 5
 
     def test_returns_zero_when_no_rows(self):
-        from datetime import date
-
         from kabusys.run_execution import _count_pending_signals
 
         conn = MagicMock()
@@ -188,9 +184,6 @@ class TestCountPendingSignals:
 
 class TestGetTodayReturn:
     def test_returns_float_when_row_exists(self):
-        from datetime import date
-        from unittest.mock import MagicMock
-
         from scripts.run_portfolio_construction import _get_today_return
 
         conn = MagicMock()
@@ -199,9 +192,6 @@ class TestGetTodayReturn:
         assert result == 0.032
 
     def test_returns_none_when_no_row(self):
-        from datetime import date
-        from unittest.mock import MagicMock
-
         from scripts.run_portfolio_construction import _get_today_return
 
         conn = MagicMock()
@@ -210,9 +200,6 @@ class TestGetTodayReturn:
         assert result is None
 
     def test_returns_none_when_value_is_null(self):
-        from datetime import date
-        from unittest.mock import MagicMock
-
         from scripts.run_portfolio_construction import _get_today_return
 
         conn = MagicMock()
