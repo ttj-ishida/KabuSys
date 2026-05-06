@@ -1,5 +1,11 @@
 # TODO: 通知基盤のLINE移行およびLINE通知設計
 
+> **ステータス（2026-05-06時点）**  
+> - LineNotifier 基盤: **実装完了**（Issue #196 / `src/kabusys/operations/notifier.py`）  
+> - Section 2（既存ドキュメントのSlack/Email削除）: 未実施  
+> - Section 3.1（定期レポート送信: 日次/週次/月次）: 未実装 → Issue 登録予定  
+> - Section 3.2（障害アラート: kill_switch/batch_error）: `monitoring/alert_manager.py` で一部実装済み、定型メッセージ送信は未実装  
+
 ## 1. 背景と目的
 
 現状のドキュメントで想定されていた「Slack通知」および「Email通知」の計画を取りやめ、システムからのすべての通知（運用状況の定期通知および障害検知アラート）を「LINE通知（LINE Messaging API / LINE Notify等）」に統合する。

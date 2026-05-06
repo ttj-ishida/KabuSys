@@ -1,6 +1,6 @@
 # TODO: 運用確認インターフェース整理メモ
 
-- ステータス: 未着手
+- ステータス: **ほぼ実装完了**（主要 6 モジュールすべて実装済み。未実装は Signal Queue Confirmation View のみ → Issue #202 にて実装済み）
 - 目的: `WebManual_OperationsCycle.md` に記載された「ユーザーが確認する必要があるシステムアウトプット」を抽出し、それをどのインターフェースで提供するか未検討の対象を整理する
 - 対象: 実運用時の朝、起動時、ザラ場中、引け後、夜間バッチ後の確認導線
 
@@ -375,8 +375,8 @@ python -m kabusys.run_position_reconciliation_report --save --json
 | `PreMarketOperationsReport` | 実装済み (Issue #200, PR #214) |
 | `ExecutionStartupSummary` | 実装済み (Issue #201, PR #215) |
 | `SignalQueueConfirmationView` | 実装済み (Issue #202, PR #216) |
-| `PositionReconciliationView` | 設計済み (Issue #204) |
-| `IntradayMonitoringInterface` | 設計済み (Issue #203) |
+| `PositionReconciliationView` | 実装済み (Issue #204 / PR #204) |
+| `IntradayMonitoringInterface` | 実装済み (Issue #203) |
 | `MarketCloseSummary` | 実装済み (Issue #205, PR #218) |
 
 ---

@@ -1,5 +1,10 @@
 # TODO: Yahoo News 取得機能の配線確認と統合
 
+> **ステータス（2026-05-06時点）**: 部分実装済み  
+> - `src/kabusys/data/news_collector.py` は実装済み（RSS 取得・`raw_news` 保存）  
+> - `run_data_update.py` / `run_daily_etl()` へのニュース収集組み込みは**未実装** → Issue 登録予定  
+> - `raw_news` / `news_articles` の役割整理も**未実装**  
+
 ## 背景
 
 コードベースを確認した結果、Yahoo News の RSS 取得機能そのものは実装されているが、夜間バッチや日次データ更新フローには未接続だった。

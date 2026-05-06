@@ -1,5 +1,11 @@
 # TODO: AIウィザード統合に向けたGap解消タスク
 
+> **ステータス（2026-05-06時点）**: 部分実装済み  
+> - Streamlit 運用 UI 基盤: **実装済み**（Issue #231 / 4 ページ構成）  
+> - `strategy_config.yaml` / `strategy.toml` は存在するが `signal_generator.py` は runtime 読み込み未対応（`_DEFAULT_WEIGHTS` 定数のまま）→ Issue 登録予定  
+> - バックテスト結果の DB 永続化: **未実装** → Issue 登録予定  
+> - AI 対話ウィザード: Issue #233（OPEN）  
+
 本ファイルは、KabuSysに「AI対話ウィザード（戦略チューニング機能）」および「Streamlit運用UI」を統合するために必要な、現在の設計・実装とのGapを解消するための具体的なアクションアイテム（TODOリスト）です。
 
 ## 1. 戦略パラメータの外部化（ハードコードの解消）

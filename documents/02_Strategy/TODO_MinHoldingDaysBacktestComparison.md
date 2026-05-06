@@ -1,6 +1,7 @@
 # TODO: 最低保有日数 0日 / 3日 / 5日 比較バックテスト
 
-- ステータス: 未着手
+- ステータス: **実装完了**（Issue #174 / 比較バックテスト実施: Issue #191）
+- 実装: `src/kabusys/strategy/signal_generator.py` の `_generate_sell_signals()` に `min_holding_days` パラメータを追加。`position_entries` テーブルで `entry_date` を管理し、営業日カウントで最低保有制約を実現。
 - 目的: 最低保有日数ルール `0日 / 3日 / 5日` の違いを比較し、現行戦略にとって妥当な保有制約を検証する
 - 対象: 日足スイング戦略、バックテスト検証、設計反映判断
 

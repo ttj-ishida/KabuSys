@@ -1,6 +1,7 @@
 # TODO: 銘柄指定バックテスト設計メモ
 
-- ステータス: 未着手
+- ステータス: **実装完了**（Issue #190）
+- 実装: `src/kabusys/backtest/engine.py` に `BacktestScope`（`mode="default_universe" / "manual_codes"`, `preserve_universe_filters`）を追加。`run_backtest()` に `backtest_scope` 引数を追加し、スコープメタデータを `BacktestResult` に含める。
 - 目的: 銘柄指定バックテストを、既存の標準バックテスト設計を壊さずに追加するための設計整理
 - 注意: 本ファイルは開発・設計検討用の暫定メモであり、現行の正式仕様書そのものではない
 

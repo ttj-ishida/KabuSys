@@ -1,5 +1,9 @@
 # TODO: Streamlit での運用フロー拡張
 
+> **ステータス（2026-05-06時点）**: 部分実装済み  
+> - Issue #231 で 4 ビュー（Home / Signal Queue / Performance / Strategy Lab）実装済み  
+> - 本 TODO の 8 ページ構成への拡張は未実装 → Issue 登録予定  
+
 ## 背景
 
 Issue #231 で Streamlit 運用ダッシュボード強化（4ビュー構成）は実装済み。

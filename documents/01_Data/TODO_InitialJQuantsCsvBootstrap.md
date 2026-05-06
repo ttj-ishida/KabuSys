@@ -1,6 +1,7 @@
 # TODO: 初回 J-Quants CSV 一括取り込み要件メモ
 
-- ステータス: 未着手
+- ステータス: **実装完了**（Issue #187 / PR #207）
+- 実装: `src/kabusys/data/bootstrap/`（`bulk_client.py`, `loaders.py`, `runner.py`）、`python -m kabusys.data.bootstrap`
 - 目的: 初回環境構築時に、J-Quants の大量ヒストリカルデータを CSV ダウンロード経由で取り込み、分析・バックテスト・実運用の初期データ基盤を構築するための要件を整理する
 - 対象: 初回データ投入（bootstrap）、通常運用前の大量データ取り込み
 

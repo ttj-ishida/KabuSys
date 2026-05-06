@@ -1,6 +1,6 @@
 # TODO: 運用成績サマリーレポート設計メモ
 
-- ステータス: 設計完了（仕様書: `docs/superpowers/specs/2026-04-29-performance-report-design.md`）
+- ステータス: **実装完了**（Issue #195 / `src/kabusys/operations/performance_report.py`、`src/kabusys/run_performance_report.py`）
 - 目的: 実運用における運用成績サマリーレポートの仕様を整理する
 - 対象: 本番口座 / `paper_trading` 共通の成績レポート
 - 出力形式: Markdown

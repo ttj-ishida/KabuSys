@@ -1,6 +1,8 @@
 # TODO: 夜間バッチ結果確認レポート設計メモ
 
-- ステータス: 未着手
+- ステータス: **実装完了**（Issue #193）
+- 実装: `src/kabusys/operations/night_batch_report.py`（READY/READY_WITH_WARNINGS/BLOCKED 判定、CLI/JSON/Markdown 出力）
+- 保存先: `artifacts/night_batch/{date}/summary.json`, `report.md`, `warnings.json`
 - 目的: 実運用において、21:30 の夜間バッチ結果確認をユーザーが安全かつ短時間で行えるように、通知・レポート仕様を整理する
 - 対象: 夜間バッチ運用、翌営業日の売買準備確認
 - 注意: 本ファイルは開発・設計検討用の暫定メモであり、現行の正式仕様書そのものではない

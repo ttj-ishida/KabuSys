@@ -1,5 +1,9 @@
 # TODO: KabuSys 運用UI（ダッシュボード）の設計と実装
 
+> **ステータス: 実装完了**（Issue #231）  
+> 実装: `src/kabusys/monitoring/streamlit_dashboard.py`（Home/System Status）、`pages/2_Signal_Queue.py`、`pages/3_Performance.py`、`pages/4_Strategy_Lab.py`、`pages/1_WebManual.py`  
+> 拡張計画: `TODO_StreamlitOperationsExpansion.md` 参照。
+
 ## 1. 背景と目的
 現在、KabuSysの運用状態を確認するためにはログファイルやDBを直接参照する必要があり、直感的な全体像の把握が難しい状態である。
 システムを安全かつ効率的に監督するため、すべての運用情報を1つの画面に集約する「運用ダッシュボード（Operations UI）」を構築する。
