@@ -184,3 +184,38 @@ class TestCountPendingSignals:
         conn.execute.return_value.fetchone.return_value = (0,)
         result = _count_pending_signals(conn, date(2026, 5, 7))
         assert result == 0
+
+
+class TestGetTodayReturn:
+    def test_returns_float_when_row_exists(self):
+        from datetime import date
+        from unittest.mock import MagicMock
+
+        from scripts.run_portfolio_construction import _get_today_return
+
+        conn = MagicMock()
+        conn.execute.return_value.fetchone.return_value = (0.032,)
+        result = _get_today_return(conn, date(2026, 5, 7))
+        assert result == 0.032
+
+    def test_returns_none_when_no_row(self):
+        from datetime import date
+        from unittest.mock import MagicMock
+
+        from scripts.run_portfolio_construction import _get_today_return
+
+        conn = MagicMock()
+        conn.execute.return_value.fetchone.return_value = None
+        result = _get_today_return(conn, date(2026, 5, 7))
+        assert result is None
+
+    def test_returns_none_when_value_is_null(self):
+        from datetime import date
+        from unittest.mock import MagicMock
+
+        from scripts.run_portfolio_construction import _get_today_return
+
+        conn = MagicMock()
+        conn.execute.return_value.fetchone.return_value = (None,)
+        result = _get_today_return(conn, date(2026, 5, 7))
+        assert result is None
