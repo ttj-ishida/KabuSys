@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
+import json as _json
+from datetime import date
+
 import duckdb
 import pytest
 
+from kabusys.backtest.engine import BacktestResult
+from kabusys.backtest.metrics import BacktestMetrics
+from kabusys.backtest.persistence import save_backtest_to_db
+from kabusys.backtest.report import (
+    BacktestReport,
+    HeadlineMetrics,
+    PerformanceSection,
+    ReportMeta,
+    TradeSection,
+)
+from kabusys.backtest.simulator import DailySnapshot, TradeRecord
 from kabusys.data.schema import init_schema
-from datetime import date
 
 
 class TestBacktestTablesExist:
@@ -58,19 +71,6 @@ class TestBacktestTablesExist:
 # ---------------------------------------------------------------------------
 # テスト用フィクスチャ
 # ---------------------------------------------------------------------------
-
-import json as _json
-
-from kabusys.backtest.metrics import BacktestMetrics
-from kabusys.backtest.simulator import DailySnapshot, TradeRecord
-from kabusys.backtest.engine import BacktestResult
-from kabusys.backtest.report import (
-    BacktestReport,
-    ReportMeta,
-    HeadlineMetrics,
-    TradeSection,
-    PerformanceSection,
-)
 
 
 def _make_result() -> BacktestResult:
@@ -193,15 +193,11 @@ class TestSaveBacktestToDb:
         self.conn.close()
 
     def test_inserts_one_row_into_backtest_runs(self):
-        from kabusys.backtest.persistence import save_backtest_to_db
-
         save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
         count = self.conn.execute("SELECT COUNT(*) FROM backtest_runs").fetchone()[0]
         assert count == 1
 
     def test_backtest_runs_metrics_are_correct(self):
-        from kabusys.backtest.persistence import save_backtest_to_db
-
         save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
         row = self.conn.execute(
             "SELECT run_id, cagr, sharpe, max_drawdown, total_trades, effective_universe_size "
@@ -215,15 +211,11 @@ class TestSaveBacktestToDb:
         assert row[5] == 100                 # effective_universe_size
 
     def test_inserts_all_trades(self):
-        from kabusys.backtest.persistence import save_backtest_to_db
-
         save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
         count = self.conn.execute("SELECT COUNT(*) FROM backtest_trades").fetchone()[0]
         assert count == 2
 
     def test_sell_trade_realized_pnl_is_correct(self):
-        from kabusys.backtest.persistence import save_backtest_to_db
-
         save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
         row = self.conn.execute(
             "SELECT realized_pnl FROM backtest_trades "
@@ -233,8 +225,6 @@ class TestSaveBacktestToDb:
         assert abs(float(row[0]) - 6645.0) < 0.01
 
     def test_buy_trade_realized_pnl_is_null(self):
-        from kabusys.backtest.persistence import save_backtest_to_db
-
         save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
         row = self.conn.execute(
             "SELECT realized_pnl FROM backtest_trades "
@@ -244,8 +234,6 @@ class TestSaveBacktestToDb:
         assert row[0] is None
 
     def test_inserts_all_daily_equity_rows(self):
-        from kabusys.backtest.persistence import save_backtest_to_db
-
         save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
         count = self.conn.execute(
             "SELECT COUNT(*) FROM backtest_daily_equity"
@@ -253,8 +241,6 @@ class TestSaveBacktestToDb:
         assert count == 2
 
     def test_daily_equity_portfolio_value_is_correct(self):
-        from kabusys.backtest.persistence import save_backtest_to_db
-
         save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
         row = self.conn.execute(
             "SELECT portfolio_value FROM backtest_daily_equity "
@@ -264,15 +250,11 @@ class TestSaveBacktestToDb:
         assert abs(float(row[0]) - 10_200_000.0) < 0.01
 
     def test_duplicate_run_id_raises(self):
-        from kabusys.backtest.persistence import save_backtest_to_db
-
         save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
         with pytest.raises(Exception):
             save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
 
     def test_empty_trades_and_history_succeed(self):
-        from kabusys.backtest.persistence import save_backtest_to_db
-
         empty_result = BacktestResult(
             history=[],
             trades=[],
@@ -293,8 +275,6 @@ class TestSaveBacktestToDb:
         assert count == 1
 
     def test_params_json_contains_initial_cash(self):
-        from kabusys.backtest.persistence import save_backtest_to_db
-
         save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
         row = self.conn.execute(
             "SELECT params_json FROM backtest_runs WHERE run_id = 'test-run-001'"
@@ -303,8 +283,6 @@ class TestSaveBacktestToDb:
         assert params["initial_cash"] == 10_000_000.0
 
     def test_scope_mode_is_stored(self):
-        from kabusys.backtest.persistence import save_backtest_to_db
-
         save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
         row = self.conn.execute(
             "SELECT scope_mode FROM backtest_runs WHERE run_id = 'test-run-001'"
@@ -312,8 +290,6 @@ class TestSaveBacktestToDb:
         assert row[0] == "default_universe"
 
     def test_manual_codes_scope_codes_json_stored(self):
-        from kabusys.backtest.persistence import save_backtest_to_db
-
         manual_result = BacktestResult(
             history=self.result.history,
             trades=self.result.trades,
