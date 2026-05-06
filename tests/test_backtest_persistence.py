@@ -129,7 +129,9 @@ def _make_result() -> BacktestResult:
     )
 
 
-def _make_report(result: BacktestResult, run_id: str = "test-run-001") -> BacktestReport:
+def _make_report(
+    result: BacktestResult, run_id: str = "test-run-001"
+) -> BacktestReport:
     meta = ReportMeta(
         run_id=run_id,
         generated_at="2024-01-05T00:00:00+00:00",
@@ -193,30 +195,38 @@ class TestSaveBacktestToDb:
         self.conn.close()
 
     def test_inserts_one_row_into_backtest_runs(self):
-        save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
+        save_backtest_to_db(
+            self.conn, self.report.meta.run_id, self.result, self.report
+        )
         count = self.conn.execute("SELECT COUNT(*) FROM backtest_runs").fetchone()[0]
         assert count == 1
 
     def test_backtest_runs_metrics_are_correct(self):
-        save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
+        save_backtest_to_db(
+            self.conn, self.report.meta.run_id, self.result, self.report
+        )
         row = self.conn.execute(
             "SELECT run_id, cagr, sharpe, max_drawdown, total_trades, effective_universe_size "
             "FROM backtest_runs WHERE run_id = 'test-run-001'"
         ).fetchone()
         assert row[0] == "test-run-001"
-        assert abs(row[1] - 0.12) < 1e-6   # cagr
-        assert abs(row[2] - 1.5) < 1e-6    # sharpe
-        assert abs(row[3] - 0.05) < 1e-6   # max_drawdown
-        assert row[4] == 1                   # total_trades
-        assert row[5] == 100                 # effective_universe_size
+        assert abs(row[1] - 0.12) < 1e-6  # cagr
+        assert abs(row[2] - 1.5) < 1e-6  # sharpe
+        assert abs(row[3] - 0.05) < 1e-6  # max_drawdown
+        assert row[4] == 1  # total_trades
+        assert row[5] == 100  # effective_universe_size
 
     def test_inserts_all_trades(self):
-        save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
+        save_backtest_to_db(
+            self.conn, self.report.meta.run_id, self.result, self.report
+        )
         count = self.conn.execute("SELECT COUNT(*) FROM backtest_trades").fetchone()[0]
         assert count == 2
 
     def test_sell_trade_realized_pnl_is_correct(self):
-        save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
+        save_backtest_to_db(
+            self.conn, self.report.meta.run_id, self.result, self.report
+        )
         row = self.conn.execute(
             "SELECT realized_pnl FROM backtest_trades "
             "WHERE run_id = 'test-run-001' AND side = 'sell'"
@@ -225,7 +235,9 @@ class TestSaveBacktestToDb:
         assert abs(float(row[0]) - 6645.0) < 0.01
 
     def test_buy_trade_realized_pnl_is_null(self):
-        save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
+        save_backtest_to_db(
+            self.conn, self.report.meta.run_id, self.result, self.report
+        )
         row = self.conn.execute(
             "SELECT realized_pnl FROM backtest_trades "
             "WHERE run_id = 'test-run-001' AND side = 'buy'"
@@ -234,14 +246,18 @@ class TestSaveBacktestToDb:
         assert row[0] is None
 
     def test_inserts_all_daily_equity_rows(self):
-        save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
+        save_backtest_to_db(
+            self.conn, self.report.meta.run_id, self.result, self.report
+        )
         count = self.conn.execute(
             "SELECT COUNT(*) FROM backtest_daily_equity"
         ).fetchone()[0]
         assert count == 2
 
     def test_daily_equity_portfolio_value_is_correct(self):
-        save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
+        save_backtest_to_db(
+            self.conn, self.report.meta.run_id, self.result, self.report
+        )
         row = self.conn.execute(
             "SELECT portfolio_value FROM backtest_daily_equity "
             "WHERE run_id = 'test-run-001' AND date = '2024-01-05'"
@@ -250,9 +266,13 @@ class TestSaveBacktestToDb:
         assert abs(float(row[0]) - 10_200_000.0) < 0.01
 
     def test_duplicate_run_id_raises(self):
-        save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
+        save_backtest_to_db(
+            self.conn, self.report.meta.run_id, self.result, self.report
+        )
         with pytest.raises(Exception):
-            save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
+            save_backtest_to_db(
+                self.conn, self.report.meta.run_id, self.result, self.report
+            )
 
     def test_empty_trades_and_history_succeed(self):
         empty_result = BacktestResult(
@@ -275,7 +295,9 @@ class TestSaveBacktestToDb:
         assert count == 1
 
     def test_params_json_contains_initial_cash(self):
-        save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
+        save_backtest_to_db(
+            self.conn, self.report.meta.run_id, self.result, self.report
+        )
         row = self.conn.execute(
             "SELECT params_json FROM backtest_runs WHERE run_id = 'test-run-001'"
         ).fetchone()
@@ -283,7 +305,9 @@ class TestSaveBacktestToDb:
         assert params["initial_cash"] == 10_000_000.0
 
     def test_scope_mode_is_stored(self):
-        save_backtest_to_db(self.conn, self.report.meta.run_id, self.result, self.report)
+        save_backtest_to_db(
+            self.conn, self.report.meta.run_id, self.result, self.report
+        )
         row = self.conn.execute(
             "SELECT scope_mode FROM backtest_runs WHERE run_id = 'test-run-001'"
         ).fetchone()

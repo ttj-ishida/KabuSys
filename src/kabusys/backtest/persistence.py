@@ -134,10 +134,7 @@ def save_backtest_to_db(
                 INSERT INTO backtest_daily_equity (run_id, date, portfolio_value, cash)
                 VALUES (?, ?, ?, ?)
                 """,
-                [
-                    [run_id, s.date, s.portfolio_value, s.cash]
-                    for s in result.history
-                ],
+                [[run_id, s.date, s.portfolio_value, s.cash] for s in result.history],
             )
 
         conn.execute("COMMIT")
