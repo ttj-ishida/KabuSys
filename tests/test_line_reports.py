@@ -158,3 +158,29 @@ class TestFormatMonthlyMessage:
         )
         assert isinstance(msg, str)
         assert len(msg) > 0
+
+
+# run_execution の朝通知ヘルパーのテスト
+from unittest.mock import MagicMock
+
+
+class TestCountPendingSignals:
+    def test_returns_count_from_db(self):
+        from datetime import date
+
+        from kabusys.run_execution import _count_pending_signals
+
+        conn = MagicMock()
+        conn.execute.return_value.fetchone.return_value = (5,)
+        result = _count_pending_signals(conn, date(2026, 5, 7))
+        assert result == 5
+
+    def test_returns_zero_when_no_rows(self):
+        from datetime import date
+
+        from kabusys.run_execution import _count_pending_signals
+
+        conn = MagicMock()
+        conn.execute.return_value.fetchone.return_value = (0,)
+        result = _count_pending_signals(conn, date(2026, 5, 7))
+        assert result == 0
