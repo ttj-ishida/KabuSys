@@ -269,7 +269,7 @@ def _check_strategy_config_content(data: object) -> None:
                 _error(f"strategy_config.yaml: strategy.weights.{k} は 0 以上で設定してください（現在値: {v}）。")
         valid_vals = [float(v) for k, v in raw_w.items()
                       if not isinstance(v, bool) and isinstance(v, (int, float)) and float(v) >= 0]
-        if valid_vals and sum(valid_vals) <= 0:
+        if valid_vals and sum(valid_vals) == 0:
             _error("strategy_config.yaml: strategy.weights の合計が 0 以下です。")
 
     # threshold
@@ -331,7 +331,7 @@ def _check_strategy_config_content(data: object) -> None:
 
 
 def _check_config_yaml_files() -> None:
-    """config/*.yaml の存在・構文確認。risk_config.yaml はセマンティック検証も行う。"""
+    """config/*.yaml の存在・構文確認。risk_config.yaml および strategy_config.yaml はセマンティック検証も行う。"""
     try:
         import yaml  # type: ignore[import]
 
