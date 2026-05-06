@@ -1,428 +1,216 @@
-# RuntimeJobSchedule.md
+# Runtime Job Schedule
 
-## 1. 目的
+- 対象: KabuSys の日次ジョブ構成
+- 前提: Single Windows Node / Windows Task Scheduler
 
-本ドキュメントは、日本株自動売買システムの
-**日次運用スケジュール（Runtime Job Schedule）** を定義する。
+---
 
-目的:
+## 1. 全体像
 
--   夜間バッチ処理の順序定義
--   ザラ場処理の安全運用
--   Execution 環境の保護
--   Windows Task Scheduler の設定指針
+KabuSys は、夜間バッチで翌営業日のシグナルと発注キューを作り、翌朝に Execution / Monitoring を起動してザラ場を監視する構成です。
 
-本システムは **Single Windows Node** で稼働するため、
-処理負荷を時間帯で分離する。
+```text
+15:30  data_update
+16:00  feature_gen
+18:00  ai_analysis
+20:00  strategy_signal
+21:00  portfolio_construction
+21:30  night batch status confirmation
+08:00  pre_market_report
+08:30  execution start
+09:00  monitoring start
+15:00  market_close_report
+```
 
-**本スケジュールは日足スイング戦略専用の設計である。**
-夜間バッチでシグナルを生成し、翌営業日の寄付きで執行する。ザラ場中はシグナル生成を行わない（Execution と Monitoring のみ稼働）。デイトレードやザラ場リバランスには対応しない。
+---
 
-------------------------------------------------------------------------
+## 2. Night Batch
 
-# 2. 日次運用タイムライン
+### 2.1 data_update（15:30）
 
-    15:30  Market Close
-       ↓
-    Night Batch Processing
-       ↓
-    Signal Generation
-       ↓
-    Portfolio Construction
-       ↓
-    Execution Preparation
-       ↓
-    09:00  Market Open
-       ↓
-    Execution Monitoring
-       ↓
-    15:30  Market Close
+役割:
 
-------------------------------------------------------------------------
+- J-Quants 日次データ取得
+- ニュース原文保存
+- DuckDB 更新
 
-# 3. 夜間バッチ（Night Batch）
+主なテーブル:
 
-夜間バッチは **重い計算処理を行う時間帯**。
+- `prices_daily`
+- `fundamentals`
+- `raw_news`
 
-対象処理:
+### 2.2 feature_gen（16:00）
 
--   データ更新
--   特徴量計算
--   AI分析
--   戦略シグナル生成
--   ポートフォリオ構築
+役割:
 
-------------------------------------------------------------------------
+- モメンタム
+- ボラティリティ
+- 流動性
+- その他特徴量
 
-## 3.1 データ更新
+主なテーブル:
 
-**時刻**
+- `features`
 
-    15:30
+### 2.3 ai_analysis（18:00）
 
-ジョブ
+役割:
 
-    data_update_job
+- ニュース sentiment
+- 市場 regime 判定
 
-処理
+主なテーブル:
 
--   J-Quants から株価・財務・銘柄マスタを取得（市場・財務データの唯一の基盤データ源）
--   Yahoo News から補助ニュース記事を取得（RSS、売買判断の主役にしない）
--   データ保存
+- `ai_scores`
+- `market_regime`
 
-更新対象
+### 2.4 strategy_signal（20:00）
 
-    prices_daily
-    news_articles
-    fundamentals
+役割:
 
-------------------------------------------------------------------------
+- BUY / SELL シグナル生成
+- Bear regime / breadth_stop / 決算回避反映
+- `min_holding_days` / `time_exit` / `trailing_stop` を考慮
 
-## 3.1b 適時開示収集（Issue #198 / #199）
+主なテーブル:
 
-> ⚠️ **オプション機能** — `ENABLE_TDNET=true`（`.env`）のときのみ実行されます。デフォルトはスキップ。
+- `signals`
 
-**時刻**
+### 2.5 portfolio_construction（21:00）
 
-    15:35（TDnet） / 15:40（EDINET）
+役割:
 
-ジョブ
+- ポジションサイズ計算
+- 翌営業日発注キュー生成
 
-    tdnet_collection_job
-    edinet_collection_job
+主なテーブル:
 
-処理
+- `signal_queue`
 
--   適時開示情報閲覧サービス (TDnet) から当日の開示一覧を全件取得（先に全件保存・後から参照する方式）
--   EDINET API から有報・四半期報告・大量保有等の法定開示を補完取得
--   開示情報を `raw_disclosures` に保存（冪等: ON CONFLICT DO NOTHING）
+---
 
-更新対象
+## 3. Night Batch 状態確認（21:30）
 
-    raw_disclosures（source='tdnet' / 'edinet'）
+現行運用では、Task Scheduler の結果確認と `signal_queue` の確認を組み合わせて翌営業日の準備完了を判断する。
 
-注意
+```powershell
+Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object TaskName, LastRunTime, LastTaskResult
+```
 
--   `ENABLE_TDNET=false`（デフォルト）の場合、`run_tdnet_collection.py` は即座にスキップされ Core 機能に影響しない
--   TDnet 閲覧サービスには31日掲載制限がある。毎日差分取得で取りこぼしを防ぐ
--   開示分類（`disclosure_events`）は別ジョブ（17:00）で実施する
+```cmd
+python -m kabusys.run_signal_queue_report
+```
 
-------------------------------------------------------------------------
+判定の考え方:
 
-## 3.2 特徴量生成
+- `READY`: 必須ジョブ成功かつ翌営業日の `signal_queue` が作成済み
+- `READY_WITH_WARNINGS`: warning はあるが翌営業日の準備は完了
+- `BLOCKED`: 必須ジョブ失敗または翌営業日の発注準備が未完了
 
-**時刻**
+補足:
 
-    16:00
+- 判定ロジック自体は `src/kabusys/operations/night_batch_report.py` に実装済み
+- 現行ツリーでは独立 CLI よりも Task Scheduler と queue 確認が導線
 
-ジョブ
+---
 
-    feature_generation_job
+## 4. Pre-Market（08:00）
 
-処理
+```cmd
+python -m kabusys.run_pre_market_report --save
+```
 
--   モメンタム
--   ボラティリティ
--   出来高指標
+判定:
 
-保存
+- `READY`
+- `READY_WITH_WARNINGS`
+- `BLOCKED`
 
-    features
+確認対象:
 
-------------------------------------------------------------------------
+- stop flag
+- Task Scheduler readiness
+- Signal Queue
+- ポジション差分
+- データ鮮度
 
-## 3.2b 開示イベント分類
+出力先:
 
-> ⚠️ **オプション機能** — `ENABLE_TDNET=true`（`.env`）のときのみ実行されます。デフォルトはスキップ。
+- `artifacts/pre_market/{date}/report.md`
 
-**時刻**
+---
 
-    17:00
+## 5. Execution / Monitoring
 
-ジョブ
+### 5.1 Execution Start（08:30）
 
-    disclosure_classification_job
+```cmd
+python scripts\start_system.py --component execution
+```
 
-処理
+補足:
 
--   `raw_disclosures` の当日分を表題ベースの分類ルールで評価
--   `event_type`（決算短信/業績修正上方・下方/自己株取得/増資/M&A/訴訟不祥事等）を付与
--   `event_score`（+1.0 / 0.0 / -1.0）・`buy_caution` / `hold_caution` / `review_required` フラグを付与
--   `disclosure_events` に UPSERT
+- `python -m kabusys.run_execution` 実行時に Execution Startup Summary が自動保存される
+- 保存先: `artifacts/execution_startup/{date}/report.md`
 
-更新対象
+### 5.2 Monitoring Start（09:00）
 
-    disclosure_events
+```cmd
+python scripts\start_system.py --component monitoring
+```
 
-------------------------------------------------------------------------
+ザラ場では `execution_service` と `monitoring_service` が動作し、注文・ポジション・リスク状態を監視する。
 
-## 3.3 AI分析
+---
 
-**時刻**
+## 6. Market Close（15:00）
 
-    18:00
+```cmd
+python -m kabusys.run_market_close_report --save
+python -m kabusys.run_performance_report --type daily --save
+```
 
-ジョブ
+判定:
 
-    ai_analysis_job
+- `OK`
+- `BLOCKED`
 
-処理
+出力先:
 
--   ニュースセンチメント分析: score_news(conn, target_date)
-    - raw_news + news_symbols → gpt-4o-mini → 銘柄ごとの sentiment_score
--   市場レジーム判定: score_regime(conn, target_date)
-    - ETF1321の200日MA乖離（70%）+ マクロニュースLLM（30%）→ regime_score / regime_label
+- `artifacts/market_close/{date}/report.md`
+- `artifacts/performance/live/daily/{date}/report.md`
 
-保存
+---
 
-    ai_scores      （sentiment_score: 銘柄単位）
-    market_regime  （regime_score / regime_label: 日次1行）
+## 7. Task Scheduler
 
-------------------------------------------------------------------------
+登録スクリプト:
 
-## 3.4 売買シグナル生成
+- `scripts/setup_task_scheduler.ps1`
 
-**時刻**
+標準ジョブ:
 
-    20:00
+- `KabuSys_DataUpdate`
+- `KabuSys_FeatureGen`
+- `KabuSys_AiAnalysis`
+- `KabuSys_StrategySignal`
+- `KabuSys_PortfolioConstruction`
+- `KabuSys_ExecutionStart`
+- `KabuSys_MonitoringStart`
 
-ジョブ
+---
 
-    strategy_signal_job
+## 8. 補足
 
-処理
+- `market_breadth` は data update / breadth 計算で日次更新される
+- バックテストでは `prices_daily` から再計算して `breadth_stop` を評価する
+- Streamlit ダッシュボードから `WebManual` を参照できる
 
--   戦略スコア算出（モメンタム / バリュー / ボラティリティ / AIスコア統合）
--   セクター相対強弱フィルタ適用
--   ギャップリスクフィルタ適用
--   決算回避・主要イベント縮小判定（`earnings_calendar` / `config/event_calendar.md` 参照）
--   最低保有日数・再エントリー制限判定（`position_entries` テーブル参照）
--   breadth_stop フィルタ適用（`market_breadth` テーブル参照）
--   銘柄ランキング・シグナル書き込み
+---
 
-保存
+## 9. 参考
 
-    signals（side, score, signal_rank, size_multiplier）
-
-------------------------------------------------------------------------
-
-## 3.5 ポートフォリオ生成
-
-**時刻**
-
-    21:00
-
-ジョブ
-
-    portfolio_construction_job
-
-処理
-
--   ポジションサイズ計算
--   リスク制御適用
-
-保存
-
-    signal_queue
-
-------------------------------------------------------------------------
-
-# 4. プレマーケット処理
-
-市場開始前に Execution を起動する。
-
-**時刻**
-
-    08:30
-
-ジョブ
-
-    execution_start
-
-処理
-
--   Execution Engine 起動
--   Signal Queue 読み込み
--   API接続確認
-
-------------------------------------------------------------------------
-
-# 5. ザラ場処理（Market Hours）
-
-ザラ場では **重い処理は禁止**。
-
-稼働プロセス
-
-    execution_service
-    monitoring_service
-
-------------------------------------------------------------------------
-
-## 5.1 Execution Loop
-
-    execution_loop
-
-処理
-
--   pending signal取得
--   発注
--   約定確認
--   ポジション更新
-
-------------------------------------------------------------------------
-
-## 5.2 Monitoring Loop
-
-    monitoring_loop
-
-監視
-
--   Executionプロセス
--   API接続
--   ドローダウン
--   注文エラー
-
-異常時
-
-    LINE Alert
-    Kill Switch
-
-------------------------------------------------------------------------
-
-# 6. Market Close処理
-
-**時刻**
-
-    15:30
-
-ジョブ
-
-    market_close_job
-
-処理
-
--   ポジション更新
--   当日ログ保存
--   パフォーマンス計算
-
-更新テーブル
-
-    positions
-    portfolio_performance
-
-------------------------------------------------------------------------
-
-# 7. Windows Task Scheduler 設定
-
-登録スクリプト: `scripts/setup_task_scheduler.ps1`
-
-  時刻    タスク名                             実行スクリプト
-  ------- ------------------------------------ -----------------------------------------------
-  15:30   KabuSys_DataUpdate                   scripts\run_data_update.py
-  15:33   KabuSys_YahooNewsCollection          scripts\run_yahoonews_collection.py    ※ オプション (ENABLE_YAHOONEWS=true 時のみ実行)
-  15:35   KabuSys_TDnetCollection              scripts\run_tdnet_collection.py        ※ オプション (ENABLE_TDNET=true 時のみ実行)
-  15:40   KabuSys_EdinetCollection             scripts\run_edinet_collection.py       ※ オプション (ENABLE_EDINET=true 時のみ実行)
-  16:00   KabuSys_FeatureGen                   scripts\run_feature_gen.py
-  17:00   KabuSys_DisclosureClassification     scripts\run_disclosure_classification.py ※ オプション (ENABLE_TDNET=true 時のみ実行)
-  18:00   KabuSys_AiAnalysis                   scripts\run_ai_analysis.py
-  20:00   KabuSys_StrategySignal               scripts\run_strategy_signal.py
-  21:00   KabuSys_PortfolioConstruction        scripts\run_portfolio_construction.py
-  08:30   KabuSys_ExecutionStart               scripts\start_system.py --component execution
-  09:00   KabuSys_MonitoringStart              scripts\start_system.py --component monitoring
-
-登録コマンド（プロジェクトルートで実行）:
-
-    powershell -File scripts\setup_task_scheduler.ps1
-
-既存ジョブは `-Force` で上書き登録される。
-
-------------------------------------------------------------------------
-
-# 8. プロセス優先度
-
-Execution環境を保護する。
-
-  プロセス             優先度     起動スクリプト
-  -------------------- -------- -------------------------------------------
-  execution_service    High     scripts\start_system.py --component execution
-  monitoring_service   High     scripts\start_system.py --component monitoring
-  strategy_service     Normal   ライブラリ（夜間バッチから呼び出し）
-  ai_service           Low      ライブラリ（夜間バッチから呼び出し）
-
-各起動スクリプトは `src/kabusys/utils/process_priority.set_process_priority("high")` を
-先頭で呼び出し、OS優先度を設定してからエンジンを初期化する。
-Windows では管理者権限推奨（権限不足時は WARNING ログで続行）。
-
-------------------------------------------------------------------------
-
-# 8.1 停止・制御スクリプト
-
-  スクリプト                     用途
-  ------------------------------ ----------------------------------------------------
-  scripts\start_system.py        execution / monitoring プロセスを起動（PIDファイル書き込み）
-  scripts\stop_system.py         グレースフル停止（10秒タイムアウト後に強制終了）
-  scripts\rebuild_features.py    prices_daily のデータ確認後に特徴量を再計算
-  scripts\reset_signals.py       signal_queue をクリア（未処理シグナルを削除）
-
-停止フラグファイル: `data/stop_requested.flag`
-
-- `stop_system.py` が作成し、`start_system.py` が次回起動時にクリアする。
-- `run_execution.py` と `run_monitoring.py` はメインループでこのフラグを監視してグレースフルに終了する。
-
-PIDファイル:
-
-  プロセス           PIDファイル
-  ------------------ ----------------------
-  execution_service  data/execution.pid
-  monitoring_service data/monitoring.pid
-
-------------------------------------------------------------------------
-
-# 9. 休日・祝日処理
-
-JPXカレンダーを参照する。
-
-    market_calendar
-
-チェック
-
--   is_trading_day
--   is_half_day
--   is_sq_day
-
-非取引日は **Night Batch のみ実行**。
-
-------------------------------------------------------------------------
-
-# 10. 障害対応
-
-異常フロー
-
-    Monitoring
-       ↓
-    Alert
-       ↓
-    Execution Stop
-       ↓
-    Manual Investigation
-
-------------------------------------------------------------------------
-
-# 11. まとめ
-
-Runtime Job Schedule は以下で構成される。
-
-    Night Batch
-       ↓
-    Signal Generation
-       ↓
-    Portfolio Construction
-       ↓
-    Execution Preparation
-       ↓
-    Market Execution
-       ↓
-    Monitoring
-
-このスケジュールにより **Single Windows Node
-環境でも安全で安定した自動売買運用**を実現する。
+- `documents/08_Operations/TradingRunbook.md`
+- `documents/WebManual/A_OperationsCycle.md`
+- `documents/10_Runtime/TODO_OperationsInterfaces.md`

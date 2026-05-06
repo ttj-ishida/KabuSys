@@ -1,212 +1,192 @@
-# D. 本番運用 — WebManual
+# D. 本番運用
 
-- **対象**: KabuSys を実際の資金で自動売買として運用する方
-- **想定読者**: ペーパートレードで検証済みの運用者
-- **目的**: 本番環境での日次運用を、毎日の定型手順として安全に実施できるようにする
-
-> ⚠️ **本番運用を開始する前に、必ずペーパートレード（[C_PaperTrading.md](./C_PaperTrading.md)）で動作確認を行ってください。**
+- 対象: `live` 環境で KabuSys を運用する担当者
+- 前提: Paper Trading で一通り確認済み
 
 ---
 
-## D-1. 本番運用を始める前のチェックリスト
+## D-1. 本番切替前チェック
 
-以下がすべて完了していることを確認してください。
-
-- [ ] ペーパートレードで数日間、一連の運用フロー（夜間バッチ→発注→約定確認）が正常に動作している
-- [ ] `.env` の `KABUSYS_ENV` を `paper_trading` から `live` に変更した
-- [ ] `python -m kabusys.validate_config` が `live` 環境でエラーなく完了する
-- [ ] kabuステーション® が本番用パスワード（ポート 18080）でログインできている
-- [ ] `config/risk_config.yaml` のリスクパラメータを実際の運用資金に合わせて設定している
-- [ ] Task Scheduler の全バッチジョブが `Ready` 状態になっている
+- `.env` の `KABUSYS_ENV=live`
+- `python -m kabusys.validate_config`
+- kabuステーション API 接続確認
+- `config/risk_config.yaml` の再確認
+- Task Scheduler の `KabuSys_*` が `Ready`
 
 ---
 
-## D-2. 1日の運用タイムライン
+## D-2. 1日の流れ
 
-```
-07:50  PC・kabuステーション起動確認（手動）
-08:00  Pre-Market Checklist 確認（手動）
-08:30  Execution Engine 起動（Task Scheduler 自動）
-09:00  Monitoring 起動（Task Scheduler 自動）
-       ─────── 前場（09:00〜11:30）───────
-       自動発注・約定確認・リスク監視
-       ─────── 昼休み（11:30〜12:30）─────
-       注文受付停止
-       ─────── 後場（12:30〜15:00）───────
-       自動発注・約定確認・リスク監視
-15:00  市場クローズ → Market Close 確認（手動）
-15:30  市場データ更新バッチ（Task Scheduler 自動）
-16:00  特徴量計算バッチ（Task Scheduler 自動）
-18:00  AI 分析バッチ（Task Scheduler 自動・オプション）
-20:00  売買シグナル生成バッチ（Task Scheduler 自動）
-21:00  ポートフォリオ構築バッチ（Task Scheduler 自動）
-21:30  夜間バッチ結果確認（手動）
+```text
+08:00  Pre-Market
+08:30  Execution 起動
+09:00  Monitoring 起動
+09:00-15:00  ザラ場監視
+15:00  Market Close
+15:30-21:00  夜間バッチ
+21:30  Night Batch 状態確認
 ```
 
 ---
 
-## D-3. 朝の確認（08:00 — Pre-Market Checklist）
+## D-3. 朝の確認（08:00）
 
-市場オープン前に、以下を **すべて** 確認してから Execution を起動します。
+主要コマンド:
 
-| 確認項目 | 内容 | 確認方法 |
-|---|---|---|
-| PC 状態 | スリープ解除済み・正常動作 | 目視 |
-| kabuステーション | 起動・ログイン済み（本番ポート 18080） | 画面確認 |
-| API 接続 | kabuステーション の接続状態 = 正常 | kabuステーション 画面 |
-| 夜間データ | 前日分データが DuckDB に入っている | `data_update` ログ確認 |
-| Signal Queue | 本日の `pending` シグナルが存在する | 下記コマンド |
-| ポジション整合 | DB と証券口座のポジションが一致 | 下記コマンド |
-| 停止フラグ | `data/stop_requested.flag` が存在しない | エクスプローラー確認 |
-| Task Scheduler | 全バッチジョブが `Ready` 状態 | 下記コマンド |
-
-**Signal Queue 確認:**
 ```cmd
+python -m kabusys.run_pre_market_report --save
 python -m kabusys.run_signal_queue_report
-```
-
-**ポジション整合確認:**
-```cmd
 python -m kabusys.run_position_reconciliation_report
 ```
-→ `CLEAN` が表示されれば問題なし。`DISCREPANCY` が出た場合は Execution 起動前に確認すること。
 
-**Task Scheduler 状態確認:**
-```powershell
-Get-ScheduledTask -TaskName "KabuSys_*" | Select-Object TaskName, State
-```
+判定:
+
+- `READY`
+- `READY_WITH_WARNINGS`
+- `BLOCKED`
+
+`BLOCKED` の場合は Execution を開始しない。
+
+出力先:
+
+- `artifacts/pre_market/{date}/report.md`
 
 ---
 
-## D-4. Execution の起動と停止（08:30）
+## D-4. Execution 起動（08:30）
 
-Task Scheduler が自動起動します。手動での起動・停止が必要な場合は以下を使用します。
-
-**手動起動（Execution + Monitoring まとめて）:**
 ```cmd
-python scripts\start_system.py
-```
-
-**Execution のみ起動:**
-```cmd
+python scripts\start_system.py --dry-run
 python scripts\start_system.py --component execution
 ```
 
-**起動前の安全確認（`--dry-run`）:**
-```cmd
-python scripts\start_system.py --dry-run
-```
-発注は行わず、Signal Queue とポジションの状態のみ確認できます。
+補足:
 
-**停止（グレースフルシャットダウン）:**
-```cmd
-python scripts\stop_system.py
-```
+- `python -m kabusys.run_execution` 実行時に Execution Startup Summary が自動保存される
+- 保存先: `artifacts/execution_startup/{date}/report.md`
+
+`orders_no_status > 0` は執行継続不可の扱いにする。
 
 ---
 
-## D-5. ザラ場中の監視（09:00〜15:00）
+## D-5. ザラ場監視（09:00-15:00）
 
-ザラ場中は以下の項目を定期的に目視確認します。
+見るもの:
 
-| 監視項目 | 確認内容 | 異常時の対応 |
-|---|---|---|
-| 注文エラー | `rejected` 注文が連続していないか | ログ確認 → [E. 障害対応](./E_FailureRecovery.md) |
-| API 接続 | kabuステーション の接続状態 | kabuステーション 再起動 |
-| ドローダウン | 日次損失が閾値に近づいていないか | Kill Switch 検討 |
-| Execution プロセス | `data/execution.pid` が存在するか | `start_system.py --component execution` |
+- 注文エラー
+- API エラー
+- ドローダウン
+- Kill Switch
+- ポジション差分
 
-**ログのリアルタイム確認:**
-```powershell
-# Execution ログの直近50行
-Get-Content logs\execution.log -Tail 50
+CLI:
 
-# ERROR / CRITICAL のみ抽出
-Select-String -Path logs\*.log -Pattern "ERROR|CRITICAL"
+```cmd
+python -m kabusys.run_intraday_monitor --watch
 ```
 
-**主要なログキーワード:**
+Streamlit:
 
-| キーワード | 意味 | 対応 |
-|---|---|---|
-| `停止フラグを検知` | グレースフル停止開始 | 正常停止を確認する |
-| `Kill Switch` | 緊急停止発動 | [E-2. 緊急停止](./E_FailureRecovery.md#e-2) を参照 |
-| `position_discrepancies` | ポジション不整合 | [E-4. ポジション不整合](./E_FailureRecovery.md#e-4) を参照 |
-| `CIRCUIT_BREAKER_OPEN` | サーキットブレーカー発動 | [E-3. API 障害](./E_FailureRecovery.md#e-3) を参照 |
+```cmd
+streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
+```
+
+使うページ:
+
+- `Home`
+- `WebManual`
+- `Signal Queue`
+- `Performance`
+- `Strategy Lab`
 
 ---
 
-## D-6. 引け後の確認（15:00 — Market Close）
-
-市場クローズ後に以下を確認します。
-
-| 確認項目 | 確認内容 |
-|---|---|
-| 未約定注文 | `signal_queue` に `pending` が残っていないか |
-| ポジション更新 | `positions` テーブルが最新状態か |
-| 当日損益 | `portfolio_performance` に本日分が記録されているか |
+## D-6. 引け後の確認（15:00）
 
 ```cmd
-:: ポジション確認
-duckdb data\kabusys.duckdb "SELECT * FROM positions ORDER BY code"
-
-:: 日次レポート生成（artifacts/ に保存）
+python -m kabusys.run_market_close_report --save
 python -m kabusys.run_performance_report --type daily --save
-
-:: Market Close レポート
-python -m kabusys.run_market_close_report
 ```
+
+判定:
+
+- `OK`: 夜間バッチへ進む
+- `BLOCKED`: warning 解消まで進まない
+
+出力先:
+
+- `artifacts/market_close/{date}/report.md`
+- `artifacts/performance/live/daily/{date}/report.md`
 
 ---
 
 ## D-7. 夜間バッチの確認（21:30）
 
-夜間バッチが正常完了したかを確認します。
-
 ```powershell
-# Task Scheduler の実行結果を一覧表示
 Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object TaskName, LastRunTime, LastTaskResult
 ```
 
-`LastTaskResult = 0` が正常終了です。
-
-| ジョブ名 | 実行時刻 | 確認内容 |
-|---|---|---|
-| KabuSys_DataUpdate | 15:30 | DuckDB に当日の株価データが追加されている |
-| KabuSys_FeatureGen | 16:00 | `features` テーブルが更新されている |
-| KabuSys_AiAnalysis | 18:00 | `news_scores`, `regime_scores` が更新されている（オプション） |
-| KabuSys_StrategySignal | 20:00 | `signals` テーブルに本日の BUY シグナルがある |
-| KabuSys_PortfolioConstruction | 21:00 | `signal_queue` に `pending` シグナルが入っている |
-
-**signal_queue に pending がない場合（翌日の発注候補ゼロ）:**
 ```cmd
 python -m kabusys.run_signal_queue_report
-:: → pending = 0 なら翌日は発注なし（戦略上の条件不成立）
 ```
+
+確認項目:
+
+- 必須ジョブ成功
+- `signals` 生成済み
+- 翌営業日の `signal_queue` 作成済み
+- warning の有無
+
+判定の考え方:
+
+- `READY`: 必須ジョブ成功かつ翌営業日の `signal_queue` が作成済み
+- `READY_WITH_WARNINGS`: warning はあるが翌営業日の準備は完了
+- `BLOCKED`: 必須ジョブ失敗または翌営業日の発注準備が未完了
+
+補足:
+
+- 判定ロジック自体は `src/kabusys/operations/night_batch_report.py` に実装済み
+- 現行ツリーでは独立 CLI よりも Task Scheduler と queue 確認が導線
 
 ---
 
-## D-8. 成績レポートの確認（日次・週次・月次）
-
-成績レポートはいつでも生成できます。
+## D-8. 成績レポート
 
 ```cmd
-:: 日次レポート
 python -m kabusys.run_performance_report --type daily --save
-
-:: 週次レポート
 python -m kabusys.run_performance_report --type weekly --save
-
-:: 月次レポート
 python -m kabusys.run_performance_report --type monthly --save
 ```
 
-レポートは `artifacts/performance/live/` 配下に保存されます。
+保存先:
+
+- `artifacts/performance/live/daily/...`
+- `artifacts/performance/live/weekly/...`
+- `artifacts/performance/live/monthly/...`
 
 ---
 
-## 関連ドキュメント
+## D-9. 異常時
 
-- `documents/08_Operations/TradingRunbook.md` — 日次運用の詳細手順（エンジニア向け完全版）
-- [E_FailureRecovery.md](./E_FailureRecovery.md) — 異常が起きたときの対応
-- [C_PaperTrading.md](./C_PaperTrading.md) — ペーパートレードへの切り替え方
+停止:
+
+```cmd
+python scripts\stop_system.py
+```
+
+再開前:
+
+```cmd
+python scripts\start_system.py --dry-run
+```
+
+詳細は [E_FailureRecovery.md](./E_FailureRecovery.md) を参照。
+
+---
+
+## 関連
+
+- [A_OperationsCycle.md](./A_OperationsCycle.md)
+- [C_PaperTrading.md](./C_PaperTrading.md)
+- [E_FailureRecovery.md](./E_FailureRecovery.md)
+- [documents/08_Operations/TradingRunbook.md](../08_Operations/TradingRunbook.md)

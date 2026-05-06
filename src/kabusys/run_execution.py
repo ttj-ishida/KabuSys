@@ -35,10 +35,20 @@ from kabusys.operations.execution_startup_report import (  # noqa: E402
     save_report,
 )
 from kabusys.monitoring.monitoring_db import init_monitoring_db  # noqa: E402
+from kabusys.operations.line_reports import format_morning_message  # noqa: E402
+from kabusys.operations.notifier import build_notifier  # noqa: E402
 from kabusys.utils.logging_setup import setup_logging  # noqa: E402
 from kabusys.utils.process_priority import set_process_priority  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+
+def _count_pending_signals(conn: duckdb.DuckDBPyConnection, target_date: date) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) FROM signal_queue WHERE date = ? AND status = 'pending'",
+        [target_date],
+    ).fetchone()
+    return int(row[0]) if row else 0
 
 
 def _load_risk_config(path: Path, initial_portfolio_value: float) -> RiskConfig:
@@ -278,6 +288,7 @@ def main() -> None:
         # 起動時リコンシリエーション + Execution Startup Summary 生成
         today = date.today()
         reconcile_result = reconciler.run()
+        _report = None
         try:
             _report = build_report(
                 reconcile_result=reconcile_result, startup_date=today
@@ -288,6 +299,24 @@ def main() -> None:
             logger.warning(
                 "Execution Startup Summary の生成に失敗しました（起動を続行します）",
                 exc_info=True,
+            )
+
+        # 朝の LINE 通知（失敗しても起動を継続する）
+        try:
+            notifier = build_notifier(settings)
+            pending_count = _count_pending_signals(duckdb_conn, today)
+            status = _report.status if _report is not None else "UNKNOWN"
+            orders_no_status = _report.orders_no_status if _report is not None else 0
+            msg = format_morning_message(
+                status=status,
+                orders_no_status=orders_no_status,
+                pending_count=pending_count,
+                report_date=today.isoformat(),
+            )
+            notifier.send(msg)
+        except Exception:
+            logger.warning(
+                "朝の LINE 通知に失敗しました（起動を続行します）", exc_info=True
             )
 
         # 5. ExecutionEngine 起動（reconciliation は上で完了済みのため reconciler=None）
