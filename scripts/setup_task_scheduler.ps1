@@ -60,6 +60,8 @@ function Register-KabuSysTask {
 
 # Night batch jobs
 Register-KabuSysTask -TaskName "KabuSys_DataUpdate"            -Script "run_data_update.py"            -TriggerTime "15:30"
+# オプション: ENABLE_YAHOONEWS=true のときのみ実際に収集が実行される（false の場合即スキップ）
+Register-KabuSysTask -TaskName "KabuSys_YahooNewsCollection"   -Script "run_yahoonews_collection.py"   -TriggerTime "15:33"
 Register-KabuSysTask -TaskName "KabuSys_FeatureGen"            -Script "run_feature_gen.py"            -TriggerTime "16:00"
 Register-KabuSysTask -TaskName "KabuSys_AiAnalysis"            -Script "run_ai_analysis.py"            -TriggerTime "18:00"
 Register-KabuSysTask -TaskName "KabuSys_StrategySignal"        -Script "run_strategy_signal.py"        -TriggerTime "20:00"
@@ -70,5 +72,5 @@ Register-KabuSysTask -TaskName "KabuSys_ExecutionStart"  -Script "start_system.p
 Register-KabuSysTask -TaskName "KabuSys_MonitoringStart" -Script "start_system.py" -Arguments "--component monitoring" -TriggerTime "09:00"
 
 Write-Host ""
-Write-Host "7 件のジョブ登録が完了しました。"
+Write-Host "8 件のジョブ登録が完了しました。"
 Write-Host "確認: Get-ScheduledTask -TaskName 'KabuSys_*' | Select-Object TaskName, State"

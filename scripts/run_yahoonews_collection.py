@@ -1,7 +1,7 @@
 # scripts/run_yahoonews_collection.py
 """Night batch: Yahoo News RSS 収集 (yahoonews_collection_job)。
 
-Task Scheduler から 15:35 に起動される。
+Task Scheduler から 15:33 に起動される。
 ENABLE_YAHOONEWS=false（デフォルト）のときはスキップして正常終了する。
 """
 
@@ -25,11 +25,12 @@ logger = logging.getLogger(__name__)
 def _fetch_known_codes(conn: duckdb.DuckDBPyConnection) -> list[str]:
     """stocks テーブルから上場銘柄コードを取得する。"""
     try:
-        rows = conn.execute("SELECT code FROM stocks").fetchall()
-        return [r[0] for r in rows]
+        rows = conn.execute("SELECT DISTINCT code FROM stocks").fetchall()
+        return [str(r[0]) for r in rows]
     except Exception:
         logger.warning(
-            "stocks テーブルからの銘柄コード取得に失敗しました。symbol リンクをスキップします。"
+            "stocks テーブルからの銘柄コード取得に失敗しました。symbol リンクをスキップします。",
+            exc_info=True,
         )
         return []
 
@@ -41,8 +42,9 @@ def main() -> None:
             "Yahoo News 収集はオプション機能です（ENABLE_YAHOONEWS=false）。スキップします。"
         )
         return
-    conn = duckdb.connect(str(settings.duckdb_path))
+    conn = None
     try:
+        conn = duckdb.connect(str(settings.duckdb_path))
         known_codes = _fetch_known_codes(conn)
         saved = run_news_collection(
             conn,
@@ -53,7 +55,8 @@ def main() -> None:
         logger.exception("yahoonews_collection バッチが失敗しました")
         sys.exit(1)
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 if __name__ == "__main__":
