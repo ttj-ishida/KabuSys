@@ -66,6 +66,26 @@ _ITEMS: list[dict] = [
         "description": "  通常はデフォルトのままで可",
     },
     {
+        "key": "KABU_USE_SANDBOX",
+        "label": "kabuステーション検証環境（ポート 18081）の使用",
+        "choices": ["true", "false"],
+        "default": "false",
+        "description": (
+            "  true かつ KABUSYS_ENV=paper_trading のとき検証環境（18081）に接続する\n"
+            "  false の場合 MockBrokerClient を使用してシミュレーションする"
+        ),
+    },
+    {
+        "key": "KABU_SANDBOX_API_PASSWORD",
+        "label": "kabuステーション検証環境 API パスワード（任意）",
+        "secret": True,
+        "optional": True,
+        "description": (
+            "  KABU_USE_SANDBOX=true の場合に使用する検証環境用 API パスワード\n"
+            "  未設定時は KABU_API_PASSWORD を流用する"
+        ),
+    },
+    {
         "key": "KABU_TRADE_PASSWORD",
         "label": "kabuステーション 取引パスワード（任意）",
         "secret": True,
@@ -161,6 +181,15 @@ _ITEMS: list[dict] = [
         ),
     },
     {
+        "key": "PAPER_TRADING_INITIAL_CASH",
+        "label": "ペーパートレード用初期資金（円）",
+        "default": "10000000",
+        "description": (
+            "  KABUSYS_ENV=paper_trading 時の MockBrokerClient 初期現金残高（円）\n"
+            "  デフォルト: 10,000,000 円（1,000 万円）"
+        ),
+    },
+    {
         "key": "LOG_LEVEL",
         "label": "ログレベル",
         "choices": ["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -215,6 +244,8 @@ def _write_env(path: Path, values: dict[str, str]) -> None:
         f"KABU_API_PASSWORD={values.get('KABU_API_PASSWORD', '')}",
         f"KABU_API_BASE_URL={values.get('KABU_API_BASE_URL', 'http://localhost:18080/kabusapi')}",
         f"KABU_TRADE_PASSWORD={values.get('KABU_TRADE_PASSWORD', '')}",
+        f"KABU_USE_SANDBOX={values.get('KABU_USE_SANDBOX', 'false')}",
+        f"KABU_SANDBOX_API_PASSWORD={values.get('KABU_SANDBOX_API_PASSWORD', '')}",
         "",
         "# --- LINE Messaging API (アラート通知用) ---",
         f"LINE_CHANNEL_ACCESS_TOKEN={values.get('LINE_CHANNEL_ACCESS_TOKEN', '')}",
@@ -223,6 +254,9 @@ def _write_env(path: Path, values: dict[str, str]) -> None:
         "# --- データベース ---",
         f"DUCKDB_PATH={values.get('DUCKDB_PATH', 'data/kabusys.duckdb')}",
         f"SQLITE_PATH={values.get('SQLITE_PATH', 'data/monitoring.db')}",
+        "",
+        "# --- ペーパートレード設定 ---",
+        f"PAPER_TRADING_INITIAL_CASH={values.get('PAPER_TRADING_INITIAL_CASH', '10000000')}",
         "",
         "# --- システム設定 ---",
         f"KABUSYS_ENV={values.get('KABUSYS_ENV', 'development')}",
