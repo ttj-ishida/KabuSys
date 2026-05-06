@@ -166,7 +166,8 @@ python -m kabusys.run_execution
 python -m kabusys.run_execution
 ```
 
-> kabuステーションを検証用（ポート 18081）でログインしてから起動してください。
+> kabuステーションを検証用（ポート 18081）でログインしてから起動してください。  
+> 発注リクエストはポート 18081 のsandbox APIへ実際に送信されます（`KABU_API_BASE_URL` の設定に関係なく 18081 を使用）。kabuステーション検証環境の仕様により実市場約定は発生しません。
 
 ### 停止
 

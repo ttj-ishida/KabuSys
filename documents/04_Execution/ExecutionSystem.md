@@ -199,7 +199,7 @@ broker = BrokerClientFactory.create(settings)
 |---|---|---|---|
 | `development` | — | `MockBrokerClient` | ローカル開発・テスト用（発注なし） |
 | `paper_trading` | `false`（デフォルト） | `MockBrokerClient` | 仮想発注（Paper Trading DB に記録） |
-| `paper_trading` | `true` | `KabuStationClient`（ポート 18081） | kabu検証環境への実際の接続（発注は行われない） |
+| `paper_trading` | `true` | `KabuStationClient`（ポート 18081） | 発注リクエストはsandbox APIへ送信されるが、kabuステーション検証環境の仕様により実市場約定は発生しない |
 | `live` | — | `KabuStationClient`（ポート 18080） | 実際に kabuステーション API へ発注 |
 
 **直接指定（テスト・開発時）**
@@ -220,7 +220,7 @@ api = create_broker_api(mock=False, api_password="...", base_url="http://localho
 | `KABU_API_PASSWORD` | 必須 | kabuステーション API パスワード（live 環境で必須） |
 | `KABU_TRADE_PASSWORD` | 省略可 | kabuステーション 取引パスワード（省略時は `KABU_API_PASSWORD` と同一とみなす） |
 | `KABU_API_BASE_URL` | `http://localhost:18080/kabusapi` | kabuステーション API ベース URL |
-| `KABU_USE_SANDBOX` | `false` | `true` でポート 18081 のkabu検証環境に接続（`paper_trading` 時のみ有効） |
+| `KABU_USE_SANDBOX` | `false` | `true` でポート 18081 のkabu検証環境に接続（`paper_trading` 時のみ有効）。`true` のとき `KABU_API_BASE_URL` より優先し 18081 をハードコード使用 |
 | `KABU_SANDBOX_API_PASSWORD` | （空） | kabu検証環境用 API パスワード（未設定時は `KABU_API_PASSWORD` を使用） |
 | `PAPER_FILL_MODE` | `instant` | MockBrokerClient の約定方式（instant/partial/never/reject） |
 | `PAPER_TRADING_INITIAL_CASH` | `10000000` | MockBrokerClient の初期仮想資金（円）。起動時に `paper_trading.db` の約定履歴で上書きされる |
