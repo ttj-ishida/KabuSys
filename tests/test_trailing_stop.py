@@ -333,9 +333,9 @@ class TestTrailingStopDefault:
         sig = inspect.signature(run_backtest)
         assert "trailing_stop_atr" in sig.parameters
 
-    def test_generate_signals_default_is_2_0(self):
+    def test_generate_signals_default_is_none_sentinel(self):
         sig = inspect.signature(generate_signals)
-        assert sig.parameters["trailing_stop_atr"].default == pytest.approx(2.0)
+        assert sig.parameters["trailing_stop_atr"].default is None
 
     def test_run_backtest_default_is_2_0(self):
         sig = inspect.signature(run_backtest)

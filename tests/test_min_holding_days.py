@@ -306,13 +306,10 @@ class TestMinHoldingDaysDefault:
             f"run_backtest の min_holding_days デフォルト値は 5 であるべき (got {param.default})"
         )
 
-    def test_generate_signals_and_run_backtest_defaults_match(self):
-        """`generate_signals` と `run_backtest` の min_holding_days デフォルト値が一致する。"""
+    def test_generate_signals_uses_none_sentinel_for_min_holding_days(self):
+        """`generate_signals` の min_holding_days デフォルト値は None（config-driven sentinel）であること。"""
         sig_gs = inspect.signature(generate_signals)
-        sig_rb = inspect.signature(run_backtest)
         default_gs = sig_gs.parameters["min_holding_days"].default
-        default_rb = sig_rb.parameters["min_holding_days"].default
-        assert default_gs == default_rb, (
-            f"generate_signals ({default_gs}) と run_backtest ({default_rb}) の "
-            "min_holding_days デフォルト値が一致すべき"
+        assert default_gs is None, (
+            f"generate_signals の min_holding_days デフォルト値は None (config-driven) であるべき (got {default_gs})"
         )

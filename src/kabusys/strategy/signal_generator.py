@@ -640,6 +640,7 @@ def _is_reentry_blocked(
     conn: duckdb.DuckDBPyConnection,
     code: str,
     target_date: date,
+    cooldown_days: int = _REENTRY_COOLDOWN_DAYS,
 ) -> bool:
     """最新の sell_date から target_date までの営業日数が _REENTRY_COOLDOWN_DAYS 未満なら True。
     sell_date が NULL またはレコードなしは False（制限なし）。
@@ -656,7 +657,7 @@ def _is_reentry_blocked(
         return False
     sell_date = row[0] if isinstance(row[0], date) else date.fromisoformat(str(row[0]))
     days = get_trading_days(conn, sell_date, target_date)
-    return (len(days) - 1) < _REENTRY_COOLDOWN_DAYS
+    return (len(days) - 1) < cooldown_days
 
 
 def _has_upcoming_earnings(
@@ -699,6 +700,7 @@ def _generate_sell_signals(
     min_holding_days: int = _MIN_HOLDING_DAYS,
     max_holding_days: int = _MAX_HOLDING_DAYS,
     trailing_stop_atr: float = _TRAILING_STOP_ATR_MULT,
+    stop_loss_rate: float = _STOP_LOSS_RATE,
 ) -> list[dict[str, Any]]:
     """保有ポジションに対してエグジット条件を判定し、SELL シグナルを返す。
 
@@ -720,6 +722,7 @@ def _generate_sell_signals(
         max_holding_days:    この営業日数以上保有した銘柄に time_exit SELL を発動（デフォルト: _MAX_HOLDING_DAYS）。
                              ストップロス・決算回避より低優先。min_holding_days は無視して発火する。
         trailing_stop_atr:   ATR 乗数。peak_close − N×ATR を下回ったら trailing_stop SELL（含み益ありの場合のみ）。
+        stop_loss_rate:      ストップロス閾値（デフォルト: _STOP_LOSS_RATE）。pnl_rate がこの値以下で SELL。
 
     Returns:
         [{"code": str, "score": float, "reason": str}, ...] のリスト。
@@ -779,7 +782,7 @@ def _generate_sell_signals(
 
         # 1. ストップロス（最優先・保有日数チェックをスキップ）
         pnl_rate = (close - avg_price) / avg_price
-        if pnl_rate <= _STOP_LOSS_RATE:
+        if pnl_rate <= stop_loss_rate:
             sell_signals.append(
                 {
                     "code": code,
@@ -886,13 +889,13 @@ def _generate_sell_signals(
 def generate_signals(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
-    threshold: float = _DEFAULT_THRESHOLD,
+    threshold: float | None = None,
     weights: dict[str, float] | None = None,
     event_dates: dict[date, str] | None = None,
     scope: BacktestScope | None = None,
-    min_holding_days: int = _MIN_HOLDING_DAYS,
-    max_holding_days: int = _MAX_HOLDING_DAYS,
-    trailing_stop_atr: float = _TRAILING_STOP_ATR_MULT,
+    min_holding_days: int | None = None,
+    max_holding_days: int | None = None,
+    trailing_stop_atr: float | None = None,
 ) -> int:
     """features テーブルを読み込み、売買シグナルを生成して signals テーブルへ書き込む。
 
@@ -901,22 +904,34 @@ def generate_signals(
     Args:
         conn:              DuckDB 接続。features / ai_scores / positions テーブルを参照する。
         target_date:       シグナル生成日。
-        threshold:         BUY シグナル生成の final_score 閾値（デフォルト 0.60）。
-        weights:           ファクター重みの辞書（デフォルトは StrategyModel.md Section 4.1 の値）。
+        threshold:         BUY シグナル生成の final_score 閾値（None の場合は config から読み込む）。
+        weights:           ファクター重みの辞書（None の場合は config から読み込む）。
         event_dates:       {event_date: event_name} の辞書。翌営業日がイベント日の場合、
                            BUY の size_multiplier を 0.5 に縮小する。省略時はイベントなし扱い。
         scope:             BacktestScope インスタンス。mode='manual_codes' かつ codes が指定されている場合、
                            features クエリを指定銘柄に絞る。省略時（None）は全銘柄が対象。
-        min_holding_days:  SELL を抑制する最低保有営業日数（デフォルト: _MIN_HOLDING_DAYS）。
+        min_holding_days:  SELL を抑制する最低保有営業日数（None の場合は config から読み込む）。
                            ストップロスと Bear レジーム時は保有日数に関わらず SELL が発生する。
-        max_holding_days:  この営業日数以上保有した銘柄に time_exit SELL を発動（デフォルト: _MAX_HOLDING_DAYS）。
+        max_holding_days:  この営業日数以上保有した銘柄に time_exit SELL を発動（None の場合は config から読み込む）。
                            1 以上を指定すること。
         trailing_stop_atr: ATR 乗数。peak_close − N×ATR を下回ったら trailing_stop SELL。
-                           正の値を指定すること（デフォルト: _TRAILING_STOP_ATR_MULT）。
+                           正の値を指定すること（None の場合は config から読み込む）。
 
     Returns:
         signals テーブルへ書き込んだシグナル数（BUY + SELL の合計）。
     """
+    _cfg = _load_strategy_config()
+    if threshold is None:
+        threshold = _cfg["threshold"]
+    if weights is None:
+        weights = _cfg["weights"]
+    if min_holding_days is None:
+        min_holding_days = _cfg["min_holding_days"]
+    if max_holding_days is None:
+        max_holding_days = _cfg["max_holding_days"]
+    if trailing_stop_atr is None:
+        trailing_stop_atr = _cfg["trailing_stop_atr_mult"]
+
     if min_holding_days < 0:
         raise ValueError(
             f"min_holding_days は 0 以上を指定してください: {min_holding_days}"
@@ -1113,6 +1128,8 @@ def generate_signals(
     score_map: dict[str, float] = {r["code"]: r["score"] for r in scored}
 
     # 6. BUY シグナル生成（Bear レジームまたは breadth_stop では抑制）
+    _gap_up = _cfg["gap_up_threshold"]
+    _gap_down = _cfg["gap_down_threshold"]
     buy_signals: list[dict] = []
     if not regime_is_bear and not breadth_stop:
         # 3c. ギャップ比率を一括取得（BUY 生成が必要な場合のみ実行）
@@ -1128,8 +1145,8 @@ def generate_signals(
                 continue
             gap = gap_ratios.get(r["code"])
             if gap is not None and (
-                gap > _GAP_UP_THRESHOLD + _GAP_THRESHOLD_EPSILON
-                or gap <= _GAP_DOWN_THRESHOLD + _GAP_THRESHOLD_EPSILON
+                gap > _gap_up + _GAP_THRESHOLD_EPSILON
+                or gap <= _gap_down + _GAP_THRESHOLD_EPSILON
             ):
                 logger.debug(
                     "gap filter: %s gap=%.2f%% — BUY を抑制 date=%s",
@@ -1151,7 +1168,7 @@ def generate_signals(
                 sector_suppressed += 1
                 continue
             # 再エントリー制限チェック
-            if _is_reentry_blocked(conn, r["code"], target_date):
+            if _is_reentry_blocked(conn, r["code"], target_date, cooldown_days=_cfg["reentry_cooldown_days"]):
                 logger.debug("reentry blocked: %s — date=%s", r["code"], target_date)
                 reentry_suppressed += 1
                 continue
@@ -1200,6 +1217,7 @@ def generate_signals(
         min_holding_days=min_holding_days,
         max_holding_days=max_holding_days,
         trailing_stop_atr=trailing_stop_atr,
+        stop_loss_rate=_cfg["stop_loss_rate"],
     )
 
     # SELL 対象銘柄は BUY から除外し、ランクを連番で再付与（SELL 優先ポリシー）
