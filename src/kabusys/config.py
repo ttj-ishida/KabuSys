@@ -209,6 +209,16 @@ class Settings:
         """
         return os.environ.get("EDINET_API_KEY", "")
 
+    # --- Yahoo News ---
+    @property
+    def enable_yahoonews(self) -> bool:
+        """Yahoo News RSS 収集機能の有効フラグ（ENABLE_YAHOONEWS、デフォルト: False）。
+
+        "1" / "true" / "yes" / "on" のみ True。デフォルト無効。
+        False の場合、yahoonews_collection ジョブはスキップされる。
+        """
+        return _parse_bool_env("ENABLE_YAHOONEWS", default=False)
+
     # --- LINE Messaging API ---
     @property
     def line_channel_access_token(self) -> str:

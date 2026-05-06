@@ -22,6 +22,7 @@ _TOGGLE_DEFAULTS: dict[str, str] = {
     "ENABLE_AI_SENTIMENT": "false",
     "ENABLE_TDNET": "false",
     "ENABLE_EDINET": "false",
+    "ENABLE_YAHOONEWS": "false",
 }
 
 # ---------------------------------------------------------------------------
@@ -146,6 +147,17 @@ _ITEMS: list[dict] = [
         "description": (
             "  EDINET API v2 の利用に必要（ENABLE_EDINET=true の場合のみ使用）\n"
             "  https://disclosure2.edinet-fsa.go.jp/ から無料取得"
+        ),
+    },
+    {
+        "key": "ENABLE_YAHOONEWS",
+        "label": "Yahoo News RSS 収集の有効化",
+        "choices": ["true", "false"],
+        "default": "false",
+        "description": (
+            "  Yahoo News RSS から当日ニュースを収集し raw_news テーブルへ保存する（無料）\n"
+            "  false の場合 yahoonews_collection ジョブはスキップされる\n"
+            "  ニュース AI スコアリングには別途 ENABLE_AI_SENTIMENT=true が必要"
         ),
     },
     {

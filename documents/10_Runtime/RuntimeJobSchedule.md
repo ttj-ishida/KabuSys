@@ -319,6 +319,7 @@
   時刻    タスク名                             実行スクリプト
   ------- ------------------------------------ -----------------------------------------------
   15:30   KabuSys_DataUpdate                   scripts\run_data_update.py
+  15:33   KabuSys_YahooNewsCollection          scripts\run_yahoonews_collection.py    ※ オプション (ENABLE_YAHOONEWS=true 時のみ実行)
   15:35   KabuSys_TDnetCollection              scripts\run_tdnet_collection.py        ※ オプション (ENABLE_TDNET=true 時のみ実行)
   15:40   KabuSys_EdinetCollection             scripts\run_edinet_collection.py       ※ オプション (ENABLE_EDINET=true 時のみ実行)
   16:00   KabuSys_FeatureGen                   scripts\run_feature_gen.py

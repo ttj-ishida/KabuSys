@@ -1,9 +1,9 @@
 # TODO: Yahoo News 取得機能の配線確認と統合
 
-> **ステータス（2026-05-06時点）**: 部分実装済み  
+> **ステータス（2026-05-06時点）**: **実装済み（Issue #254）**  
 > - `src/kabusys/data/news_collector.py` は実装済み（RSS 取得・`raw_news` 保存）  
-> - `run_data_update.py` / `run_daily_etl()` へのニュース収集組み込みは**未実装** → Issue 登録予定  
-> - `raw_news` / `news_articles` の役割整理も**未実装**  
+> - `scripts/run_yahoonews_collection.py` を新設。`ENABLE_YAHOONEWS=true` でオプション機能として動作  
+> - `raw_news` を正として統一。`news_articles` は不使用  
 
 ## 背景
 
