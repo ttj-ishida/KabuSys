@@ -80,7 +80,10 @@ python -m kabusys.config_setup
 
 | 環境変数 | 説明 | デフォルト |
 |---|---|---|
-| `PAPER_FILL_MODE` | ペーパートレードの約定方式 | `instant` |
+| `PAPER_FILL_MODE` | ペーパートレードの約定方式（`instant`/`partial`/`never`/`reject`） | `instant` |
+| `PAPER_TRADING_INITIAL_CASH` | MockBrokerClient の初期仮想資金（円） | `10000000` |
+| `KABU_USE_SANDBOX` | `true` でポート 18081 のkabu検証環境を使用（`paper_trading` 時のみ有効） | `false` |
+| `KABU_SANDBOX_API_PASSWORD` | kabu検証環境用 API パスワード（`KABU_USE_SANDBOX=true` 時） | （空） |
 | `LINE_NOTIFY_ENABLED` | LINE 通知の有効化 | `false` |
 | `ENABLE_AI_SENTIMENT` | AI センチメントの有効化 | `false` |
 | `ENABLE_TDNET` | TDnet 適時開示収集の有効化 | `false` |

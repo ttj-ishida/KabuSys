@@ -87,6 +87,9 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 その他:
 - MONITOR_POLL_INTERVAL（run_monitoring のポーリング間隔、秒; デフォルト 60）
 - PAPER_FILL_MODE（paper_trading の fill 動作: `instant`/`partial`/`never`/`reject`）
+- PAPER_TRADING_INITIAL_CASH（MockBrokerClient の初期仮想資金（円）; デフォルト `10000000`）
+- KABU_USE_SANDBOX（`true` でポート 18081 のkabu検証環境に接続; `paper_trading` 時のみ有効; デフォルト `false`）
+- KABU_SANDBOX_API_PASSWORD（kabu検証環境用 API パスワード; 未設定時は `KABU_API_PASSWORD` を使用）
 
 設定作成は `python -m kabusys.config_setup` を推奨し、作成後に `python -m kabusys.validate_config` で検証してください。
 
@@ -308,6 +311,8 @@ python -m kabusys.run_execution
 ```
 
 - `KABUSYS_ENV=paper_trading` にすると MockBroker を使用し `data/paper_trading.db` に記録（本番 DB は汚染されません）
+  - 起動時に `paper_trading.db` の約定履歴からポジション・現金残高を自動復元（日次再起動後も状態継続）
+  - `KABU_USE_SANDBOX=true` を設定するとポート 18081 のkabu検証環境に実際に接続してテスト可能
 - 起動時にブローカーとのポジション差分を自動チェック（リコンシリエーション）します
 - `data/execution.pid` に PID を記録し、`data/stop_requested.flag` で安全停止します
 

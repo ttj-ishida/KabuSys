@@ -15,15 +15,14 @@ KabuSys の「ペーパートレード（仮想売買）」とは、**実際の�
 
 ### 2 種類のペーパートレードモード
 
-KabuSys では、目的に応じて 2 種類のペーパートレードモードをサポートします（②は開発予定）。
+KabuSys では、目的に応じて 2 種類のペーパートレードモードをサポートします。
 
 | モード | 概要 | kabu ステーション起動 | 用途 |
 |---|---|---|---|
 | **① Pure Mock モード** | システム内部の MockBrokerClient で発注・約定を完全シミュレート | 不要 | 発注ロジック・Risk Manager の動作確認 |
-| **② 検証環境モード** *(開発予定)* | kabuステーション検証環境（ポート 18081）に実際に接続してテスト | 必要（検証用ログイン） | API 接続・認証・約定フローの E2E テスト |
+| **② 検証環境モード** | kabuステーション検証環境（ポート 18081）に実際に接続してテスト | 必要（検証用ログイン） | API 接続・認証・約定フローの E2E テスト |
 
-> **現在実装済みなのは① Pure Mock モードのみです。**
-> ②の検証環境モードは `TODO_PaperTradingE2E.md` の TODO-5 として開発予定です。
+> 両モードとも実装済みです（Issue #255）。②の有効化は `KABU_USE_SANDBOX=true` を設定してください。
 
 ### Pure Mock モードの仕組み
 
@@ -45,8 +44,8 @@ KabuSys では、目的に応じて 2 種類のペーパートレードモード
 | 制約 | 詳細 |
 |---|---|
 | 価格は模擬 | Pure Mock モードでは実際の市場価格に連動しない（約定価格は発注時の指定値 or 0円） |
-| 現金は仮想 | MockBrokerClient の初期資金は固定値（デフォルト: 1,000 万円） |
-| 日次再起動でリセット *(課題)* | 毎日 Execution を再起動するとモック口座の状態（現金・ポジション）がリセットされる（→ TODO-3 で解決予定）|
+| 現金は仮想 | MockBrokerClient の初期資金は `PAPER_TRADING_INITIAL_CASH` 環境変数で設定可能（デフォルト: 1,000 万円） |
+| 再起動後も状態を引き継ぎ | Execution 再起動時に `paper_trading.db` の約定履歴からポジション・現金残高を自動復元します |
 | 夜間バッチは本番と共用 | Signal Queue の生成は本番 DuckDB を使用。データ更新・特徴量生成は本番と同じ |
 
 ---
@@ -78,6 +77,14 @@ PAPER_FILL_MODE=instant
 
 # ペーパートレード用 SQLite DB のパス（本番 DB と分離）
 PAPER_TRADING_SQLITE_PATH=data/paper_trading.db
+
+# MockBrokerClient の初期仮想資金（デフォルト: 10,000,000）
+# 実際の運用予定資金に合わせてドローダウン・資金上限をテストできます
+PAPER_TRADING_INITIAL_CASH=10000000
+
+# ② 検証環境モード（kabuステーションポート 18081）を使う場合のみ設定
+# KABU_USE_SANDBOX=true
+# KABU_SANDBOX_API_PASSWORD=（検証環境用 API パスワード）
 ```
 
 > ⚠️ `KABUSYS_ENV=paper_trading` では Execution の注文・約定は `paper_trading.db` に記録されますが、Monitoring は引き続き本番の `data/monitoring.db` を使用します。
@@ -86,12 +93,10 @@ PAPER_TRADING_SQLITE_PATH=data/paper_trading.db
 
 ## C-3. テスト用シグナルの注入（任意の銘柄を指定して検証）
 
-> ⚠️ **このセクションの機能は開発予定です（TODO-1）。現在は未実装です。**
-
 通常、ペーパートレードでは夜間バッチが生成したシグナルを使います。
-しかし特定の銘柄について「買い・売りが正しく処理されるか」をピンポイントでテストしたい場合は、ダミーシグナルを注入する CLI ツールを使います。
+しかし特定の銘柄について「買い・売りが正しく処理されるか」をピンポイントでテストしたい場合は、ダミーシグナルを注入する CLI ツールを使います（Issue #229 で実装済み）。
 
-### 使用方法（実装後）
+### 使用方法
 
 **1. ダミーシグナルを注入する**
 
@@ -151,7 +156,7 @@ python -m kabusys.run_execution
 python -m kabusys.run_execution
 ```
 
-**② 検証環境モードで起動する場合（開発予定）：**
+**② 検証環境モードで起動する場合：**
 
 ```powershell
 # .env に以下を設定した上で起動
@@ -160,6 +165,8 @@ python -m kabusys.run_execution
 # KABU_SANDBOX_API_PASSWORD=（検証用パスワード）
 python -m kabusys.run_execution
 ```
+
+> kabuステーションを検証用（ポート 18081）でログインしてから起動してください。
 
 ### 停止
 
@@ -217,26 +224,31 @@ python -m kabusys.run_performance_report --type weekly --env paper_trading
 
 ## C-6. テスト環境のリセット
 
-> ⚠️ **このセクションの機能は開発予定です（TODO-4）。現在は未実装です。**
-
 テスト運用を繰り返すと `paper_trading.db` にデータが蓄積します。
-ただし、`--paper-reset` は現状まだ未実装です。クリーンな状態でやり直したい場合は、取引時間外に `paper_trading.db` を退避または削除してから `python scripts/setup_db.py --paper` を再実行してください。
+ワンコマンドでクリーンな初期状態にリセットできます（Issue #255 で実装済み）。
 
-> ⚠️ `paper_trading.db` を削除すると、ペーパートレードの注文・ポジション履歴は失われます。TODO-4 のワンコマンド初期化は未実装です。
+```powershell
+# paper_trading.db を削除して再初期化（取引時間外に実行すること）
+python scripts/setup_db.py --paper-reset
+```
+
+> ⚠️ `--paper-reset` を実行すると、ペーパートレードの注文・ポジション・約定履歴はすべて失われます。Execution Engine や Streamlit が DB を開いている場合は先に停止してください。
+
+> ℹ️ 通常の `--paper`（テーブル初期化のみ）との違い: `--paper-reset` は既存の `paper_trading.db` ファイル自体を削除してから再作成します。
 
 ---
 
-## C-7. 今後追加予定の機能（ロードマップ）
+## C-7. 実装済み機能一覧
 
-以下の機能は `TODO_PaperTradingE2E.md` に記録されており、順次実装が予定されています。
+以下の機能はすべて実装済みです（`TODO_PaperTradingE2E.md` 参照）。
 
-| 機能 | TODO | 概要 |
-|---|---|---|
-| ダミーシグナル注入 CLI | TODO-1 | 任意の銘柄・数量の BUY/SELL シグナルを signal_queue に直接注入 |
-| 仮想資金の設定化 | TODO-2 | `PAPER_TRADING_INITIAL_CASH` 環境変数で MockBrokerClient の初期資金を設定可能に |
-| モック口座の状態復元 | TODO-3 | 毎日の再起動後にも前日のポジション・現金残高が引き継がれるようにする |
-| テスト DB リセット機能 | TODO-4 | ワンコマンドで paper_trading.db をクリーンな状態に初期化 |
-| kabuステーション検証環境対応 | TODO-5 | `KABU_USE_SANDBOX=true` でポート 18081 の検証環境に接続し、本番と同じ API コードパスをテスト |
+| 機能 | Issue | 状態 | 概要 |
+|---|---|---|---|
+| ダミーシグナル注入 CLI | #229 | ✅ 実装済み | 任意の銘柄・数量の BUY/SELL シグナルを signal_queue に直接注入 |
+| 仮想資金の設定化 | #255 | ✅ 実装済み | `PAPER_TRADING_INITIAL_CASH` 環境変数で MockBrokerClient の初期資金を設定可能に |
+| モック口座の状態復元 | #255 | ✅ 実装済み | 毎日の再起動後にも前日のポジション・現金残高が `paper_trading.db` から自動復元される |
+| テスト DB リセット機能 | #255 | ✅ 実装済み | `python scripts/setup_db.py --paper-reset` でワンコマンド初期化 |
+| kabuステーション検証環境対応 | #255 | ✅ 実装済み | `KABU_USE_SANDBOX=true` でポート 18081 の検証環境に接続し、本番と同じ API コードパスをテスト |
 
 ---
 
