@@ -235,6 +235,101 @@ def _check_risk_config_content(data: object) -> None:
             )
 
 
+_KNOWN_STRATEGY_WEIGHT_KEYS = frozenset(
+    {"momentum", "value", "volatility", "liquidity", "news"}
+)
+
+
+def _check_strategy_config_content(data: object) -> None:
+    """strategy_config.yaml のセマンティック検証。
+
+    _load_strategy_config() と同じルールを事前検証として適用する。
+    エラー・警告は _error / _warn に追記する（例外は送出しない）。
+    """
+    if not isinstance(data, dict):
+        _error("strategy_config.yaml のトップレベルが dict ではありません。")
+        return
+    s = data.get("strategy")
+    if not isinstance(s, dict):
+        _error("strategy_config.yaml に 'strategy' セクションがありません。")
+        return
+
+    # weights
+    raw_w = s.get("weights")
+    if not isinstance(raw_w, dict):
+        _error("strategy_config.yaml: strategy.weights が dict ではありません。")
+    else:
+        missing_w = _KNOWN_STRATEGY_WEIGHT_KEYS - set(raw_w)
+        for k in sorted(missing_w):
+            _warn(f"strategy_config.yaml: strategy.weights.{k} がありません（デフォルト値を使用）。")
+        for k, v in raw_w.items():
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                _error(f"strategy_config.yaml: strategy.weights.{k} は数値で設定してください（現在値: {v!r}）。")
+            elif float(v) < 0:
+                _error(f"strategy_config.yaml: strategy.weights.{k} は 0 以上で設定してください（現在値: {v}）。")
+        valid_vals = [float(v) for k, v in raw_w.items()
+                      if not isinstance(v, bool) and isinstance(v, (int, float)) and float(v) >= 0]
+        if valid_vals and sum(valid_vals) <= 0:
+            _error("strategy_config.yaml: strategy.weights の合計が 0 以下です。")
+
+    # threshold
+    t = s.get("threshold")
+    if t is None:
+        _warn("strategy_config.yaml: strategy.threshold がありません（デフォルト値を使用）。")
+    elif isinstance(t, bool) or not isinstance(t, (int, float)):
+        _error(f"strategy_config.yaml: strategy.threshold は数値で設定してください（現在値: {t!r}）。")
+    elif not (0 < float(t) < 1):
+        _warn(f"strategy_config.yaml: strategy.threshold は (0, 1) の範囲が推奨です（現在値: {t}）。")
+
+    # stop_loss_rate
+    slr = s.get("stop_loss_rate")
+    if slr is None:
+        _warn("strategy_config.yaml: strategy.stop_loss_rate がありません（デフォルト値を使用）。")
+    elif isinstance(slr, bool) or not isinstance(slr, (int, float)):
+        _error(f"strategy_config.yaml: strategy.stop_loss_rate は数値で設定してください（現在値: {slr!r}）。")
+    elif float(slr) >= 0:
+        _error(f"strategy_config.yaml: strategy.stop_loss_rate は負の値で設定してください（現在値: {slr}）。")
+
+    # min_holding_days
+    mhd = s.get("min_holding_days")
+    if mhd is not None:
+        if isinstance(mhd, bool) or not isinstance(mhd, (int, float)):
+            _error(f"strategy_config.yaml: strategy.min_holding_days は整数で設定してください（現在値: {mhd!r}）。")
+        elif int(mhd) < 0:
+            _error(f"strategy_config.yaml: strategy.min_holding_days は 0 以上で設定してください（現在値: {mhd}）。")
+
+    # max_holding_days
+    xhd = s.get("max_holding_days")
+    if xhd is not None:
+        if isinstance(xhd, bool) or not isinstance(xhd, (int, float)):
+            _error(f"strategy_config.yaml: strategy.max_holding_days は整数で設定してください（現在値: {xhd!r}）。")
+        elif int(xhd) < 1:
+            _error(f"strategy_config.yaml: strategy.max_holding_days は 1 以上で設定してください（現在値: {xhd}）。")
+
+    # trailing_stop_atr_mult
+    tsa = s.get("trailing_stop_atr_mult")
+    if tsa is not None:
+        if isinstance(tsa, bool) or not isinstance(tsa, (int, float)):
+            _error(f"strategy_config.yaml: strategy.trailing_stop_atr_mult は数値で設定してください（現在値: {tsa!r}）。")
+        elif float(tsa) <= 0:
+            _error(f"strategy_config.yaml: strategy.trailing_stop_atr_mult は正の値で設定してください（現在値: {tsa}）。")
+
+    # gap thresholds
+    gut = s.get("gap_up_threshold")
+    if gut is not None:
+        if isinstance(gut, bool) or not isinstance(gut, (int, float)):
+            _error(f"strategy_config.yaml: strategy.gap_up_threshold は数値で設定してください（現在値: {gut!r}）。")
+        elif float(gut) <= 0:
+            _warn(f"strategy_config.yaml: strategy.gap_up_threshold は正の値が推奨です（現在値: {gut}）。")
+
+    gdt = s.get("gap_down_threshold")
+    if gdt is not None:
+        if isinstance(gdt, bool) or not isinstance(gdt, (int, float)):
+            _error(f"strategy_config.yaml: strategy.gap_down_threshold は数値で設定してください（現在値: {gdt!r}）。")
+        elif float(gdt) >= 0:
+            _warn(f"strategy_config.yaml: strategy.gap_down_threshold は負の値が推奨です（現在値: {gdt}）。")
+
+
 def _check_config_yaml_files() -> None:
     """config/*.yaml の存在・構文確認。risk_config.yaml はセマンティック検証も行う。"""
     try:
@@ -263,6 +358,8 @@ def _check_config_yaml_files() -> None:
                 _info(f"config/{filename}: syntax OK")
                 if filename == "risk_config.yaml":
                     _check_risk_config_content(data)
+                if filename == "strategy_config.yaml":
+                    _check_strategy_config_content(data)
             except Exception as e:
                 _error(f"config/{filename} のパースに失敗しました: {e}")
 
