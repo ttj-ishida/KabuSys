@@ -1,6 +1,7 @@
 """
 Tests that generate_signals() resolves None sentinels from strategy_config.yaml.
 """
+
 import textwrap
 from datetime import date
 from unittest.mock import patch
@@ -99,6 +100,7 @@ class TestGenerateSignalsConfigWeights:
         )
 
         from kabusys.strategy import signal_generator as sg
+
         with patch.object(sg, "_STRATEGY_CONFIG_PATH", cfg_path):
             count = sg.generate_signals(conn, target, weights=None)
 
@@ -148,12 +150,20 @@ class TestGenerateSignalsConfigWeights:
         )
 
         from kabusys.strategy import signal_generator as sg
+
         with patch.object(sg, "_STRATEGY_CONFIG_PATH", cfg_path):
             # Explicit weights: all volatility → low-volatility stock scores ~0.95 > threshold 0.50
             sg.generate_signals(
-                conn, target,
+                conn,
+                target,
                 threshold=0.50,
-                weights={"momentum": 0.0, "value": 0.0, "volatility": 1.0, "liquidity": 0.0, "news": 0.0},
+                weights={
+                    "momentum": 0.0,
+                    "value": 0.0,
+                    "volatility": 1.0,
+                    "liquidity": 0.0,
+                    "news": 0.0,
+                },
             )
         rows = conn.execute(
             "SELECT code, side FROM signals WHERE date = ?", [target]
@@ -204,6 +214,7 @@ class TestGenerateSignalsConfigThreshold:
         )
 
         from kabusys.strategy import signal_generator as sg
+
         with patch.object(sg, "_STRATEGY_CONFIG_PATH", cfg_path):
             # threshold=None → uses config threshold=0.99 → should produce 0 buy signals
             sg.generate_signals(conn, target)
@@ -251,6 +262,7 @@ class TestGenerateSignalsConfigThreshold:
         )
 
         from kabusys.strategy import signal_generator as sg
+
         with patch.object(sg, "_STRATEGY_CONFIG_PATH", cfg_path):
             # Explicit threshold=0.10 overrides config 0.99 → should produce buy signal
             sg.generate_signals(conn, target, threshold=0.10)
@@ -299,17 +311,15 @@ class TestGenerateSignalsConfigStopLoss:
         target = date(2025, 1, 6)
 
         # Position bought at 1000, now close=985 → -1.5% loss (exceeds -1% stop)
+        conn.execute("INSERT INTO positions VALUES (?, '1001', 100, 1000.0)", [target])
         conn.execute(
-            "INSERT INTO positions VALUES (?, '1001', 100, 1000.0)", [target]
+            "INSERT INTO prices_daily VALUES (?, '1001', 985.0, 990.0, 980.0, 985.0)",
+            [target],
         )
-        conn.execute(
-            "INSERT INTO prices_daily VALUES (?, '1001', 985.0, 990.0, 980.0, 985.0)", [target]
-        )
-        conn.execute(
-            "INSERT INTO trading_calendar VALUES (?)", [target]
-        )
+        conn.execute("INSERT INTO trading_calendar VALUES (?)", [target])
 
         from kabusys.strategy import signal_generator as sg
+
         with patch.object(sg, "_STRATEGY_CONFIG_PATH", cfg_path):
             sg.generate_signals(conn, target)
 
@@ -357,9 +367,11 @@ class TestGenerateSignalsNoneResolution:
         target = date(2025, 1, 6)
 
         from kabusys.strategy import signal_generator as sg
+
         with patch.object(sg, "_STRATEGY_CONFIG_PATH", cfg_path):
             count = sg.generate_signals(
-                conn, target,
+                conn,
+                target,
                 threshold=None,
                 weights=None,
                 min_holding_days=None,

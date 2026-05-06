@@ -1168,7 +1168,12 @@ def generate_signals(
                 sector_suppressed += 1
                 continue
             # 再エントリー制限チェック
-            if _is_reentry_blocked(conn, r["code"], target_date, cooldown_days=_cfg["reentry_cooldown_days"]):
+            if _is_reentry_blocked(
+                conn,
+                r["code"],
+                target_date,
+                cooldown_days=_cfg["reentry_cooldown_days"],
+            ):
                 logger.debug("reentry blocked: %s — date=%s", r["code"], target_date)
                 reentry_suppressed += 1
                 continue

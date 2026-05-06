@@ -356,7 +356,9 @@ strategy:
   gap_down_threshold: -0.03
 """
         errors, _ = self._run_with_yaml(content, tmp_path)
-        assert any("strategy_config" in e and "trailing_stop_atr_mult" in e for e in errors)
+        assert any(
+            "strategy_config" in e and "trailing_stop_atr_mult" in e for e in errors
+        )
 
     def test_max_holding_days_zero_errors(self, tmp_path):
         content = """\
