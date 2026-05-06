@@ -328,3 +328,51 @@ class TestSaveBacktestToDb:
         ).fetchone()
         assert row[0] == "manual_codes"
         assert _json.loads(row[1]) == ["7203", "9984"]
+
+
+class TestRunCliPersistence:
+    """run.py の永続化呼び出しを直接関数呼び出しで検証する。"""
+
+    def test_run_backtest_saves_to_db(self, tmp_path):
+        db_path = tmp_path / "test.duckdb"
+        conn = init_schema(str(db_path))
+        conn.close()
+
+        result = _make_result()
+        report = _make_report(result, run_id="cli-test-001")
+
+        import duckdb as _duckdb
+        conn_persist = _duckdb.connect(str(db_path))
+        try:
+            save_backtest_to_db(conn_persist, report.meta.run_id, result, report)
+        finally:
+            conn_persist.close()
+
+        conn_verify = _duckdb.connect(str(db_path))
+        count = conn_verify.execute(
+            "SELECT COUNT(*) FROM backtest_runs WHERE run_id = 'cli-test-001'"
+        ).fetchone()[0]
+        conn_verify.close()
+        assert count == 1
+
+    def test_db_persistence_does_not_affect_existing_schema(self, tmp_path):
+        db_path = tmp_path / "test2.duckdb"
+        conn = init_schema(str(db_path))
+        conn.close()
+
+        result = _make_result()
+        report = _make_report(result, run_id="cli-test-002")
+
+        import duckdb as _duckdb
+        conn_persist = _duckdb.connect(str(db_path))
+        try:
+            save_backtest_to_db(conn_persist, report.meta.run_id, result, report)
+        finally:
+            conn_persist.close()
+
+        conn_verify = _duckdb.connect(str(db_path))
+        count = conn_verify.execute(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'prices_daily'"
+        ).fetchone()[0]
+        conn_verify.close()
+        assert count == 1
