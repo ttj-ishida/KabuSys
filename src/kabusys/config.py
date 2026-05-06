@@ -203,7 +203,6 @@ class Settings:
 
     @property
     def edinet_api_key(self) -> str:
-
         """EDINET API サブスクリプションキー（EDINET_API_KEY）。
 
         EDINET API v2 の利用に必要。ENABLE_EDINET=true の場合に設定すること。

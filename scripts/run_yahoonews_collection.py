@@ -28,7 +28,9 @@ def _fetch_known_codes(conn: duckdb.DuckDBPyConnection) -> list[str]:
         rows = conn.execute("SELECT code FROM stocks").fetchall()
         return [r[0] for r in rows]
     except Exception:
-        logger.warning("stocks テーブルからの銘柄コード取得に失敗しました。symbol リンクをスキップします。")
+        logger.warning(
+            "stocks テーブルからの銘柄コード取得に失敗しました。symbol リンクをスキップします。"
+        )
         return []
 
 
