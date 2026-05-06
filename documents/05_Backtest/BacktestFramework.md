@@ -1,268 +1,235 @@
-# Backtest Framework (バックテスト・検証基盤)
+# Backtest Framework
 
-- 対象: AIスコア、クオンツ戦略のリサーチおよびバックテストパイプライン
-- 版数: v2.0
+- 対象: KabuSys のバックテスト実行基盤
+- 更新: 実装済み仕様ベース
 
 ---
 
 ## 1. 目的
 
-システムに実装する「戦略（Strategy）」や「AIモデルのスコアリング」が、**「本当に利益を生む優位性があるか（Alpha）」**を過去のデータを用いて検証する枠組み。
-
-「本番環境（Production）」と「テスト環境（Backtest）」のコードベース（ロジック）を完全に共通化し、バックテストで利益が出たのに本番で損をする「乖離（オーバーフィッティング等）」を最小限にとどめることを目的とする。
-
-**対象戦略**: 日足スイング戦略（想定保有期間: 数営業日〜数週間、最大 60 営業日）。夜間バッチでシグナル生成し翌営業日寄付き執行する設計を前提とする。以下の制御ルールがバックテスト本番で共通適用される。
-
-| 制御ルール | 実装箇所 |
-|-----------|---------|
-| ギャップリスクフィルタ（始値 +5%超 / -3%以下でBUY見送り） | `generate_signals()` |
-| 決算回避（決算前日のBUY禁止・決算前強制SELL） | `generate_signals()` |
-| 主要イベント前BUYサイズ縮小（50%） | `generate_signals()` |
-| セクター相対強弱フィルタ（下位25%セクターBUY禁止） | `generate_signals()` |
-| 最低保有日数（5営業日、ストップロス・決算回避を除く） | `_generate_sell_signals()` |
-| 再エントリー制限（SELL後5営業日同一銘柄BUY禁止） | `generate_signals()` |
+KabuSys のバックテストは、実運用で使っている `generate_signals()` と同じロジックを再利用しながら、専用のインメモリ DB 上で安全に検証するための仕組みです。  
+`paper_trading` や `live` と乖離しないことを優先し、シグナル生成・保有制御・地合い判定をできるだけ共通化しています。
 
 ---
 
-## 2. Research Environment ワークフロー
+## 2. 位置づけ
 
-新しい戦略やAIスコアは、以下の厳格なステップを踏んで本番へ導入される。
-
-1. **Research (探索・分析)**
-   - Jupyter Notebook等でJ-Quantsのヒストリカルデータやニュース履歴を分析。
-   - 特徴量の相関や、AIニューススコアの統計的優位性を仮説立て・探索。
-2. **Backtest (ヒストリカル・シミュレーション)**
-   - 過去数年分（Bull/Bearの両相場を含む期間）のデータに取引ロジックを流し込み、スリッページや売買手数料を考慮した詳細なパフォーマンス測定を実施。
-3. **Forward Test (ペーパー取引 / シミュレーション実行)**
-   - バックテストで合格したロジックを、本番と**全く同じExecution System**のまま `MockBrokerClient` を使ってリアルタイム稼働させる。
-   - 環境変数 `KABUSYS_ENV=paper_trading` で Paper Trading モードに切り替わり、`BrokerClientFactory` が自動的に `MockBrokerClient` を選択する。
-   - データは `data/paper_trading.db` に保存され、本番 DB（`data/monitoring.db`）とは完全分離される。
-   - `PAPER_FILL_MODE` 環境変数で約定シミュレーション方式を制御（`instant` / `partial` / `never` / `reject`、デフォルト: `instant`）。
-   - ここで、APIの速度や、リアルタイムの気配値更新特有の遅延（レイテンシ）の影響を評価。
-4. **Production (本番稼働)**
-   - Forward Testで想定通りの乖離率に収まり、システム安定性が確認された場合のみ、通常のロット（資金）を投下して本番運用を開始。
+1. Research
+   Notebook や分析コードで仮説を作る
+2. Backtest
+   共通ロジックで過去検証する
+3. Paper Trading
+   模擬約定で運用フローを確認する
+4. Live
+   実口座で日次運用する
 
 ---
 
-## 3. レポート評価指標（Metrics）
+## 3. 主な評価指標
 
-バックテストの結果は、単なる「最終利益」だけでなく、いかに安定して資産を増やせるかというリスク調整後リターンで評価する。
+- CAGR
+- Sharpe Ratio
+- Max Drawdown
+- Win Rate
+- Payoff Ratio
+- Profit Factor
+- Annual Volatility
+- Calmar Ratio
+- Avg Holding Days
 
-| 指標 | 定義 | 合格ライン |
-|------|------|-----------|
-| **CAGR (年平均成長率)** | `(最終資産/初期資産)^(1/年数) - 1` | — |
-| **Sharpe Ratio** | `年次化超過リターン / 年次化標準偏差`（無リスク金利=0） | ≥ 1.0（理想 1.5） |
-| **Max Drawdown** | `max(1 - 評価額 / 過去ピーク)` | ≤ 20% |
-| **Win Rate / Payoff Ratio** | 勝ちトレード数 / 全クローズトレード数、平均利益 / 平均損失 | — |
-
-**税金は計算対象外**（確定申告ルール・NISA・損失繰越が複雑なため）。手数料のみ適用する。
+集計は `src/kabusys/backtest/metrics.py` と `src/kabusys/backtest/report.py` で行う。
 
 ---
 
-## 4. ルックアヘッド・バイアス（未来情報漏洩）の完全防止策
+## 4. 実行モデル
 
-バックテストにおける最大の罠は「その時点で知り得ない未来（翌日や来週）のデータを使って今日の売買判断をしてしまうこと」である。これをフレームワークレベルで厳粛に防ぐ。
+1 営業日ごとに次を繰り返す。
 
-### 4.1 財務情報・ニュースの反映タイミング
+1. 前営業日に作った注文を当日寄りで約定させる
+2. 当日の `positions` をインメモリ DB に反映する
+3. 当日終値で時価評価する
+4. 当日データで `generate_signals()` を実行する
+5. 翌営業日寄りで執行する注文キューを組む
 
-「決算発表日」や「大引け後（15:00以降）のニュース」のデータは、その日の取引が終わった後にしか市場に反映されない前提とする。これらがシグナル生成に使えるのは、厳密に「翌営業日の寄付き（または夜間バッチ）」からである。
-
-### 4.2 本番用とバックテスト用クロック（時計）の共通化
-
-`Strategy` 層などからはサーバーの現在時刻 (`datetime.now()`) を直接見ず、フレームワークから注入される `Current Simulated Time` インターフェースに依存するように設計する。
-これにより、同じコードを時計の針だけ任意に進めてループ実行することで、未来のデータへの参照を物理的にブロックする。
-
-実装上は `engine.py` のループ変数 `trading_day` がそのまま Simulated Time として機能する。
-既存の `generate_signals(conn, target_date)` は引数で日付を受け取る設計のため、`datetime.now()` に依存しない。
-
-| 処理 | 使うデータ | 根拠 |
-|------|-----------|------|
-| シグナル生成（day T） | `date < T` の価格・特徴量 | `generate_signals()` の SQL が `WHERE date = T` でバインド |
-| SELL 判定（day T） | `date <= T` の prices_daily | `_generate_sell_signals()` の SQL が `WHERE date <= T` でバインド |
-| 約定（day T+1） | day T+1 の始値 | シグナルは常に翌営業日の始値で執行 |
-| 最低保有日数判定（day T） | `position_entries.entry_date` | バックテスト用インメモリ DB で管理（本番と同一ロジック） |
-| 再エントリー制限判定（day T） | `position_entries.sell_date` | 同上 |
-| 決算回避判定（day T） | `earnings_calendar.announcement_date` | インメモリ DB にコピー済み |
-
-さらに、インメモリ DB には `end_date` 以降のデータを含まないため、物理的に未来参照が不可能。
-
-`position_entries` テーブルはバックテスト開始時に空で初期化され、`simulator.py` が BUY/SELL 約定のたびに書き込む。`earnings_calendar` は本番 DB から `end_date` までのデータをコピーして使用する。
-
-### 4.3 スリッページと手数料の厳密なモデリング
-
-シグナルが出た翌日の「始値（Open）」で約定すると仮定する。さらに、売買手数料を必ず差し引く設定をデフォルトとする。
-
-| パラメータ | デフォルト値 | 説明 |
-|-----------|------------|------|
-| `slippage_rate` | 0.001 (0.1%) | BUY: `open × (1 + slippage_rate)` / SELL: `open × (1 - slippage_rate)` |
-| `commission_rate` | 0.00055 (0.055%) | 国内証券の標準的な手数料率 |
-| `max_position_pct` | 0.20 (20%) | 1銘柄あたりの最大ポートフォリオ比率（RiskManagement.md 準拠） |
+これにより、シグナル生成は当日終値ベース、執行は翌営業日寄りという運用系と同じ前提で評価する。
 
 ---
 
 ## 5. モジュール構成
 
-```
+```text
 src/kabusys/backtest/
 ├── __init__.py
-├── clock.py       # SimulatedClock（将来の拡張用薄いデータクラス）
-├── simulator.py   # PortfolioSimulator — 擬似約定・ポートフォリオ状態管理
-├── metrics.py     # calc_metrics() — CAGR / Sharpe / MaxDD / WinRate
-├── engine.py      # run_backtest() — 全体を統合するエントリポイント
-└── run.py         # CLI エントリポイント
+├── clock.py
+├── simulator.py
+├── metrics.py
+├── engine.py
+├── report.py
+└── run.py
 
 tests/
-└── test_backtest_framework.py
+├── test_backtest_framework.py
+├── test_backtest_scope.py
+├── test_backtest_report.py
+└── test_min_holding_days.py
 ```
 
 ---
 
 ## 6. 公開 API
 
-### `engine.py`
+### `run_backtest()`
 
 ```python
-def run_backtest(
-    conn: duckdb.DuckDBPyConnection,
-    start_date: date,
-    end_date: date,
-    initial_cash: float = 10_000_000,
-    slippage_rate: float = 0.001,
-    commission_rate: float = 0.00055,
-    max_position_pct: float = 0.20,
-) -> BacktestResult:
-    ...
-
-@dataclass
-class BacktestResult:
-    history: list[DailySnapshot]   # 日次ポートフォリオ履歴
-    trades: list[TradeRecord]      # 全約定履歴
-    metrics: BacktestMetrics       # 計算済みメトリクス
+run_backtest(
+    conn,
+    start_date,
+    end_date,
+    initial_cash=10_000_000,
+    slippage_rate=0.001,
+    commission_rate=0.00055,
+    max_position_pct=0.10,
+    allocation_method="risk_based",
+    max_utilization=0.70,
+    max_positions=10,
+    risk_pct=0.005,
+    stop_loss_pct=0.08,
+    lot_size=100,
+    backtest_scope=None,
+    min_holding_days=5,
+    max_holding_days=60,
+    trailing_stop_atr=2.0,
+)
 ```
 
-### CLI
+### `BacktestScope`
+
+```python
+BacktestScope(
+    mode="default_universe" | "manual_codes",
+    codes=None,
+    preserve_universe_filters=True,
+)
+```
+
+### `BacktestResult`
+
+`BacktestResult` には次のメタデータが入る。
+
+- `history`
+- `trades`
+- `metrics`
+- `scope_mode`
+- `scope_codes`
+- `effective_universe_size`
+- `excluded_codes`
+- `preserve_universe_filters`
+
+---
+
+## 7. CLI
+
+基本実行:
 
 ```bash
 python -m kabusys.backtest.run \
-    --start 2023-01-01 --end 2024-12-31 \
+    --start 2023-01-01 \
+    --end 2024-12-31 \
     --cash 10000000 \
-    --db path/to/kabusys.duckdb
+    --db data/kabusys.duckdb
 ```
 
-**前提条件**: 指定 DB ファイルに `prices_daily`, `features`, `ai_scores`, `market_regime`, `market_breadth`, `market_calendar`, `earnings_calendar` が入力済みであること。`position_entries` はバックテスト開始時に自動で空テーブルとして初期化される。
+主なオプション:
+
+- `--scope-mode default_universe|manual_codes`
+- `--codes 7203 9984 ...`
+- `--no-preserve-universe-filters`
+- `--min-holding-days 5`
+- `--max-holding-days 60`
+- `--trailing-stop-atr 2.0`
+- `--output-format summary|json|markdown|all`
+- `--output-dir artifacts/backtests/...`
+
+`manual_codes` を使うと対象銘柄を限定した targeted backtest を実行できる。
 
 ---
 
-## 7. インメモリ DB 分離（本番 DB 汚染防止）
+## 8. インメモリ DB 分離
 
-`generate_signals()` は `signals` テーブルに書き込み、`_generate_sell_signals()` は `positions` テーブルを読み取る。これらを本番 DB に直接書くと本番データを汚染する。
+バックテストは本番 DB 汚染を防ぐため、毎回 `:memory:` の DuckDB を作って必要データだけをコピーして実行する。
 
-**方針**: バックテストは専用のインメモリ DuckDB を使用する。
+概念的には次の流れ。
 
-```
-_build_backtest_conn(source_conn, start_date, end_date):
-  1. ":memory:" で新規 DuckDB を作成しスキーマを初期化
-  2. source_conn から以下のデータをコピー:
-     - prices_daily     (start_date - 300日 〜 end_date)
-     - features         (同範囲)
-     - ai_scores        (同範囲)
-     - market_regime    (同範囲)
-     - market_calendar  (全件)
-     - stocks           (全件。セクターフィルタ用)
-     - earnings_calendar (end_date までの全件。未来参照防止のため end_date でカット)
-  3. インメモリ conn を返す
+```text
+_build_backtest_conn(source_conn, start_date, end_date)
+  1. :memory: DB を作成
+  2. 必要テーブルを source_conn からコピー
+  3. prices_daily から market_breadth を再計算
+  4. positions / signals / position_entries をバックテスト用に使う
 ```
 
-> **注意（未対応）**: `market_breadth` はバックテスト用インメモリ DB にコピーされていない。
-> このため `_is_breadth_stop()` は常に `False`（BUY 許可・安全側）を返し、
-> バックテストでは breadth_stop フィルタが機能しない。
-> 対応は別 Issue で実装予定。
+コピーまたは再構成する主なテーブル:
+
+- `prices_daily`
+- `features`
+- `ai_scores`
+- `market_regime`
+- `market_calendar`
+- `stocks`
+- `earnings_calendar`
+- `market_breadth`（コピーではなく再計算）
+
+重要:
+
+- `market_breadth` は未対応ではなく、現在はバックテスト用 DB で再計算される
+- そのため `breadth_stop` フィルタはバックテストでも有効
+- `manual_codes` 指定時でも `market_regime` / `market_breadth` は市場全体ベースで判定する
 
 ---
 
-## 8. 実行フロー（1日のループ）
+## 9. 実装済みの保有制御
 
-```
-# 初期化
-bt_conn = _build_backtest_conn(conn, start_date, end_date)
-simulator = PortfolioSimulator(cash=initial_cash, ...)
-signals_prev = []
+バックテストで評価できる主な保有制御:
 
-for trading_day in get_trading_days(bt_conn, start_date, end_date):
+- `min_holding_days`
+- `max_holding_days` による `time_exit`
+- `trailing_stop_atr`
+- Bear regime による BUY 抑制
+- `breadth_stop` による BUY 抑制
+- 決算回避
+- ストップロス
 
-    1. 前日シグナルを当日 open 価格で約定
-       → open_prices = _fetch_open_prices(bt_conn, trading_day)
-       → simulator.execute_orders(signals_prev, open_prices,
-                                  slippage_rate, commission_rate)
-          ※ shares = floor(alloc / (open * (1 + slippage_rate)))  for BUY
-          ※ 約定価格 = open * (1 - slippage_rate)               for SELL
-
-    2. positions テーブルに書き戻し（generate_signals の SELL 判定に必要）
-       → _write_positions(bt_conn, trading_day,
-                          simulator.positions, simulator.cost_basis)
-          ※ DELETE WHERE date = trading_day → INSERT（冪等）
-          ※ market_value は NULL（nullable カラム、SELL 判定では参照されない）
-
-    3. 当日終値で時価評価・スナップショット記録
-       → close_prices = _fetch_close_prices(bt_conn, trading_day)
-       → simulator.mark_to_market(trading_day, close_prices)
-
-    4. 翌日用シグナルを生成
-       → generate_signals(bt_conn, target_date=trading_day)
-          ※ 戻り値は int（書き込み件数）。シグナル内容は signals テーブルをクエリ
-
-    5. 翌日の発注リストを組み立て（ポジションサイジング）
-       → buy_signals  = SELECT code, signal_rank FROM signals
-                         WHERE date = trading_day AND side = 'buy'
-                         ORDER BY signal_rank
-       → sell_signals = SELECT code FROM signals
-                         WHERE date = trading_day AND side = 'sell'
-       → prior_pv = simulator.history[-1].portfolio_value
-                    if simulator.history else initial_cash
-       → alloc = min(prior_pv * max_position_pct,
-                     simulator.cash / len(buy_signals))   # buy なし時はスキップ
-       → signals_prev = [{"code": s.code, "side": "buy", "alloc": alloc}
-                          for s in buy_signals] +
-                         [{"code": s.code, "side": "sell"}
-                          for s in sell_signals]
-```
+`min_holding_days` は通常 SELL を抑制するが、ストップロス・決算回避・time exit・一部の優先 SELL 条件はバイパスされる。
 
 ---
 
-## 9. データ構造
+## 10. レポート出力
 
-```python
-@dataclass
-class DailySnapshot:
-    date: date
-    cash: float
-    positions: dict[str, int]   # code → 株数
-    portfolio_value: float      # cash + 時価評価額
+`src/kabusys/backtest/report.py` でバックテスト結果をレポート化できる。
 
-@dataclass
-class TradeRecord:
-    date: date
-    code: str
-    side: str                   # "buy" | "sell"
-    shares: int
-    price: float                # 約定価格（スリッページ適用後）
-    commission: float
-    realized_pnl: float | None  # SELL 時のみ（取得原価との差分）
+出力形式:
 
-@dataclass
-class PortfolioSimulator:
-    cash: float
-    positions: dict[str, int]
-    cost_basis: dict[str, float]  # code → 平均取得単価
-    history: list[DailySnapshot]
-    trades: list[TradeRecord]
+- CLI summary
+- JSON
+- Markdown
+- 保存一式
 
-@dataclass
-class BacktestMetrics:
-    cagr: float
-    sharpe_ratio: float
-    max_drawdown: float
-    win_rate: float
-    payoff_ratio: float
-    total_trades: int
-```
+`--output-format all` を指定すると、既定で `artifacts/backtests/{run_id}/` に次を保存する。
+
+- `summary.json`
+- `report.md`
+- `trades.csv`
+- `daily_equity.csv`
+- `warnings.json`
+
+targeted backtest の場合は `report_type = targeted_backtest` となり、スコープ情報と警告がレポートへ反映される。
+
+---
+
+## 11. 関連
+
+- `documents/02_Strategy/StrategyModel.md`
+- `documents/06_RiskManagement/RiskManagement.md`
+- `documents/Archive/TODO_TargetedBacktest.md`
+- `documents/Archive/TODO_BacktestReporting.md`
+- `documents/Archive/TODO_MinHoldingDaysBacktestComparison.md`
