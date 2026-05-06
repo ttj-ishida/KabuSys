@@ -642,7 +642,7 @@ def _is_reentry_blocked(
     target_date: date,
     cooldown_days: int = _REENTRY_COOLDOWN_DAYS,
 ) -> bool:
-    """最新の sell_date から target_date までの営業日数が _REENTRY_COOLDOWN_DAYS 未満なら True。
+    """最新の sell_date から target_date までの営業日数が cooldown_days 未満なら True。
     sell_date が NULL またはレコードなしは False（制限なし）。
     """
     row = conn.execute(
