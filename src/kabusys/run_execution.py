@@ -158,7 +158,7 @@ def _restore_paper_state(
     # code → [buy_qty, buy_cost, sell_qty, sell_proceeds]
     data: dict[str, list[float]] = {}
     for row in rows:
-        side = row["side"].lower()
+        side = (row["side"] or "").lower()
         if side not in ("buy", "sell"):
             logger.warning(
                 "orders テーブルに未知の side 値があります。スキップします: side=%r code=%s",
@@ -178,6 +178,8 @@ def _restore_paper_state(
             data[code][2] += filled_qty
             data[code][3] += filled_qty * avg_price
 
+    # net_cash は買いコストを差し引き・売り収入を加算する。
+    # DB の不整合（例: 売り超過）により負値になり得るが MockBrokerClient 側で許容する。
     net_cash = initial_cash
     positions: list[Position] = []
     for code, (buy_qty, buy_cost, sell_qty, sell_proceeds) in data.items():
