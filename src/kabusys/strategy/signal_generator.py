@@ -80,6 +80,156 @@ _REENTRY_COOLDOWN_DAYS: int = (
 
 
 # ---------------------------------------------------------------------------
+# 設定ファイル読み込み
+# ---------------------------------------------------------------------------
+
+_STRATEGY_CONFIG_DEFAULTS: dict = {
+    "weights": {k: v for k, v in _DEFAULT_WEIGHTS.items()},
+    "threshold": _DEFAULT_THRESHOLD,
+    "stop_loss_rate": _STOP_LOSS_RATE,
+    "gap_up_threshold": _GAP_UP_THRESHOLD,
+    "gap_down_threshold": _GAP_DOWN_THRESHOLD,
+    "min_holding_days": _MIN_HOLDING_DAYS,
+    "max_holding_days": _MAX_HOLDING_DAYS,
+    "trailing_stop_atr_mult": _TRAILING_STOP_ATR_MULT,
+    "reentry_cooldown_days": _REENTRY_COOLDOWN_DAYS,
+}
+
+_STRATEGY_CONFIG_PATH = (
+    Path(__file__).resolve().parents[3] / "config" / "strategy_config.yaml"
+)
+
+_strategy_config_cache: dict | None = None
+_strategy_config_mtime: float = -1.0
+
+
+def _load_strategy_config() -> dict:
+    """config/strategy_config.yaml から戦略パラメータを読み込む。
+
+    ファイルが存在しない・読み込み失敗の場合はデフォルト値にフォールバック。
+    各キーは個別に検証し、不正値のみデフォルトで補完する。
+    mtime ベースのキャッシュにより、同一ファイルの繰り返し読み込みを回避する。
+
+    Returns:
+        {
+            "weights": dict[str, float],
+            "threshold": float,
+            "stop_loss_rate": float,
+            "gap_up_threshold": float,
+            "gap_down_threshold": float,
+            "min_holding_days": int,
+            "max_holding_days": int,
+            "trailing_stop_atr_mult": float,
+            "reentry_cooldown_days": int,
+        }
+    """
+    global _strategy_config_cache, _strategy_config_mtime
+    import yaml  # PyYAML（既存の依存パッケージ）
+
+    def _defaults() -> dict:
+        d = dict(_STRATEGY_CONFIG_DEFAULTS)
+        d["weights"] = dict(_STRATEGY_CONFIG_DEFAULTS["weights"])
+        return d
+
+    if not _STRATEGY_CONFIG_PATH.exists():
+        logger.debug(
+            "strategy_config.yaml が見つかりません。デフォルトを使用します: %s",
+            _STRATEGY_CONFIG_PATH,
+        )
+        return _defaults()
+
+    try:
+        current_mtime = _STRATEGY_CONFIG_PATH.stat().st_mtime
+    except OSError as exc:
+        logger.warning(
+            "strategy_config.yaml の stat() に失敗: %s (デフォルトを使用)", exc
+        )
+        return _defaults()
+
+    if _strategy_config_cache is not None and current_mtime == _strategy_config_mtime:
+        cached = _strategy_config_cache
+        out = dict(cached)
+        out["weights"] = dict(cached["weights"])
+        return out
+
+    try:
+        with open(_STRATEGY_CONFIG_PATH, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except Exception as exc:
+        logger.warning("strategy_config.yaml 読み込み失敗: %s (デフォルトを使用)", exc)
+        return _defaults()
+
+    if not isinstance(data, dict):
+        logger.warning(
+            "strategy_config.yaml のトップレベルが dict ではありません。デフォルトを使用します"
+        )
+        return _defaults()
+
+    result = _defaults()
+    s = data.get("strategy")
+    if not isinstance(s, dict):
+        _strategy_config_cache = result
+        _strategy_config_mtime = current_mtime
+        out = dict(result)
+        out["weights"] = dict(result["weights"])
+        return out
+
+    # weights — 既知キーのみ受け付け、負値は無視、合計 0 以下ならデフォルト
+    raw_w = s.get("weights")
+    if isinstance(raw_w, dict):
+        merged: dict[str, float] = {}
+        for key in result["weights"]:
+            v = raw_w.get(key)
+            if (
+                v is not None
+                and isinstance(v, (int, float))
+                and not isinstance(v, bool)
+                and math.isfinite(float(v))
+                and float(v) >= 0
+            ):
+                merged[key] = float(v)
+            else:
+                merged[key] = result["weights"][key]
+        if sum(merged.values()) > 0:
+            result["weights"] = merged
+        else:
+            logger.warning(
+                "strategy_config.yaml: strategy.weights の合計が 0 以下。デフォルトを使用"
+            )
+
+    # float スカラーパラメータ
+    for key in (
+        "threshold",
+        "stop_loss_rate",
+        "gap_up_threshold",
+        "gap_down_threshold",
+        "trailing_stop_atr_mult",
+    ):
+        v = s.get(key)
+        if (
+            v is not None
+            and isinstance(v, (int, float))
+            and not isinstance(v, bool)
+            and math.isfinite(float(v))
+        ):
+            result[key] = float(v)
+
+    # int スカラーパラメータ（0 以上）
+    for key in ("min_holding_days", "max_holding_days", "reentry_cooldown_days"):
+        v = s.get(key)
+        if v is not None and isinstance(v, (int, float)) and not isinstance(v, bool):
+            iv = int(v)
+            if iv >= 0:
+                result[key] = iv
+
+    _strategy_config_cache = result
+    _strategy_config_mtime = current_mtime
+    out = dict(result)
+    out["weights"] = dict(result["weights"])
+    return out
+
+
+# ---------------------------------------------------------------------------
 # スコア計算ユーティリティ
 # ---------------------------------------------------------------------------
 
@@ -116,45 +266,112 @@ _VALUE_CONFIG_DEFAULTS: dict = {
     "normalization": {"per_mid": 20.0, "pbr_mid": 1.5, "div_yield_max": 3.0},
 }
 
+_value_config_cache: dict | None = None
+_value_config_cache_mtimes: tuple[float, float] = (-1.0, -1.0)
+
 
 def _load_value_config() -> dict:
-    """config/strategy.toml からバリュースコア設定を読み込む。
+    """strategy_config.yaml の value_score セクションからバリュースコア設定を読み込む。
 
+    value_score セクションが存在しない場合は strategy.toml にフォールバック（後方互換）。
     ファイルが存在しない・読み込み失敗・不正値の場合はデフォルト値にフォールバック。
-    存在するキーのみファイル値でマージし、欠損キーはデフォルトで補完する。
-
-    Returns:
-        {"weights": {...}, "normalization": {...}} 形式の辞書。
+    yaml/toml の mtime ベースキャッシュにより繰り返し I/O を回避する。
     """
-    config_path = Path(__file__).resolve().parents[3] / "config" / "strategy.toml"
-    raw: dict = {}
-    if config_path.exists():
+    global _value_config_cache, _value_config_cache_mtimes
+    import yaml  # PyYAML
+
+    def _defaults() -> dict:
+        return {
+            "weights": dict(_VALUE_CONFIG_DEFAULTS["weights"]),
+            "normalization": dict(_VALUE_CONFIG_DEFAULTS["normalization"]),
+        }
+
+    def _current_mtimes() -> tuple[float, float]:
+        toml_path = _STRATEGY_CONFIG_PATH.parent / "strategy.toml"
+        y = t = -1.0
         try:
-            with open(config_path, "rb") as f:
-                raw = tomllib.load(f).get("value_score", {})
+            if _STRATEGY_CONFIG_PATH.exists():
+                y = _STRATEGY_CONFIG_PATH.stat().st_mtime
+        except OSError:
+            pass
+        try:
+            if toml_path.exists():
+                t = toml_path.stat().st_mtime
+        except OSError:
+            pass
+        return (y, t)
+
+    mtimes = _current_mtimes()
+    if _value_config_cache is not None and mtimes == _value_config_cache_mtimes:
+        c = _value_config_cache
+        return {
+            "weights": dict(c["weights"]),
+            "normalization": dict(c["normalization"]),
+        }
+
+    def _cache_and_return(result: dict) -> dict:
+        global _value_config_cache, _value_config_cache_mtimes
+        _value_config_cache = result
+        _value_config_cache_mtimes = mtimes
+        return {
+            "weights": dict(result["weights"]),
+            "normalization": dict(result["normalization"]),
+        }
+
+    # 1. strategy_config.yaml の value_score セクションを試みる
+    if _STRATEGY_CONFIG_PATH.exists():
+        try:
+            with open(_STRATEGY_CONFIG_PATH, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            if isinstance(data, dict) and isinstance(data.get("value_score"), dict):
+                raw = data["value_score"]
+                w = {**_VALUE_CONFIG_DEFAULTS["weights"], **(raw.get("weights") or {})}
+                n = {
+                    **_VALUE_CONFIG_DEFAULTS["normalization"],
+                    **(raw.get("normalization") or {}),
+                }
+                if any(v < 0 for v in w.values()) or sum(w.values()) <= 0:
+                    logger.warning(
+                        "strategy_config.yaml: value_score.weights が不正。デフォルトを使用"
+                    )
+                    return _cache_and_return(_defaults())
+                if any(
+                    n.get(k, 0) <= 0 for k in ("per_mid", "pbr_mid", "div_yield_max")
+                ):
+                    logger.warning(
+                        "strategy_config.yaml: value_score.normalization に 0 以下の値。デフォルトを使用"
+                    )
+                    return _cache_and_return(_defaults())
+                return _cache_and_return({"weights": dict(w), "normalization": dict(n)})
+        except Exception as exc:
+            logger.warning("strategy_config.yaml (value_score) 読み込み失敗: %s", exc)
+
+    # 2. 後方互換: strategy.toml フォールバック
+    toml_path = _STRATEGY_CONFIG_PATH.parent / "strategy.toml"
+    raw_toml: dict = {}
+    if toml_path.exists():
+        try:
+            with open(toml_path, "rb") as f:
+                raw_toml = tomllib.load(f).get("value_score", {})
         except Exception as exc:
             logger.warning("strategy.toml 読み込み失敗: %s (デフォルトを使用)", exc)
 
-    w = {**_VALUE_CONFIG_DEFAULTS["weights"], **(raw.get("weights") or {})}
-    n = {**_VALUE_CONFIG_DEFAULTS["normalization"], **(raw.get("normalization") or {})}
+    w = {**_VALUE_CONFIG_DEFAULTS["weights"], **(raw_toml.get("weights") or {})}
+    n = {
+        **_VALUE_CONFIG_DEFAULTS["normalization"],
+        **(raw_toml.get("normalization") or {}),
+    }
 
     if any(v < 0 for v in w.values()) or sum(w.values()) <= 0:
         logger.warning(
             "value_score.weights が不正（負値または合計<=0）。デフォルトを使用"
         )
-        return {
-            "weights": dict(_VALUE_CONFIG_DEFAULTS["weights"]),
-            "normalization": dict(_VALUE_CONFIG_DEFAULTS["normalization"]),
-        }
-
+        return _cache_and_return(_defaults())
     if any(n.get(k, 0) <= 0 for k in ("per_mid", "pbr_mid", "div_yield_max")):
         logger.warning("value_score.normalization に 0 以下の値。デフォルトを使用")
-        return {
-            "weights": dict(_VALUE_CONFIG_DEFAULTS["weights"]),
-            "normalization": dict(_VALUE_CONFIG_DEFAULTS["normalization"]),
-        }
+        return _cache_and_return(_defaults())
 
-    return {"weights": dict(w), "normalization": dict(n)}
+    return _cache_and_return({"weights": dict(w), "normalization": dict(n)})
 
 
 def _compute_value_score(feat: dict[str, Any], config: dict) -> float | None:
@@ -487,8 +704,9 @@ def _is_reentry_blocked(
     conn: duckdb.DuckDBPyConnection,
     code: str,
     target_date: date,
+    cooldown_days: int = _REENTRY_COOLDOWN_DAYS,
 ) -> bool:
-    """最新の sell_date から target_date までの営業日数が _REENTRY_COOLDOWN_DAYS 未満なら True。
+    """最新の sell_date から target_date までの営業日数が cooldown_days 未満なら True。
     sell_date が NULL またはレコードなしは False（制限なし）。
     """
     row = conn.execute(
@@ -503,7 +721,7 @@ def _is_reentry_blocked(
         return False
     sell_date = row[0] if isinstance(row[0], date) else date.fromisoformat(str(row[0]))
     days = get_trading_days(conn, sell_date, target_date)
-    return (len(days) - 1) < _REENTRY_COOLDOWN_DAYS
+    return (len(days) - 1) < cooldown_days
 
 
 def _has_upcoming_earnings(
@@ -546,6 +764,7 @@ def _generate_sell_signals(
     min_holding_days: int = _MIN_HOLDING_DAYS,
     max_holding_days: int = _MAX_HOLDING_DAYS,
     trailing_stop_atr: float = _TRAILING_STOP_ATR_MULT,
+    stop_loss_rate: float = _STOP_LOSS_RATE,
 ) -> list[dict[str, Any]]:
     """保有ポジションに対してエグジット条件を判定し、SELL シグナルを返す。
 
@@ -567,6 +786,7 @@ def _generate_sell_signals(
         max_holding_days:    この営業日数以上保有した銘柄に time_exit SELL を発動（デフォルト: _MAX_HOLDING_DAYS）。
                              ストップロス・決算回避より低優先。min_holding_days は無視して発火する。
         trailing_stop_atr:   ATR 乗数。peak_close − N×ATR を下回ったら trailing_stop SELL（含み益ありの場合のみ）。
+        stop_loss_rate:      ストップロス閾値（デフォルト: _STOP_LOSS_RATE）。pnl_rate がこの値以下で SELL。
 
     Returns:
         [{"code": str, "score": float, "reason": str}, ...] のリスト。
@@ -626,7 +846,7 @@ def _generate_sell_signals(
 
         # 1. ストップロス（最優先・保有日数チェックをスキップ）
         pnl_rate = (close - avg_price) / avg_price
-        if pnl_rate <= _STOP_LOSS_RATE:
+        if pnl_rate <= stop_loss_rate:
             sell_signals.append(
                 {
                     "code": code,
@@ -733,13 +953,13 @@ def _generate_sell_signals(
 def generate_signals(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
-    threshold: float = _DEFAULT_THRESHOLD,
+    threshold: float | None = None,
     weights: dict[str, float] | None = None,
     event_dates: dict[date, str] | None = None,
     scope: BacktestScope | None = None,
-    min_holding_days: int = _MIN_HOLDING_DAYS,
-    max_holding_days: int = _MAX_HOLDING_DAYS,
-    trailing_stop_atr: float = _TRAILING_STOP_ATR_MULT,
+    min_holding_days: int | None = None,
+    max_holding_days: int | None = None,
+    trailing_stop_atr: float | None = None,
 ) -> int:
     """features テーブルを読み込み、売買シグナルを生成して signals テーブルへ書き込む。
 
@@ -748,22 +968,34 @@ def generate_signals(
     Args:
         conn:              DuckDB 接続。features / ai_scores / positions テーブルを参照する。
         target_date:       シグナル生成日。
-        threshold:         BUY シグナル生成の final_score 閾値（デフォルト 0.60）。
-        weights:           ファクター重みの辞書（デフォルトは StrategyModel.md Section 4.1 の値）。
+        threshold:         BUY シグナル生成の final_score 閾値（None の場合は config から読み込む）。
+        weights:           ファクター重みの辞書（None の場合は config から読み込む）。
         event_dates:       {event_date: event_name} の辞書。翌営業日がイベント日の場合、
                            BUY の size_multiplier を 0.5 に縮小する。省略時はイベントなし扱い。
         scope:             BacktestScope インスタンス。mode='manual_codes' かつ codes が指定されている場合、
                            features クエリを指定銘柄に絞る。省略時（None）は全銘柄が対象。
-        min_holding_days:  SELL を抑制する最低保有営業日数（デフォルト: _MIN_HOLDING_DAYS）。
+        min_holding_days:  SELL を抑制する最低保有営業日数（None の場合は config から読み込む）。
                            ストップロスと Bear レジーム時は保有日数に関わらず SELL が発生する。
-        max_holding_days:  この営業日数以上保有した銘柄に time_exit SELL を発動（デフォルト: _MAX_HOLDING_DAYS）。
+        max_holding_days:  この営業日数以上保有した銘柄に time_exit SELL を発動（None の場合は config から読み込む）。
                            1 以上を指定すること。
         trailing_stop_atr: ATR 乗数。peak_close − N×ATR を下回ったら trailing_stop SELL。
-                           正の値を指定すること（デフォルト: _TRAILING_STOP_ATR_MULT）。
+                           正の値を指定すること（None の場合は config から読み込む）。
 
     Returns:
         signals テーブルへ書き込んだシグナル数（BUY + SELL の合計）。
     """
+    _cfg = _load_strategy_config()
+    if threshold is None:
+        threshold = _cfg["threshold"]
+    if weights is None:
+        weights = _cfg["weights"]
+    if min_holding_days is None:
+        min_holding_days = _cfg["min_holding_days"]
+    if max_holding_days is None:
+        max_holding_days = _cfg["max_holding_days"]
+    if trailing_stop_atr is None:
+        trailing_stop_atr = _cfg["trailing_stop_atr_mult"]
+
     if min_holding_days < 0:
         raise ValueError(
             f"min_holding_days は 0 以上を指定してください: {min_holding_days}"
@@ -960,6 +1192,8 @@ def generate_signals(
     score_map: dict[str, float] = {r["code"]: r["score"] for r in scored}
 
     # 6. BUY シグナル生成（Bear レジームまたは breadth_stop では抑制）
+    _gap_up = _cfg["gap_up_threshold"]
+    _gap_down = _cfg["gap_down_threshold"]
     buy_signals: list[dict] = []
     if not regime_is_bear and not breadth_stop:
         # 3c. ギャップ比率を一括取得（BUY 生成が必要な場合のみ実行）
@@ -975,8 +1209,8 @@ def generate_signals(
                 continue
             gap = gap_ratios.get(r["code"])
             if gap is not None and (
-                gap > _GAP_UP_THRESHOLD + _GAP_THRESHOLD_EPSILON
-                or gap <= _GAP_DOWN_THRESHOLD + _GAP_THRESHOLD_EPSILON
+                gap > _gap_up + _GAP_THRESHOLD_EPSILON
+                or gap <= _gap_down + _GAP_THRESHOLD_EPSILON
             ):
                 logger.debug(
                     "gap filter: %s gap=%.2f%% — BUY を抑制 date=%s",
@@ -998,7 +1232,12 @@ def generate_signals(
                 sector_suppressed += 1
                 continue
             # 再エントリー制限チェック
-            if _is_reentry_blocked(conn, r["code"], target_date):
+            if _is_reentry_blocked(
+                conn,
+                r["code"],
+                target_date,
+                cooldown_days=_cfg["reentry_cooldown_days"],
+            ):
                 logger.debug("reentry blocked: %s — date=%s", r["code"], target_date)
                 reentry_suppressed += 1
                 continue
@@ -1047,6 +1286,7 @@ def generate_signals(
         min_holding_days=min_holding_days,
         max_holding_days=max_holding_days,
         trailing_stop_atr=trailing_stop_atr,
+        stop_loss_rate=_cfg["stop_loss_rate"],
     )
 
     # SELL 対象銘柄は BUY から除外し、ランクを連番で再付与（SELL 優先ポリシー）

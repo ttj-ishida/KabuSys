@@ -60,19 +60,29 @@ ai_scores:
     "strategy_config.yaml": """\
 # strategy_config.yaml — 売買戦略パラメータ
 strategy:
-  name: momentum_strategy
-  universe_size: 500
-  rebalance_frequency: daily
-
-factors:
-  momentum_20_weight: 0.5
-  momentum_60_weight: 0.3
-  volume_factor_weight: 0.2
-
-ai_overlay:
-  enabled: true
-  # AIオーバーレイの影響度上限（RiskManagement.md §6 に準拠）
-  max_influence: 0.10
+  weights:
+    momentum: 0.40
+    value: 0.20
+    volatility: 0.15
+    liquidity: 0.15
+    news: 0.10
+  threshold: 0.60
+  stop_loss_rate: -0.08
+  min_holding_days: 5
+  max_holding_days: 60
+  trailing_stop_atr_mult: 2.0
+  reentry_cooldown_days: 5
+  gap_up_threshold: 0.05
+  gap_down_threshold: -0.03
+value_score:
+  weights:
+    per: 0.50
+    pbr: 0.30
+    div_yield: 0.20
+  normalization:
+    per_mid: 20.0
+    pbr_mid: 1.5
+    div_yield_max: 3.0
 """,
     "risk_config.yaml": """\
 # risk_config.yaml — リスク管理設定

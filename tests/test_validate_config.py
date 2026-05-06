@@ -247,3 +247,185 @@ class TestPaperTradingCashValidation:
             config_dir=tmp_path,
         )
         assert not any("PAPER_TRADING_INITIAL_CASH" in e for e in errors)
+
+
+class TestCheckStrategyConfigContent:
+    """_check_strategy_config_content() のセマンティック検証テスト。"""
+
+    def _run_with_yaml(self, yaml_content: str, tmp_path):
+        """strategy_config.yaml に yaml_content を書いて validate() を実行する。"""
+        cfg_path = tmp_path / "strategy_config.yaml"
+        cfg_path.write_text(yaml_content, encoding="utf-8")
+        errors, warnings, _ = _run_validate(config_dir=tmp_path)
+        return errors, warnings
+
+    def test_valid_strategy_config_no_errors(self, tmp_path):
+        content = """\
+strategy:
+  weights:
+    momentum: 0.40
+    value: 0.20
+    volatility: 0.15
+    liquidity: 0.15
+    news: 0.10
+  threshold: 0.60
+  stop_loss_rate: -0.08
+  min_holding_days: 5
+  max_holding_days: 60
+  trailing_stop_atr_mult: 2.0
+  reentry_cooldown_days: 5
+  gap_up_threshold: 0.05
+  gap_down_threshold: -0.03
+value_score:
+  weights:
+    per: 0.50
+    pbr: 0.30
+    div_yield: 0.20
+  normalization:
+    per_mid: 20.0
+    pbr_mid: 1.5
+    div_yield_max: 3.0
+"""
+        errors, warnings = self._run_with_yaml(content, tmp_path)
+        strategy_errors = [e for e in errors if "strategy_config" in e]
+        assert strategy_errors == []
+
+    def test_missing_strategy_section_errors(self, tmp_path):
+        content = "other_key: value\n"
+        errors, _ = self._run_with_yaml(content, tmp_path)
+        assert any("strategy_config" in e and "strategy" in e for e in errors)
+
+    def test_negative_weight_errors(self, tmp_path):
+        content = """\
+strategy:
+  weights:
+    momentum: -0.10
+    value: 0.20
+    volatility: 0.15
+    liquidity: 0.15
+    news: 0.10
+  threshold: 0.60
+  stop_loss_rate: -0.08
+  min_holding_days: 5
+  max_holding_days: 60
+  trailing_stop_atr_mult: 2.0
+  reentry_cooldown_days: 5
+  gap_up_threshold: 0.05
+  gap_down_threshold: -0.03
+"""
+        errors, _ = self._run_with_yaml(content, tmp_path)
+        assert any("strategy_config" in e and "momentum" in e for e in errors)
+
+    def test_stop_loss_rate_non_negative_errors(self, tmp_path):
+        content = """\
+strategy:
+  weights:
+    momentum: 0.40
+    value: 0.20
+    volatility: 0.15
+    liquidity: 0.15
+    news: 0.10
+  threshold: 0.60
+  stop_loss_rate: 0.05
+  min_holding_days: 5
+  max_holding_days: 60
+  trailing_stop_atr_mult: 2.0
+  reentry_cooldown_days: 5
+  gap_up_threshold: 0.05
+  gap_down_threshold: -0.03
+"""
+        errors, _ = self._run_with_yaml(content, tmp_path)
+        assert any("strategy_config" in e and "stop_loss_rate" in e for e in errors)
+
+    def test_trailing_stop_non_positive_errors(self, tmp_path):
+        content = """\
+strategy:
+  weights:
+    momentum: 0.40
+    value: 0.20
+    volatility: 0.15
+    liquidity: 0.15
+    news: 0.10
+  threshold: 0.60
+  stop_loss_rate: -0.08
+  min_holding_days: 5
+  max_holding_days: 60
+  trailing_stop_atr_mult: -1.0
+  reentry_cooldown_days: 5
+  gap_up_threshold: 0.05
+  gap_down_threshold: -0.03
+"""
+        errors, _ = self._run_with_yaml(content, tmp_path)
+        assert any(
+            "strategy_config" in e and "trailing_stop_atr_mult" in e for e in errors
+        )
+
+    def test_max_holding_days_zero_errors(self, tmp_path):
+        content = """\
+strategy:
+  weights:
+    momentum: 0.40
+    value: 0.20
+    volatility: 0.15
+    liquidity: 0.15
+    news: 0.10
+  threshold: 0.60
+  stop_loss_rate: -0.08
+  min_holding_days: 5
+  max_holding_days: 0
+  trailing_stop_atr_mult: 2.0
+  reentry_cooldown_days: 5
+  gap_up_threshold: 0.05
+  gap_down_threshold: -0.03
+"""
+        errors, _ = self._run_with_yaml(content, tmp_path)
+        assert any("strategy_config" in e and "max_holding_days" in e for e in errors)
+
+    def test_negative_reentry_cooldown_errors(self, tmp_path):
+        content = """\
+strategy:
+  weights:
+    momentum: 0.40
+    value: 0.20
+    volatility: 0.15
+    liquidity: 0.15
+    news: 0.10
+  threshold: 0.60
+  stop_loss_rate: -0.08
+  min_holding_days: 5
+  max_holding_days: 60
+  trailing_stop_atr_mult: 2.0
+  reentry_cooldown_days: -1
+  gap_up_threshold: 0.05
+  gap_down_threshold: -0.03
+"""
+        errors, _ = self._run_with_yaml(content, tmp_path)
+        assert any(
+            "strategy_config" in e and "reentry_cooldown_days" in e for e in errors
+        )
+
+    def test_min_holding_days_gte_max_warns(self, tmp_path):
+        content = """\
+strategy:
+  weights:
+    momentum: 0.40
+    value: 0.20
+    volatility: 0.15
+    liquidity: 0.15
+    news: 0.10
+  threshold: 0.60
+  stop_loss_rate: -0.08
+  min_holding_days: 60
+  max_holding_days: 5
+  trailing_stop_atr_mult: 2.0
+  reentry_cooldown_days: 5
+  gap_up_threshold: 0.05
+  gap_down_threshold: -0.03
+"""
+        _, warnings = self._run_with_yaml(content, tmp_path)
+        assert any(
+            "strategy_config" in w
+            and "min_holding_days" in w
+            and "max_holding_days" in w
+            for w in warnings
+        )

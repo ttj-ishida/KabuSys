@@ -302,9 +302,9 @@ class TestMaxHoldingDaysDefault:
         sig = inspect.signature(run_backtest)
         assert "max_holding_days" in sig.parameters
 
-    def test_generate_signals_default_is_60(self):
+    def test_generate_signals_default_is_none_sentinel(self):
         sig = inspect.signature(generate_signals)
-        assert sig.parameters["max_holding_days"].default == 60
+        assert sig.parameters["max_holding_days"].default is None
 
     def test_run_backtest_default_is_60(self):
         sig = inspect.signature(run_backtest)
