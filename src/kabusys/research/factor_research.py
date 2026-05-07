@@ -435,7 +435,7 @@ def calc_quality(
         """
         WITH fy_ranked AS (
             SELECT code, report_date, revenue, operating_profit,
-                   ROW_NUMBER() OVER (PARTITION BY code ORDER BY report_date DESC) AS rn
+                   ROW_NUMBER() OVER (PARTITION BY code ORDER BY report_date DESC, fetched_at DESC) AS rn
             FROM raw_financials
             WHERE report_date <= ?
               AND period_type LIKE '%FY%'

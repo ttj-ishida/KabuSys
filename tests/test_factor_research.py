@@ -676,3 +676,21 @@ class TestCalcQuality:
         row = result[0]
         assert set(row.keys()) == {"date", "code", "op_margin", "rev_growth_yoy", "profit_growth_yoy"}
         assert row["date"] == self.TARGET
+
+    def test_op_margin_none_when_revenue_zero(self, db):
+        _insert_financials(db, [
+            ("1001", date(2024, 1, 1), "FYResultNotification", 0.0, 50_000.0, 30_000.0, 30.0, 0.0),
+        ])
+        result = calc_quality(db, self.TARGET)
+        assert len(result) == 1
+        assert result[0]["op_margin"] is None
+
+    def test_rev_growth_yoy_with_negative_prior_revenue(self, db):
+        _insert_financials(db, [
+            ("1001", date(2023, 1, 1), "FYResultNotification", -100_000.0, -10_000.0, -20_000.0, -20.0, 0.0),
+            ("1001", date(2024, 1, 1), "FYResultNotification", -80_000.0, -5_000.0, -10_000.0, -10.0, 0.0),
+        ])
+        result = calc_quality(db, self.TARGET)
+        assert len(result) == 1
+        # (-80000 - -100000) / abs(-100000) = 20000 / 100000 = 0.2
+        assert abs(result[0]["rev_growth_yoy"] - 0.2) < 1e-9
