@@ -84,6 +84,7 @@ def collect_update_counts(
         fundamentals=_count_table(conn, "fundamentals", run_date),
         features=_count_table(conn, "features", run_date),
         ai_scores=_count_table(conn, "ai_scores", run_date),
+        market_regime=_count_table(conn, "market_regime", run_date),
         signals=_count_table(conn, "signals", run_date),
         signal_queue=_count_table(conn, "signal_queue", run_date),
     )
@@ -168,7 +169,16 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
 
-    run_date = date.fromisoformat(args.date) if args.date else date.today()
+    if args.date:
+        try:
+            run_date = date.fromisoformat(args.date)
+        except ValueError:
+            logger.error(
+                "--date の形式が不正です: %s (YYYY-MM-DD が必要です)", args.date
+            )
+            sys.exit(1)
+    else:
+        run_date = date.today()
     logger.info("レポート生成開始: run_date=%s", run_date)
 
     # --- JobRunResult 読み込み ---
@@ -178,30 +188,23 @@ def main() -> None:
 
     # --- DB クエリ ---
     db_path = args.db or str(Settings().duckdb_path)
+    target_date: date = run_date + timedelta(days=1)
     conn = duckdb.connect(db_path)
     try:
         update_counts = collect_update_counts(conn, run_date)
         next_day = collect_next_day_summary(conn, run_date)
-    finally:
-        conn.close()
-
-    # --- 翌営業日を特定（prices_daily の翌日以降の最小日付） ---
-    try:
-        conn2 = duckdb.connect(db_path)
         try:
-            row = conn2.execute(
+            row = conn.execute(
                 "SELECT MIN(date) FROM prices_daily WHERE date > ?", [run_date]
             ).fetchone()
-            target_date: date = (
-                row[0] if row and row[0] else run_date + timedelta(days=1)
+            if row and row[0]:
+                target_date = row[0]
+        except Exception:
+            logger.warning(
+                "翌営業日の取得に失敗しました。run_date+1 を使用します。", exc_info=True
             )
-        finally:
-            conn2.close()
-    except Exception:
-        logger.warning(
-            "翌営業日の取得に失敗しました。run_date+1 を使用します。", exc_info=True
-        )
-        target_date = run_date + timedelta(days=1)
+    finally:
+        conn.close()
 
     # --- レポート構築・保存 ---
     report = build_report(

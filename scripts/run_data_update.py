@@ -51,6 +51,7 @@ def main() -> None:
         if max_date_row and max_date_row[0]:
             target_date = max_date_row[0]
             breadth_result = calc_and_save_breadth(conn, target_date)
+            _updated_rows["market_breadth"] = breadth_result
             if breadth_result == 1:
                 logger.info("breadth 挿入完了: date=%s", target_date)
             else:
