@@ -258,7 +258,11 @@ def main() -> None:
             "バックテスト結果を DB に保存しました: run_id=%s", report.meta.run_id
         )
     except Exception:
-        logger.warning("DB 保存に失敗しました（ファイル保存は完了済み）", exc_info=True)
+        logger.warning(
+            "DB 保存に失敗しました（ファイル保存は完了済み）: run_id=%s",
+            report.meta.run_id,
+            exc_info=True,
+        )
     finally:
         conn_persist.close()
 
