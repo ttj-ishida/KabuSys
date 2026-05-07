@@ -687,6 +687,77 @@ def save_market_calendar(
     return len(rows)
 
 
+def fetch_topix_daily(
+    id_token: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> list[dict[str, Any]]:
+    """TOPIX 日足 OHLC を取得する（/indices/topix エンドポイント）。
+
+    Args:
+        id_token:  認証トークン。省略時はキャッシュを使用。
+        date_from: 取得開始日。
+        date_to:   取得終了日。
+
+    Returns:
+        TOPIX 日足レコードのリスト。各要素は {"Date": "YYYYMMDD", "Open": float, ...} を含む。
+    """
+    params: dict[str, str] = {}
+    if date_from:
+        params["dateFrom"] = date_from.strftime("%Y%m%d")
+    if date_to:
+        params["dateTo"] = date_to.strftime("%Y%m%d")
+    data = _request("/indices/topix", params=params, id_token=id_token)
+    records = data.get("topix", [])
+    logger.info("fetch_topix_daily: %d レコード取得", len(records))
+    return records
+
+
+def save_topix_daily(
+    conn: duckdb.DuckDBPyConnection,
+    records: list[dict[str, Any]],
+) -> int:
+    """TOPIX 日足データを topix_daily テーブルへ冪等保存する。
+
+    Args:
+        conn:    DuckDB 接続。
+        records: fetch_topix_daily() の戻り値。
+
+    Returns:
+        保存したレコード数。
+    """
+    rows: list[tuple] = []
+    for r in records:
+        date_str = r.get("Date", "")
+        if not date_str:
+            continue
+        try:
+            d = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
+        except (ValueError, IndexError):
+            logger.warning("save_topix_daily: 不正な日付 '%s' — スキップ", date_str)
+            continue
+        o = _to_float(r.get("Open"))
+        h = _to_float(r.get("High"))
+        lo = _to_float(r.get("Low"))
+        c = _to_float(r.get("Close"))
+        if None in (o, h, lo, c):
+            continue
+        rows.append((d, o, h, lo, c))
+    if not rows:
+        return 0
+    conn.executemany(
+        """
+        INSERT INTO topix_daily (date, open, high, low, close)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (date) DO UPDATE SET
+            open=excluded.open, high=excluded.high, low=excluded.low, close=excluded.close
+        """,
+        rows,
+    )
+    logger.info("save_topix_daily: %d 件を topix_daily に保存", len(rows))
+    return len(rows)
+
+
 def fetch_listed_info(
     id_token: str | None = None,
     date_: date | None = None,

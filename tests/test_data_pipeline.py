@@ -521,3 +521,79 @@ class TestEarningsCalendarPipeline:
         n = jq.save_earnings_calendar(conn, records)
         assert n == 1  # 有効な 1件のみ保存
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# TOPIX 日次 ETL テスト
+# ---------------------------------------------------------------------------
+
+from kabusys.data import jquants_client as jq
+from kabusys.data.pipeline import run_topix_etl, get_last_topix_date
+
+
+def _sample_topix_record(date_str: str = "20240110") -> dict:
+    return {"Date": date_str, "Open": 2300.1, "High": 2310.2, "Low": 2295.0, "Close": 2305.5}
+
+
+@pytest.fixture
+def mem_db_topix():
+    from kabusys.data.schema import init_schema
+    c = init_schema(":memory:")
+    yield c
+    c.close()
+
+
+class TestSaveTopixDaily:
+    def test_saves_records(self, mem_db_topix):
+        records = [_sample_topix_record("20240110"), _sample_topix_record("20240111")]
+        saved = jq.save_topix_daily(mem_db_topix, records)
+        assert saved == 2
+        row = mem_db_topix.execute(
+            "SELECT COUNT(*) FROM topix_daily"
+        ).fetchone()[0]
+        assert row == 2
+
+    def test_idempotent(self, mem_db_topix):
+        records = [_sample_topix_record("20240110")]
+        jq.save_topix_daily(mem_db_topix, records)
+        saved = jq.save_topix_daily(mem_db_topix, records)
+        assert saved == 1  # upsert: 上書き成功
+        row = mem_db_topix.execute("SELECT COUNT(*) FROM topix_daily").fetchone()[0]
+        assert row == 1
+
+    def test_skips_missing_date(self, mem_db_topix):
+        saved = jq.save_topix_daily(mem_db_topix, [{"Open": 2300.0}])
+        assert saved == 0
+
+    def test_skips_invalid_date(self, mem_db_topix):
+        saved = jq.save_topix_daily(mem_db_topix, [{"Date": "BADDATE", "Open": 2300.0, "High": 2310.0, "Low": 2290.0, "Close": 2305.0}])
+        assert saved == 0
+
+
+class TestRunTopixEtl:
+    def test_fetches_and_saves(self, mem_db_topix):
+        with mock.patch.object(jq, "fetch_topix_daily", return_value=[_sample_topix_record("20240110")]) as mock_fetch, \
+             mock.patch.object(jq, "save_topix_daily", return_value=1) as mock_save:
+            fetched, saved = run_topix_etl(mem_db_topix, date(2024, 1, 10))
+        assert fetched == 1
+        assert saved == 1
+
+    def test_skips_when_up_to_date(self, mem_db_topix):
+        mem_db_topix.execute(
+            "INSERT INTO topix_daily (date, open, high, low, close) VALUES (?, 2300, 2310, 2290, 2305)",
+            [date(2024, 1, 10)],
+        )
+        with mock.patch.object(jq, "fetch_topix_daily") as mock_fetch:
+            fetched, saved = run_topix_etl(mem_db_topix, date(2024, 1, 10))
+        mock_fetch.assert_not_called()
+        assert fetched == 0
+
+    def test_get_last_topix_date_none_when_empty(self, mem_db_topix):
+        assert get_last_topix_date(mem_db_topix) is None
+
+    def test_get_last_topix_date_returns_max(self, mem_db_topix):
+        mem_db_topix.executemany(
+            "INSERT INTO topix_daily (date, open, high, low, close) VALUES (?, 2300, 2310, 2290, 2305)",
+            [(date(2024, 1, 10),), (date(2024, 1, 11),)],
+        )
+        assert get_last_topix_date(mem_db_topix) == date(2024, 1, 11)
