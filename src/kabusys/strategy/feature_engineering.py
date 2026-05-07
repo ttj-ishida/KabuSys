@@ -25,7 +25,13 @@ from typing import Any
 import duckdb
 
 from kabusys.data.stats import zscore_normalize
-from kabusys.research.factor_research import calc_momentum, calc_value, calc_volatility
+from kabusys.research.factor_research import (
+    calc_momentum,
+    calc_quality,
+    calc_topix_relative,
+    calc_value,
+    calc_volatility,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +50,11 @@ _NORM_COLS: tuple[str, ...] = (
     "atr_pct",
     "volume_ratio",
     "ma200_dev",
+    "topix_rel_20",
+    "topix_rel_60",
+    "op_margin",
+    "rev_growth_yoy",
+    "profit_growth_yoy",
 )
 
 
@@ -103,10 +114,14 @@ def build_features(
     mom_list = calc_momentum(conn, target_date)
     vol_list = calc_volatility(conn, target_date)
     val_list = calc_value(conn, target_date)
+    topix_rel_list = calc_topix_relative(conn, target_date)
+    quality_list = calc_quality(conn, target_date)
 
     mom_map: dict[str, dict] = {r["code"]: r for r in mom_list}
     vol_map: dict[str, dict] = {r["code"]: r for r in vol_list}
     val_map: dict[str, dict] = {r["code"]: r for r in val_list}
+    topix_map: dict[str, dict] = {r["code"]: r for r in topix_rel_list}
+    quality_map: dict[str, dict] = {r["code"]: r for r in quality_list}
 
     # 2. current close prices（ユニバースフィルタ用）
     # target_date 以前の最新価格を参照（休場日・当日欠損に対応）
@@ -132,6 +147,8 @@ def build_features(
         m = mom_map.get(code, {})
         v = vol_map.get(code, {})
         f = val_map.get(code, {})
+        t = topix_map.get(code, {})
+        q = quality_map.get(code, {})
         merged.append(
             {
                 "code": code,
@@ -146,6 +163,11 @@ def build_features(
                 "per": f.get("per"),
                 "pbr": f.get("pbr"),  # 追加
                 "div_yield": f.get("div_yield"),  # 追加
+                "topix_rel_20": t.get("topix_rel_20"),
+                "topix_rel_60": t.get("topix_rel_60"),
+                "op_margin": q.get("op_margin"),
+                "rev_growth_yoy": q.get("rev_growth_yoy"),
+                "profit_growth_yoy": q.get("profit_growth_yoy"),
             }
         )
 
@@ -163,6 +185,10 @@ def build_features(
                 r[col] = max(-_ZSCORE_CLIP, min(_ZSCORE_CLIP, v))
             else:
                 r[col] = None
+        # quality_score: 正規化済み品質サブ指標の非 NULL 平均
+        q_vals = [r.get("op_margin"), r.get("rev_growth_yoy"), r.get("profit_growth_yoy")]
+        q_valid = [v for v in q_vals if v is not None and math.isfinite(v)]
+        r["quality_score"] = sum(q_valid) / len(q_valid) if q_valid else None
 
     # 7. features テーブルへ日付単位の置換（トランザクション＋バルク挿入で原子性を保証）
     params = [
@@ -177,6 +203,9 @@ def build_features(
             r.get("pbr"),  # 追加
             r.get("div_yield"),  # 追加
             r.get("ma200_dev"),
+            r.get("topix_rel_20"),
+            r.get("topix_rel_60"),
+            r.get("quality_score"),
         )
         for r in normalized
     ]
@@ -188,8 +217,9 @@ def build_features(
                 """
                 INSERT INTO features
                     (date, code, momentum_20, momentum_60, volatility_20, volume_ratio,
-                     per, pbr, div_yield, ma200_dev, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
+                     per, pbr, div_yield, ma200_dev,
+                     topix_rel_20, topix_rel_60, quality_score, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
                 """,
                 params,
             )
