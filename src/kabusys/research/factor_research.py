@@ -345,6 +345,12 @@ def calc_topix_relative(
 
     topix_ret_short = float(topix_row[0]) if topix_row[0] is not None else None
     topix_ret_mid = float(topix_row[1]) if topix_row[1] is not None else None
+    if topix_ret_short is None and topix_ret_mid is None:
+        logger.warning(
+            "calc_topix_relative: TOPIX LAG ウィンドウ不足（データは存在するがリターン計算不可）date=%s",
+            target_date,
+        )
+        return []
 
     rows = conn.execute(
         f"""
@@ -357,7 +363,11 @@ def calc_topix_relative(
             FROM prices_daily
             WHERE date BETWEEN ? AND ?
         )
-        SELECT date, code, close, close_short_ago, close_mid_ago
+        SELECT date, code,
+               CASE WHEN close_short_ago > 0
+                    THEN (close - close_short_ago) / close_short_ago END AS ret_short,
+               CASE WHEN close_mid_ago > 0
+                    THEN (close - close_mid_ago) / close_mid_ago END AS ret_mid
         FROM stock_data
         WHERE date = (
             SELECT MAX(date) FROM prices_daily WHERE date <= ?
@@ -368,17 +378,9 @@ def calc_topix_relative(
     ).fetchall()
 
     result = []
-    for _row_date, code, close, close_short_ago, close_mid_ago in rows:
-        stock_ret_short = (
-            float((close - close_short_ago) / close_short_ago)
-            if close_short_ago and close_short_ago > 0
-            else None
-        )
-        stock_ret_mid = (
-            float((close - close_mid_ago) / close_mid_ago)
-            if close_mid_ago and close_mid_ago > 0
-            else None
-        )
+    for _row_date, code, ret_short, ret_mid in rows:
+        stock_ret_short = float(ret_short) if ret_short is not None else None
+        stock_ret_mid = float(ret_mid) if ret_mid is not None else None
         topix_rel_20 = (
             stock_ret_short - topix_ret_short
             if stock_ret_short is not None and topix_ret_short is not None
