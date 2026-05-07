@@ -17,6 +17,7 @@ import argparse
 import logging
 import sys
 from datetime import date
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +247,24 @@ def main() -> None:
         print(format_cli_summary(report))
         run_dir = save_report(report, result, output_dir=args.output_dir)
         logger.info("レポートを保存しました: %s", run_dir)
+
+    # DB 永続化（--output-format に関わらず常に実行）
+    from kabusys.backtest.persistence import save_backtest_to_db
+
+    conn_persist = init_schema(str(Path(args.db)))
+    try:
+        save_backtest_to_db(conn_persist, report.meta.run_id, result, report)
+        logger.info(
+            "バックテスト結果を DB に保存しました: run_id=%s", report.meta.run_id
+        )
+    except Exception:
+        logger.warning(
+            "DB 保存に失敗しました（ファイル保存は完了済み）: run_id=%s",
+            report.meta.run_id,
+            exc_info=True,
+        )
+    finally:
+        conn_persist.close()
 
 
 if __name__ == "__main__":
