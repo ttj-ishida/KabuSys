@@ -20,7 +20,8 @@
 18:00  ai_analysis
 20:00  strategy_signal
 21:00  portfolio_construction
-21:30  Night Batch 確認
+21:15  night_batch_report（自動生成）
+21:30  Night Batch 確認（オペレーター）
 ```
 
 ---
@@ -164,15 +165,18 @@ python -m kabusys.run_performance_report --type daily --save
 
 ---
 
-## 7. 夜間バッチ（15:30-21:00）
+## 7. 夜間バッチ（15:30-21:15）
 
 ジョブ:
 
-- `run_data_update.py`
-- `run_feature_gen.py`
-- `run_ai_analysis.py`
-- `run_strategy_signal.py`
-- `run_portfolio_construction.py`
+| 時刻 | スクリプト |
+|---|---|
+| 15:30 | `run_data_update.py` |
+| 16:00 | `run_feature_gen.py` |
+| 18:00 | `run_ai_analysis.py` |
+| 20:00 | `run_strategy_signal.py` |
+| 21:00 | `run_portfolio_construction.py` |
+| 21:15 | `run_night_batch_report.py`（自動レポート生成） |
 
 Task Scheduler 確認:
 
@@ -184,29 +188,30 @@ Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object 
 
 ## 8. Night Batch 判定（21:30）
 
-主要コマンド:
+21:15 に `KabuSys_NightBatchReport` が自動実行し、レポートを生成する。
 
 ```cmd
-python -m kabusys.run_signal_queue_report
+python scripts/run_night_batch_report.py
 ```
+
+出力先:
+
+- `artifacts/night_batch/{date}/summary.json`
+- `artifacts/night_batch/{date}/report.md`
+- `artifacts/night_batch/{date}/warnings.json`
 
 確認項目:
 
-- 必須ジョブ成功
+- 必須ジョブ成功（`data_update` / `feature_gen` / `ai_analysis` / `strategy_signal` / `portfolio_construction`）
 - `signals` が生成されている
 - 翌営業日の `signal_queue` が作られている
-- 必要なら warning を確認する
+- warnings の有無
 
-判定の考え方:
+判定:
 
-- `READY`: 必須ジョブ成功かつ翌営業日の `signal_queue` が作成済み
+- `READY`: 全必須ジョブ成功かつ `signal_queue` 作成済み
 - `READY_WITH_WARNINGS`: warning はあるが翌営業日の準備は完了
-- `BLOCKED`: 必須ジョブ失敗または翌営業日の発注準備が未完了
-
-補足:
-
-- 判定ロジック自体は `src/kabusys/operations/night_batch_report.py` に実装済み
-- 現行ツリーでは独立 CLI よりも Task Scheduler 結果確認と `run_signal_queue_report` を運用導線にしている
+- `BLOCKED`: 必須ジョブ失敗または `signal_queue` が空
 
 ---
 

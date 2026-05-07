@@ -222,9 +222,10 @@ KabuSys は**日足スイング戦略**専用の設計です。夜間バッチ�
   ├─ 16:00  特徴量生成   scripts/run_feature_gen.py
   ├─ 18:00  AI 分析      scripts/run_ai_analysis.py
   ├─ 20:00  シグナル生成 scripts/run_strategy_signal.py
-  └─ 21:00  ポートフォリオ構築 scripts/run_portfolio_construction.py
+  ├─ 21:00  ポートフォリオ構築 scripts/run_portfolio_construction.py
+  └─ 21:15  バッチ結果レポート scripts/run_night_batch_report.py
   ↓
-21:30  夜間バッチ結果確認（Signal Queue / 異常チェック）
+21:30  夜間バッチ結果確認（レポート参照）
   ↓
 08:30  Execution 起動
 09:00  市場オープン → 寄付き発注
@@ -287,17 +288,33 @@ python scripts/run_portfolio_construction.py
 シグナルからポジションサイズを計算し、リスク制御を適用して `signal_queue` に翌日の発注キューを生成します。  
 このテーブルが Execution エンジンの入力になります。
 
+**バッチ結果レポート**（21:15 自動実行）
+
+```
+python scripts/run_night_batch_report.py
+```
+
+各ジョブの実行結果 (`artifacts/job_runs/{date}/`) を読み込み、DB からカウントを集計して READY / READY_WITH_WARNINGS / BLOCKED を判定します。  
+`KabuSys_NightBatchReport` タスクが 21:15 に自動実行します。手動確認・再生成にも使用できます。
+
+出力先: `artifacts/night_batch/{date}/summary.json`, `report.md`, `warnings.json`
+
 ---
 
 ### 夜間バッチ結果確認
 
-**Signal Queue 確認**（21:30 頃・任意）  
-翌営業日の発注予定を確認し、READY / BLOCKED / READY_WITH_WARNINGS を判定します。
+**Night Batch レポート確認**（21:30 頃）  
+21:15 に自動生成されたレポートを確認します。
 
 ```
-python -m kabusys.run_signal_queue_report
-python -m kabusys.run_signal_queue_report --date 2026-04-28 --save --json
+python scripts/run_night_batch_report.py
 ```
+
+判定結果:
+
+- `READY` — 全必須ジョブ成功・`signal_queue` 作成済み → 翌日執行可
+- `READY_WITH_WARNINGS` — 警告あり・準備は完了 → 内容確認の上で判断
+- `BLOCKED` — 必須ジョブ失敗または `signal_queue` 空 → 自動執行を開始しない
 
 ---
 
@@ -467,10 +484,13 @@ touch data/stop_requested.flag
 
 - Signal Queue: artifacts/signal_queue/YYYY-MM-DD/
   - summary.json, report.md, warnings.json
+- Job Runs: artifacts/job_runs/YYYY-MM-DD/
+  - {job_name}.json（各夜間バッチジョブの実行結果）
+- Night Batch: artifacts/night_batch/YYYY-MM-DD/
+  - summary.json, report.md, warnings.json
 - Execution Startup: artifacts/execution_startup/YYYY-MM-DD/
 - Pre-Market: artifacts/pre_market/YYYY-MM-DD/
 - Market Close: artifacts/market_close/YYYY-MM-DD/
-- Night Batch: artifacts/night_batch/YYYY-MM-DD/
 - Performance: artifacts/performance/{env}/{type}/{period}/
 
 ---
@@ -495,6 +515,7 @@ touch data/stop_requested.flag
   - operations/                    — 各種レポート生成ロジック（pure function）
     - pre_market_report.py
     - night_batch_report.py
+    - job_run_recorder.py          — 夜間バッチジョブ実行結果の書き出し・読み込み
     - market_close_report.py
     - performance_collector.py
     - performance_report.py

@@ -7,7 +7,7 @@ breadth_stop による BUY 停止の動作検証。
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -606,3 +606,62 @@ def test_generate_signals_no_ai_warning_when_ai_disabled(conn, monkeypatch, capl
     assert len(ai_warnings) == 0, (
         f"ENABLE_AI_SENTIMENT=false なのに AI 警告が {len(ai_warnings)} 件出力された"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 6: TOPIX 200MA 乖離率に基づく size_multiplier 縮小
+# ---------------------------------------------------------------------------
+
+from kabusys.strategy.signal_generator import _get_topix_size_multiplier  # noqa: E402
+
+
+class TestGetTopixSizeMultiplier:
+    """TOPIX 200MA 乖離率に基づく size_multiplier のテスト。"""
+
+    def _insert_topix(self, conn, rows: list[tuple]) -> None:
+        conn.executemany(
+            "INSERT INTO topix_daily (date, open, high, low, close) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT DO NOTHING",
+            rows,
+        )
+
+    def _make_topix_series(
+        self, conn, start: date, days: int, start_close: float, end_close: float
+    ) -> None:
+        from datetime import timedelta
+
+        rows = []
+        for i in range(days):
+            d = start + timedelta(days=i)
+            c = start_close + (end_close - start_close) * i / max(days - 1, 1)
+            rows.append((d, c, c, c, c))
+        self._insert_topix(conn, rows)
+
+    def test_returns_1_when_no_topix_data(self, conn):
+        assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
+
+    def test_returns_1_when_above_ma200(self, conn):
+        self._make_topix_series(
+            conn, TARGET_DATE - timedelta(days=250), 250, 2000.0, 2000.0
+        )
+        assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
+
+    def test_returns_05_when_below_ma200_by_15_percent(self, conn):
+        from datetime import timedelta
+
+        self._make_topix_series(
+            conn, TARGET_DATE - timedelta(days=250), 240, 2000.0, 2000.0
+        )
+        # 直近 10 日を 1600 に設定（200MA ≈ 2000 なので乖離率 ≈ -0.20）
+        recent_start = TARGET_DATE - timedelta(days=10)
+        self._make_topix_series(conn, recent_start, 11, 1600.0, 1600.0)
+        result = _get_topix_size_multiplier(conn, TARGET_DATE)
+        assert result == 0.5
+
+    def test_returns_1_when_insufficient_data(self, conn):
+        from datetime import timedelta
+
+        self._make_topix_series(
+            conn, TARGET_DATE - timedelta(days=50), 50, 2000.0, 2000.0
+        )
+        assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0

@@ -23,8 +23,8 @@
 09:00  Monitoring 起動
 09:00-15:00  ザラ場監視
 15:00  Market Close
-15:30-21:00  夜間バッチ
-21:30  Night Batch 状態確認
+15:30-21:15  夜間バッチ（21:15 にレポート自動生成）
+21:30  Night Batch 状態確認（オペレーター）
 ```
 
 ---
@@ -122,12 +122,16 @@ python -m kabusys.run_performance_report --type daily --save
 
 ## D-7. 夜間バッチの確認（21:30）
 
-```powershell
-Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object TaskName, LastRunTime, LastTaskResult
-```
+21:15 に `KabuSys_NightBatchReport` が自動実行し、レポートを生成する。手動確認・再生成:
 
 ```cmd
-python -m kabusys.run_signal_queue_report
+python scripts/run_night_batch_report.py
+```
+
+Task Scheduler 結果確認:
+
+```powershell
+Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object TaskName, LastRunTime, LastTaskResult
 ```
 
 確認項目:
@@ -135,18 +139,20 @@ python -m kabusys.run_signal_queue_report
 - 必須ジョブ成功
 - `signals` 生成済み
 - 翌営業日の `signal_queue` 作成済み
-- warning の有無
+- warnings の有無
 
-判定の考え方:
+判定:
 
-- `READY`: 必須ジョブ成功かつ翌営業日の `signal_queue` が作成済み
-- `READY_WITH_WARNINGS`: warning はあるが翌営業日の準備は完了
-- `BLOCKED`: 必須ジョブ失敗または翌営業日の発注準備が未完了
+- `READY`: 全必須ジョブ成功かつ `signal_queue` 作成済み → 翌日執行可
+- `READY_WITH_WARNINGS`: warning はあるが翌営業日の準備は完了 → 内容確認の上で判断
+- `BLOCKED`: 必須ジョブ失敗または `signal_queue` が空 → 自動執行を開始しない
 
-補足:
+出力先:
 
-- 判定ロジック自体は `src/kabusys/operations/night_batch_report.py` に実装済み
-- 現行ツリーでは独立 CLI よりも Task Scheduler と queue 確認が導線
+- `artifacts/night_batch/{date}/summary.json`
+- `artifacts/night_batch/{date}/report.md`
+- `artifacts/night_batch/{date}/warnings.json`
+- `artifacts/job_runs/{date}/{job_name}.json`（各ジョブの実行結果）
 
 ---
 

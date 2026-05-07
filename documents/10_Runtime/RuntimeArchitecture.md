@@ -166,6 +166,7 @@ monitoring_service は常時稼働する。
   18:00   KabuSys_AiAnalysis             scripts\run_ai_analysis.py
   20:00   KabuSys_StrategySignal         scripts\run_strategy_signal.py
   21:00   KabuSys_PortfolioConstruction  scripts\run_portfolio_construction.py
+  21:15   KabuSys_NightBatchReport       scripts\run_night_batch_report.py
   08:30   KabuSys_ExecutionStart         scripts\start_system.py --component execution
   09:00   KabuSys_MonitoringStart        scripts\start_system.py --component monitoring
 

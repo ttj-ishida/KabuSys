@@ -1,6 +1,6 @@
 # TODO: 夜間バッチ結果確認レポートの運用フロー接続
 
-- ステータス: **未接続**
+- ステータス: **完了（Issue #263 / PR #268 でマージ済み）**
 - 関連モジュール: `src/kabusys/operations/night_batch_report.py`（実装済み）
 - 関連仕様: `documents/10_Runtime/MVP_NightBatchOperationsReportSpec.md`
 
