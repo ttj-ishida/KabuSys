@@ -51,6 +51,7 @@ class UpdateCounts:
     fundamentals: int = 0
     features: int = 0
     ai_scores: int = 0
+    market_regime: int = 0
     signals: int = 0
     signal_queue: int = 0
 
@@ -235,8 +236,8 @@ def format_cli_summary(report: NightBatchReport) -> str:
         "  Update Counts:",
         f"    prices_daily : {uc.prices_daily:>6}    features     : {uc.features:>6}",
         f"    news_articles: {uc.news_articles:>6}    ai_scores    : {uc.ai_scores:>6}",
-        f"    fundamentals : {uc.fundamentals:>6}    signals      : {uc.signals:>6}",
-        f"                              signal_queue : {uc.signal_queue:>6}",
+        f"    fundamentals : {uc.fundamentals:>6}    market_regime: {uc.market_regime:>6}",
+        f"    signals      : {uc.signals:>6}    signal_queue : {uc.signal_queue:>6}",
     ]
     lines.append(thin)
     nd = report.next_day_summary
@@ -333,6 +334,7 @@ def format_markdown(report: NightBatchReport) -> str:
         f"| fundamentals | {uc.fundamentals} |",
         f"| features | {uc.features} |",
         f"| ai_scores | {uc.ai_scores} |",
+        f"| market_regime | {uc.market_regime} |",
         f"| signals | {uc.signals} |",
         f"| signal_queue | {uc.signal_queue} |",
         "",
