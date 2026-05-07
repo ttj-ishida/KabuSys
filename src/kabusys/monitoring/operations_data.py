@@ -1,0 +1,348 @@
+"""operations_data.py — 運用系 Streamlit ページ共通のデータロード関数。
+
+Pre-Market チェック・執行起動サマリ・日中監視・障害サマリ・ペーパートレード
+検証などの各データ取得をまとめる。
+
+`dashboard_data.py`（監視エンジン系）とは責務を分離し、
+Streamlit に依存しないため単体テスト可能。
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from typing import Optional
+
+
+# ---------------------------------------------------------------------------
+# 1. load_premarket_data
+# ---------------------------------------------------------------------------
+
+
+def load_premarket_data(
+    duckdb_conn: object,
+    sqlite_conn: object,
+    settings: object,
+) -> dict:
+    """Pre-Market チェック結果を収集して辞書で返す。
+
+    Args:
+        duckdb_conn: DuckDB 接続（prices_daily / signal_queue クエリ用）
+        sqlite_conn: SQLite 接続（positions / signal_queue クエリ用）
+        settings: 設定オブジェクト。以下の属性を参照する:
+            - stop_flag_path (Path): 停止フラグのパス
+            - task_name (str, optional): Task Scheduler タスク名
+                                         デフォルト "KabuSys_ExecutionStart"
+
+    Returns:
+        dict with keys:
+            status, checks, warnings, generated_at,
+            signal_queue_pending, position_count,
+            stop_flag_exists, data_freshness_ok, task_scheduler_ready
+    """
+    from kabusys.operations.pre_market_collector import collect
+    from kabusys.operations.pre_market_report import build_report
+
+    stop_flag_path: Path = getattr(settings, "stop_flag_path", Path("stop_requested.flag"))
+    task_name: str = getattr(settings, "task_name", "KabuSys_ExecutionStart")
+    today = date.today()
+
+    data = collect(
+        duckdb_conn=duckdb_conn,
+        sqlite_conn=sqlite_conn,
+        stop_flag_path=stop_flag_path,
+        task_name=task_name,
+        today=today,
+    )
+
+    report = build_report(
+        report_date=today,
+        data_freshness_ok=data.data_freshness_ok,
+        signal_queue_pending=data.signal_queue_pending,
+        position_count=data.position_count,
+        stop_flag_exists=data.stop_flag_exists,
+        task_scheduler_ready=data.task_scheduler_ready,
+    )
+
+    return {
+        "status": report.status,
+        "checks": [
+            {"name": c.name, "status": c.status, "detail": c.detail}
+            for c in report.checks
+        ],
+        "warnings": report.warnings,
+        "generated_at": report.generated_at,
+        "signal_queue_pending": data.signal_queue_pending,
+        "position_count": data.position_count,
+        "stop_flag_exists": data.stop_flag_exists,
+        "data_freshness_ok": data.data_freshness_ok,
+        "task_scheduler_ready": data.task_scheduler_ready,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 2. load_execution_startup
+# ---------------------------------------------------------------------------
+
+
+def load_execution_startup(
+    base_dir: Path,
+    target_date: Optional[date] = None,
+) -> Optional[dict]:
+    """執行起動サマリを artifacts/execution_startup/{date}/summary.json から読み込む。
+
+    Args:
+        base_dir: execution_startup ディレクトリのベースパス
+        target_date: 読み込む日付。省略時は本日。
+
+    Returns:
+        summary.json の内容を dict で返す。ファイルが存在しない場合は None。
+    """
+    if target_date is None:
+        target_date = date.today()
+
+    summary_path = Path(base_dir) / target_date.isoformat() / "summary.json"
+    if not summary_path.exists():
+        return None
+
+    return json.loads(summary_path.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# 3. load_intraday_summary
+# ---------------------------------------------------------------------------
+
+
+def load_intraday_summary(
+    sqlite_conn: sqlite3.Connection,
+    hours: int = 1,
+) -> dict:
+    """日中監視サマリを SQLite から取得する。
+
+    Args:
+        sqlite_conn: SQLite 接続（risk_logs / dashboard テーブルを持つ DB）
+        hours: 集計対象の直近時間数（デフォルト 1 時間）
+
+    Returns:
+        dict with keys:
+            order_errors (int): 直近 N 時間の ORDER_ERROR 件数
+            stale_orders (int): 直近 N 時間の STALE_ORDER 件数
+            drawdown_pct (float): 最新ドローダウン（%換算）。データなし時は 0.0
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+    # ORDER_ERROR カウント
+    try:
+        row = sqlite_conn.execute(
+            "SELECT COUNT(*) FROM risk_logs WHERE event_type = 'ORDER_ERROR' AND logged_at >= ?",
+            (cutoff,),
+        ).fetchone()
+        order_errors = int(row[0]) if row and row[0] is not None else 0
+    except sqlite3.OperationalError:
+        order_errors = 0
+
+    # STALE_ORDER カウント
+    try:
+        row = sqlite_conn.execute(
+            "SELECT COUNT(*) FROM risk_logs WHERE event_type = 'STALE_ORDER' AND logged_at >= ?",
+            (cutoff,),
+        ).fetchone()
+        stale_orders = int(row[0]) if row and row[0] is not None else 0
+    except sqlite3.OperationalError:
+        stale_orders = 0
+
+    # 最新 drawdown_pct（DB には分数 e.g. -0.05 で格納 → % 換算して返す）
+    drawdown_pct = 0.0
+    try:
+        row = sqlite_conn.execute(
+            "SELECT drawdown_pct FROM dashboard ORDER BY updated_at DESC LIMIT 1"
+        ).fetchone()
+        if row and row[0] is not None:
+            drawdown_pct = float(row[0]) * 100.0
+    except sqlite3.OperationalError:
+        pass
+
+    return {
+        "order_errors": order_errors,
+        "stale_orders": stale_orders,
+        "drawdown_pct": drawdown_pct,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 4. load_failure_summary
+# ---------------------------------------------------------------------------
+
+
+def load_failure_summary(
+    sqlite_conn: sqlite3.Connection,
+) -> dict:
+    """直近 24 時間の障害イベントサマリを SQLite から取得する。
+
+    Args:
+        sqlite_conn: SQLite 接続（risk_logs テーブルを持つ DB）
+
+    Returns:
+        dict with keys:
+            critical_count (int)
+            kill_switch_count (int)
+            risk_breach_count (int)
+            order_error_count (int)
+            recent_events (list[dict])
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+
+    counts: dict[str, int] = {
+        "CRITICAL": 0,
+        "KILL_SWITCH": 0,
+        "RISK_BREACH": 0,
+        "ORDER_ERROR": 0,
+    }
+    recent_events: list[dict] = []
+
+    try:
+        cur = sqlite_conn.execute(
+            """
+            SELECT event_type, message, logged_at
+            FROM risk_logs
+            WHERE event_type IN ('CRITICAL', 'KILL_SWITCH', 'RISK_BREACH', 'ORDER_ERROR')
+              AND logged_at >= ?
+            ORDER BY logged_at DESC
+            """,
+            (cutoff,),
+        )
+        cols = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+        for row in rows:
+            event = dict(zip(cols, row))
+            recent_events.append(event)
+            et = event.get("event_type", "")
+            if et in counts:
+                counts[et] += 1
+    except sqlite3.OperationalError:
+        pass
+
+    return {
+        "critical_count": counts["CRITICAL"],
+        "kill_switch_count": counts["KILL_SWITCH"],
+        "risk_breach_count": counts["RISK_BREACH"],
+        "order_error_count": counts["ORDER_ERROR"],
+        "recent_events": recent_events,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 5. load_paper_verification_data
+# ---------------------------------------------------------------------------
+
+
+def load_paper_verification_data(
+    paper_sqlite_path: Path,
+    from_dt: Optional[str] = None,
+    to_dt: Optional[str] = None,
+) -> dict:
+    """ペーパートレード検証データを SQLite から取得する。
+
+    Args:
+        paper_sqlite_path: paper trading SQLite DB ファイルのパス
+        from_dt: フィルタ開始日時文字列（ISO8601 形式、省略可）
+        to_dt:   フィルタ終了日時文字列（ISO8601 形式、省略可）
+
+    Returns:
+        DBが存在しない場合: {"available": False}
+        DBが存在する場合:
+            {
+                "available": True,
+                "uptime_pct": float | None,
+                "fill_rate_pct": float | None,
+                "send_rate_pct": float | None,
+                "p95_latency_ms": float | None,
+                "pass_fail": str,
+                "total_polls": int,
+                "created_count": int,
+            }
+    """
+    from kabusys.tools.paper_verification_report import (
+        THRESHOLD_FILL_RATE_PCT,
+        THRESHOLD_P95_LATENCY_MS,
+        THRESHOLD_SEND_RATE_PCT,
+        THRESHOLD_UPTIME_PCT,
+        _query_latency,
+        _query_order_stats,
+        _query_system_stability,
+    )
+
+    paper_sqlite_path = Path(paper_sqlite_path)
+    if not paper_sqlite_path.exists():
+        return {"available": False}
+
+    conn = sqlite3.connect(str(paper_sqlite_path))
+    try:
+        try:
+            stability = _query_system_stability(conn, from_dt, to_dt)
+        except sqlite3.OperationalError:
+            stability = {"total_polls": 0, "error_count": 0, "uptime_pct": None}
+
+        try:
+            orders = _query_order_stats(conn, from_dt, to_dt)
+        except sqlite3.OperationalError:
+            orders = {
+                "created_count": 0,
+                "filled_count": 0,
+                "sent_count": 0,
+                "fill_rate_pct": None,
+                "send_rate_pct": None,
+            }
+
+        try:
+            latency = _query_latency(conn, from_dt, to_dt)
+        except sqlite3.OperationalError:
+            latency = {"avg_ms": None, "max_ms": None, "p95_ms": None}
+    finally:
+        conn.close()
+
+    uptime_pct = stability.get("uptime_pct")
+    fill_rate_pct = orders.get("fill_rate_pct")
+    send_rate_pct = orders.get("send_rate_pct")
+    p95_latency_ms = latency.get("p95_ms")
+    total_polls = stability.get("total_polls", 0)
+    created_count = orders.get("created_count", 0)
+
+    # Pass/Fail 判定
+    failures: list[str] = []
+    if uptime_pct is None:
+        failures.append("稼働率: N/A (データなし)")
+    elif uptime_pct < THRESHOLD_UPTIME_PCT:
+        failures.append(f"稼働率: {uptime_pct:.1f}% < {THRESHOLD_UPTIME_PCT}%")
+
+    if created_count == 0:
+        failures.append("注文データなし（対象期間に Created イベントが存在しない）")
+
+    if fill_rate_pct is not None and fill_rate_pct < THRESHOLD_FILL_RATE_PCT:
+        failures.append(f"注文成功率: {fill_rate_pct:.1f}% < {THRESHOLD_FILL_RATE_PCT}%")
+
+    if send_rate_pct is not None and send_rate_pct < THRESHOLD_SEND_RATE_PCT:
+        failures.append(f"送信率: {send_rate_pct:.1f}% < {THRESHOLD_SEND_RATE_PCT}%")
+
+    if p95_latency_ms is not None and p95_latency_ms > THRESHOLD_P95_LATENCY_MS:
+        failures.append(f"P95レイテンシ: {p95_latency_ms:.1f} ms > {THRESHOLD_P95_LATENCY_MS} ms")
+
+    passed = len(failures) == 0
+    pass_fail = (
+        "PASS (全指標が基準値を満たしています)"
+        if passed
+        else f"FAIL ({'; '.join(failures)})"
+    )
+
+    return {
+        "available": True,
+        "uptime_pct": uptime_pct,
+        "fill_rate_pct": fill_rate_pct,
+        "send_rate_pct": send_rate_pct,
+        "p95_latency_ms": p95_latency_ms,
+        "pass_fail": pass_fail,
+        "total_polls": total_polls,
+        "created_count": created_count,
+    }
