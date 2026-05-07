@@ -502,7 +502,7 @@ def _get_topix_size_multiplier(
 
     if row is None or row[1] is None or row[2] < _TOPIX_MIN_DATA_COUNT:
         return 1.0
-    close, ma200, cnt = float(row[0]), float(row[1]), row[2]
+    close, ma200, _ = float(row[0]), float(row[1]), row[2]
     if ma200 > 0 and (close / ma200 - 1.0) < _TOPIX_DRAWDOWN_THRESHOLD:
         return _TOPIX_SIZE_MULTIPLIER_BEAR
     return 1.0
