@@ -15,7 +15,8 @@ KabuSys は、夜間バッチで翌営業日のシグナルと発注キューを
 18:00  ai_analysis
 20:00  strategy_signal
 21:00  portfolio_construction
-21:30  night batch status confirmation
+21:15  night_batch_report（自動生成）
+21:30  night batch status confirmation（オペレーター確認）
 08:00  pre_market_report
 08:30  execution start
 09:00  monitoring start
@@ -88,30 +89,50 @@ KabuSys は、夜間バッチで翌営業日のシグナルと発注キューを
 
 - `signal_queue`
 
+### 2.6 night_batch_report（21:15）
+
+役割:
+
+- `artifacts/job_runs/{date}/` から各ジョブの `JobRunResult` を読み込む
+- DuckDB から当日の更新件数・翌営業日シグナル情報を集計
+- READY / READY_WITH_WARNINGS / BLOCKED を判定してレポートを生成
+
+主なアーティファクト:
+
+- `artifacts/job_runs/{date}/{job_name}.json`（各ジョブの実行結果）
+- `artifacts/night_batch/{date}/summary.json`
+- `artifacts/night_batch/{date}/report.md`
+- `artifacts/night_batch/{date}/warnings.json`
+
+関連モジュール:
+
+- `src/kabusys/operations/night_batch_report.py`
+- `src/kabusys/operations/job_run_recorder.py`
+
 ---
 
-## 3. Night Batch 状態確認（21:30）
+## 3. Night Batch 状態確認（21:15 以降）
 
-現行運用では、Task Scheduler の結果確認と `signal_queue` の確認を組み合わせて翌営業日の準備完了を判断する。
+21:15 に `KabuSys_NightBatchReport` が自動実行し、CLI サマリーと `artifacts/night_batch/{date}/` を生成する。
+
+手動実行（再生成・デバッグ時）:
+
+```cmd
+python scripts/run_night_batch_report.py
+python scripts/run_night_batch_report.py --date 2026-05-07
+```
+
+Task Scheduler 結果確認:
 
 ```powershell
 Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object TaskName, LastRunTime, LastTaskResult
 ```
 
-```cmd
-python -m kabusys.run_signal_queue_report
-```
+判定:
 
-判定の考え方:
-
-- `READY`: 必須ジョブ成功かつ翌営業日の `signal_queue` が作成済み
+- `READY`: 全必須ジョブ成功かつ翌営業日の `signal_queue` が作成済み
 - `READY_WITH_WARNINGS`: warning はあるが翌営業日の準備は完了
-- `BLOCKED`: 必須ジョブ失敗または翌営業日の発注準備が未完了
-
-補足:
-
-- 判定ロジック自体は `src/kabusys/operations/night_batch_report.py` に実装済み
-- 現行ツリーでは独立 CLI よりも Task Scheduler と queue 確認が導線
+- `BLOCKED`: 必須ジョブ失敗または `signal_queue` が空
 
 ---
 
@@ -191,13 +212,16 @@ python -m kabusys.run_performance_report --type daily --save
 
 標準ジョブ:
 
-- `KabuSys_DataUpdate`
-- `KabuSys_FeatureGen`
-- `KabuSys_AiAnalysis`
-- `KabuSys_StrategySignal`
-- `KabuSys_PortfolioConstruction`
-- `KabuSys_ExecutionStart`
-- `KabuSys_MonitoringStart`
+| 時刻 | タスク名 | スクリプト |
+|---|---|---|
+| 15:30 | `KabuSys_DataUpdate` | `scripts\run_data_update.py` |
+| 16:00 | `KabuSys_FeatureGen` | `scripts\run_feature_gen.py` |
+| 18:00 | `KabuSys_AiAnalysis` | `scripts\run_ai_analysis.py` |
+| 20:00 | `KabuSys_StrategySignal` | `scripts\run_strategy_signal.py` |
+| 21:00 | `KabuSys_PortfolioConstruction` | `scripts\run_portfolio_construction.py` |
+| 21:15 | `KabuSys_NightBatchReport` | `scripts\run_night_batch_report.py` |
+| 08:30 | `KabuSys_ExecutionStart` | `scripts\start_system.py --component execution` |
+| 09:00 | `KabuSys_MonitoringStart` | `scripts\start_system.py --component monitoring` |
 
 ---
 
