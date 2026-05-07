@@ -20,6 +20,7 @@ from kabusys.research.factor_research import (
     calc_momentum,
     calc_volatility,
     calc_value,
+    calc_topix_relative,
 )
 from kabusys.research.feature_exploration import (
     calc_forward_returns,
@@ -50,6 +51,15 @@ def _insert_prices(conn, rows: list[tuple]):
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT DO NOTHING
         """,
+        rows,
+    )
+
+
+def _insert_topix(conn, rows: list[tuple]):
+    """(date, open, high, low, close) を topix_daily に挿入。"""
+    conn.executemany(
+        "INSERT INTO topix_daily (date, open, high, low, close) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT DO NOTHING",
         rows,
     )
 
@@ -508,3 +518,71 @@ class TestResearchIsolation:
         calc_momentum(db, date(2024, 1, 5))
         after = db.execute("SELECT COUNT(*) FROM signal_queue").fetchone()[0]
         assert before == after  # signal_queue に変化なし
+
+
+# ---------------------------------------------------------------------------
+# calc_topix_relative
+# ---------------------------------------------------------------------------
+
+
+class TestCalcTopixRelative:
+    TARGET = date(2024, 3, 1)
+    START = date(2023, 1, 1)
+
+    def _make_prices(self, start: date, days: int, code: str, base: float) -> list[tuple]:
+        """base から 1% ずつ上昇する価格シリーズを生成。"""
+        from datetime import timedelta
+        rows = []
+        for i in range(days):
+            d = start + timedelta(days=i)
+            c = base * (1 + 0.01 * i)
+            rows.append((d, code, c, c, c, c, 100000, c * 100000))
+        return rows
+
+    def _make_topix(self, start: date, days: int, base: float) -> list[tuple]:
+        from datetime import timedelta
+        rows = []
+        for i in range(days):
+            d = start + timedelta(days=i)
+            c = base * (1 + 0.005 * i)  # 0.5% ずつ上昇（株より遅い）
+            rows.append((d, c, c, c, c))
+        return rows
+
+    def test_returns_correct_relative_momentum(self, db):
+        _insert_prices(db, self._make_prices(self.START, 425, "1001", 1000.0))
+        _insert_topix(db, self._make_topix(self.START, 425, 2000.0))
+        result = calc_topix_relative(db, self.TARGET)
+        assert len(result) == 1
+        row = result[0]
+        assert row["code"] == "1001"
+        # 株の 21 日リターン > TOPIX の 21 日リターン → topix_rel_20 > 0
+        assert row["topix_rel_20"] is not None
+        assert row["topix_rel_20"] > 0
+        # 株の 63 日リターン > TOPIX の 63 日リターン → topix_rel_60 > 0
+        assert row["topix_rel_60"] is not None
+        assert row["topix_rel_60"] > 0
+
+    def test_returns_empty_when_no_topix_data(self, db):
+        _insert_prices(db, self._make_prices(self.START, 425, "1001", 1000.0))
+        # topix_daily にデータなし
+        result = calc_topix_relative(db, self.TARGET)
+        assert result == []
+
+    def test_returns_none_for_insufficient_stock_history(self, db):
+        from datetime import timedelta
+        # 株は 10 日分のみ（21 日に足りない）
+        _insert_prices(db, self._make_prices(self.TARGET - timedelta(days=10), 10, "1001", 1000.0))
+        _insert_topix(db, self._make_topix(self.START, 425, 2000.0))
+        result = calc_topix_relative(db, self.TARGET)
+        assert len(result) == 1
+        assert result[0]["topix_rel_20"] is None
+        assert result[0]["topix_rel_60"] is None
+
+    def test_result_schema(self, db):
+        _insert_prices(db, self._make_prices(self.START, 425, "1001", 1000.0))
+        _insert_topix(db, self._make_topix(self.START, 425, 2000.0))
+        result = calc_topix_relative(db, self.TARGET)
+        assert len(result) == 1
+        row = result[0]
+        assert set(row.keys()) == {"date", "code", "topix_rel_20", "topix_rel_60"}
+        assert row["date"] == self.TARGET

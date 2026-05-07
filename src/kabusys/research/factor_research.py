@@ -294,3 +294,109 @@ def calc_value(
     result = [dict(zip(cols, r)) for r in rows]
     logger.debug("calc_value: %d 銘柄 date=%s", len(result), target_date)
     return result
+
+
+# ---------------------------------------------------------------------------
+# TOPIX 相対強度ファクター
+# ---------------------------------------------------------------------------
+
+
+def calc_topix_relative(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+) -> list[dict[str, Any]]:
+    """TOPIX 対比の相対モメンタムを計算する。
+
+    各銘柄の 21 日・63 日リターンから同期間の TOPIX リターンを差し引く。
+    topix_daily にデータが存在しない場合は空リストを返す。
+
+    Args:
+        conn:        DuckDB 接続。prices_daily / topix_daily テーブルを参照する。
+        target_date: 計算基準日。
+
+    Returns:
+        [{"date": date, "code": str, "topix_rel_20": float|None, "topix_rel_60": float|None}]
+    """
+    start_date = target_date - timedelta(days=_MOMENTUM_SCAN_DAYS)
+
+    topix_row = conn.execute(
+        f"""
+        WITH topix_data AS (
+            SELECT date, close,
+                   LAG(close, {_MOMENTUM_SHORT_DAYS}) OVER (ORDER BY date) AS close_short_ago,
+                   LAG(close, {_MOMENTUM_MID_DAYS})   OVER (ORDER BY date) AS close_mid_ago
+            FROM topix_daily
+            WHERE date BETWEEN ? AND ?
+        )
+        SELECT
+            CASE WHEN close_short_ago > 0
+                 THEN (close - close_short_ago) / close_short_ago END AS ret_short,
+            CASE WHEN close_mid_ago > 0
+                 THEN (close - close_mid_ago) / close_mid_ago END AS ret_mid
+        FROM topix_data
+        WHERE date = (SELECT MAX(date) FROM topix_daily WHERE date <= ?)
+        """,
+        [start_date, target_date, target_date],
+    ).fetchone()
+
+    if topix_row is None:
+        logger.warning("calc_topix_relative: TOPIX データ不足 date=%s", target_date)
+        return []
+
+    topix_ret_short = float(topix_row[0]) if topix_row[0] is not None else None
+    topix_ret_mid = float(topix_row[1]) if topix_row[1] is not None else None
+
+    rows = conn.execute(
+        f"""
+        WITH stock_data AS (
+            SELECT code, date, close,
+                   LAG(close, {_MOMENTUM_SHORT_DAYS}) OVER (PARTITION BY code ORDER BY date)
+                       AS close_short_ago,
+                   LAG(close, {_MOMENTUM_MID_DAYS})   OVER (PARTITION BY code ORDER BY date)
+                       AS close_mid_ago
+            FROM prices_daily
+            WHERE date BETWEEN ? AND ?
+        )
+        SELECT date, code, close, close_short_ago, close_mid_ago
+        FROM stock_data
+        WHERE date = (
+            SELECT MAX(date) FROM prices_daily WHERE date <= ?
+        )
+        ORDER BY code
+        """,
+        [start_date, target_date, target_date],
+    ).fetchall()
+
+    result = []
+    for _row_date, code, close, close_short_ago, close_mid_ago in rows:
+        stock_ret_short = (
+            float((close - close_short_ago) / close_short_ago)
+            if close_short_ago and close_short_ago > 0
+            else None
+        )
+        stock_ret_mid = (
+            float((close - close_mid_ago) / close_mid_ago)
+            if close_mid_ago and close_mid_ago > 0
+            else None
+        )
+        topix_rel_20 = (
+            stock_ret_short - topix_ret_short
+            if stock_ret_short is not None and topix_ret_short is not None
+            else None
+        )
+        topix_rel_60 = (
+            stock_ret_mid - topix_ret_mid
+            if stock_ret_mid is not None and topix_ret_mid is not None
+            else None
+        )
+        result.append(
+            {
+                "date": target_date,
+                "code": code,
+                "topix_rel_20": topix_rel_20,
+                "topix_rel_60": topix_rel_60,
+            }
+        )
+
+    logger.debug("calc_topix_relative: %d 銘柄 date=%s", len(result), target_date)
+    return result
