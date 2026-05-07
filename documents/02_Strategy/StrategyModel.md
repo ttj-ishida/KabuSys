@@ -90,6 +90,24 @@ div_yield_max = 3.0
 - **指標**: 20日ATR（Average True Range）、出来高変化率
 - **傾向**: ボラティリティが適切な範囲にあり、直近で出来高急増などの変化があるか。
 
+### 3.4 TOPIX 相対強度 (TOPIX Relative Strength)（Issue #257 実装済み）
+- **指標**: `topix_rel_20`（21日リターン差）、`topix_rel_60`（63日リターン差）
+- **計算**: `銘柄リターン − TOPIX リターン` を対象日の直前取引日のデータで算出し、Zスコア正規化（±3クリップ）して `features` テーブルに保存
+- **実装**: `research/factor_research.py::calc_topix_relative()`
+- **傾向**: TOPIX を上回る相対的な上昇トレンドにある銘柄を評価。市場全体の上昇に引っ張られた銘柄ではなく、独自に強い銘柄を識別する。
+- **注意**: `topix_daily` に 21 件未満のデータしかない期間（初期運用開始直後）はファクターを返さず、他のファクターで計算を継続する
+
+### 3.5 財務品質スコア (Quality Score)（Issue #257 実装済み）
+- **指標**: `quality_score`（営業利益率・売上成長率・利益成長率の正規化平均）
+- **計算式**: `quality_score = mean([norm(op_margin), norm(rev_growth_yoy), norm(profit_growth_yoy)])`
+  - `op_margin` = `operating_income / revenue`（最新 FY実績）
+  - `rev_growth_yoy` = `(revenue − prev_revenue) / |prev_revenue|`（前 FY 比）
+  - `profit_growth_yoy` = `(net_income − prev_net_income) / |prev_net_income|`（前 FY 比）
+  - 各指標を個別に Zスコア正規化（±3クリップ）してから平均
+- **実装**: `research/factor_research.py::calc_quality()`
+- **データ源**: `fundamentals` テーブル（`period_type LIKE 'FYResult%'` の最新 FY実績のみ使用）
+- **傾向**: 財務の健全性が高く持続的に利益を伸ばしている企業を高評価。PER/PBR のバリューファクターを補完する
+
 ---
 
 ## 4. シグナル生成・スコア統合
@@ -120,6 +138,7 @@ final_score =
 ### 5.1 エントリー（Entry）
 - **条件**: `final_score` が閾値以上であること。
 - **レジームフィルタ**: AIが判定する `regime` が Bear（弱気・下落トレンド）の時は、どんなにスコアが高くても**新規の買いエントリーは生成しない（見送り）**。
+- **TOPIX 200MA サイズ縮小** （Issue #257 実装済み）: TOPIX 終値が 200 日移動平均を 15% 以上下回った場合（`(close/ma200 - 1) < -0.15`）、新規 BUY の発注サイズを通常の **50%** に縮小する（`signals.size_multiplier` の `topix_multiplier = 0.5`）。Bear レジーム判定・breadth_stop とは独立して動作し、最も小さい `size_multiplier` が採用される。`topix_daily` に 100 件未満のデータしかない期間（初期運用開始直後）はこのフィルタを無効化する。実装: `signal_generator.py::_get_topix_size_multiplier()`
 - **breadth_stop フィルタ** （Issue #173 実装済み）: 東証全銘柄の 25 日移動平均上銘柄比率が 35% 未満の場合、市場全体の内部悪化と判定し**全銘柄の新規 BUY を停止する**。Bear レジーム判定とは独立して動作する。
 - **ギャップリスクフィルタ** （Issue #170 実装済み）: 当日の始値が前日終値比 **+5% 超**（ギャップアップ過大）または **-3% 以下**（ギャップダウン過大）の銘柄は、その銘柄の新規 BUY を見送る。SELL は対象外。
 - **セクター相対強弱フィルタ** （Issue #172 実装済み）: セクター20営業日リターンの下位25%セクターに属する銘柄は新規 BUY を禁止する。上位25%セクターの銘柄は `final_score +0.03` の補正を行う（Section 4.2 参照）。セクター集中制限（`apply_sector_cap`）とは独立して動作する。SELL は対象外。

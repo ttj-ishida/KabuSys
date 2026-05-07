@@ -1,6 +1,6 @@
 # MVP: 運用成績サマリーレポート最小仕様
 
-- ステータス: 設計完了（Issue #195、仕様書: `docs/superpowers/specs/2026-04-29-performance-report-design.md`）
+- ステータス: 実装完了（Issue #195）
 - 目的: 最初に実装する運用成績サマリーレポートの最小仕様を 1 ページで定義する
 - 対象: `live` / `paper_trading` 共通
 - 出力形式: Markdown

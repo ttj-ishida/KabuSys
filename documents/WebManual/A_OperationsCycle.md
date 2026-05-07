@@ -136,13 +136,19 @@ python -m kabusys.run_intraday_monitor --watch
 streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
 ```
 
-ダッシュボードは 4 ページ構成です。
+ダッシュボードは 10 ページ構成です。
 
 | ページ（サイドバー） | 主な確認内容 |
 |---|---|
 | **Home** | Kill Switch 状態 / Execution・Monitoring プロセス UP 確認 / ドローダウン / 直近エラーイベント |
+| **Initial Setup** | 環境変数・設定・DB・Task Scheduler の初期セットアップ確認 |
+| **Pre-Market** | 朝の READY/BLOCKED 判定 / データ鮮度 / 停止フラグ確認 |
+| **Execution Startup** | 起動直後のリコンシリエーション差分 / ポジション整合確認 |
+| **Intraday Monitor** | ザラ場監視（自動更新）/ Kill Switch 状態 / 注文エラー / ドローダウン |
 | **Signal Queue** | 翌営業日の発注キュー（pending 件数）/ ポートフォリオ目標 / 直近シグナル |
-| **Performance** | エクイティカーブ / 保有ポジション / 取引履歴 |
+| **Performance** | エクイティカーブ / 保有ポジション / 取引履歴 / Paper Verification |
+| **Failure Recovery** | 障害イベント集約 / 復旧ガイド |
+| **WebManual** | 運用マニュアル閲覧ビュー |
 | **Strategy Lab** | 市場レジームスコア / AI スコアランキング / シグナル推移 |
 
 確認項目:

@@ -211,6 +211,19 @@ alloc_i  = 総資産 × weight_i × max_utilization（0.70）
 
 実装モジュール: `src/kabusys/portfolio/risk_adjustment.py`（`calc_regime_multiplier`）
 
+## 9.2 TOPIX 200MA サイズ縮小（Issue #257 実装済み）
+
+TOPIX 終値が 200 日移動平均を 15% 以上下回った場合（深刻な弱地合い）、新規 BUY の `size_multiplier` を 0.5 に設定する。これにより算出株数がおよそ半分になる。
+
+| 条件 | `topix_multiplier` | 説明 |
+|------|-------------------|------|
+| `(close/ma200 - 1) < -0.15` | 0.5 | 200MA から 15% 超下落中：サイズ半減 |
+| それ以外 | 1.0 | 通常サイズ |
+
+- AI レジーム乗数・breadth_stop とは独立して動作し、最も小さい `size_multiplier` が採用される
+- `topix_daily` に 100 件未満しかない期間（初期運用開始直後）は 1.0 を返して無効化する
+- 実装: `src/kabusys/strategy/signal_generator.py::_get_topix_size_multiplier()`
+
 ---
 
 # 10. AIスコアの利用

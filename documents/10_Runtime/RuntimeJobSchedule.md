@@ -40,6 +40,7 @@ KabuSys は、夜間バッチで翌営業日のシグナルと発注キューを
 - `prices_daily`
 - `fundamentals`
 - `raw_news`
+- `topix_daily`（Issue #257: `run_topix_etl()` が Step 5 として追加）
 
 ### 2.2 feature_gen（16:00）
 
@@ -48,6 +49,8 @@ KabuSys は、夜間バッチで翌営業日のシグナルと発注キューを
 - モメンタム
 - ボラティリティ
 - 流動性
+- TOPIX 相対強度（`topix_rel_20` / `topix_rel_60`）（Issue #257）
+- 財務品質スコア（`quality_score`）（Issue #257）
 - その他特徴量
 
 主なテーブル:

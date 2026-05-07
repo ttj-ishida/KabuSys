@@ -42,9 +42,11 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
   - 単発または監視モード（`--watch`）で実行状態 / リスク / システム指標を表示
 
 - Streamlit 監視ダッシュボード: `streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db`
-  - 4ページ構成（Home / Signal Queue / Performance / Strategy Lab）
+  - 10ページ構成（Home / Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Signal Queue / Performance / Failure Recovery / WebManual / Strategy Lab）
   - Home: Kill Switch・Execution / Monitoring プロセス状態・エラーログ（SQLite）
-  - Signal Queue / Performance / Strategy Lab: DuckDB（`kabusys.duckdb`）を読み取り専用で参照
+  - Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Failure Recovery: 運用フロー確認ページ（SQLite `monitoring.db`、`operations_data.py` 経由）
+  - Performance > Paper Verification タブ: SQLite `paper_trading.db`（read-only）
+  - Signal Queue / Performance（Paper Verification 以外）/ Strategy Lab: DuckDB（`kabusys.duckdb`）を読み取り専用で参照
 
 - 各種レポート生成:
   - Pre-Market Report: `python -m kabusys.run_pre_market_report`（--save / --json）
@@ -367,11 +369,20 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 | ページ | 主な確認内容 |
 |---|---|
 | **Home** | Kill Switch / Execution・Monitoring プロセス状態 / ドローダウン / 直近エラーイベント |
+| **Initial Setup** | 環境変数・設定・DB・Task Scheduler の初期セットアップ確認 |
+| **Pre-Market** | 朝の READY/BLOCKED 判定 / データ鮮度 / 停止フラグ確認 |
+| **Execution Startup** | 起動直後のリコンシリエーション差分 / ポジション整合確認 |
+| **Intraday Monitor** | ザラ場監視（自動更新）/ Kill Switch 状態 / 注文エラー / ドローダウン |
 | **Signal Queue** | 翌営業日の発注キュー（pending 件数）/ ポートフォリオ目標 / 直近シグナル |
-| **Performance** | エクイティカーブ / 保有ポジション / 取引履歴 |
+| **Performance** | エクイティカーブ / 保有ポジション / 取引履歴 / Paper Verification |
+| **Failure Recovery** | 障害イベント集約 / 復旧ガイド |
+| **WebManual** | 運用マニュアル閲覧ビュー |
 | **Strategy Lab** | 市場レジームスコア / AI スコアランキング / シグナル推移 |
 
-- Home は SQLite `monitoring.db`、その他3ページは DuckDB `kabusys.duckdb` を読み取り専用で参照します。
+- Home は SQLite `monitoring.db`（read-only）。
+- Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Failure Recovery は `operations_data.py` 経由で SQLite `monitoring.db`（read-only）。
+- Performance > Paper Verification タブは SQLite `paper_trading.db`（read-only URI モード）。
+- Signal Queue / Performance（Paper Verification 以外）/ Strategy Lab は DuckDB `kabusys.duckdb` を読み取り専用で参照します。
 
 ---
 
@@ -537,10 +548,17 @@ touch data/stop_requested.flag
     - system_monitor.py            — CPU / メモリ / プロセス監視
     - streamlit_dashboard.py       — Streamlit Home ページ（SQLite 参照）
     - dashboard_data.py            — 全ページ共通データロード関数（DuckDB / SQLite）
+    - operations_data.py           — 運用フローページ向けデータロード関数（SQLite / Streamlit 非依存）
     - pages/
-      - 2_Signal_Queue.py          — 発注キュー・シグナル確認
-      - 3_Performance.py           — エクイティカーブ・ポジション・取引履歴
-      - 4_Strategy_Lab.py          — 市場レジーム・AI スコア・シグナル推移
+      - 2_Initial_Setup.py         — 環境変数・設定・DB・Task Scheduler 確認
+      - 3_Pre_Market.py            — 朝の READY/BLOCKED 判定・データ鮮度確認
+      - 4_Execution_Startup.py     — 起動直後のリコンシリエーション差分確認
+      - 5_Intraday_Monitor.py      — ザラ場監視（自動更新）・Kill Switch 確認
+      - 6_Signal_Queue.py          — 発注キュー・シグナル確認
+      - 7_Performance.py           — エクイティカーブ・ポジション・取引履歴・Paper Verification
+      - 8_Failure_Recovery.py      — 障害イベント集約・復旧ガイド
+      - 9_WebManual.py             — 運用マニュアル閲覧ビュー
+      - 10_Strategy_Lab.py         — 市場レジーム・AI スコア・シグナル推移
   - tools/
     - paper_verification_report.py
   - utils/

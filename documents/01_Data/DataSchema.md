@@ -209,7 +209,11 @@ J-Quants から取得した生の財務データ。
 
 ## topix_daily（新規）
 
-TOPIX 日足データ。regime_detector の ma200_ratio 算出に使用する。
+TOPIX 日足データ。以下の用途で使用する。
+
+- `regime_detector`: TOPIX の ma200_ratio（200MA比）算出
+- `factor_research.calc_topix_relative()`: TOPIX 相対強度（Issue #257）の算出基準
+- `signal_generator._get_topix_size_multiplier()`: TOPIX 200MA 大幅乖離時の発注サイズ縮小（Issue #257）
 
   column   type   description
   -------- ------ -----------
@@ -394,6 +398,12 @@ event_type 分類（初期対象）:
   momentum_60     float    60日モメンタム
   volatility_20   float    20日ボラ
   volume_ratio    float    出来高比率
+  topix_rel_20    double   TOPIX相対強度・20日（銘柄21日リターン − TOPIX21日リターン。Zスコア正規化済み）
+  topix_rel_60    double   TOPIX相対強度・60日（銘柄63日リターン − TOPIX63日リターン。Zスコア正規化済み）
+  quality_score   double   財務品質スコア（op_margin / rev_growth_yoy / profit_growth_yoy の正規化後平均）
+
+注記: topix_rel_20 / topix_rel_60 / quality_score はZスコア正規化（±3クリップ）後の値を保存する。
+      raw値ではないため、直接の財務数値とは異なる。
 
 ------------------------------------------------------------------------
 

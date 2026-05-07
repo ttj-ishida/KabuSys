@@ -40,9 +40,14 @@ Core 機能:
 Streamlit で確認できる主なページ:
 
 - `Home`
-- `WebManual`
+- `Initial Setup`（初期セットアップ確認）
+- `Pre-Market`（朝の READY/BLOCKED 判定）
+- `Execution Startup`（起動直後の差分確認）
+- `Intraday Monitor`（ザラ場監視・自動更新）
 - `Signal Queue`
-- `Performance`
+- `Performance`（Paper Verification 含む）
+- `Failure Recovery`（障害イベント集約）
+- `WebManual`
 - `Strategy Lab`
 
 ---

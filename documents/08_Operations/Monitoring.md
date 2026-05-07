@@ -192,14 +192,20 @@ Core コードは返り値の型を意識せず `.send(message)` を呼ぶだけ
 
 監視ダッシュボードを用意する。
 
-**Phase 1 実装（Issue #231）:** Streamlit マルチページ構成（4ページ）
+**Phase 1 実装（Issue #231 / Issue #260）:** Streamlit マルチページ構成（10ページ）
 
 | ページ | ファイル | 表示内容 |
 |---|---|---|
 | Home | `streamlit_dashboard.py` | Kill Switch / Execution / Monitoring 状態、ドローダウン、エラーログ |
-| Signal Queue | `pages/2_Signal_Queue.py` | 発注キュー・ポートフォリオ目標・シグナル（直近7日） |
-| Performance | `pages/3_Performance.py` | エクイティカーブ・ポジション・取引履歴 |
-| Strategy Lab | `pages/4_Strategy_Lab.py` | 市場レジーム・AI スコア・シグナル推移 |
+| Initial Setup | `pages/2_Initial_Setup.py` | 環境変数・設定・DB・Task Scheduler の初期セットアップ確認 |
+| Pre-Market | `pages/3_Pre_Market.py` | 朝の READY/BLOCKED 判定・データ鮮度・停止フラグ確認 |
+| Execution Startup | `pages/4_Execution_Startup.py` | 起動直後のリコンシリエーション差分・ポジション整合確認 |
+| Intraday Monitor | `pages/5_Intraday_Monitor.py` | ザラ場監視（自動更新）・Kill Switch 状態・注文エラー・ドローダウン |
+| Signal Queue | `pages/6_Signal_Queue.py` | 発注キュー・ポートフォリオ目標・シグナル（直近7日） |
+| Performance | `pages/7_Performance.py` | エクイティカーブ・ポジション・取引履歴・Paper Verification |
+| Failure Recovery | `pages/8_Failure_Recovery.py` | 障害イベント集約・復旧ガイド |
+| WebManual | `pages/9_WebManual.py` | 運用マニュアル閲覧ビュー |
+| Strategy Lab | `pages/10_Strategy_Lab.py` | 市場レジーム・AI スコア・シグナル推移 |
 
 推奨
 
@@ -267,7 +273,7 @@ Windows 1台での稼働を前提とし、オーバーヘッドの少ない構�
 | 種類 | ツール / 技術 | 用途・保存先 |
 |----|----|----|
 | データベース | SQLite | `monitoring.db` (テーブル: `system_status`, `trade_logs`, `positions`, `risk_logs`, `dashboard`) |
-| ダッシュボード | Streamlit | 4ページ構成（Home / Signal Queue / Performance / Strategy Lab）|
+| ダッシュボード | Streamlit | 10ページ構成（Home / Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Signal Queue / Performance / Failure Recovery / WebManual / Strategy Lab）|
 | アラート | LINE | LINE Messaging API 経由での異常通知 |
 
 ### SQLite テーブル設計（Phase 7 実装）
@@ -411,24 +417,41 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 |---|---|
 | `streamlit_dashboard.py` | Home ページ（エントリーポイント）。SQLite `monitoring.db` を読み取り |
 | `dashboard_data.py` | 全ページ共通のデータロード関数群（Streamlit 非依存） |
-| `pages/2_Signal_Queue.py` | 発注キュー・ポートフォリオ目標・シグナル確認 |
-| `pages/3_Performance.py` | エクイティカーブ・ポジション・取引履歴 |
-| `pages/4_Strategy_Lab.py` | 市場レジーム・AI スコア・シグナル推移 |
+| `operations_data.py` | 運用フローページ向けデータロード関数群（Streamlit 非依存） |
+| `pages/2_Initial_Setup.py` | 環境変数・設定・DB・Task Scheduler 確認（4タブ） |
+| `pages/3_Pre_Market.py` | 朝の READY/BLOCKED 判定・データ鮮度・停止フラグ確認 |
+| `pages/4_Execution_Startup.py` | 起動直後のリコンシリエーション差分・ポジション整合確認 |
+| `pages/5_Intraday_Monitor.py` | ザラ場監視（自動更新）・Kill Switch 状態・注文エラー・ドローダウン |
+| `pages/6_Signal_Queue.py` | 発注キュー・ポートフォリオ目標・シグナル確認 |
+| `pages/7_Performance.py` | エクイティカーブ・ポジション・取引履歴・Paper Verification |
+| `pages/8_Failure_Recovery.py` | 障害イベント集約・復旧ガイド |
+| `pages/9_WebManual.py` | 運用マニュアル閲覧ビュー |
+| `pages/10_Strategy_Lab.py` | 市場レジーム・AI スコア・シグナル推移 |
 
 **ページ別表示内容:**
 
-| ページ | タブ | 表示内容 | データソース |
+| ページ | タブ / 表示 | 表示内容 | データソース |
 |---|---|---|---|
 | Home | Overview | Kill Switch / Execution / Monitoring 状態、portfolio_value / cash / drawdown_pct、エラーログ（直近） | SQLite `dashboard` / `risk_logs` |
 | Home | Positions | 保有ポジション一覧 | SQLite `positions` |
 | Home | Orders | trade_logs 最新20件 | SQLite `trade_logs` |
 | Home | System | system_status 最新状態 | SQLite `system_status` |
+| Initial Setup | 環境変数 | Settings から取得した主要環境変数一覧・検証結果 | `validate_config.run_checks()` |
+| Initial Setup | 設定 | risk_config.yaml 等の設定値確認 | `validate_config.run_checks()` |
+| Initial Setup | DB | monitoring.db / kabusys.duckdb / paper_trading.db 存在確認 | ファイルシステム |
+| Initial Setup | Task Scheduler | KabuSys_* タスクの登録状態確認 | `schtasks` |
+| Pre-Market | - | READY/BLOCKED 判定・データ鮮度・Signal Queue 件数・停止フラグ状態 | SQLite `monitoring.db` / `operations_data` |
+| Execution Startup | - | 起動直後のリコンシリエーション差分（orders_no_status / position_discrepancies） | SQLite `monitoring.db` / `operations_data` |
+| Intraday Monitor | - | Kill Switch 状態・Execution プロセス UP・注文エラー件数・ドローダウン（自動更新） | SQLite `monitoring.db` / `operations_data` |
 | Signal Queue | 発注キュー | signal_queue 全件（status 別集計） | DuckDB `signal_queue` |
 | Signal Queue | ポートフォリオ目標 | 最新日の target_weight / target_size | DuckDB `portfolio_targets` |
 | Signal Queue | シグナル（直近7日） | signals テーブル | DuckDB `signals` |
 | Performance | エクイティカーブ | equity / cash / drawdown / daily_return 推移 | DuckDB `portfolio_performance` |
 | Performance | ポジション | 最新日の保有ポジション（position_size ≠ 0） | DuckDB `positions` |
 | Performance | 取引履歴 | 直近50件の取引 | DuckDB `trades` |
+| Performance | Paper Verification | 稼働率・注文成功率・送信率・P95 レイテンシ（ゴーライブ合格基準） | SQLite `paper_trading.db`（read-only） |
+| Failure Recovery | - | 障害イベント種別ごとの件数集計（直近24時間）・直近イベント一覧（50件） | SQLite `risk_logs` / `operations_data` |
+| WebManual | - | 運用マニュアル閲覧ビュー（documents/WebManual/ のマークダウン） | ファイルシステム |
 | Strategy Lab | 市場レジーム | regime_score / regime_label 推移 | DuckDB `market_regime` |
 | Strategy Lab | AI スコア | 最新日の ai_score ランキング | DuckDB `ai_scores` |
 | Strategy Lab | シグナル推移 | 日別 buy/sell 件数集計 | DuckDB `signals` |
@@ -436,7 +459,9 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 **データソース分離:**
 
 - Home ページ: SQLite `monitoring.db`（read-only URI モード）
-- Signal Queue / Performance / Strategy Lab: DuckDB `kabusys.duckdb`（`read_only=True`）
+- Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Failure Recovery: SQLite `monitoring.db`（`operations_data.py` 経由）
+- Performance > Paper Verification タブ: SQLite `paper_trading.db`（read-only URI モード）
+- Signal Queue / Performance（Paper Verification 以外）/ Strategy Lab: DuckDB `kabusys.duckdb`（`read_only=True`）
 
 **依存ライブラリ:** `psutil`（SystemMonitor）、`streamlit`（ダッシュボード UI）— `requirements.txt` に追加すること。
 

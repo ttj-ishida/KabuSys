@@ -99,6 +99,7 @@ Data Fetch -> [ Raw Layer ] -> Data Cleaning -> [ Processed Layer ] -> Feature G
 ### 4.2 主要ジョブ（日次差分更新）
 
 - `calendar_update_job`: J-Quants等からJPXカレンダー情報（祝日・SQ日など）を取得し、`market_calendar` テーブルを更新する夜間バッチ処理。
+- `run_topix_etl()`: J-Quants `/indices/topix` エンドポイントから TOPIX 日足（OHLC）を差分取得し、`topix_daily` テーブルへ UPSERT する。`run_daily_etl()` の Step 5 として実行される（Issue #257）。当日分取得済みの場合はバックフィルも含めてスキップ。TOPIX は JPX 公式指数のため過去日付の訂正配信はほぼ発生しない。
 
 ### 4.3 Bootstrap フロー（初回一括投入）
 
