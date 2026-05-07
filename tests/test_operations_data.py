@@ -53,7 +53,7 @@ class TestLoadExecutionStartup:
 # ---------------------------------------------------------------------------
 
 
-def _make_monitoring_db(tmp_path) -> sqlite3.Connection:
+def _make_monitoring_db() -> sqlite3.Connection:
     """テスト用の monitoring SQLite DB を作成する。"""
     conn = sqlite3.connect(":memory:")
     conn.execute("""
@@ -88,7 +88,7 @@ def _make_monitoring_db(tmp_path) -> sqlite3.Connection:
 class TestLoadIntradaySummary:
     def test_returns_zeros_when_no_events(self):
         from kabusys.monitoring.operations_data import load_intraday_summary
-        conn = _make_monitoring_db(None)
+        conn = _make_monitoring_db()
         result = load_intraday_summary(conn, hours=1)
         assert result["order_errors"] == 0
         assert result["stale_orders"] == 0
@@ -97,7 +97,7 @@ class TestLoadIntradaySummary:
 
     def test_counts_order_errors_within_window(self):
         from kabusys.monitoring.operations_data import load_intraday_summary
-        conn = _make_monitoring_db(None)
+        conn = _make_monitoring_db()
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(
             "INSERT INTO risk_logs (event_type, message, logged_at) VALUES (?, ?, ?)",
@@ -110,7 +110,7 @@ class TestLoadIntradaySummary:
 
     def test_reads_drawdown_from_dashboard(self):
         from kabusys.monitoring.operations_data import load_intraday_summary
-        conn = _make_monitoring_db(None)
+        conn = _make_monitoring_db()
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(
             "INSERT INTO dashboard (portfolio_value, cash, drawdown_pct, updated_at) VALUES (?, ?, ?, ?)",
@@ -130,7 +130,7 @@ class TestLoadIntradaySummary:
 class TestLoadFailureSummary:
     def test_returns_zero_counts_when_no_events(self):
         from kabusys.monitoring.operations_data import load_failure_summary
-        conn = _make_monitoring_db(None)
+        conn = _make_monitoring_db()
         result = load_failure_summary(conn)
         assert result["critical_count"] == 0
         assert result["kill_switch_count"] == 0
@@ -140,7 +140,7 @@ class TestLoadFailureSummary:
 
     def test_counts_critical_events_within_24h(self):
         from kabusys.monitoring.operations_data import load_failure_summary
-        conn = _make_monitoring_db(None)
+        conn = _make_monitoring_db()
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(
             "INSERT INTO risk_logs (event_type, message, logged_at) VALUES (?, ?, ?)",

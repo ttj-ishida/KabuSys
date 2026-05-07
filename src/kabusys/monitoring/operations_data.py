@@ -210,6 +210,7 @@ def load_failure_summary(
             WHERE event_type IN ('CRITICAL', 'KILL_SWITCH', 'RISK_BREACH', 'ORDER_ERROR')
               AND logged_at >= ?
             ORDER BY logged_at DESC
+            LIMIT 100
             """,
             (cutoff,),
         )
@@ -236,6 +237,155 @@ def load_failure_summary(
 # ---------------------------------------------------------------------------
 # 5. load_paper_verification_data
 # ---------------------------------------------------------------------------
+
+
+def _build_date_filter(
+    ts_col: str,
+    from_dt: Optional[str],
+    to_dt: Optional[str],
+) -> tuple[str, list[str]]:
+    """日付フィルタの WHERE 句フラグメントとパラメータを返す。"""
+    clauses: list[str] = []
+    params: list[str] = []
+    if from_dt:
+        clauses.append(f"{ts_col} >= ?")
+        params.append(from_dt)
+    if to_dt:
+        clauses.append(f"{ts_col} <= ?")
+        params.append(to_dt)
+    if clauses:
+        return " AND ".join(clauses), params
+    return "", []
+
+
+def _paper_query_system_stability(
+    conn: sqlite3.Connection,
+    from_dt: Optional[str],
+    to_dt: Optional[str],
+) -> dict:
+    """system_status テーブルからシステム安定性指標を取得する。"""
+    where, params = _build_date_filter("recorded_at", from_dt, to_dt)
+    where_clause = f"WHERE {where}" if where else ""
+
+    row = conn.execute(
+        f"""
+        SELECT
+            COUNT(*)            AS total_polls,
+            SUM(1 - process_ok) AS error_count,
+            CASE WHEN COUNT(*) > 0
+                THEN CAST(SUM(process_ok) AS REAL) / COUNT(*) * 100.0
+                ELSE NULL
+            END AS uptime_pct
+        FROM system_status
+        {where_clause}
+        """,
+        params,
+    ).fetchone()
+
+    if row is None or row[0] == 0:
+        return {"total_polls": 0, "error_count": 0, "uptime_pct": None}
+
+    return {
+        "total_polls": row[0],
+        "error_count": row[1] if row[1] is not None else 0,
+        "uptime_pct": row[2],
+    }
+
+
+def _paper_query_order_stats(
+    conn: sqlite3.Connection,
+    from_dt: Optional[str],
+    to_dt: Optional[str],
+) -> dict:
+    """trade_logs テーブルから注文成功率・送信率指標を取得する。"""
+    where, params = _build_date_filter("logged_at", from_dt, to_dt)
+    where_clause = f"WHERE {where}" if where else ""
+
+    row = conn.execute(
+        f"""
+        SELECT
+            COUNT(CASE WHEN event_type = 'Created' THEN 1 END) AS created_count,
+            COUNT(CASE WHEN event_type = 'Filled'  THEN 1 END) AS filled_count,
+            COUNT(CASE WHEN event_type = 'Sent'    THEN 1 END) AS sent_count
+        FROM trade_logs
+        {where_clause}
+        """,
+        params,
+    ).fetchone()
+
+    if row is None:
+        return {
+            "created_count": 0,
+            "filled_count": 0,
+            "sent_count": 0,
+            "fill_rate_pct": None,
+            "send_rate_pct": None,
+        }
+
+    created = row[0] or 0
+    filled = row[1] or 0
+    sent = row[2] or 0
+
+    fill_rate = (filled / created * 100.0) if created > 0 else None
+    send_rate = (sent / created * 100.0) if created > 0 else None
+
+    return {
+        "created_count": created,
+        "filled_count": filled,
+        "sent_count": sent,
+        "fill_rate_pct": fill_rate,
+        "send_rate_pct": send_rate,
+    }
+
+
+def _paper_query_latency(
+    conn: sqlite3.Connection,
+    from_dt: Optional[str],
+    to_dt: Optional[str],
+) -> dict:
+    """trade_logs テーブルからレイテンシ指標を取得する。"""
+    import math
+
+    where_parts, params = _build_date_filter("logged_at", from_dt, to_dt)
+    latency_condition = "latency_ms IS NOT NULL"
+    if where_parts:
+        where_clause = f"WHERE {where_parts} AND {latency_condition}"
+    else:
+        where_clause = f"WHERE {latency_condition}"
+
+    row = conn.execute(
+        f"""
+        SELECT
+            AVG(latency_ms) AS avg_ms,
+            MAX(latency_ms) AS max_ms
+        FROM trade_logs
+        {where_clause}
+        """,
+        params,
+    ).fetchone()
+
+    avg_ms = row[0] if row and row[0] is not None else None
+    max_ms = row[1] if row and row[1] is not None else None
+
+    # P95 計算用に全値を取得
+    rows = conn.execute(
+        f"SELECT latency_ms FROM trade_logs {where_clause}",
+        params,
+    ).fetchall()
+    latency_values = [r[0] for r in rows if r[0] is not None]
+
+    if latency_values:
+        sorted_vals = sorted(latency_values)
+        idx = max(math.ceil(len(sorted_vals) * 0.95) - 1, 0)
+        p95_ms: Optional[float] = sorted_vals[idx]
+    else:
+        p95_ms = None
+
+    return {
+        "avg_ms": avg_ms,
+        "max_ms": max_ms,
+        "p95_ms": p95_ms,
+    }
 
 
 def load_paper_verification_data(
@@ -269,9 +419,6 @@ def load_paper_verification_data(
         THRESHOLD_P95_LATENCY_MS,
         THRESHOLD_SEND_RATE_PCT,
         THRESHOLD_UPTIME_PCT,
-        _query_latency,
-        _query_order_stats,
-        _query_system_stability,
     )
 
     paper_sqlite_path = Path(paper_sqlite_path)
@@ -281,12 +428,12 @@ def load_paper_verification_data(
     conn = sqlite3.connect(str(paper_sqlite_path))
     try:
         try:
-            stability = _query_system_stability(conn, from_dt, to_dt)
+            stability = _paper_query_system_stability(conn, from_dt, to_dt)
         except sqlite3.OperationalError:
             stability = {"total_polls": 0, "error_count": 0, "uptime_pct": None}
 
         try:
-            orders = _query_order_stats(conn, from_dt, to_dt)
+            orders = _paper_query_order_stats(conn, from_dt, to_dt)
         except sqlite3.OperationalError:
             orders = {
                 "created_count": 0,
@@ -297,7 +444,7 @@ def load_paper_verification_data(
             }
 
         try:
-            latency = _query_latency(conn, from_dt, to_dt)
+            latency = _paper_query_latency(conn, from_dt, to_dt)
         except sqlite3.OperationalError:
             latency = {"avg_ms": None, "max_ms": None, "p95_ms": None}
     finally:
