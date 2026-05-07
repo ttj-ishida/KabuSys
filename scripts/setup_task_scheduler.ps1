@@ -66,11 +66,12 @@ Register-KabuSysTask -TaskName "KabuSys_FeatureGen"            -Script "run_feat
 Register-KabuSysTask -TaskName "KabuSys_AiAnalysis"            -Script "run_ai_analysis.py"            -TriggerTime "18:00"
 Register-KabuSysTask -TaskName "KabuSys_StrategySignal"        -Script "run_strategy_signal.py"        -TriggerTime "20:00"
 Register-KabuSysTask -TaskName "KabuSys_PortfolioConstruction" -Script "run_portfolio_construction.py" -TriggerTime "21:00"
+Register-KabuSysTask -TaskName "KabuSys_NightBatchReport"      -Script "run_night_batch_report.py"      -TriggerTime "21:15"
 
 # System start jobs
 Register-KabuSysTask -TaskName "KabuSys_ExecutionStart"  -Script "start_system.py" -Arguments "--component execution"  -TriggerTime "08:30"
 Register-KabuSysTask -TaskName "KabuSys_MonitoringStart" -Script "start_system.py" -Arguments "--component monitoring" -TriggerTime "09:00"
 
 Write-Host ""
-Write-Host "8 件のジョブ登録が完了しました。"
+Write-Host "9 件のジョブ登録が完了しました。"
 Write-Host "確認: Get-ScheduledTask -TaskName 'KabuSys_*' | Select-Object TaskName, State"
