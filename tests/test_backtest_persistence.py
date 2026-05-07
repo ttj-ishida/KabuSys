@@ -354,18 +354,80 @@ class TestSaveBacktestToDb:
         assert _json.loads(row[1]) == ["7203", "9984"]
 
 
+class TestBacktestTradeSeq:
+    """trade_seq 連番 PK により同日・同銘柄・同サイドの複数トレードが許容されることを確認。"""
+
+    def test_multiple_trades_same_day_code_side_succeed(self):
+        conn = init_schema(":memory:")
+        result = BacktestResult(
+            history=[
+                DailySnapshot(
+                    date=date(2024, 1, 4),
+                    cash=9_000_000.0,
+                    positions={"7203": 200},
+                    portfolio_value=10_200_000.0,
+                )
+            ],
+            trades=[
+                TradeRecord(
+                    date=date(2024, 1, 4),
+                    code="7203",
+                    side="buy",
+                    shares=100,
+                    price=6000.0,
+                    commission=3300.0,
+                    realized_pnl=None,
+                ),
+                TradeRecord(
+                    date=date(2024, 1, 4),
+                    code="7203",
+                    side="buy",
+                    shares=100,
+                    price=6010.0,
+                    commission=3305.0,
+                    realized_pnl=None,
+                ),
+            ],
+            metrics=BacktestMetrics(
+                cagr=0.0,
+                sharpe_ratio=0.0,
+                max_drawdown=0.0,
+                win_rate=0.0,
+                payoff_ratio=0.0,
+                total_trades=0,
+            ),
+        )
+        report = _make_report(result, run_id="seq-test-001")
+        save_backtest_to_db(conn, report.meta.run_id, result, report)
+        count = conn.execute("SELECT COUNT(*) FROM backtest_trades").fetchone()[0]
+        conn.close()
+        assert count == 2
+
+    def test_trade_seq_is_assigned_sequentially(self):
+        conn = init_schema(":memory:")
+        result = _make_result()
+        report = _make_report(result, run_id="seq-test-002")
+        save_backtest_to_db(conn, report.meta.run_id, result, report)
+        seqs = [
+            r[0]
+            for r in conn.execute(
+                "SELECT trade_seq FROM backtest_trades WHERE run_id = 'seq-test-002' ORDER BY trade_seq"
+            ).fetchall()
+        ]
+        conn.close()
+        assert seqs == [1, 2]
+
+
 class TestRunCliPersistence:
     """run.py の永続化呼び出しを直接関数呼び出しで検証する。"""
 
     def test_run_backtest_saves_to_db(self, tmp_path):
         db_path = tmp_path / "test.duckdb"
-        conn = init_schema(str(db_path))
-        conn.close()
 
         result = _make_result()
         report = _make_report(result, run_id="cli-test-001")
 
-        conn_persist = duckdb.connect(str(db_path))
+        conn_persist = init_schema(str(db_path))
         try:
             save_backtest_to_db(conn_persist, report.meta.run_id, result, report)
         finally:
@@ -378,15 +440,33 @@ class TestRunCliPersistence:
         conn_verify.close()
         assert count == 1
 
+    def test_uninitialised_db_saves_successfully(self, tmp_path):
+        """init_schema を使うことで未初期化 DB でも保存が成功することを確認。"""
+        db_path = tmp_path / "fresh.duckdb"
+
+        result = _make_result()
+        report = _make_report(result, run_id="cli-test-003")
+
+        conn_persist = init_schema(str(db_path))
+        try:
+            save_backtest_to_db(conn_persist, report.meta.run_id, result, report)
+        finally:
+            conn_persist.close()
+
+        conn_verify = duckdb.connect(str(db_path))
+        count = conn_verify.execute(
+            "SELECT COUNT(*) FROM backtest_runs WHERE run_id = 'cli-test-003'"
+        ).fetchone()[0]
+        conn_verify.close()
+        assert count == 1
+
     def test_db_persistence_does_not_affect_existing_schema(self, tmp_path):
         db_path = tmp_path / "test2.duckdb"
-        conn = init_schema(str(db_path))
-        conn.close()
 
         result = _make_result()
         report = _make_report(result, run_id="cli-test-002")
 
-        conn_persist = duckdb.connect(str(db_path))
+        conn_persist = init_schema(str(db_path))
         try:
             save_backtest_to_db(conn_persist, report.meta.run_id, result, report)
         finally:

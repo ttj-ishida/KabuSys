@@ -249,12 +249,10 @@ def main() -> None:
         logger.info("レポートを保存しました: %s", run_dir)
 
     # DB 永続化（--output-format に関わらず常に実行）
-    import duckdb as _duckdb
+    from kabusys.backtest.persistence import save_backtest_to_db
 
-    conn_persist = _duckdb.connect(str(Path(args.db)))
+    conn_persist = init_schema(str(Path(args.db)))
     try:
-        from kabusys.backtest.persistence import save_backtest_to_db
-
         save_backtest_to_db(conn_persist, report.meta.run_id, result, report)
         logger.info(
             "バックテスト結果を DB に保存しました: run_id=%s", report.meta.run_id

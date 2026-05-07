@@ -420,14 +420,15 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
 _BACKTEST_TRADES = """
 CREATE TABLE IF NOT EXISTS backtest_trades (
     run_id        VARCHAR       NOT NULL,
+    trade_seq     INTEGER       NOT NULL,
     date          DATE          NOT NULL,
     code          VARCHAR       NOT NULL,
-    side          VARCHAR       NOT NULL,
+    side          VARCHAR       NOT NULL CHECK (side IN ('buy', 'sell')),
     shares        INTEGER       NOT NULL,
     price         DECIMAL(18,4) NOT NULL,
     commission    DECIMAL(18,4) NOT NULL,
     realized_pnl  DECIMAL(18,4),
-    PRIMARY KEY (run_id, date, code, side)
+    PRIMARY KEY (run_id, trade_seq)
 )
 """
 
@@ -462,6 +463,7 @@ _INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_raw_disclosures_disclosed_at ON raw_disclosures(disclosed_at)",
     "CREATE INDEX IF NOT EXISTS idx_disclosure_events_code ON disclosure_events(code)",
     "CREATE INDEX IF NOT EXISTS idx_disclosure_events_disclosed_at ON disclosure_events(disclosed_at)",
+    "CREATE INDEX IF NOT EXISTS idx_backtest_trades_run_date ON backtest_trades(run_id, date)",
 ]
 
 # ---------------------------------------------------------------------------
@@ -479,7 +481,7 @@ _MIGRATIONS: list[str] = [
     "ALTER TABLE raw_financials ADD COLUMN IF NOT EXISTS bps DECIMAL(18,4)",
     # Issue #259: backtest 永続化テーブル追加（新規 DB は _ALL_DDL で作成済み。既存 DB 用）
     "CREATE TABLE IF NOT EXISTS backtest_runs (run_id VARCHAR PRIMARY KEY, created_at TIMESTAMP NOT NULL DEFAULT current_timestamp, start_date DATE NOT NULL, end_date DATE NOT NULL, initial_cash DECIMAL(18,2) NOT NULL, scope_mode VARCHAR NOT NULL, scope_codes_json VARCHAR, params_json VARCHAR NOT NULL, cagr DOUBLE, sharpe DOUBLE, max_drawdown DOUBLE, win_rate DOUBLE, payoff_ratio DOUBLE, profit_factor DOUBLE, annual_volatility DOUBLE, calmar_ratio DOUBLE, avg_holding_days DOUBLE, total_trades INTEGER, effective_universe_size INTEGER)",
-    "CREATE TABLE IF NOT EXISTS backtest_trades (run_id VARCHAR NOT NULL, date DATE NOT NULL, code VARCHAR NOT NULL, side VARCHAR NOT NULL, shares INTEGER NOT NULL, price DECIMAL(18,4) NOT NULL, commission DECIMAL(18,4) NOT NULL, realized_pnl DECIMAL(18,4), PRIMARY KEY (run_id, date, code, side))",
+    "CREATE TABLE IF NOT EXISTS backtest_trades (run_id VARCHAR NOT NULL, trade_seq INTEGER NOT NULL, date DATE NOT NULL, code VARCHAR NOT NULL, side VARCHAR NOT NULL CHECK (side IN ('buy', 'sell')), shares INTEGER NOT NULL, price DECIMAL(18,4) NOT NULL, commission DECIMAL(18,4) NOT NULL, realized_pnl DECIMAL(18,4), PRIMARY KEY (run_id, trade_seq))",
     "CREATE TABLE IF NOT EXISTS backtest_daily_equity (run_id VARCHAR NOT NULL, date DATE NOT NULL, portfolio_value DECIMAL(18,2) NOT NULL, cash DECIMAL(18,2) NOT NULL, PRIMARY KEY (run_id, date))",
 ]
 

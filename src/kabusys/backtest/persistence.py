@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 import duckdb
@@ -42,25 +43,16 @@ def save_backtest_to_db(
     meta = report.meta
     m = result.metrics
 
-    # params_json: ReportMeta から run_id / generated_at / report_type を除いた全パラメータ
-    params = {
-        "start_date": meta.start_date,
-        "end_date": meta.end_date,
-        "initial_cash": meta.initial_cash,
-        "slippage_rate": meta.slippage_rate,
-        "commission_rate": meta.commission_rate,
-        "allocation_method": meta.allocation_method,
-        "max_position_pct": meta.max_position_pct,
-        "max_utilization": meta.max_utilization,
-        "max_positions": meta.max_positions,
-        "risk_pct": meta.risk_pct,
-        "stop_loss_pct": meta.stop_loss_pct,
-        "lot_size": meta.lot_size,
-        "min_holding_days": meta.min_holding_days,
-        "max_holding_days": meta.max_holding_days,
-        "trailing_stop_atr": meta.trailing_stop_atr,
-        "scope_mode": meta.scope_mode,
+    # params_json: ReportMeta の全フィールドから DB 専用カラムおよび識別子を除外した辞書を JSON 化
+    _PARAMS_EXCLUDE = {
+        "run_id",
+        "generated_at",
+        "report_type",
+        "scope_codes",
+        "effective_universe_size",
+        "excluded_codes",
     }
+    params = {k: v for k, v in asdict(meta).items() if k not in _PARAMS_EXCLUDE}
     params_json = json.dumps(params, ensure_ascii=False)
 
     scope_codes_json = (
@@ -104,17 +96,18 @@ def save_backtest_to_db(
             ],
         )
 
-        # backtest_trades: TradeRecord を一括 INSERT
+        # backtest_trades: TradeRecord を一括 INSERT（trade_seq で 1 始まり連番）
         if result.trades:
             conn.executemany(
                 """
                 INSERT INTO backtest_trades
-                    (run_id, date, code, side, shares, price, commission, realized_pnl)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (run_id, trade_seq, date, code, side, shares, price, commission, realized_pnl)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     [
                         run_id,
+                        seq,
                         t.date,
                         t.code,
                         t.side,
@@ -123,7 +116,7 @@ def save_backtest_to_db(
                         t.commission,
                         t.realized_pnl,
                     ]
-                    for t in result.trades
+                    for seq, t in enumerate(result.trades, start=1)
                 ],
             )
 
