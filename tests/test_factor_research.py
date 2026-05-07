@@ -530,9 +530,12 @@ class TestCalcTopixRelative:
     TARGET = date(2024, 3, 1)
     START = date(2023, 1, 1)
 
-    def _make_prices(self, start: date, days: int, code: str, base: float) -> list[tuple]:
+    def _make_prices(
+        self, start: date, days: int, code: str, base: float
+    ) -> list[tuple]:
         """base から 1% ずつ上昇する価格シリーズを生成。"""
         from datetime import timedelta
+
         rows = []
         for i in range(days):
             d = start + timedelta(days=i)
@@ -542,6 +545,7 @@ class TestCalcTopixRelative:
 
     def _make_topix(self, start: date, days: int, base: float) -> list[tuple]:
         from datetime import timedelta
+
         rows = []
         for i in range(days):
             d = start + timedelta(days=i)
@@ -571,8 +575,11 @@ class TestCalcTopixRelative:
 
     def test_returns_none_for_insufficient_stock_history(self, db):
         from datetime import timedelta
+
         # 株は 10 日分のみ（21 日に足りない）
-        _insert_prices(db, self._make_prices(self.TARGET - timedelta(days=10), 10, "1001", 1000.0))
+        _insert_prices(
+            db, self._make_prices(self.TARGET - timedelta(days=10), 10, "1001", 1000.0)
+        )
         _insert_topix(db, self._make_topix(self.START, 425, 2000.0))
         result = calc_topix_relative(db, self.TARGET)
         assert len(result) == 1
@@ -624,9 +631,21 @@ class TestCalcQuality:
     TARGET = date(2024, 3, 1)
 
     def test_computes_op_margin_from_fy_record(self, db):
-        _insert_financials(db, [
-            ("1001", date(2024, 1, 1), "FYResultNotification", 1_000_000.0, 200_000.0, 150_000.0, 100.0, 0.10),
-        ])
+        _insert_financials(
+            db,
+            [
+                (
+                    "1001",
+                    date(2024, 1, 1),
+                    "FYResultNotification",
+                    1_000_000.0,
+                    200_000.0,
+                    150_000.0,
+                    100.0,
+                    0.10,
+                ),
+            ],
+        )
         result = calc_quality(db, self.TARGET)
         assert len(result) == 1
         row = result[0]
@@ -634,10 +653,31 @@ class TestCalcQuality:
         assert abs(row["op_margin"] - 0.2) < 1e-9  # 200000 / 1000000
 
     def test_computes_yoy_growth_with_two_fy_records(self, db):
-        _insert_financials(db, [
-            ("1001", date(2023, 1, 1), "FYResultNotification", 1_000_000.0, 100_000.0, 80_000.0, 80.0, 0.08),
-            ("1001", date(2024, 1, 1), "FYResultNotification", 1_200_000.0, 150_000.0, 120_000.0, 120.0, 0.10),
-        ])
+        _insert_financials(
+            db,
+            [
+                (
+                    "1001",
+                    date(2023, 1, 1),
+                    "FYResultNotification",
+                    1_000_000.0,
+                    100_000.0,
+                    80_000.0,
+                    80.0,
+                    0.08,
+                ),
+                (
+                    "1001",
+                    date(2024, 1, 1),
+                    "FYResultNotification",
+                    1_200_000.0,
+                    150_000.0,
+                    120_000.0,
+                    120.0,
+                    0.10,
+                ),
+            ],
+        )
         result = calc_quality(db, self.TARGET)
         assert len(result) == 1
         row = result[0]
@@ -645,51 +685,138 @@ class TestCalcQuality:
         assert abs(row["profit_growth_yoy"] - 0.5) < 1e-9
 
     def test_growth_none_with_single_fy_record(self, db):
-        _insert_financials(db, [
-            ("1001", date(2024, 1, 1), "FYResultNotification", 1_000_000.0, 200_000.0, 150_000.0, 100.0, 0.10),
-        ])
+        _insert_financials(
+            db,
+            [
+                (
+                    "1001",
+                    date(2024, 1, 1),
+                    "FYResultNotification",
+                    1_000_000.0,
+                    200_000.0,
+                    150_000.0,
+                    100.0,
+                    0.10,
+                ),
+            ],
+        )
         result = calc_quality(db, self.TARGET)
         assert len(result) == 1
         assert result[0]["rev_growth_yoy"] is None
         assert result[0]["profit_growth_yoy"] is None
 
     def test_excludes_non_fy_records(self, db):
-        _insert_financials(db, [
-            ("1001", date(2024, 1, 1), "Q1ResultNotification", 250_000.0, 50_000.0, 40_000.0, 25.0, 0.10),
-        ])
+        _insert_financials(
+            db,
+            [
+                (
+                    "1001",
+                    date(2024, 1, 1),
+                    "Q1ResultNotification",
+                    250_000.0,
+                    50_000.0,
+                    40_000.0,
+                    25.0,
+                    0.10,
+                ),
+            ],
+        )
         result = calc_quality(db, self.TARGET)
         assert result == []
 
     def test_excludes_future_records(self, db):
-        _insert_financials(db, [
-            ("1001", date(2024, 4, 1), "FYResultNotification", 1_000_000.0, 200_000.0, 150_000.0, 100.0, 0.10),
-        ])
+        _insert_financials(
+            db,
+            [
+                (
+                    "1001",
+                    date(2024, 4, 1),
+                    "FYResultNotification",
+                    1_000_000.0,
+                    200_000.0,
+                    150_000.0,
+                    100.0,
+                    0.10,
+                ),
+            ],
+        )
         result = calc_quality(db, self.TARGET)
         assert result == []
 
     def test_result_schema(self, db):
-        _insert_financials(db, [
-            ("1001", date(2024, 1, 1), "FYResultNotification", 1_000_000.0, 200_000.0, 150_000.0, 100.0, 0.10),
-        ])
+        _insert_financials(
+            db,
+            [
+                (
+                    "1001",
+                    date(2024, 1, 1),
+                    "FYResultNotification",
+                    1_000_000.0,
+                    200_000.0,
+                    150_000.0,
+                    100.0,
+                    0.10,
+                ),
+            ],
+        )
         result = calc_quality(db, self.TARGET)
         assert len(result) == 1
         row = result[0]
-        assert set(row.keys()) == {"date", "code", "op_margin", "rev_growth_yoy", "profit_growth_yoy"}
+        assert set(row.keys()) == {
+            "date",
+            "code",
+            "op_margin",
+            "rev_growth_yoy",
+            "profit_growth_yoy",
+        }
         assert row["date"] == self.TARGET
 
     def test_op_margin_none_when_revenue_zero(self, db):
-        _insert_financials(db, [
-            ("1001", date(2024, 1, 1), "FYResultNotification", 0.0, 50_000.0, 30_000.0, 30.0, 0.0),
-        ])
+        _insert_financials(
+            db,
+            [
+                (
+                    "1001",
+                    date(2024, 1, 1),
+                    "FYResultNotification",
+                    0.0,
+                    50_000.0,
+                    30_000.0,
+                    30.0,
+                    0.0,
+                ),
+            ],
+        )
         result = calc_quality(db, self.TARGET)
         assert len(result) == 1
         assert result[0]["op_margin"] is None
 
     def test_rev_growth_yoy_with_negative_prior_revenue(self, db):
-        _insert_financials(db, [
-            ("1001", date(2023, 1, 1), "FYResultNotification", -100_000.0, -10_000.0, -20_000.0, -20.0, 0.0),
-            ("1001", date(2024, 1, 1), "FYResultNotification", -80_000.0, -5_000.0, -10_000.0, -10.0, 0.0),
-        ])
+        _insert_financials(
+            db,
+            [
+                (
+                    "1001",
+                    date(2023, 1, 1),
+                    "FYResultNotification",
+                    -100_000.0,
+                    -10_000.0,
+                    -20_000.0,
+                    -20.0,
+                    0.0,
+                ),
+                (
+                    "1001",
+                    date(2024, 1, 1),
+                    "FYResultNotification",
+                    -80_000.0,
+                    -5_000.0,
+                    -10_000.0,
+                    -10.0,
+                    0.0,
+                ),
+            ],
+        )
         result = calc_quality(db, self.TARGET)
         assert len(result) == 1
         # (-80000 - -100000) / abs(-100000) = 20000 / 100000 = 0.2

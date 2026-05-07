@@ -455,7 +455,9 @@ def run_topix_etl(
             if last >= target_date:
                 # TOPIX は単一時系列のため、当日分が取得済みであればバックフィルも不要
                 logger.info(
-                    "run_topix_etl: すでに最新 date_from=%s target=%s", last, target_date
+                    "run_topix_etl: すでに最新 date_from=%s target=%s",
+                    last,
+                    target_date,
                 )
                 return 0, 0
             date_from = max(_MIN_DATA_DATE, last - timedelta(days=backfill_days - 1))
@@ -469,7 +471,9 @@ def run_topix_etl(
         return 0, 0
 
     logger.info("run_topix_etl: date_from=%s date_to=%s", date_from, target_date)
-    records = jq.fetch_topix_daily(id_token=id_token, date_from=date_from, date_to=target_date)
+    records = jq.fetch_topix_daily(
+        id_token=id_token, date_from=date_from, date_to=target_date
+    )
     saved = jq.save_topix_daily(conn, records)
     logger.info("run_topix_etl: fetched=%d saved=%d", len(records), saved)
     return len(records), saved

@@ -1,6 +1,7 @@
 """
 build_features 統合テスト — TOPIX 相対強度・品質スコア (Issue #257)
 """
+
 from __future__ import annotations
 
 import math
@@ -23,7 +24,9 @@ def conn():
     c.close()
 
 
-def _insert_prices(conn, code: str, start: date, days: int, base: float = 1000.0) -> None:
+def _insert_prices(
+    conn, code: str, start: date, days: int, base: float = 1000.0
+) -> None:
     rows = []
     for i in range(days):
         d = start + timedelta(days=i)
@@ -55,8 +58,28 @@ def _insert_financials(conn, code: str) -> None:
         "(code, report_date, period_type, revenue, operating_profit, net_income, eps, roe, bps, fetched_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp) ON CONFLICT DO NOTHING",
         [
-            (code, date(2023, 1, 1), "FYResultNotification", 1_000_000, 200_000, 150_000, 100, 0.10, 1000),
-            (code, date(2024, 1, 1), "FYResultNotification", 1_200_000, 250_000, 180_000, 120, 0.12, 1100),
+            (
+                code,
+                date(2023, 1, 1),
+                "FYResultNotification",
+                1_000_000,
+                200_000,
+                150_000,
+                100,
+                0.10,
+                1000,
+            ),
+            (
+                code,
+                date(2024, 1, 1),
+                "FYResultNotification",
+                1_200_000,
+                250_000,
+                180_000,
+                120,
+                0.12,
+                1100,
+            ),
         ],
     )
 

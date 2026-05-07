@@ -186,7 +186,11 @@ def build_features(
             else:
                 r[col] = None
         # quality_score: 正規化済み品質サブ指標の非 NULL 平均
-        q_vals = [r.get("op_margin"), r.get("rev_growth_yoy"), r.get("profit_growth_yoy")]
+        q_vals = [
+            r.get("op_margin"),
+            r.get("rev_growth_yoy"),
+            r.get("profit_growth_yoy"),
+        ]
         q_valid = [v for v in q_vals if v is not None and math.isfinite(v)]
         r["quality_score"] = sum(q_valid) / len(q_valid) if q_valid else None
 

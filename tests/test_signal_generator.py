@@ -625,8 +625,11 @@ class TestGetTopixSizeMultiplier:
             rows,
         )
 
-    def _make_topix_series(self, conn, start: date, days: int, start_close: float, end_close: float) -> None:
+    def _make_topix_series(
+        self, conn, start: date, days: int, start_close: float, end_close: float
+    ) -> None:
         from datetime import timedelta
+
         rows = []
         for i in range(days):
             d = start + timedelta(days=i)
@@ -638,12 +641,17 @@ class TestGetTopixSizeMultiplier:
         assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
 
     def test_returns_1_when_above_ma200(self, conn):
-        self._make_topix_series(conn, TARGET_DATE - timedelta(days=250), 250, 2000.0, 2000.0)
+        self._make_topix_series(
+            conn, TARGET_DATE - timedelta(days=250), 250, 2000.0, 2000.0
+        )
         assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
 
     def test_returns_05_when_below_ma200_by_15_percent(self, conn):
         from datetime import timedelta
-        self._make_topix_series(conn, TARGET_DATE - timedelta(days=250), 240, 2000.0, 2000.0)
+
+        self._make_topix_series(
+            conn, TARGET_DATE - timedelta(days=250), 240, 2000.0, 2000.0
+        )
         # 直近 10 日を 1600 に設定（200MA ≈ 2000 なので乖離率 ≈ -0.20）
         recent_start = TARGET_DATE - timedelta(days=10)
         self._make_topix_series(conn, recent_start, 11, 1600.0, 1600.0)
@@ -652,5 +660,8 @@ class TestGetTopixSizeMultiplier:
 
     def test_returns_1_when_insufficient_data(self, conn):
         from datetime import timedelta
-        self._make_topix_series(conn, TARGET_DATE - timedelta(days=50), 50, 2000.0, 2000.0)
+
+        self._make_topix_series(
+            conn, TARGET_DATE - timedelta(days=50), 50, 2000.0, 2000.0
+        )
         assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
