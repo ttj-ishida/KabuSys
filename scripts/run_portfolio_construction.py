@@ -229,9 +229,7 @@ def main() -> None:
             last_day = calendar.monthrange(target_date.year, target_date.month)[1]
             if target_date.day == last_day:
                 month_start = target_date.replace(day=1)
-                monthly_rows = collect_monthly_rows(
-                    conn, env, month_start, target_date
-                )
+                monthly_rows = collect_monthly_rows(conn, env, month_start, target_date)
                 monthly_report = build_report(
                     monthly_rows,
                     report_type="monthly",
