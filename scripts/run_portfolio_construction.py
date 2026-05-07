@@ -16,7 +16,7 @@ import logging
 import os
 import sys
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import duckdb
@@ -24,11 +24,13 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from kabusys.config import Settings
+from kabusys.operations.job_run_recorder import write_job_result
 from kabusys.operations.line_reports import (
     format_evening_message,
     format_monthly_message,
     format_weekly_message,
 )
+from kabusys.operations.night_batch_report import JobRunResult
 from kabusys.operations.notifier import build_notifier
 from kabusys.operations.performance_collector import (
     collect_monthly_rows,
@@ -42,8 +44,9 @@ from kabusys.utils.logging_setup import setup_logging
 setup_logging(app_name="portfolio_construction")
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PORTFOLIO_VALUE = 10_000_000  # 1000万円
+_DEFAULT_PORTFOLIO_VALUE = 10_000_000
 _MAX_UTILIZATION = 0.70
+_JOB_NAME = "portfolio_construction_job"
 
 
 def _get_today_return(
@@ -60,9 +63,13 @@ def _get_today_return(
 
 
 def main() -> None:
+    started_at = datetime.now(timezone.utc)
     settings = Settings()
     conn = duckdb.connect(str(settings.duckdb_path))
     target_date = date.today()
+    _failed = False
+    _errors: list[str] = []
+    _updated_rows: dict[str, int] = {}
 
     try:
         portfolio_value_str = os.environ.get(
@@ -80,7 +87,6 @@ def main() -> None:
         available_cash = portfolio_value * _MAX_UTILIZATION
         inserted = 0
 
-        # 1. 当日の BUY シグナルを取得
         cur = conn.execute(
             "SELECT code, side, score, signal_rank FROM signals WHERE date = ? AND side = 'buy'",
             [target_date],
@@ -90,19 +96,20 @@ def main() -> None:
 
         if not buy_signals:
             logger.info("本日の BUY シグナルが 0 件です。signal_queue を更新しません。")
+            _updated_rows["signal_queue"] = 0
         else:
-            # 2. 銘柄選定・重み計算（メモリ内）
             candidates = select_candidates(buy_signals)
             if not candidates:
                 logger.info("銘柄選定結果が 0 件です。signal_queue を更新しません。")
+                _updated_rows["signal_queue"] = 0
             else:
                 weights = calc_score_weights(candidates)
                 if not weights:
                     logger.info(
                         "重み計算結果が 0 件です。signal_queue を更新しません。"
                     )
+                    _updated_rows["signal_queue"] = 0
                 else:
-                    # 3. 最新終値を取得（直近の prices_daily から）
                     codes = [c["code"] for c in candidates]
                     code_params = ",".join(["?"] * len(codes))
                     price_cur = conn.execute(
@@ -124,7 +131,6 @@ def main() -> None:
                         if r[1] is not None
                     }
 
-                    # 4. 現在のポジション取得
                     pos_cur = conn.execute(
                         "SELECT code, size FROM positions WHERE code IN ("
                         + code_params
@@ -133,7 +139,6 @@ def main() -> None:
                     )
                     current_positions = {r[0]: int(r[1]) for r in pos_cur.fetchall()}
 
-                    # 5. ポジションサイズ計算
                     sizes = calc_position_sizes(
                         weights=weights,
                         candidates=candidates,
@@ -143,7 +148,6 @@ def main() -> None:
                         open_prices=close_prices,
                     )
 
-                    # 6. portfolio_targets / signal_queue をトランザクション内で更新
                     conn.execute("BEGIN")
                     try:
                         conn.execute(
@@ -157,7 +161,6 @@ def main() -> None:
                                 [target_date, code, weight, size],
                             )
 
-                        # 7. signal_queue を更新（当日の pending シグナルをクリアして再挿入）
                         conn.execute(
                             "DELETE FROM signal_queue WHERE date = ? AND status = 'pending'",
                             [target_date],
@@ -184,6 +187,7 @@ def main() -> None:
                         conn.execute("ROLLBACK")
                         raise
 
+                    _updated_rows["signal_queue"] = inserted
                     logger.info(
                         "ポートフォリオ構築完了: %d 銘柄を signal_queue に挿入 (date=%s)",
                         inserted,
@@ -248,11 +252,32 @@ def main() -> None:
         except Exception:
             logger.warning("LINE 通知に失敗しました", exc_info=True)
 
-    except Exception:
+    except Exception as exc:
         logger.exception("ポートフォリオ構築が失敗しました")
-        sys.exit(1)
+        _errors.append(str(exc))
+        _failed = True
     finally:
         conn.close()
+
+    finished_at = datetime.now(timezone.utc)
+    try:
+        write_job_result(
+            JobRunResult(
+                job_name=_JOB_NAME,
+                status="failed" if _failed else "success",
+                started_at=started_at,
+                finished_at=finished_at,
+                duration_sec=(finished_at - started_at).total_seconds(),
+                updated_rows=_updated_rows,
+                warnings=[],
+                errors=_errors,
+            )
+        )
+    except Exception:
+        logger.warning("JobRunResult の書き出しに失敗しました", exc_info=True)
+
+    if _failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
