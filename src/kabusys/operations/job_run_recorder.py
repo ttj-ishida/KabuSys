@@ -72,12 +72,16 @@ def read_job_results(
                     started_at=datetime.fromisoformat(data["started_at"]),
                     finished_at=datetime.fromisoformat(data["finished_at"]),
                     duration_sec=float(data["duration_sec"]),
-                    updated_rows=dict(data.get("updated_rows", {})),
+                    updated_rows={
+                        k: int(v) for k, v in data.get("updated_rows", {}).items()
+                    },
                     warnings=list(data.get("warnings", [])),
                     errors=list(data.get("errors", [])),
                 )
             )
-        except Exception:
+        except (
+            Exception
+        ):  # JSONDecodeError, KeyError, ValueError, or any future field change
             logger.warning(
                 "job result JSON の読み込みに失敗しました: %s", path, exc_info=True
             )
