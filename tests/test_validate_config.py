@@ -171,6 +171,46 @@ def test_strict_mode_fails_on_warning(tmp_path):
     assert result == 1
 
 
+class TestRunChecks:
+    def test_returns_validation_result_type(self, tmp_path, monkeypatch):
+        from kabusys.validate_config import ValidationResult, run_checks
+        monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+        monkeypatch.setenv("KABU_API_PASSWORD", "pwd")
+        monkeypatch.setenv("KABUSYS_ENV", "development")
+        monkeypatch.chdir(tmp_path)
+        result = run_checks()
+        assert isinstance(result, ValidationResult)
+
+    def test_status_ok_when_no_errors_no_warnings(self, tmp_path, monkeypatch):
+        from kabusys.validate_config import run_checks
+        monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+        monkeypatch.setenv("KABU_API_PASSWORD", "pwd")
+        monkeypatch.setenv("KABUSYS_ENV", "development")
+        monkeypatch.chdir(tmp_path)
+        result = run_checks()
+        assert result.status in ("OK", "WARNING")  # warnings ok, errors not
+
+    def test_status_error_when_required_var_missing(self, monkeypatch):
+        from kabusys.validate_config import run_checks
+        monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
+        monkeypatch.delenv("KABU_API_PASSWORD", raising=False)
+        result = run_checks()
+        assert result.status == "ERROR"
+        assert len(result.errors) >= 1
+
+    def test_two_consecutive_calls_are_independent(self, monkeypatch):
+        from kabusys.validate_config import run_checks
+        monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
+        monkeypatch.delenv("KABU_API_PASSWORD", raising=False)
+        r1 = run_checks()
+        monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+        monkeypatch.setenv("KABU_API_PASSWORD", "pwd")
+        monkeypatch.setenv("KABUSYS_ENV", "development")
+        r2 = run_checks()
+        assert r1.status == "ERROR"
+        assert r2.status in ("OK", "WARNING")
+
+
 class TestSandboxConfig:
     def test_no_warning_when_sandbox_disabled(self, tmp_path):
         _, warnings, _ = _run_validate(

@@ -12,10 +12,34 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _CONFIG_DIR = _PROJECT_ROOT / "config"
+
+# ---------------------------------------------------------------------------
+# 結果データクラス
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ValidationResult:
+    """設定検証の結果を保持するデータクラス。"""
+
+    errors: list[str]
+    warnings: list[str]
+    infos: list[str]
+
+    @property
+    def status(self) -> str:
+        """OK / WARNING / ERROR を返す。"""
+        if self.errors:
+            return "ERROR"
+        if self.warnings:
+            return "WARNING"
+        return "OK"
+
 
 # ---------------------------------------------------------------------------
 # 結果収集
@@ -511,6 +535,15 @@ def validate() -> tuple[list[str], list[str], list[str]]:
     _check_live_guards()
 
     return list(_errors), list(_warnings), list(_infos)
+
+
+def run_checks() -> ValidationResult:
+    """全チェックを実行して ValidationResult を返す。
+
+    validate() のラッパー。Streamlit 等から型安全に呼び出せる。
+    """
+    errors, warnings, infos = validate()
+    return ValidationResult(errors=errors, warnings=warnings, infos=infos)
 
 
 def main(argv: list[str] | None = None) -> int:
