@@ -402,3 +402,66 @@ def calc_topix_relative(
 
     logger.debug("calc_topix_relative: %d 銘柄 date=%s", len(result), target_date)
     return result
+
+
+# ---------------------------------------------------------------------------
+# 財務品質ファクター
+# ---------------------------------------------------------------------------
+
+
+def calc_quality(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+) -> list[dict[str, Any]]:
+    """財務品質指標を計算する。
+
+    raw_financials の年次（FY）データから以下を計算する。
+      - op_margin       : 営業利益率（operating_profit / revenue）
+      - rev_growth_yoy  : 売上 YoY 成長率（最新 FY / 直前 FY - 1）
+      - profit_growth_yoy: 営業利益 YoY 成長率（最新 FY / 直前 FY - 1）
+
+    period_type が '%FY%' に一致するレコードのみを対象とする。
+    年次データが 1 件のみの場合は成長率が None になる。
+
+    Args:
+        conn:        DuckDB 接続。raw_financials テーブルを参照する。
+        target_date: 計算基準日（report_date <= target_date のデータのみ使用）。
+
+    Returns:
+        [{"date": date, "code": str, "op_margin": float|None,
+          "rev_growth_yoy": float|None, "profit_growth_yoy": float|None}]
+    """
+    rows = conn.execute(
+        """
+        WITH fy_ranked AS (
+            SELECT code, report_date, revenue, operating_profit,
+                   ROW_NUMBER() OVER (PARTITION BY code ORDER BY report_date DESC) AS rn
+            FROM raw_financials
+            WHERE report_date <= ?
+              AND period_type LIKE '%FY%'
+        ),
+        latest_fy AS (SELECT * FROM fy_ranked WHERE rn = 1),
+        prior_fy  AS (SELECT * FROM fy_ranked WHERE rn = 2)
+        SELECT
+            ? AS date,
+            l.code,
+            CASE WHEN l.revenue > 0 AND l.operating_profit IS NOT NULL
+                 THEN l.operating_profit / l.revenue END AS op_margin,
+            CASE WHEN p.revenue IS NOT NULL AND p.revenue <> 0
+                      AND l.revenue IS NOT NULL
+                 THEN (l.revenue - p.revenue) / ABS(p.revenue) END AS rev_growth_yoy,
+            CASE WHEN p.operating_profit IS NOT NULL AND p.operating_profit <> 0
+                      AND l.operating_profit IS NOT NULL
+                 THEN (l.operating_profit - p.operating_profit) / ABS(p.operating_profit)
+                 END AS profit_growth_yoy
+        FROM latest_fy l
+        LEFT JOIN prior_fy p ON l.code = p.code
+        ORDER BY l.code
+        """,
+        [target_date, target_date],
+    ).fetchall()
+
+    cols = ["date", "code", "op_margin", "rev_growth_yoy", "profit_growth_yoy"]
+    result = [dict(zip(cols, r)) for r in rows]
+    logger.debug("calc_quality: %d 銘柄 date=%s", len(result), target_date)
+    return result

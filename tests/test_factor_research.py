@@ -21,6 +21,7 @@ from kabusys.research.factor_research import (
     calc_volatility,
     calc_value,
     calc_topix_relative,
+    calc_quality,
 )
 from kabusys.research.feature_exploration import (
     calc_forward_returns,
@@ -612,3 +613,66 @@ class TestCalcTopixRelative:
             )
         result = calc_topix_relative(conn, target_date)
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# calc_quality
+# ---------------------------------------------------------------------------
+
+
+class TestCalcQuality:
+    TARGET = date(2024, 3, 1)
+
+    def test_computes_op_margin_from_fy_record(self, db):
+        _insert_financials(db, [
+            ("1001", date(2024, 1, 1), "FYResultNotification", 1_000_000.0, 200_000.0, 150_000.0, 100.0, 0.10),
+        ])
+        result = calc_quality(db, self.TARGET)
+        assert len(result) == 1
+        row = result[0]
+        assert row["code"] == "1001"
+        assert abs(row["op_margin"] - 0.2) < 1e-9  # 200000 / 1000000
+
+    def test_computes_yoy_growth_with_two_fy_records(self, db):
+        _insert_financials(db, [
+            ("1001", date(2023, 1, 1), "FYResultNotification", 1_000_000.0, 100_000.0, 80_000.0, 80.0, 0.08),
+            ("1001", date(2024, 1, 1), "FYResultNotification", 1_200_000.0, 150_000.0, 120_000.0, 120.0, 0.10),
+        ])
+        result = calc_quality(db, self.TARGET)
+        assert len(result) == 1
+        row = result[0]
+        assert abs(row["rev_growth_yoy"] - 0.2) < 1e-9
+        assert abs(row["profit_growth_yoy"] - 0.5) < 1e-9
+
+    def test_growth_none_with_single_fy_record(self, db):
+        _insert_financials(db, [
+            ("1001", date(2024, 1, 1), "FYResultNotification", 1_000_000.0, 200_000.0, 150_000.0, 100.0, 0.10),
+        ])
+        result = calc_quality(db, self.TARGET)
+        assert len(result) == 1
+        assert result[0]["rev_growth_yoy"] is None
+        assert result[0]["profit_growth_yoy"] is None
+
+    def test_excludes_non_fy_records(self, db):
+        _insert_financials(db, [
+            ("1001", date(2024, 1, 1), "Q1ResultNotification", 250_000.0, 50_000.0, 40_000.0, 25.0, 0.10),
+        ])
+        result = calc_quality(db, self.TARGET)
+        assert result == []
+
+    def test_excludes_future_records(self, db):
+        _insert_financials(db, [
+            ("1001", date(2024, 4, 1), "FYResultNotification", 1_000_000.0, 200_000.0, 150_000.0, 100.0, 0.10),
+        ])
+        result = calc_quality(db, self.TARGET)
+        assert result == []
+
+    def test_result_schema(self, db):
+        _insert_financials(db, [
+            ("1001", date(2024, 1, 1), "FYResultNotification", 1_000_000.0, 200_000.0, 150_000.0, 100.0, 0.10),
+        ])
+        result = calc_quality(db, self.TARGET)
+        assert len(result) == 1
+        row = result[0]
+        assert set(row.keys()) == {"date", "code", "op_margin", "rev_growth_yoy", "profit_growth_yoy"}
+        assert row["date"] == self.TARGET
