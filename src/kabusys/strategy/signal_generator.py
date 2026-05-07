@@ -80,7 +80,7 @@ _REENTRY_COOLDOWN_DAYS: int = (
 
 _TOPIX_DRAWDOWN_THRESHOLD: float = -0.15  # 200MA 乖離率がこの値以下で縮小
 _TOPIX_SIZE_MULTIPLIER_BEAR: float = 0.5  # 地合い悪化時の size_multiplier
-_TOPIX_MIN_DATA_COUNT: int = 100  # 200MA を信頼できる最低データ数
+_TOPIX_MIN_DATA_COUNT: int = 100  # 200MA を信頼できる最低データ数（初期運用でのデータ蓄積期間を考慮し 200 でなく 100 に設定）
 
 
 # ---------------------------------------------------------------------------
