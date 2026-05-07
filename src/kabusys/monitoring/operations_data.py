@@ -310,31 +310,15 @@ def load_paper_verification_data(
     total_polls = stability.get("total_polls", 0)
     created_count = orders.get("created_count", 0)
 
-    # Pass/Fail 判定
-    failures: list[str] = []
-    if uptime_pct is None:
-        failures.append("稼働率: N/A (データなし)")
-    elif uptime_pct < THRESHOLD_UPTIME_PCT:
-        failures.append(f"稼働率: {uptime_pct:.1f}% < {THRESHOLD_UPTIME_PCT}%")
-
-    if created_count == 0:
-        failures.append("注文データなし（対象期間に Created イベントが存在しない）")
-
-    if fill_rate_pct is not None and fill_rate_pct < THRESHOLD_FILL_RATE_PCT:
-        failures.append(f"注文成功率: {fill_rate_pct:.1f}% < {THRESHOLD_FILL_RATE_PCT}%")
-
-    if send_rate_pct is not None and send_rate_pct < THRESHOLD_SEND_RATE_PCT:
-        failures.append(f"送信率: {send_rate_pct:.1f}% < {THRESHOLD_SEND_RATE_PCT}%")
-
-    if p95_latency_ms is not None and p95_latency_ms > THRESHOLD_P95_LATENCY_MS:
-        failures.append(f"P95レイテンシ: {p95_latency_ms:.1f} ms > {THRESHOLD_P95_LATENCY_MS} ms")
-
-    passed = len(failures) == 0
-    pass_fail = (
-        "PASS (全指標が基準値を満たしています)"
-        if passed
-        else f"FAIL ({'; '.join(failures)})"
+    # Pass/Fail 判定 — スペック準拠: bare "PASS" / "FAIL" のみを返す
+    # None はしきい値未達として扱う
+    all_pass = (
+        uptime_pct is not None and uptime_pct >= THRESHOLD_UPTIME_PCT
+        and fill_rate_pct is not None and fill_rate_pct >= THRESHOLD_FILL_RATE_PCT
+        and send_rate_pct is not None and send_rate_pct >= THRESHOLD_SEND_RATE_PCT
+        and p95_latency_ms is not None and p95_latency_ms <= THRESHOLD_P95_LATENCY_MS
     )
+    pass_fail = "PASS" if all_pass else "FAIL"
 
     return {
         "available": True,
