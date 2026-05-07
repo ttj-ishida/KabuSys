@@ -586,3 +586,29 @@ class TestCalcTopixRelative:
         row = result[0]
         assert set(row.keys()) == {"date", "code", "topix_rel_20", "topix_rel_60"}
         assert row["date"] == self.TARGET
+
+    def test_returns_empty_when_topix_lag_window_insufficient(self, db):
+        """TOPIX data exists but fewer rows than LAG window -> returns []"""
+        from datetime import timedelta
+
+        conn = db
+        target_date = date(2024, 1, 31)
+        # Insert enough stock data (70 days)
+        base = date(2023, 11, 1)
+        for i in range(70):
+            d = base + timedelta(days=i)
+            c = 1000.0 + i
+            conn.execute(
+                "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [d, "1301", c, c, c, c, 1000, c * 1000],
+            )
+        # Insert ONLY 10 days of TOPIX data (far less than 21-day LAG)
+        for i in range(10):
+            d = date(2024, 1, 22) + timedelta(days=i)
+            conn.execute(
+                "INSERT INTO topix_daily (date, open, high, low, close) VALUES (?, ?, ?, ?, ?)",
+                [d, 2000.0, 2010.0, 1990.0, 2000.0 + i],
+            )
+        result = calc_topix_relative(conn, target_date)
+        assert result == []
