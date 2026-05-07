@@ -45,9 +45,7 @@ def load_premarket_data(
     from kabusys.operations.pre_market_collector import collect
     from kabusys.operations.pre_market_report import build_report
 
-    stop_flag_path: Path = getattr(
-        settings, "stop_flag_path", Path("stop_requested.flag")
-    )
+    stop_flag_path: Path = Path(str(settings.kill_flag_path))
     task_name: str = getattr(settings, "task_name", "KabuSys_ExecutionStart")
     today = date.today()
 
@@ -205,25 +203,36 @@ def load_failure_summary(
     recent_events: list[dict] = []
 
     try:
+        # 全件 GROUP BY で正確なカウントを取得（LIMIT 100 によるアンダーカウントを防ぐ）
         cur = sqlite_conn.execute(
+            """
+            SELECT event_type, COUNT(*) AS cnt
+            FROM risk_logs
+            WHERE event_type IN ('CRITICAL', 'KILL_SWITCH', 'RISK_BREACH', 'ORDER_ERROR')
+              AND logged_at >= ?
+            GROUP BY event_type
+            """,
+            (cutoff,),
+        )
+        for row in cur.fetchall():
+            et, cnt = row[0], row[1]
+            if et in counts:
+                counts[et] = cnt
+
+        # 直近イベントは別クエリで LIMIT 50 取得
+        cur2 = sqlite_conn.execute(
             """
             SELECT event_type, message, logged_at
             FROM risk_logs
             WHERE event_type IN ('CRITICAL', 'KILL_SWITCH', 'RISK_BREACH', 'ORDER_ERROR')
               AND logged_at >= ?
             ORDER BY logged_at DESC
-            LIMIT 100
+            LIMIT 50
             """,
             (cutoff,),
         )
-        cols = [d[0] for d in cur.description]
-        rows = cur.fetchall()
-        for row in rows:
-            event = dict(zip(cols, row))
-            recent_events.append(event)
-            et = event.get("event_type", "")
-            if et in counts:
-                counts[et] += 1
+        cols = [d[0] for d in cur2.description]
+        recent_events = [dict(zip(cols, row)) for row in cur2.fetchall()]
     except sqlite3.OperationalError:
         pass
 
@@ -427,7 +436,8 @@ def load_paper_verification_data(
     if not paper_sqlite_path.exists():
         return {"available": False}
 
-    conn = sqlite3.connect(str(paper_sqlite_path))
+    uri = paper_sqlite_path.resolve().as_uri() + "?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
     try:
         try:
             stability = _paper_query_system_stability(conn, from_dt, to_dt)
