@@ -741,6 +741,7 @@ def save_topix_daily(
         lo = _to_float(r.get("Low"))
         c = _to_float(r.get("Close"))
         if None in (o, h, lo, c):
+            logger.warning("save_topix_daily: OHLC 欠損行をスキップ: %s", r)
             continue
         rows.append((d, o, h, lo, c))
     if not rows:

@@ -453,6 +453,7 @@ def run_topix_etl(
         last = get_last_topix_date(conn)
         if last is not None:
             if last >= target_date:
+                # TOPIX は単一時系列のため、当日分が取得済みであればバックフィルも不要
                 logger.info(
                     "run_topix_etl: すでに最新 date_from=%s target=%s", last, target_date
                 )
