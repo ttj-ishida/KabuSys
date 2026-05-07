@@ -1,4 +1,4 @@
-"""pages/7_Performance.py — 運用成績・ポジション・取引履歴ビュー。"""
+"""pages/7_Performance.py — 運用成績・ポジション・取引履歴・Paper Verification ビュー。"""
 
 from __future__ import annotations
 

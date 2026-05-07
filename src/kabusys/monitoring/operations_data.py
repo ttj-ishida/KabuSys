@@ -32,7 +32,7 @@ def load_premarket_data(
         duckdb_conn: DuckDB 接続（prices_daily / signal_queue クエリ用）
         sqlite_conn: SQLite 接続（positions / signal_queue クエリ用）
         settings: 設定オブジェクト。以下の属性を参照する:
-            - stop_flag_path (Path): 停止フラグのパス
+            - kill_flag_path (Path): 停止フラグのパス
             - task_name (str, optional): Task Scheduler タスク名
                                          デフォルト "KabuSys_ExecutionStart"
 
