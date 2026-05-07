@@ -78,6 +78,10 @@ _REENTRY_COOLDOWN_DAYS: int = (
     5  # SELL 後この営業日数を経過するまで同一銘柄の BUY を禁止
 )
 
+_TOPIX_DRAWDOWN_THRESHOLD: float = -0.15  # 200MA 乖離率がこの値以下で縮小
+_TOPIX_SIZE_MULTIPLIER_BEAR: float = 0.5  # 地合い悪化時の size_multiplier
+_TOPIX_MIN_DATA_COUNT: int = 100  # 200MA を信頼できる最低データ数
+
 
 # ---------------------------------------------------------------------------
 # 設定ファイル読み込み
@@ -454,6 +458,54 @@ def _is_breadth_stop(
     if row is None:
         return False
     return bool(row[0])
+
+
+def _get_topix_size_multiplier(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+) -> float:
+    """TOPIX の 200 日移動平均乖離率に基づく size_multiplier を返す。
+
+    TOPIX が 200 日 MA から _TOPIX_DRAWDOWN_THRESHOLD (−15%) 以上下落している場合は
+    _TOPIX_SIZE_MULTIPLIER_BEAR (0.5) を返す。
+    データ不足または topix_daily が空の場合は 1.0 を返す（制限なし）。
+
+    Args:
+        conn:        DuckDB 接続。topix_daily テーブルを参照する。
+        target_date: 基準日（この日以前の最新 TOPIX を使用）。
+
+    Returns:
+        size_multiplier（0.5 または 1.0）。
+    """
+    try:
+        row = conn.execute(
+            """
+            WITH topix_data AS (
+                SELECT date, close,
+                       AVG(close) OVER (ORDER BY date ROWS BETWEEN 199 PRECEDING AND CURRENT ROW) AS ma200,
+                       COUNT(*) OVER (ORDER BY date ROWS BETWEEN 199 PRECEDING AND CURRENT ROW) AS cnt
+                FROM topix_daily
+                WHERE date <= ?
+            )
+            SELECT close, ma200, cnt
+            FROM topix_data
+            WHERE date = (SELECT MAX(date) FROM topix_daily WHERE date <= ?)
+            """,
+            [target_date, target_date],
+        ).fetchone()
+    except Exception:
+        logger.debug(
+            "_get_topix_size_multiplier: topix_daily テーブルが存在しないため 1.0 を返す date=%s",
+            target_date,
+        )
+        return 1.0
+
+    if row is None or row[1] is None or row[2] < _TOPIX_MIN_DATA_COUNT:
+        return 1.0
+    close, ma200, cnt = float(row[0]), float(row[1]), row[2]
+    if ma200 > 0 and (close / ma200 - 1.0) < _TOPIX_DRAWDOWN_THRESHOLD:
+        return _TOPIX_SIZE_MULTIPLIER_BEAR
+    return 1.0
 
 
 def _fetch_gap_ratios(
@@ -1049,6 +1101,8 @@ def generate_signals(
 
     event_dates = event_dates or {}
     size_multiplier = _get_event_size_multiplier(event_dates, target_date, conn)
+    topix_multiplier = _get_topix_size_multiplier(conn, target_date)
+    size_multiplier = min(size_multiplier, topix_multiplier)
 
     # 1. features 読み込み（scope.mode="manual_codes" の場合は対象銘柄に限定）
     _scope_codes: frozenset[str] | None = None
