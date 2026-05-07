@@ -202,6 +202,9 @@ CREATE TABLE IF NOT EXISTS features (
     pbr             DOUBLE,
     div_yield       DOUBLE,
     ma200_dev       DOUBLE,
+    topix_rel_20    DOUBLE,
+    topix_rel_60    DOUBLE,
+    quality_score   DOUBLE,
     created_at      TIMESTAMP   NOT NULL DEFAULT current_timestamp,
     PRIMARY KEY (date, code)
 )
@@ -483,6 +486,10 @@ _MIGRATIONS: list[str] = [
     "CREATE TABLE IF NOT EXISTS backtest_runs (run_id VARCHAR PRIMARY KEY, created_at TIMESTAMP NOT NULL DEFAULT current_timestamp, start_date DATE NOT NULL, end_date DATE NOT NULL, initial_cash DECIMAL(18,2) NOT NULL, scope_mode VARCHAR NOT NULL, scope_codes_json VARCHAR, params_json VARCHAR NOT NULL, cagr DOUBLE, sharpe DOUBLE, max_drawdown DOUBLE, win_rate DOUBLE, payoff_ratio DOUBLE, profit_factor DOUBLE, annual_volatility DOUBLE, calmar_ratio DOUBLE, avg_holding_days DOUBLE, total_trades INTEGER, effective_universe_size INTEGER)",
     "CREATE TABLE IF NOT EXISTS backtest_trades (run_id VARCHAR NOT NULL, trade_seq INTEGER NOT NULL, date DATE NOT NULL, code VARCHAR NOT NULL, side VARCHAR NOT NULL CHECK (side IN ('buy', 'sell')), shares INTEGER NOT NULL, price DECIMAL(18,4) NOT NULL, commission DECIMAL(18,4) NOT NULL, realized_pnl DECIMAL(18,4), PRIMARY KEY (run_id, trade_seq))",
     "CREATE TABLE IF NOT EXISTS backtest_daily_equity (run_id VARCHAR NOT NULL, date DATE NOT NULL, portfolio_value DECIMAL(18,2) NOT NULL, cash DECIMAL(18,2) NOT NULL, PRIMARY KEY (run_id, date))",
+    # Issue #257: features に TOPIX 相対強度・品質スコアを追加
+    "ALTER TABLE features ADD COLUMN IF NOT EXISTS topix_rel_20 DOUBLE",
+    "ALTER TABLE features ADD COLUMN IF NOT EXISTS topix_rel_60 DOUBLE",
+    "ALTER TABLE features ADD COLUMN IF NOT EXISTS quality_score DOUBLE",
 ]
 
 # ---------------------------------------------------------------------------

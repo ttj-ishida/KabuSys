@@ -294,3 +294,175 @@ def calc_value(
     result = [dict(zip(cols, r)) for r in rows]
     logger.debug("calc_value: %d 銘柄 date=%s", len(result), target_date)
     return result
+
+
+# ---------------------------------------------------------------------------
+# TOPIX 相対強度ファクター
+# ---------------------------------------------------------------------------
+
+
+def calc_topix_relative(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+) -> list[dict[str, Any]]:
+    """TOPIX 対比の相対モメンタムを計算する。
+
+    各銘柄の 21 日・63 日リターンから同期間の TOPIX リターンを差し引く。
+    topix_daily にデータが存在しない場合は空リストを返す。
+
+    Args:
+        conn:        DuckDB 接続。prices_daily / topix_daily テーブルを参照する。
+        target_date: 計算基準日。
+
+    Returns:
+        [{"date": date, "code": str, "topix_rel_20": float|None, "topix_rel_60": float|None}]
+    """
+    start_date = target_date - timedelta(days=_MOMENTUM_SCAN_DAYS)
+
+    topix_row = conn.execute(
+        f"""
+        WITH topix_data AS (
+            SELECT date, close,
+                   LAG(close, {_MOMENTUM_SHORT_DAYS}) OVER (ORDER BY date) AS close_short_ago,
+                   LAG(close, {_MOMENTUM_MID_DAYS})   OVER (ORDER BY date) AS close_mid_ago
+            FROM topix_daily
+            WHERE date BETWEEN ? AND ?
+        )
+        SELECT
+            CASE WHEN close_short_ago > 0
+                 THEN (close - close_short_ago) / close_short_ago END AS ret_short,
+            CASE WHEN close_mid_ago > 0
+                 THEN (close - close_mid_ago) / close_mid_ago END AS ret_mid
+        FROM topix_data
+        WHERE date = (SELECT MAX(date) FROM topix_daily WHERE date <= ?)
+        """,
+        [start_date, target_date, target_date],
+    ).fetchone()
+
+    if topix_row is None:
+        logger.warning("calc_topix_relative: TOPIX データ不足 date=%s", target_date)
+        return []
+
+    topix_ret_short = float(topix_row[0]) if topix_row[0] is not None else None
+    topix_ret_mid = float(topix_row[1]) if topix_row[1] is not None else None
+    if topix_ret_short is None and topix_ret_mid is None:
+        logger.warning(
+            "calc_topix_relative: TOPIX LAG ウィンドウ不足（データは存在するがリターン計算不可）date=%s",
+            target_date,
+        )
+        return []
+
+    rows = conn.execute(
+        f"""
+        WITH stock_data AS (
+            SELECT code, date, close,
+                   LAG(close, {_MOMENTUM_SHORT_DAYS}) OVER (PARTITION BY code ORDER BY date)
+                       AS close_short_ago,
+                   LAG(close, {_MOMENTUM_MID_DAYS})   OVER (PARTITION BY code ORDER BY date)
+                       AS close_mid_ago
+            FROM prices_daily
+            WHERE date BETWEEN ? AND ?
+        )
+        SELECT date, code,
+               CASE WHEN close_short_ago > 0
+                    THEN (close - close_short_ago) / close_short_ago END AS ret_short,
+               CASE WHEN close_mid_ago > 0
+                    THEN (close - close_mid_ago) / close_mid_ago END AS ret_mid
+        FROM stock_data
+        WHERE date = (
+            SELECT MAX(date) FROM prices_daily WHERE date <= ?
+        )
+        ORDER BY code
+        """,
+        [start_date, target_date, target_date],
+    ).fetchall()
+
+    result = []
+    for _row_date, code, ret_short, ret_mid in rows:
+        stock_ret_short = float(ret_short) if ret_short is not None else None
+        stock_ret_mid = float(ret_mid) if ret_mid is not None else None
+        topix_rel_20 = (
+            stock_ret_short - topix_ret_short
+            if stock_ret_short is not None and topix_ret_short is not None
+            else None
+        )
+        topix_rel_60 = (
+            stock_ret_mid - topix_ret_mid
+            if stock_ret_mid is not None and topix_ret_mid is not None
+            else None
+        )
+        result.append(
+            {
+                "date": target_date,
+                "code": code,
+                "topix_rel_20": topix_rel_20,
+                "topix_rel_60": topix_rel_60,
+            }
+        )
+
+    logger.debug("calc_topix_relative: %d 銘柄 date=%s", len(result), target_date)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 財務品質ファクター
+# ---------------------------------------------------------------------------
+
+
+def calc_quality(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+) -> list[dict[str, Any]]:
+    """財務品質指標を計算する。
+
+    raw_financials の年次（FY）データから以下を計算する。
+      - op_margin       : 営業利益率（operating_profit / revenue）
+      - rev_growth_yoy  : 売上 YoY 成長率（最新 FY / 直前 FY - 1）
+      - profit_growth_yoy: 営業利益 YoY 成長率（最新 FY / 直前 FY - 1）
+
+    period_type が 'FYResult%' に一致する通期実績レコードのみを対象とする
+    （FYForecastRevision 等の予想・修正系は除外）。
+    年次データが 1 件のみの場合は成長率が None になる。
+
+    Args:
+        conn:        DuckDB 接続。raw_financials テーブルを参照する。
+        target_date: 計算基準日（report_date <= target_date のデータのみ使用）。
+
+    Returns:
+        [{"date": date, "code": str, "op_margin": float|None,
+          "rev_growth_yoy": float|None, "profit_growth_yoy": float|None}]
+    """
+    rows = conn.execute(
+        """
+        WITH fy_ranked AS (
+            SELECT code, report_date, revenue, operating_profit,
+                   ROW_NUMBER() OVER (PARTITION BY code ORDER BY report_date DESC, fetched_at DESC) AS rn
+            FROM raw_financials
+            WHERE report_date <= ?
+              AND period_type LIKE 'FYResult%'
+        ),
+        latest_fy AS (SELECT * FROM fy_ranked WHERE rn = 1),
+        prior_fy  AS (SELECT * FROM fy_ranked WHERE rn = 2)
+        SELECT
+            ? AS date,
+            l.code,
+            CASE WHEN l.revenue > 0 AND l.operating_profit IS NOT NULL
+                 THEN l.operating_profit / l.revenue END AS op_margin,
+            CASE WHEN p.revenue IS NOT NULL AND p.revenue <> 0
+                      AND l.revenue IS NOT NULL
+                 THEN (l.revenue - p.revenue) / ABS(p.revenue) END AS rev_growth_yoy,
+            CASE WHEN p.operating_profit IS NOT NULL AND p.operating_profit <> 0
+                      AND l.operating_profit IS NOT NULL
+                 THEN (l.operating_profit - p.operating_profit) / ABS(p.operating_profit)
+                 END AS profit_growth_yoy
+        FROM latest_fy l
+        LEFT JOIN prior_fy p ON l.code = p.code
+        ORDER BY l.code
+        """,
+        [target_date, target_date],
+    ).fetchall()
+
+    cols = ["date", "code", "op_margin", "rev_growth_yoy", "profit_growth_yoy"]
+    result = [dict(zip(cols, r)) for r in rows]
+    logger.debug("calc_quality: %d 銘柄 date=%s", len(result), target_date)
+    return result

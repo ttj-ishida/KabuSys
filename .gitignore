@@ -46,3 +46,6 @@ Order.txt
 
 .worktrees/
 src/kabusys/db
+
+# Visual companion brainstorming files
+.superpowers/
