@@ -11,13 +11,11 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import time
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import streamlit as st
 
 from kabusys.config import Settings
-from kabusys.monitoring.dashboard_data import load_error_logs
 from kabusys.monitoring.monitoring_db import MonitoringDB
 from kabusys.operations.intraday_collector import (
     _MONITORING_PID,
@@ -113,30 +111,12 @@ def main(db_path: str) -> None:
                     st.warning(f"⚠️ ドローダウン {dd:.2f}% — 閾値 -10% 超過")
                 st.caption(f"Updated: {dashboard['updated_at']}")
 
-                cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-                conn.row_factory = sqlite3.Row
-                order_error_count = conn.execute(
-                    "SELECT COUNT(*) AS cnt FROM risk_logs WHERE event_type='ORDER_ERROR' AND logged_at > ?",
-                    (cutoff,),
-                ).fetchone()["cnt"]
-                stale_order_count = conn.execute(
-                    "SELECT COUNT(*) AS cnt FROM risk_logs WHERE event_type='STALE_ORDER' AND logged_at > ?",
-                    (cutoff,),
-                ).fetchone()["cnt"]
-
-                col4, col5 = st.columns(2)
-                col4.metric("注文エラー（直近1時間）", order_error_count)
-                col5.metric("滞留注文（直近1時間）", stale_order_count)
             else:
                 st.info("No dashboard data yet.")
 
-            st.divider()
-            st.subheader("🚨 直近の ERROR / CRITICAL イベント")
-            error_logs = load_error_logs(conn)
-            if error_logs:
-                st.dataframe(error_logs, use_container_width=True)
-            else:
-                st.success("直近のエラーイベントはありません。")
+            st.info(
+                "📡 ザラ場監視の詳細は **Intraday Monitor** ページを確認してください。"
+            )
 
         with tab_positions:
             positions = load_positions(conn)
