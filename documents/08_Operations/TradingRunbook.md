@@ -109,11 +109,12 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 
 利用ページ:
 
-- `Home`
+- `Home`（Kill Switch・プロセス状態・ドローダウン・エラーイベント）
+- `Intraday Monitor`（ザラ場監視・自動更新・Kill Switch 状態）
+- `Signal Queue`（発注キュー・ポートフォリオ目標・シグナル）
+- `Performance`（エクイティカーブ・ポジション・取引履歴）
+- `Failure Recovery`（障害イベント集約・復旧ガイド）
 - `WebManual`
-- `Signal Queue`
-- `Performance`
-- `Strategy Lab`
 
 ---
 

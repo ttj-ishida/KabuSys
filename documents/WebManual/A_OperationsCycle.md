@@ -37,6 +37,7 @@ KabuSys は、**市場が閉まっている時間に翌営業日の売買準備�
 18:00  ai_analysis バッチ（自動）
 20:00  strategy_signal バッチ（自動）
 21:00  portfolio_construction バッチ（自動）
+21:15  night_batch_report 自動生成（KabuSys_NightBatchReport）
 21:30  夜間バッチ結果確認（手動）
 ```
 
@@ -172,7 +173,7 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 
 この時間帯は、新規売買のためではなく、当日運用結果が正常に締められたかを確認する時間です。
 
-### 3.7 夜間バッチ（15:30-21:00）
+### 3.7 夜間バッチ（15:30-21:15）
 
 夜間バッチは、翌営業日のための準備時間です。
 
@@ -240,13 +241,26 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 
 ### 3.8 夜間バッチ結果確認（21:30）
 
-この時間帯は、ユーザーが翌日の準備結果を確認します。
+21:15 に `KabuSys_NightBatchReport` が自動実行し、`artifacts/night_batch/{date}/` にレポートを生成します。  
+ユーザーはこのレポートを確認して翌日の準備が整っているか判断します。
+
+手動実行（再生成・確認時）:
+
+```cmd
+python scripts/run_night_batch_report.py
+```
 
 確認項目:
 
-- バッチがすべて成功しているか
+- バッチがすべて成功しているか（`data_update` / `feature_gen` / `strategy_signal` / `portfolio_construction`）
 - エラーログがないか
 - 明日の `Signal Queue` が作られているか
+
+判定:
+
+- `READY`: 全必須ジョブ成功かつ `signal_queue` 作成済み → 翌日執行可
+- `READY_WITH_WARNINGS`: 警告はあるが翌営業日の準備は完了 → 内容確認の上で判断
+- `BLOCKED`: 必須ジョブ失敗または `signal_queue` が空 → 翌朝の自動執行を開始しない
 
 夜間バッチが失敗している場合、翌朝の自動執行は危険です。  
 少なくとも `Signal Queue` が妥当かどうかは、ユーザーが確認する前提です。
