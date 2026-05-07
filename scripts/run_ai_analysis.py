@@ -29,11 +29,11 @@ _JOB_NAME = "ai_analysis_job"
 
 
 def main() -> None:
+    started_at = datetime.now(timezone.utc)
     settings = Settings()
     conn = duckdb.connect(str(settings.duckdb_path))
     target_date = date.today()
     api_key = getattr(settings, "openai_api_key", None)
-    started_at = datetime.now(timezone.utc)
     _failed = False
     _errors: list[str] = []
     _updated_rows: dict[str, int] = {}

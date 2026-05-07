@@ -27,9 +27,9 @@ _JOB_NAME = "strategy_signal_job"
 
 
 def main() -> None:
+    started_at = datetime.now(timezone.utc)
     settings = Settings()
     conn = duckdb.connect(str(settings.duckdb_path))
-    started_at = datetime.now(timezone.utc)
     _failed = False
     _errors: list[str] = []
     _updated_rows: dict[str, int] = {}

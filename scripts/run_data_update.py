@@ -28,10 +28,11 @@ _JOB_NAME = "data_update_job"
 
 
 def main() -> None:
+    started_at = datetime.now(timezone.utc)
     settings = Settings()
     conn = duckdb.connect(str(settings.duckdb_path))
-    started_at = datetime.now(timezone.utc)
     _failed = False
+    _has_warnings = False
     _errors: list[str] = []
     _updated_rows: dict[str, int] = {}
 
@@ -42,6 +43,7 @@ def main() -> None:
         if result.errors:
             logger.warning("ETL 完了（エラーあり）: %s", result.errors)
             _errors.extend(result.errors)
+            _has_warnings = True
         else:
             logger.info("ETL 完了")
 
@@ -69,7 +71,9 @@ def main() -> None:
         write_job_result(
             JobRunResult(
                 job_name=_JOB_NAME,
-                status="failed" if _failed else "success",
+                status="failed"
+                if _failed
+                else ("warning" if _has_warnings else "success"),
                 started_at=started_at,
                 finished_at=finished_at,
                 duration_sec=(finished_at - started_at).total_seconds(),
