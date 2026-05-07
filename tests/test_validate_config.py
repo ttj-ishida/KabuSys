@@ -174,6 +174,7 @@ def test_strict_mode_fails_on_warning(tmp_path):
 class TestRunChecks:
     def test_returns_validation_result_type(self, tmp_path, monkeypatch):
         from kabusys.validate_config import ValidationResult, run_checks
+
         monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
         monkeypatch.setenv("KABU_API_PASSWORD", "pwd")
         monkeypatch.setenv("KABUSYS_ENV", "development")
@@ -183,6 +184,7 @@ class TestRunChecks:
 
     def test_status_ok_when_no_errors_no_warnings(self, tmp_path, monkeypatch):
         from kabusys.validate_config import run_checks
+
         monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
         monkeypatch.setenv("KABU_API_PASSWORD", "pwd")
         monkeypatch.setenv("KABUSYS_ENV", "development")
@@ -192,6 +194,7 @@ class TestRunChecks:
 
     def test_status_error_when_required_var_missing(self, monkeypatch):
         from kabusys.validate_config import run_checks
+
         monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
         monkeypatch.delenv("KABU_API_PASSWORD", raising=False)
         result = run_checks()
@@ -200,6 +203,7 @@ class TestRunChecks:
 
     def test_two_consecutive_calls_are_independent(self, monkeypatch):
         from kabusys.validate_config import run_checks
+
         monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
         monkeypatch.delenv("KABU_API_PASSWORD", raising=False)
         r1 = run_checks()

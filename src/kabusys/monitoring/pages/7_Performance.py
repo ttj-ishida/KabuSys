@@ -94,7 +94,9 @@ try:
         else:
             col_from, col_to = st.columns(2)
             with col_from:
-                from_date = st.date_input("開始日", value=date.today() - timedelta(days=30))
+                from_date = st.date_input(
+                    "開始日", value=date.today() - timedelta(days=30)
+                )
             with col_to:
                 to_date = st.date_input("終了日", value=date.today())
 
@@ -102,7 +104,9 @@ try:
             to_dt = f"{to_date}T23:59:59.999999+00:00"
 
             paper_path = Path(str(settings.paper_sqlite_path))
-            data = load_paper_verification_data(paper_path, from_dt=from_dt, to_dt=to_dt)
+            data = load_paper_verification_data(
+                paper_path, from_dt=from_dt, to_dt=to_dt
+            )
 
             if not data.get("available"):
                 st.warning(

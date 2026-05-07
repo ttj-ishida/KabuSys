@@ -39,9 +39,16 @@ tab_env, tab_yaml, tab_db, tab_scheduler = st.tabs(
 
 _REQUIRED = {"JQUANTS_REFRESH_TOKEN", "KABU_API_PASSWORD"}
 _OPTIONAL = {
-    "KABUSYS_ENV", "DUCKDB_PATH", "SQLITE_PATH", "LOG_LEVEL",
-    "KABU_API_BASE_URL", "LINE_CHANNEL_ACCESS_TOKEN", "LINE_USER_ID",
-    "ENABLE_YAHOONEWS", "KABU_USE_SANDBOX", "KABU_SANDBOX_API_PASSWORD",
+    "KABUSYS_ENV",
+    "DUCKDB_PATH",
+    "SQLITE_PATH",
+    "LOG_LEVEL",
+    "KABU_API_BASE_URL",
+    "LINE_CHANNEL_ACCESS_TOKEN",
+    "LINE_USER_ID",
+    "ENABLE_YAHOONEWS",
+    "KABU_USE_SANDBOX",
+    "KABU_SANDBOX_API_PASSWORD",
     "PAPER_TRADING_INITIAL_CASH",
 }
 
@@ -60,8 +67,12 @@ with tab_env:
             st.caption(f"　{var}: 未設定（デフォルト値を使用）")
 
 _CONFIG_FILES = [
-    "system_config.yaml", "data_config.yaml", "strategy_config.yaml",
-    "risk_config.yaml", "execution_config.yaml", "monitoring_config.yaml",
+    "system_config.yaml",
+    "data_config.yaml",
+    "strategy_config.yaml",
+    "risk_config.yaml",
+    "execution_config.yaml",
+    "monitoring_config.yaml",
 ]
 
 with tab_yaml:
@@ -70,7 +81,9 @@ with tab_yaml:
         if (Path("config") / f).exists():
             st.success(f"✅ {f}")
         else:
-            st.warning(f"⚠️ {f}: 見つかりません（python scripts/generate_config.py で生成）")
+            st.warning(
+                f"⚠️ {f}: 見つかりません（python scripts/generate_config.py で生成）"
+            )
     if result.errors or result.warnings:
         st.divider()
         for msg in result.errors:
@@ -83,7 +96,11 @@ with tab_db:
     _db_checks = [
         (Path(str(settings.duckdb_path)), "DuckDB (kabusys.duckdb)", True),
         (Path(str(settings.sqlite_path)), "SQLite monitoring (monitoring.db)", False),
-        (Path(str(settings.paper_sqlite_path)), "SQLite paper (paper_trading.db)", False),
+        (
+            Path(str(settings.paper_sqlite_path)),
+            "SQLite paper (paper_trading.db)",
+            False,
+        ),
     ]
     for p, label, required in _db_checks:
         if p.exists():
@@ -92,7 +109,9 @@ with tab_db:
         elif required:
             st.error(f"❌ {label}: 見つかりません")
         else:
-            st.warning(f"⚠️ {label}: 見つかりません（paper_trading 環境以外は不要な場合あり）")
+            st.warning(
+                f"⚠️ {label}: 見つかりません（paper_trading 環境以外は不要な場合あり）"
+            )
 
 with tab_scheduler:
     st.subheader("Task Scheduler")
@@ -103,4 +122,6 @@ with tab_scheduler:
         else:
             st.error("❌ KabuSys_ExecutionStart: Ready ではありません（要確認）")
     except Exception as e:
-        st.warning(f"Task Scheduler の確認に失敗しました（Windows 環境外では利用不可）: {e}")
+        st.warning(
+            f"Task Scheduler の確認に失敗しました（Windows 環境外では利用不可）: {e}"
+        )

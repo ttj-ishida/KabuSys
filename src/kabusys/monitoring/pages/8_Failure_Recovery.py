@@ -28,7 +28,9 @@ try:
     uri = Path(str(settings.sqlite_path)).resolve().as_uri() + "?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
 except sqlite3.OperationalError:
-    st.error(f"Database not found: {settings.sqlite_path}. Start MonitoringEngine first.")
+    st.error(
+        f"Database not found: {settings.sqlite_path}. Start MonitoringEngine first."
+    )
     st.stop()
 
 try:

@@ -45,7 +45,9 @@ def load_premarket_data(
     from kabusys.operations.pre_market_collector import collect
     from kabusys.operations.pre_market_report import build_report
 
-    stop_flag_path: Path = getattr(settings, "stop_flag_path", Path("stop_requested.flag"))
+    stop_flag_path: Path = getattr(
+        settings, "stop_flag_path", Path("stop_requested.flag")
+    )
     task_name: str = getattr(settings, "task_name", "KabuSys_ExecutionStart")
     today = date.today()
 
@@ -460,10 +462,14 @@ def load_paper_verification_data(
     # Pass/Fail 判定 — スペック準拠: bare "PASS" / "FAIL" のみを返す
     # None はしきい値未達として扱う
     all_pass = (
-        uptime_pct is not None and uptime_pct >= THRESHOLD_UPTIME_PCT
-        and fill_rate_pct is not None and fill_rate_pct >= THRESHOLD_FILL_RATE_PCT
-        and send_rate_pct is not None and send_rate_pct >= THRESHOLD_SEND_RATE_PCT
-        and p95_latency_ms is not None and p95_latency_ms <= THRESHOLD_P95_LATENCY_MS
+        uptime_pct is not None
+        and uptime_pct >= THRESHOLD_UPTIME_PCT
+        and fill_rate_pct is not None
+        and fill_rate_pct >= THRESHOLD_FILL_RATE_PCT
+        and send_rate_pct is not None
+        and send_rate_pct >= THRESHOLD_SEND_RATE_PCT
+        and p95_latency_ms is not None
+        and p95_latency_ms <= THRESHOLD_P95_LATENCY_MS
     )
     pass_fail = "PASS" if all_pass else "FAIL"
 

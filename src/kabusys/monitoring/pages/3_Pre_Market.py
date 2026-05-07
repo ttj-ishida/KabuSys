@@ -53,8 +53,10 @@ if status == STATUS_READY:
     st.success("✅ READY — 執行開始可能")
 elif status == STATUS_READY_WITH_WARNINGS:
     st.warning("⚠️ READY_WITH_WARNINGS — 警告を確認してください")
-else:
+elif status == STATUS_BLOCKED:
     st.error("🚫 BLOCKED — 自動執行を開始しないでください")
+else:
+    st.error(f"🚫 {status} — 自動執行を開始しないでください")
 
 st.divider()
 
@@ -68,18 +70,30 @@ def _icon(chk_status: str) -> str:
 col1, col2, col3 = st.columns(3)
 with col1:
     c = checks.get("data_freshness", {})
-    st.metric("データ鮮度", f"{_icon(c.get('status','failed'))} {'OK' if c.get('status') == 'ok' else '古い'}")
+    st.metric(
+        "データ鮮度",
+        f"{_icon(c.get('status', 'failed'))} {'OK' if c.get('status') == 'ok' else '古い'}",
+    )
 with col2:
     c = checks.get("signal_queue", {})
-    st.metric("Signal Queue", f"{_icon(c.get('status','failed'))} pending {result['signal_queue_pending']}件")
+    st.metric(
+        "Signal Queue",
+        f"{_icon(c.get('status', 'failed'))} pending {result['signal_queue_pending']}件",
+    )
 with col3:
     c = checks.get("task_scheduler", {})
-    st.metric("Task Scheduler", f"{_icon(c.get('status','failed'))} {'Ready' if c.get('status') == 'ok' else 'NG'}")
+    st.metric(
+        "Task Scheduler",
+        f"{_icon(c.get('status', 'failed'))} {'Ready' if c.get('status') == 'ok' else 'NG'}",
+    )
 
 col4, col5, col6 = st.columns(3)
 with col4:
     c = checks.get("stop_flag", {})
-    st.metric("停止フラグ", f"{_icon(c.get('status','ok'))} {'あり' if result['stop_flag_exists'] else 'なし'}")
+    st.metric(
+        "停止フラグ",
+        f"{_icon(c.get('status', 'ok'))} {'あり' if result['stop_flag_exists'] else 'なし'}",
+    )
 with col5:
     st.metric("保有ポジション", f"📊 {result['position_count']}銘柄")
 with col6:

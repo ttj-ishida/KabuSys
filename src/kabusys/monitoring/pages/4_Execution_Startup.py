@@ -30,7 +30,9 @@ report_data = load_execution_startup(base_dir, target_date=selected_date)
 
 if report_data is None:
     st.info(f"📋 {selected_date} の Execution はまだ起動していません。")
-    st.caption("Execution を起動すると `artifacts/execution_startup/{date}/summary.json` が自動生成されます。")
+    st.caption(
+        "Execution を起動すると `artifacts/execution_startup/{date}/summary.json` が自動生成されます。"
+    )
     st.stop()
 
 status = report_data.get("status", "BLOCKED")
@@ -38,8 +40,10 @@ if status == STATUS_READY:
     st.success("✅ READY — 執行開始可能")
 elif status == STATUS_READY_WITH_WARNINGS:
     st.warning("⚠️ READY_WITH_WARNINGS — ポジション差分あり。確認してください")
-else:
+elif status == STATUS_BLOCKED:
     st.error("🚫 BLOCKED — ステータス不明注文あり。手動確認が必要です")
+else:
+    st.error(f"🚫 {status} — 手動確認が必要です")
 
 st.divider()
 col1, col2, col3 = st.columns(3)

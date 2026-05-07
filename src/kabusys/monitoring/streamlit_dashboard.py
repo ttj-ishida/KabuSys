@@ -114,7 +114,9 @@ def main(db_path: str) -> None:
             else:
                 st.info("No dashboard data yet.")
 
-            st.info("📡 ザラ場監視の詳細は **Intraday Monitor** ページを確認してください。")
+            st.info(
+                "📡 ザラ場監視の詳細は **Intraday Monitor** ページを確認してください。"
+            )
 
         with tab_positions:
             positions = load_positions(conn)
