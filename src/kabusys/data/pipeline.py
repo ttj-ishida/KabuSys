@@ -439,6 +439,10 @@ def run_topix_etl(
 ) -> tuple[int, int]:
     """TOPIX 日足データの差分 ETL を実行する。
 
+    TOPIX は単一時系列かつ JPX 公式指数のため、過去日付の訂正配信はほぼ発生しない。
+    当日分が取得済み（last >= target_date）の場合はバックフィルも含めてスキップする。
+    通常の差分更新では最終取得日 - backfill_days 日前から再取得し、万一の後出し修正を吸収する。
+
     Args:
         conn:          DuckDB 接続。
         target_date:   取得終了日。

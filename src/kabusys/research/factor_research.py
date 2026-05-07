@@ -420,7 +420,8 @@ def calc_quality(
       - rev_growth_yoy  : 売上 YoY 成長率（最新 FY / 直前 FY - 1）
       - profit_growth_yoy: 営業利益 YoY 成長率（最新 FY / 直前 FY - 1）
 
-    period_type が '%FY%' に一致するレコードのみを対象とする。
+    period_type が 'FYResult%' に一致する通期実績レコードのみを対象とする
+    （FYForecastRevision 等の予想・修正系は除外）。
     年次データが 1 件のみの場合は成長率が None になる。
 
     Args:
