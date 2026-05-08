@@ -31,12 +31,14 @@ def duck_conn():
 
 def test_load_market_regime_empty(duck_conn):
     from kabusys.monitoring.strategy_lab_data import load_market_regime
+
     df = load_market_regime(duck_conn, days=30)
     assert df.empty
 
 
 def test_load_market_regime_returns_rows(duck_conn):
     from kabusys.monitoring.strategy_lab_data import load_market_regime
+
     duck_conn.execute("""
         INSERT INTO market_regime (date, regime_score, regime_label)
         VALUES (current_date, 0.65, 'bull')
@@ -48,12 +50,14 @@ def test_load_market_regime_returns_rows(duck_conn):
 
 def test_load_ai_scores_empty(duck_conn):
     from kabusys.monitoring.strategy_lab_data import load_ai_scores
+
     df = load_ai_scores(duck_conn)
     assert df.empty
 
 
 def test_load_ai_scores_returns_latest_date_only(duck_conn):
     from kabusys.monitoring.strategy_lab_data import load_ai_scores
+
     duck_conn.execute("""
         INSERT INTO ai_scores (date, code, ai_score)
         VALUES ('2024-09-01', '7203', 0.8),
@@ -66,12 +70,14 @@ def test_load_ai_scores_returns_latest_date_only(duck_conn):
 
 def test_load_signal_summary_empty(duck_conn):
     from kabusys.monitoring.strategy_lab_data import load_signal_summary
+
     df = load_signal_summary(duck_conn, days=30)
     assert df.empty
 
 
 def test_load_signal_summary_counts_by_side(duck_conn):
     from kabusys.monitoring.strategy_lab_data import load_signal_summary
+
     duck_conn.execute("""
         INSERT INTO signals (date, code, side, score, signal_rank)
         VALUES (current_date, '7203', 'buy',  0.8, 1),
