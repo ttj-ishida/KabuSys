@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from kabusys.backtest.engine import BacktestScope
 
 from kabusys.data.calendar_management import get_trading_days, next_trading_day
+from kabusys.core.interfaces import RegimeProvider, build_regime_provider
 
 logger = logging.getLogger(__name__)
 
@@ -423,23 +424,6 @@ def _compute_volatility_score(feat: dict[str, Any]) -> float | None:
 def _compute_liquidity_score(feat: dict[str, Any]) -> float | None:
     """流動性スコア（出来高比率が高いほど高スコア）。"""
     return _sigmoid(feat.get("volume_ratio"))
-
-
-def _is_bear_regime(
-    conn: duckdb.DuckDBPyConnection,
-    target_date: date,
-) -> bool:
-    """market_regime テーブルの regime_label を参照し、Bear 相場か否かを判定する。
-
-    データが存在しない場合は False（安全側：BUY を許可）を返す。
-    """
-    row = conn.execute(
-        "SELECT regime_label FROM market_regime WHERE date = ?",
-        [target_date],
-    ).fetchone()
-    if row is None:
-        return False
-    return row[0] == "bear"
 
 
 def _is_breadth_stop(
@@ -1012,6 +996,8 @@ def generate_signals(
     min_holding_days: int | None = None,
     max_holding_days: int | None = None,
     trailing_stop_atr: float | None = None,
+    *,
+    regime_provider: RegimeProvider | None = None,
 ) -> int:
     """features テーブルを読み込み、売買シグナルを生成して signals テーブルへ書き込む。
 
@@ -1153,15 +1139,25 @@ def generate_signals(
             target_date,
         )
 
-    # 2. AI スコア読み込み（センチメントスコアのみ使用）
-    ai_rows = conn.execute(
-        "SELECT code, ai_score FROM ai_scores WHERE date = ?",
-        [target_date],
-    ).fetchall()
-    ai_map: dict[str, dict] = {code: {"ai_score": ai} for code, ai in ai_rows}
+    # 2. AI スコア読み込み（ENABLE_AI_SENTIMENT=false 時はスキップ）
+    from kabusys.config import Settings
 
-    # 3. Bear レジーム判定（market_regime テーブルから取得）
-    regime_is_bear = _is_bear_regime(conn, target_date)
+    ai_enabled = Settings().enable_ai_sentiment
+    ai_map: dict[str, dict]
+    if ai_enabled:
+        ai_rows = conn.execute(
+            "SELECT code, ai_score FROM ai_scores WHERE date = ?",
+            [target_date],
+        ).fetchall()
+        ai_map = {code: {"ai_score": ai} for code, ai in ai_rows}
+    else:
+        ai_map = {}
+
+    if regime_provider is None:
+        regime_provider = build_regime_provider(conn, ai_enabled)
+
+    # 3. Bear レジーム判定
+    regime_is_bear = regime_provider.get_regime(target_date) == "bear"
     if regime_is_bear:
         logger.info(
             "generate_signals: Bear レジーム検知 — BUY シグナル抑制 date=%s",
@@ -1188,10 +1184,7 @@ def generate_signals(
 
     # 4. 各銘柄の final_score 計算（Section 4.1）
     # バリュースコア設定・AI フラグをループ外で1回だけ評価する
-    from kabusys.config import Settings
-
     value_config = _load_value_config()
-    ai_enabled = Settings().enable_ai_sentiment
     scored: list[dict[str, Any]] = []
     for feat in features:
         code = feat["code"]

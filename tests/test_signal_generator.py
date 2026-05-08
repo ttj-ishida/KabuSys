@@ -1,7 +1,7 @@
 """
 シグナル生成モジュール テスト
 
-_is_bear_regime バグ修正（market_regime.regime_label 参照）および
+RegimeProvider 移行後（market_regime.regime_label 参照）および
 breadth_stop による BUY 停止の動作検証。
 """
 
@@ -75,31 +75,34 @@ def _insert_regime(conn, d: date, regime_label: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _is_bear_regime バグ修正テスト
+# DatabaseRegimeProvider テスト（market_regime テーブル参照）
 # ---------------------------------------------------------------------------
 
 
 def test_is_bear_regime_from_market_regime(conn):
-    """regime_label='bear' → True を返す（market_regime テーブルを正しく参照）。"""
-    from kabusys.strategy.signal_generator import _is_bear_regime
+    """regime_label='bear' → 'bear' を返す（market_regime テーブルを正しく参照）。"""
+    from kabusys.core.interfaces import DatabaseRegimeProvider
 
     _insert_regime(conn, TARGET_DATE, "bear")
-    assert _is_bear_regime(conn, TARGET_DATE) is True
+    provider = DatabaseRegimeProvider(conn)
+    assert provider.get_regime(TARGET_DATE) == "bear"
 
 
 def test_is_bear_regime_bull_returns_false(conn):
-    """regime_label='bull' → False を返す。"""
-    from kabusys.strategy.signal_generator import _is_bear_regime
+    """regime_label='bull' → 'bull' を返す。"""
+    from kabusys.core.interfaces import DatabaseRegimeProvider
 
     _insert_regime(conn, TARGET_DATE, "bull")
-    assert _is_bear_regime(conn, TARGET_DATE) is False
+    provider = DatabaseRegimeProvider(conn)
+    assert provider.get_regime(TARGET_DATE) == "bull"
 
 
 def test_is_bear_regime_no_data_returns_false(conn):
-    """market_regime にデータなし → False を返す（安全側）。"""
-    from kabusys.strategy.signal_generator import _is_bear_regime
+    """market_regime にデータなし → 'bull' を返す（安全側）。"""
+    from kabusys.core.interfaces import DatabaseRegimeProvider
 
-    assert _is_bear_regime(conn, TARGET_DATE) is False
+    provider = DatabaseRegimeProvider(conn)
+    assert provider.get_regime(TARGET_DATE) == "bull"
 
 
 # ---------------------------------------------------------------------------
@@ -492,6 +495,7 @@ class TestMinHoldingDaysBearException:
 
     def test_score_drop_sell_allowed_in_bear_regime_within_5_days(self, conn):
         from datetime import timedelta
+        from kabusys.core.interfaces import DatabaseRegimeProvider
         from kabusys.strategy.signal_generator import generate_signals
 
         base = date(2026, 4, 1)
@@ -513,7 +517,9 @@ class TestMinHoldingDaysBearException:
             [target_date],
         )
 
-        generate_signals(conn, target_date)
+        generate_signals(
+            conn, target_date, regime_provider=DatabaseRegimeProvider(conn)
+        )
 
         sell_rows = conn.execute(
             "SELECT code FROM signals WHERE date = ? AND side = 'sell'",
