@@ -274,7 +274,9 @@ def test_build_backtest_conn_copies_prices(conn):
     d = date(2024, 1, 5)
     _insert_price(conn, "1234", d, open_=1000.0, close=1010.0)
 
-    bt_conn = _build_backtest_conn(conn, date(2024, 1, 5), date(2024, 1, 5), ai_enabled=False)
+    bt_conn = _build_backtest_conn(
+        conn, date(2024, 1, 5), date(2024, 1, 5), ai_enabled=False
+    )
     row = bt_conn.execute(
         "SELECT close FROM prices_daily WHERE code = ? AND date = ?", ["1234", d]
     ).fetchone()
@@ -533,7 +535,9 @@ def test_build_backtest_conn_copies_stocks(conn):
         "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
         ["1234", "テスト", "Prime", "電気機器"],
     )
-    bt_conn = _build_backtest_conn(conn, date(2024, 1, 5), date(2024, 1, 5), ai_enabled=False)
+    bt_conn = _build_backtest_conn(
+        conn, date(2024, 1, 5), date(2024, 1, 5), ai_enabled=False
+    )
     row = bt_conn.execute("SELECT sector FROM stocks WHERE code = '1234'").fetchone()
     assert row is not None
     assert row[0] == "電気機器"

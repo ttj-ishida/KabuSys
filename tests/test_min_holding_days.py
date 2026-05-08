@@ -188,7 +188,9 @@ class TestMinHoldingDaysExceptions:
         _insert_position_entry(conn, code, entry_date=TARGET_DATE)
 
         regime_provider = DatabaseRegimeProvider(conn)
-        generate_signals(conn, TARGET_DATE, min_holding_days=5, regime_provider=regime_provider)
+        generate_signals(
+            conn, TARGET_DATE, min_holding_days=5, regime_provider=regime_provider
+        )
 
         rows = conn.execute(
             "SELECT code FROM signals WHERE date = ? AND side = 'sell'",
