@@ -274,7 +274,9 @@ def test_build_backtest_conn_copies_prices(conn):
     d = date(2024, 1, 5)
     _insert_price(conn, "1234", d, open_=1000.0, close=1010.0)
 
-    bt_conn = _build_backtest_conn(conn, date(2024, 1, 5), date(2024, 1, 5))
+    bt_conn = _build_backtest_conn(
+        conn, date(2024, 1, 5), date(2024, 1, 5), ai_enabled=False
+    )
     row = bt_conn.execute(
         "SELECT close FROM prices_daily WHERE code = ? AND date = ?", ["1234", d]
     ).fetchone()
@@ -476,17 +478,18 @@ def test_run_backtest_max_position_pct(conn):
 
 
 def test_fetch_regime_returns_bull_on_no_data(conn):
-    """_fetch_regime: market_regime にデータなし → 'bull' を返す。"""
-    from kabusys.backtest.engine import _fetch_regime
+    """DatabaseRegimeProvider: market_regime にデータなし → 'bull' を返す。"""
+    from kabusys.core.interfaces import DatabaseRegimeProvider
     from datetime import date
 
-    result = _fetch_regime(conn, date(2024, 1, 5))
+    provider = DatabaseRegimeProvider(conn)
+    result = provider.get_regime(date(2024, 1, 5))
     assert result == "bull"
 
 
 def test_fetch_regime_returns_correct_label(conn):
-    """_fetch_regime: market_regime にデータあり → regime_label を返す。"""
-    from kabusys.backtest.engine import _fetch_regime
+    """DatabaseRegimeProvider: market_regime にデータあり → regime_label を返す。"""
+    from kabusys.core.interfaces import DatabaseRegimeProvider
     from datetime import date
 
     d = date(2024, 1, 5)
@@ -494,7 +497,8 @@ def test_fetch_regime_returns_correct_label(conn):
         "INSERT INTO market_regime (date, regime_score, regime_label) VALUES (?, ?, ?)",
         [d, -0.5, "bear"],
     )
-    result = _fetch_regime(conn, d)
+    provider = DatabaseRegimeProvider(conn)
+    result = provider.get_regime(d)
     assert result == "bear"
 
 
@@ -531,7 +535,9 @@ def test_build_backtest_conn_copies_stocks(conn):
         "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
         ["1234", "テスト", "Prime", "電気機器"],
     )
-    bt_conn = _build_backtest_conn(conn, date(2024, 1, 5), date(2024, 1, 5))
+    bt_conn = _build_backtest_conn(
+        conn, date(2024, 1, 5), date(2024, 1, 5), ai_enabled=False
+    )
     row = bt_conn.execute("SELECT sector FROM stocks WHERE code = '1234'").fetchone()
     assert row is not None
     assert row[0] == "電気機器"
@@ -1027,7 +1033,7 @@ def test_build_backtest_conn_populates_breadth(conn):
     target = date(2024, 3, 1)
     _insert_prices_for_breadth(conn, target, n_days=30)
 
-    bt_conn = _build_backtest_conn(conn, target, target)
+    bt_conn = _build_backtest_conn(conn, target, target, ai_enabled=False)
     row = bt_conn.execute(
         "SELECT breadth_stop FROM market_breadth WHERE date = ?", [target]
     ).fetchone()

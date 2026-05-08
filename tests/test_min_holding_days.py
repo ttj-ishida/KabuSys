@@ -176,6 +176,8 @@ class TestMinHoldingDaysExceptions:
 
     def test_bear_regime_bypasses_min_holding_days(self, conn):
         """Bear レジームのとき、min_holding_days=5 でも entry 当日に score_drop SELL が発生する。"""
+        from kabusys.core.interfaces import DatabaseRegimeProvider
+
         code = "4444"
         avg_price = 1000.0
         _insert_regime(conn, TARGET_DATE, label="bear")
@@ -185,7 +187,10 @@ class TestMinHoldingDaysExceptions:
         _insert_position(conn, code, TARGET_DATE, avg_price=avg_price)
         _insert_position_entry(conn, code, entry_date=TARGET_DATE)
 
-        generate_signals(conn, TARGET_DATE, min_holding_days=5)
+        regime_provider = DatabaseRegimeProvider(conn)
+        generate_signals(
+            conn, TARGET_DATE, min_holding_days=5, regime_provider=regime_provider
+        )
 
         rows = conn.execute(
             "SELECT code FROM signals WHERE date = ? AND side = 'sell'",
