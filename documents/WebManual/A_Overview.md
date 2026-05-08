@@ -32,11 +32,11 @@ Core 機能:
 
 Addon 機能:（任意・後から追加可能。未設定でも Core は動作します）
 
-- AI によるニュース / regime 補助判定（AI Addon）
+- AI によるニュース / regime 補助判定（AI Addon — News/Disclosure Addon との併用を推奨）
 - TDnet / EDINET 適時開示収集（Disclosure Addon）
 - Yahoo News RSS 収集（News Addon）
 - LINE 通知（Notification Addon）
-- Strategy Lab 分析ページ（Operations UI Addon）
+- Strategy Lab 分析ページ（Operations UI Addon — AI Addon なしでも表示されますが分析指標は限定的になります）
 
 運用インターフェース:
 

@@ -68,6 +68,14 @@ python -m kabusys.config_setup
 
 ウィザードの質問に回答すると、プロジェクトルートに `.env` が生成されます。
 
+**設定区分の凡例:**
+
+| ラベル | 意味 |
+|---|---|
+| Core 必須 | Core を動かすために必要な設定 |
+| Core 任意 | Core が使う設定だが、未設定でもデフォルト値で Core は動作する |
+| Addon 任意 | Addon 導入時のみ意味をもつ設定。未設定でも Core の自動売買フローには影響しない |
+
 **Core 必須設定:**
 
 | 環境変数 | 説明 | 例 |
@@ -190,6 +198,8 @@ powershell -File scripts\setup_task_scheduler.ps1
 
 > 詳細は `documents/10_Runtime/RuntimeJobSchedule.md` を参照してください。
 
+> **補足:** `pre_market_report`（08:00）および `market_close_report`（15:00）は Task Scheduler の自動ジョブではなく、オペレーターが手動で実行するコマンドです（`python -m kabusys.run_pre_market_report`、`python -m kabusys.run_market_close_report`）。詳細は [D_LiveOperation.md](./D_LiveOperation.md) を参照してください。
+
 ---
 
 ## B-2. Addon 機能の有効化
@@ -227,6 +237,10 @@ Yahoo ニュースの記事を OpenAI が自動的に読み取り、各銘柄の
 - レジーム判定は `NullRegimeProvider` が使用され、常に `'bull'`（非 Bear）として扱います
 - Bear レジームフィルタは発動せず、全銘柄が BUY 候補になります
 - Core の自動売買フロー・バックテストは AI データなしで完全に動作します
+
+**他の Addon との依存関係:**
+
+> AI Addon は、ニュース原文（`raw_news`）の入力として **News Addon**（`ENABLE_YAHOONEWS=true`）または **Disclosure Addon**（`ENABLE_TDNET=true`）との併用を推奨します。いずれのニュースソースも有効でない場合、AI 分析バッチは入力データなしで実行され、`ai_scores` は空（0件）になります。その場合でも Core の自動売買フローはスキップなしで正常に動作します（ニューススコアはデフォルト値で補完されます）。
 
 **必要なもの:**
 - OpenAI API キー（有料・従量課金）

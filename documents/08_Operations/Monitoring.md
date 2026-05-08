@@ -192,7 +192,7 @@ Core コードは返り値の型を意識せず `.send(message)` を呼ぶだけ
 
 監視ダッシュボードを用意する。
 
-**Phase 1 実装（Issue #231 / Issue #260）:** Streamlit マルチページ構成（10ページ）
+**Phase 1 実装（Issue #231 / Issue #260）:** Streamlit マルチページ構成（Core 9 + Addon 1 = 10ページ）
 
 **Core 標準ページ（9ページ）:**
 
