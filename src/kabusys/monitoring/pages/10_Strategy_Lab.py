@@ -6,7 +6,7 @@ import duckdb
 import streamlit as st
 
 from kabusys.config import Settings
-from kabusys.monitoring.dashboard_data import (
+from kabusys.monitoring.strategy_lab_data import (
     load_ai_scores,
     load_market_regime,
     load_signal_summary,

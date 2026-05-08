@@ -52,13 +52,13 @@
 #### 判定
 
 - `import` 境界: `概ね良好`
-- データ境界: `未分離`
+- データ境界: `✅ 分離済み（Issue #271）`
 
 #### 分離 TODO
 
-- `StrategyEnhancer` か `RegimeProvider` のような `Core` 側 IF を作る
-- `signal_generator.py` は `ai_scores` / `market_regime` を直接読む代わりに、`Addon` 未導入時フォールバックを明示する
-- `backtest` は `AI なしで動く Core モード` を別定義する
+- ~~`StrategyEnhancer` か `RegimeProvider` のような `Core` 側 IF を作る~~ ✅ 完了（Issue #271）
+- ~~`signal_generator.py` は `ai_scores` / `market_regime` を直接読む代わりに、`Addon` 未導入時フォールバックを明示する~~ ✅ 完了（Issue #271）
+- ~~`backtest` は `AI なしで動く Core モード` を別定義する~~ ✅ 完了（Issue #271）
 
 ### 2.2 Yahoo News
 
@@ -185,8 +185,8 @@ TDnet / EDINET / 開示分類は独立スクリプトからのみ呼ばれてい
 
 優先順位は次のとおり。
 
-1. `signal_generator.py` の `ai_scores` / `market_regime` 参照を抽象化する
-2. `backtest` の `Core-only` 入力要件を定義する
+1. ~~`signal_generator.py` の `ai_scores` / `market_regime` 参照を抽象化する~~ ✅ 完了（Issue #271）
+2. ~~`backtest` の `Core-only` 入力要件を定義する~~ ✅ 完了（Issue #271）
 3. ~~`dashboard_data.py` から `Strategy Lab` ローダーを分離する~~ ✅ 完了（Issue #272 / PR #275）
 4. `scripts/run_ai_analysis.py` / `run_yahoonews_collection.py` / `run_tdnet_collection.py` を Addon 配置前提で再整理する
 
