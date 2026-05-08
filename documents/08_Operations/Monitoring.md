@@ -170,7 +170,7 @@ AIスコア分布 | 偏り検知 |
 
 | 方法 | 区分 | 内容 |
 |----|----|----|
-| LINE通知 | Notification Addon（任意） | `LINE_NOTIFY_ENABLED=true` かつ認証情報設定時のみ有効。未設定でも Core は動作する |
+| LINE通知 | Notification Addon — 任意 | `LINE_NOTIFY_ENABLED=true` かつ認証情報設定時のみ有効。未設定でも Core は動作します |
 | ログ | Core 標準 | 必須（常に有効） |
 
 ### LINE 通知アーキテクチャ（Null Object パターン）

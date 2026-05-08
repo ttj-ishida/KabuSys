@@ -82,10 +82,10 @@ Addon 機能:（任意・後から追加可能。未設定でも Core は動作�
 20:00  strategy_signal
 21:00  portfolio_construction
 21:15  night_batch_report（自動）
-08:00  pre_market_report
+08:00  pre_market_report（手動）
 08:30  execution start
 09:00  monitoring start
-15:00  market_close_report
+15:00  market_close_report（手動）
 
 # AI Addon（ENABLE_AI_SENTIMENT=true のときのみ）
 18:00  ai_analysis
