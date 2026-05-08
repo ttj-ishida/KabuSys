@@ -70,6 +70,8 @@ def _build_backtest_conn(
     source_conn: duckdb.DuckDBPyConnection,
     start_date: date,
     end_date: date,
+    *,
+    ai_enabled: bool,
 ) -> duckdb.DuckDBPyConnection:
     """本番 DB からインメモリ DuckDB にデータをコピーしてバックテスト用接続を返す。
 
@@ -90,11 +92,8 @@ def _build_backtest_conn(
     data_start = start_date - timedelta(days=300)
 
     # 日付範囲でフィルタするテーブル
-    from kabusys.config import Settings
-
-    _ai_enabled = Settings().enable_ai_sentiment
     _core_tables: tuple[str, ...] = ("prices_daily", "features", "market_regime")
-    _ai_tables: tuple[str, ...] = ("ai_scores",) if _ai_enabled else ()
+    _ai_tables: tuple[str, ...] = ("ai_scores",) if ai_enabled else ()
     date_filtered_tables = _core_tables + _ai_tables
     for table in date_filtered_tables:
         try:
@@ -467,11 +466,11 @@ def run_backtest(
 
     from kabusys.data.calendar_management import get_trading_days
     from kabusys.strategy.signal_generator import generate_signals
-
-    bt_conn = _build_backtest_conn(conn, start_date, end_date)
     from kabusys.config import Settings
 
-    _regime_provider = build_regime_provider(bt_conn, Settings().enable_ai_sentiment)
+    _ai_enabled = Settings().enable_ai_sentiment
+    bt_conn = _build_backtest_conn(conn, start_date, end_date, ai_enabled=_ai_enabled)
+    _regime_provider = build_regime_provider(bt_conn, _ai_enabled)
     simulator = PortfolioSimulator(initial_cash=initial_cash)
     # バックテストループ内でメモリ上に持ち回る翌日用発注リスト
     # （本番 live trading とは異なり、バックテストは単一関数呼び出し内で完結するためDB永続化不要）
