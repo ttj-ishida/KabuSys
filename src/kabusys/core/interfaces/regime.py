@@ -7,11 +7,12 @@ AI Addon 有効時は DatabaseRegimeProvider が market_regime テーブルを�
 from __future__ import annotations
 
 from datetime import date
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import duckdb
 
 
+@runtime_checkable
 class RegimeProvider(Protocol):
     """市場レジームラベルを返すインターフェース。"""
 
