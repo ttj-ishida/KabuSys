@@ -54,7 +54,7 @@
 
     prices_daily
     features
-    ai_scores
+    ai_scores（ENABLE_AI_SENTIMENT=true のときのみ）
 
 ## Interface
 
@@ -264,7 +264,7 @@ Market Hours
     各モジュールはデータファイル / DBテーブルで接続する
 
 2.  **Fail Safe**\
-    AIが停止してもStrategyは動作する
+    AIが停止してもStrategyは動作する（`ENABLE_AI_SENTIMENT=false` で `NullRegimeProvider` を使用。Issue #271 実装済み）
 
 3.  **Idempotent**\
     同じ処理を複数回実行しても安全

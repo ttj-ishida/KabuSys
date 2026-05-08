@@ -211,6 +211,14 @@ LINE_USER_ID=your_line_user_id
 
 Yahoo ニュースの記事を OpenAI が自動的に読み取り、各銘柄の市場センチメント（強気・弱気）をスコア化して売買判断に加味します（最大 10% の影響）。
 
+**Core-only モード（`ENABLE_AI_SENTIMENT=false`、デフォルト）について:**
+
+`ENABLE_AI_SENTIMENT=false` のとき、システムは Core-only モードで動作します。このモードでは:
+- AI センチメントスコア（`ai_scores`）は参照しません
+- レジーム判定は `NullRegimeProvider` が使用され、常に `'bull'`（非 Bear）として扱います
+- Bear レジームフィルタは発動せず、全銘柄が BUY 候補になります
+- Core の自動売買フロー・バックテストは AI データなしで完全に動作します
+
 **必要なもの:**
 - OpenAI API キー（有料・従量課金）
 

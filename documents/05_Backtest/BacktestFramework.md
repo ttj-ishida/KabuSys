@@ -172,12 +172,15 @@ _build_backtest_conn(source_conn, start_date, end_date)
 
 - `prices_daily`
 - `features`
-- `ai_scores`
-- `market_regime`
+- `ai_scores`（`ENABLE_AI_SENTIMENT=true` のときのみコピー）
+- `market_regime`（常にコピー — Core 側が将来書き込む可能性があるため）
 - `market_calendar`
 - `stocks`
 - `earnings_calendar`
 - `market_breadth`（コピーではなく再計算）
+
+Bear レジーム判定は `RegimeProvider` プロトコルを経由する（Issue #271）。
+`ENABLE_AI_SENTIMENT=false` のバックテストでは `NullRegimeProvider` が使用され、Bear フィルタは常に無効となる。
 
 重要:
 

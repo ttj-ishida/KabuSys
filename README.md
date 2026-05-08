@@ -278,8 +278,9 @@ python scripts/run_ai_analysis.py
 python scripts/run_strategy_signal.py
 ```
 
-features・ai_scores・market_regime を統合してスコアを算出し、各種フィルタ（セクター・ギャップリスク・
-breadth_stop・最低保有日数など）を適用して BUY/SELL シグナルを `signals` テーブルに書き込みます。
+features とオプションの ai_scores を統合してスコアを算出し、各種フィルタ（セクター・ギャップリスク・
+breadth_stop・最低保有日数など）を適用して BUY/SELL シグナルを `signals` テーブルに書き込みます。  
+Bear レジーム判定は `RegimeProvider` プロトコル経由で行われ、`ENABLE_AI_SENTIMENT=false`（Core-only モード）のときは Bear フィルタが発動しません。
 
 **ポートフォリオ構築**（21:00 実行）
 

@@ -137,7 +137,7 @@ final_score =
 
 ### 5.1 エントリー（Entry）
 - **条件**: `final_score` が閾値以上であること。
-- **レジームフィルタ**: AIが判定する `regime` が Bear（弱気・下落トレンド）の時は、どんなにスコアが高くても**新規の買いエントリーは生成しない（見送り）**。
+- **レジームフィルタ** （Issue #271 実装済み）: `market_regime` テーブルのラベルが `'bear'`（弱気・下落トレンド）の時は、どんなにスコアが高くても**新規の買いエントリーは生成しない（見送り）**。実装は `RegimeProvider` プロトコル経由で行われ、`ENABLE_AI_SENTIMENT=false`（Core-only モード）のときは `NullRegimeProvider` が使用されて常に `'bull'` を返すため、Bear フィルタは発動しない。実装: `src/kabusys/core/interfaces/regime.py`
 - **TOPIX 200MA サイズ縮小** （Issue #257 実装済み）: TOPIX 終値が 200 日移動平均を 15% 以上下回った場合（`(close/ma200 - 1) < -0.15`）、新規 BUY の発注サイズを通常の **50%** に縮小する（`signals.size_multiplier` の `topix_multiplier = 0.5`）。Bear レジーム判定・breadth_stop とは独立して動作し、最も小さい `size_multiplier` が採用される。`topix_daily` に 100 件未満のデータしかない期間（初期運用開始直後）はこのフィルタを無効化する。実装: `signal_generator.py::_get_topix_size_multiplier()`
 - **breadth_stop フィルタ** （Issue #173 実装済み）: 東証全銘柄の 25 日移動平均上銘柄比率が 35% 未満の場合、市場全体の内部悪化と判定し**全銘柄の新規 BUY を停止する**。Bear レジーム判定とは独立して動作する。
 - **ギャップリスクフィルタ** （Issue #170 実装済み）: 当日の始値が前日終値比 **+5% 超**（ギャップアップ過大）または **-3% 以下**（ギャップダウン過大）の銘柄は、その銘柄の新規 BUY を見送る。SELL は対象外。
