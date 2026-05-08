@@ -16,6 +16,7 @@ import duckdb
 
 from kabusys.backtest.metrics import BacktestMetrics, calc_metrics
 from kabusys.backtest.simulator import DailySnapshot, PortfolioSimulator, TradeRecord
+from kabusys.core.interfaces import build_regime_provider
 from kabusys.portfolio import (
     apply_sector_cap,
     calc_equal_weights,
@@ -89,7 +90,12 @@ def _build_backtest_conn(
     data_start = start_date - timedelta(days=300)
 
     # 日付範囲でフィルタするテーブル
-    date_filtered_tables = ("prices_daily", "features", "ai_scores", "market_regime")
+    from kabusys.config import Settings
+
+    _ai_enabled = Settings().enable_ai_sentiment
+    _core_tables: tuple[str, ...] = ("prices_daily", "features", "market_regime")
+    _ai_tables: tuple[str, ...] = ("ai_scores",) if _ai_enabled else ()
+    date_filtered_tables = _core_tables + _ai_tables
     for table in date_filtered_tables:
         try:
             rows = source_conn.execute(
@@ -337,24 +343,6 @@ def _read_day_signals(
     return buy_signals, sell_signals
 
 
-def _fetch_regime(conn: duckdb.DuckDBPyConnection, trading_day: date) -> str:
-    """market_regime テーブルから当日レジームを返す。データなしなら 'bull' でフォールバック。
-
-    schema.py の market_regime テーブルのレジーム列名は `regime_label`。
-    """
-    row = conn.execute(
-        "SELECT regime_label FROM market_regime WHERE date = ?", [trading_day]
-    ).fetchone()
-    if row is None:
-        # バックテスト序盤などでレジームデータが未整備の場合は通常の運用。INFO に留める。
-        logger.info(
-            "_fetch_regime: %s のレジームが取得できません。'bull' でフォールバック。",
-            trading_day,
-        )
-        return "bull"
-    return row[0]
-
-
 def _fetch_sector_map(conn: duckdb.DuckDBPyConnection) -> dict[str, str]:
     """stocks テーブルから {code: sector} を返す。テーブルが空なら {}。
 
@@ -481,6 +469,9 @@ def run_backtest(
     from kabusys.strategy.signal_generator import generate_signals
 
     bt_conn = _build_backtest_conn(conn, start_date, end_date)
+    from kabusys.config import Settings
+
+    _regime_provider = build_regime_provider(bt_conn, Settings().enable_ai_sentiment)
     simulator = PortfolioSimulator(initial_cash=initial_cash)
     # バックテストループ内でメモリ上に持ち回る翌日用発注リスト
     # （本番 live trading とは異なり、バックテストは単一関数呼び出し内で完結するためDB永続化不要）
@@ -564,7 +555,7 @@ def run_backtest(
 
             # Step 5: ポートフォリオ構築（Phase 5 モジュール使用）
             buy_signals, sell_signals = _read_day_signals(bt_conn, trading_day)
-            regime = _fetch_regime(bt_conn, trading_day)
+            regime = _regime_provider.get_regime(trading_day)
             multiplier = calc_regime_multiplier(regime)
             # 当日 mark_to_market 後の最新ポートフォリオ価値（翌日用発注サイジングに使用）
             current_pv = (

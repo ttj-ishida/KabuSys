@@ -476,17 +476,18 @@ def test_run_backtest_max_position_pct(conn):
 
 
 def test_fetch_regime_returns_bull_on_no_data(conn):
-    """_fetch_regime: market_regime にデータなし → 'bull' を返す。"""
-    from kabusys.backtest.engine import _fetch_regime
+    """DatabaseRegimeProvider: market_regime にデータなし → 'bull' を返す。"""
+    from kabusys.core.interfaces import DatabaseRegimeProvider
     from datetime import date
 
-    result = _fetch_regime(conn, date(2024, 1, 5))
+    provider = DatabaseRegimeProvider(conn)
+    result = provider.get_regime(date(2024, 1, 5))
     assert result == "bull"
 
 
 def test_fetch_regime_returns_correct_label(conn):
-    """_fetch_regime: market_regime にデータあり → regime_label を返す。"""
-    from kabusys.backtest.engine import _fetch_regime
+    """DatabaseRegimeProvider: market_regime にデータあり → regime_label を返す。"""
+    from kabusys.core.interfaces import DatabaseRegimeProvider
     from datetime import date
 
     d = date(2024, 1, 5)
@@ -494,7 +495,8 @@ def test_fetch_regime_returns_correct_label(conn):
         "INSERT INTO market_regime (date, regime_score, regime_label) VALUES (?, ?, ?)",
         [d, -0.5, "bear"],
     )
-    result = _fetch_regime(conn, d)
+    provider = DatabaseRegimeProvider(conn)
+    result = provider.get_regime(d)
     assert result == "bear"
 
 
