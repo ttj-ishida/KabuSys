@@ -24,12 +24,19 @@ Core 機能:
 
 - 日次データ更新
 - 特徴量生成
-- AI によるニュース / regime 補助判定
 - 売買シグナル生成
 - ポートフォリオ構築
 - 自動執行
 - リスク管理と Kill Switch
 - 日次 / 週次 / 月次レポート
+
+Addon 機能:（任意・後から追加可能。未設定でも Core は動作します）
+
+- AI によるニュース / regime 補助判定（AI Addon）
+- TDnet / EDINET 適時開示収集（Disclosure Addon）
+- Yahoo News RSS 収集（News Addon）
+- LINE 通知（Notification Addon）
+- Strategy Lab 分析ページ（Operations UI Addon）
 
 運用インターフェース:
 
@@ -37,7 +44,7 @@ Core 機能:
 - Streamlit ダッシュボード
 - Streamlit 内 WebManual ビュー
 
-Streamlit で確認できる主なページ:
+**Core 標準ページ:**
 
 - `Home`
 - `Initial Setup`（初期セットアップ確認）
@@ -48,7 +55,10 @@ Streamlit で確認できる主なページ:
 - `Performance`（Paper Verification 含む）
 - `Failure Recovery`（障害イベント集約）
 - `WebManual`
-- `Strategy Lab`
+
+**Addon ページ:**（未設定でも Core は動作します）
+
+- `Strategy Lab`（市場レジーム・AI スコア分析 — AI Addon 有効時に意味をもつ）
 
 ---
 
@@ -66,16 +76,19 @@ Streamlit で確認できる主なページ:
 ## A-4. 1日の流れ
 
 ```text
+# Core 標準フロー
 15:30  data_update
 16:00  feature_gen
-18:00  ai_analysis
 20:00  strategy_signal
 21:00  portfolio_construction
-21:30  Night Batch 状態確認
+21:15  night_batch_report（自動）
 08:00  pre_market_report
 08:30  execution start
 09:00  monitoring start
 15:00  market_close_report
+
+# AI Addon（ENABLE_AI_SENTIMENT=true のときのみ）
+18:00  ai_analysis
 ```
 
 運用判断は、個別ログだけでなく次のレポートで行う。

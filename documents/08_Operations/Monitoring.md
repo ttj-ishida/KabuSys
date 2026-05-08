@@ -168,10 +168,10 @@ AIスコア分布 | 偏り検知 |
 
 通知方法
 
-| 方法 | 内容 |
-|----|----|
-LINE通知 | 推奨（`LINE_NOTIFY_ENABLED=true` かつ認証情報設定時のみ有効） |
-ログ | 必須（常に有効） |
+| 方法 | 区分 | 内容 |
+|----|----|----|
+| LINE通知 | Notification Addon（任意） | `LINE_NOTIFY_ENABLED=true` かつ認証情報設定時のみ有効。未設定でも Core は動作する |
+| ログ | Core 標準 | 必須（常に有効） |
 
 ### LINE 通知アーキテクチャ（Null Object パターン）
 
@@ -194,6 +194,8 @@ Core コードは返り値の型を意識せず `.send(message)` を呼ぶだけ
 
 **Phase 1 実装（Issue #231 / Issue #260）:** Streamlit マルチページ構成（10ページ）
 
+**Core 標準ページ（9ページ）:**
+
 | ページ | ファイル | 表示内容 |
 |---|---|---|
 | Home | `streamlit_dashboard.py` | Kill Switch / Execution / Monitoring 状態、ドローダウン、エラーログ |
@@ -205,7 +207,12 @@ Core コードは返り値の型を意識せず `.send(message)` を呼ぶだけ
 | Performance | `pages/7_Performance.py` | エクイティカーブ・ポジション・取引履歴・Paper Verification |
 | Failure Recovery | `pages/8_Failure_Recovery.py` | 障害イベント集約・復旧ガイド |
 | WebManual | `pages/9_WebManual.py` | 運用マニュアル閲覧ビュー |
-| Strategy Lab | `pages/10_Strategy_Lab.py` | 市場レジーム・AI スコア・シグナル推移 |
+
+**Addon ページ:**（未設定でも Core は動作します）
+
+| ページ | ファイル | 区分 | 表示内容 |
+|---|---|---|---|
+| Strategy Lab | `pages/10_Strategy_Lab.py` | Operations UI Addon | 市場レジーム・AI スコア・シグナル推移（AI Addon 有効時に意味をもつ） |
 
 推奨
 
@@ -273,8 +280,8 @@ Windows 1台での稼働を前提とし、オーバーヘッドの少ない構�
 | 種類 | ツール / 技術 | 用途・保存先 |
 |----|----|----|
 | データベース | SQLite | `monitoring.db` (テーブル: `system_status`, `trade_logs`, `positions`, `risk_logs`, `dashboard`) |
-| ダッシュボード | Streamlit | 10ページ構成（Home / Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Signal Queue / Performance / Failure Recovery / WebManual / Strategy Lab）|
-| アラート | LINE | LINE Messaging API 経由での異常通知 |
+| ダッシュボード | Streamlit | Core 標準 9ページ（Home / Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Signal Queue / Performance / Failure Recovery / WebManual）+ Addon ページ（Strategy Lab）|
+| アラート | LINE | LINE Messaging API 経由での異常通知（Notification Addon — 任意） |
 
 ### SQLite テーブル設計（Phase 7 実装）
 
