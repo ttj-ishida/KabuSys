@@ -547,8 +547,9 @@ touch data/stop_requested.flag
     - monitoring_engine.py         — 各 Monitor を統括するポーリングエンジン
     - system_monitor.py            — CPU / メモリ / プロセス監視
     - streamlit_dashboard.py       — Streamlit Home ページ（SQLite 参照）
-    - dashboard_data.py            — 全ページ共通データロード関数（DuckDB / SQLite）
+    - dashboard_data.py            — Core 運用ページ向けデータロード関数（DuckDB / SQLite）
     - operations_data.py           — 運用フローページ向けデータロード関数（SQLite / Streamlit 非依存）
+    - strategy_lab_data.py         — Strategy Lab ページ（AI Addon）専用データロード関数（DuckDB）
     - pages/
       - 2_Initial_Setup.py         — 環境変数・設定・DB・Task Scheduler 確認
       - 3_Pre_Market.py            — 朝の READY/BLOCKED 判定・データ鮮度確認

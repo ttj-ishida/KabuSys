@@ -403,7 +403,7 @@ MonitoringEngine(system_monitor, trade_monitor, risk_monitor, interval_sec=60)
 
 ### StreamlitDashboard（Phase 7 実装 Issue #35、Issue #231 で拡張）
 
-Streamlit マルチページ構成で実装。ページファイルは `pages/` 配下に配置され、自動的にサイドバーへ表示される。データロードロジックは `dashboard_data.py` に集約し Streamlit 非依存・単体テスト可能な設計とする。
+Streamlit マルチページ構成で実装。ページファイルは `pages/` 配下に配置され、自動的にサイドバーへ表示される。データロードロジックは各モジュールに分離し Streamlit 非依存・単体テスト可能な設計とする。
 
 **起動方法:**
 
@@ -416,8 +416,9 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 | ファイル | 役割 |
 |---|---|
 | `streamlit_dashboard.py` | Home ページ（エントリーポイント）。SQLite `monitoring.db` を読み取り |
-| `dashboard_data.py` | 全ページ共通のデータロード関数群（Streamlit 非依存） |
+| `dashboard_data.py` | Core 運用ページ向けデータロード関数群（Streamlit 非依存） |
 | `operations_data.py` | 運用フローページ向けデータロード関数群（Streamlit 非依存） |
+| `strategy_lab_data.py` | Strategy Lab ページ（AI Addon）専用データロード関数群（Streamlit 非依存） |
 | `pages/2_Initial_Setup.py` | 環境変数・設定・DB・Task Scheduler 確認（4タブ） |
 | `pages/3_Pre_Market.py` | 朝の READY/BLOCKED 判定・データ鮮度・停止フラグ確認 |
 | `pages/4_Execution_Startup.py` | 起動直後のリコンシリエーション差分・ポジション整合確認 |
