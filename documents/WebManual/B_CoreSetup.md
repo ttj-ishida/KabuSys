@@ -68,7 +68,15 @@ python -m kabusys.config_setup
 
 ウィザードの質問に回答すると、プロジェクトルートに `.env` が生成されます。
 
-**最低限設定が必要な項目:**
+**設定区分の凡例:**
+
+| ラベル | 意味 |
+|---|---|
+| Core 必須 | Core を動かすために必要な設定 |
+| Core 任意 | Core が使う設定だが、未設定でもデフォルト値で Core は動作する |
+| Addon 任意 | Addon 導入時のみ意味をもつ設定。未設定でも Core の自動売買フローには影響しない |
+
+**Core 必須設定:**
 
 | 環境変数 | 説明 | 例 |
 |---|---|---|
@@ -76,7 +84,7 @@ python -m kabusys.config_setup
 | `JQUANTS_REFRESH_TOKEN` | J-Quants の Refresh Token | `eyJ...` |
 | `KABU_API_PASSWORD` | kabuステーション API パスワード（本番用） | `your_api_password` |
 
-**よく使うオプション設定:**
+**Core 任意設定:**（未設定でもデフォルト値で Core は動作します）
 
 | 環境変数 | 説明 | デフォルト |
 |---|---|---|
@@ -84,13 +92,19 @@ python -m kabusys.config_setup
 | `PAPER_TRADING_INITIAL_CASH` | MockBrokerClient の初期仮想資金（円） | `10000000` |
 | `KABU_USE_SANDBOX` | `true` でポート 18081 のkabu検証環境を使用（`paper_trading` 時のみ有効） | `false` |
 | `KABU_SANDBOX_API_PASSWORD` | kabu検証環境用 API パスワード（`KABU_USE_SANDBOX=true` 時） | （空） |
-| `LINE_NOTIFY_ENABLED` | LINE 通知の有効化 | `false` |
-| `ENABLE_AI_SENTIMENT` | AI センチメントの有効化 | `false` |
-| `ENABLE_TDNET` | TDnet 適時開示収集の有効化 | `false` |
-| `ENABLE_EDINET` | EDINET 法定開示収集の有効化 | `false` |
-| `EDINET_API_KEY` | EDINET API サブスクリプションキー | （空） |
-| `ENABLE_YAHOONEWS` | Yahoo News RSS 収集の有効化 | `false` |
 | `LOG_LEVEL` | ログの詳細レベル | `INFO` |
+
+**Addon 任意設定:**（未設定でも Core の自動売買フローには影響しません）
+
+| 環境変数 | 区分 | 説明 | デフォルト |
+|---|---|---|---|
+| `LINE_NOTIFY_ENABLED` | Notification Addon | LINE 通知の有効化 | `false` |
+| `ENABLE_AI_SENTIMENT` | AI Addon | AI センチメントの有効化 | `false` |
+| `OPENAI_API_KEY` | AI Addon | OpenAI API キー（`ENABLE_AI_SENTIMENT=true` 時に必須） | （空） |
+| `ENABLE_TDNET` | Disclosure Addon | TDnet 適時開示収集の有効化 | `false` |
+| `ENABLE_EDINET` | Disclosure Addon | EDINET 法定開示収集の有効化 | `false` |
+| `EDINET_API_KEY` | Disclosure Addon | EDINET API サブスクリプションキー（`ENABLE_EDINET=true` 時に必須） | （空） |
+| `ENABLE_YAHOONEWS` | News Addon | Yahoo News RSS 収集の有効化 | `false` |
 
 ### B-1-4. 設定の検証
 
@@ -138,13 +152,16 @@ python -m kabusys.data.bootstrap --endpoint /equities/bars/daily
 
 **取得対象エンドポイント:** `prices_daily`, `master`, `financials`, `market_calendar`, `dividend`, `topix`
 
-Bootstrap 後、特徴量生成・レジーム判定などを一度手動実行してデータが正しく処理されるか確認します。
+Bootstrap 後、Core の処理フローを一度手動実行してデータが正しく処理されるか確認します。
 
 ```powershell
+# Core 標準フロー（必須確認）
 python scripts/run_feature_gen.py
-python scripts/run_ai_analysis.py
 python scripts/run_strategy_signal.py
 python scripts/run_portfolio_construction.py
+
+# AI Addon（ENABLE_AI_SENTIMENT=true のときのみ）
+# python scripts/run_ai_analysis.py
 ```
 
 ### B-1-7. Task Scheduler の設定（夜間バッチの自動化）
@@ -157,38 +174,40 @@ Windows タスクスケジューラに登録することで、毎日自動で動
 powershell -File scripts\setup_task_scheduler.ps1
 ```
 
-**登録されるタスクのスケジュール:**
+**Core 標準ジョブ一覧:**
 
 | 時刻 | 処理 | スクリプト |
 |---|---|---|
 | 15:30 | 市場データ更新 | `scripts/run_data_update.py` |
-| 15:33 | Yahoo News RSS 収集（オプション） | `scripts/run_yahoonews_collection.py` |
-| 15:35 | TDnet 適時開示収集（オプション） | `scripts/run_tdnet_collection.py` |
-| 15:40 | EDINET 法定開示収集（オプション） | `scripts/run_edinet_collection.py` |
 | 16:00 | 特徴量計算 | `scripts/run_feature_gen.py` |
-| 17:00 | 開示イベント分類（オプション） | `scripts/run_disclosure_classification.py` |
-| 18:00 | AI 分析（オプション） | `scripts/run_ai_analysis.py` |
 | 20:00 | 売買シグナル生成 | `scripts/run_strategy_signal.py` |
 | 21:00 | ポートフォリオ構築 | `scripts/run_portfolio_construction.py` |
+| 21:15 | 夜間バッチ結果レポート | `scripts/run_night_batch_report.py` |
 | 08:30 | Execution Engine 起動 | `python -m kabusys.run_execution` |
 | 09:00 | Monitoring 起動 | `python -m kabusys.run_monitoring` |
 
-> TDnet 収集・開示イベント分類は `ENABLE_TDNET=false`（デフォルト）のときスキップされます。有効化手順は [B-2-3](#b-2-3-tdnet-適時開示収集の設定) を参照してください。
+**Addon 有効時のみ動くジョブ一覧:**（未設定でも Core の売買フローには影響しません）
 
-> EDINET 法定開示収集は `ENABLE_EDINET=false`（デフォルト）のときスキップされます。有効化手順は [B-2-4](#b-2-4-edinet-法定開示収集の設定) を参照してください。
-
-> Yahoo News RSS 収集は `ENABLE_YAHOONEWS=false`（デフォルト）のときスキップされます。有効化手順は [B-2-5](#b-2-5-yahoo-news-rss-収集の設定) を参照してください。
+| 時刻 | 処理 | Addon | スクリプト |
+|---|---|---|---|
+| 15:33 | Yahoo News RSS 収集 | News Addon（`ENABLE_YAHOONEWS=true`） | `scripts/run_yahoonews_collection.py` |
+| 15:35 | TDnet 適時開示収集 | Disclosure Addon（`ENABLE_TDNET=true`） | `scripts/run_tdnet_collection.py` |
+| 15:40 | EDINET 法定開示収集 | Disclosure Addon（`ENABLE_EDINET=true`） | `scripts/run_edinet_collection.py` |
+| 17:00 | 開示イベント分類 | Disclosure Addon（`ENABLE_TDNET=true`） | `scripts/run_disclosure_classification.py` |
+| 18:00 | AI 分析 | AI Addon（`ENABLE_AI_SENTIMENT=true`） | `scripts/run_ai_analysis.py` |
 
 > 詳細は `documents/10_Runtime/RuntimeJobSchedule.md` を参照してください。
 
+> **補足:** `pre_market_report`（08:00）および `market_close_report`（15:00）は Task Scheduler の自動ジョブではなく、オペレーターが手動で実行するコマンドです（`python -m kabusys.run_pre_market_report`、`python -m kabusys.run_market_close_report`）。詳細は [D_LiveOperation.md](./D_LiveOperation.md) を参照してください。
+
 ---
 
-## B-2. オプション機能の導入
+## B-2. Addon 機能の有効化
 
-オプション機能は `.env` の設定を変更するだけで有効化できます。
-Core 機能（自動売買）に影響なくいつでも追加・削除できます。
+Addon 機能は `.env` の設定を変更するだけで有効化できます。
+Core の自動売買フローに影響なくいつでも追加・削除できます。
 
-### B-2-1. LINE 通知の設定
+### B-2-1. LINE 通知の設定（Notification Addon — 任意）
 
 LINE 通知を使うと、発注・約定・エラーなどの重要なイベントをスマホの LINE で受け取れます。
 
@@ -207,7 +226,7 @@ LINE_USER_ID=your_line_user_id
 
 設定後、`python -m kabusys.validate_config` で検証します。
 
-### B-2-2. AI センチメント分析の設定
+### B-2-2. AI センチメント分析の設定（AI Addon — 任意）
 
 Yahoo ニュースの記事を OpenAI が自動的に読み取り、各銘柄の市場センチメント（強気・弱気）をスコア化して売買判断に加味します（最大 10% の影響）。
 
@@ -218,6 +237,10 @@ Yahoo ニュースの記事を OpenAI が自動的に読み取り、各銘柄の
 - レジーム判定は `NullRegimeProvider` が使用され、常に `'bull'`（非 Bear）として扱います
 - Bear レジームフィルタは発動せず、全銘柄が BUY 候補になります
 - Core の自動売買フロー・バックテストは AI データなしで完全に動作します
+
+**他の Addon との依存関係:**
+
+> AI Addon は、ニュース原文（`raw_news`）の入力として **News Addon**（`ENABLE_YAHOONEWS=true`）または **Disclosure Addon**（`ENABLE_TDNET=true`）との併用を推奨します。いずれのニュースソースも有効でない場合、AI 分析バッチは入力データなしで実行され、`ai_scores` は空（0件）になります。その場合でも Core の自動売買フローはスキップなしで正常に動作します（ニューススコアはデフォルト値で補完されます）。
 
 **必要なもの:**
 - OpenAI API キー（有料・従量課金）
@@ -231,7 +254,7 @@ ENABLE_AI_SENTIMENT=true
 OPENAI_API_KEY=sk-...
 ```
 
-### B-2-3. TDnet 適時開示収集の設定
+### B-2-3. TDnet 適時開示収集の設定（Disclosure Addon — 任意）
 
 TDnet（適時開示情報閲覧サービス）から当日の開示一覧を自動収集し、決算短信・業績修正・自己株取得などのイベントを分類・スコア化します。
 
@@ -253,7 +276,7 @@ ENABLE_TDNET=true
 
 > ℹ️ `ENABLE_TDNET=false`（デフォルト）の場合、両ジョブは即座にスキップされ Core 機能（自動売買）に影響しません。
 
-### B-2-4. EDINET 法定開示収集の設定
+### B-2-4. EDINET 法定開示収集の設定（Disclosure Addon — 任意）
 
 EDINET（Electronic Disclosure for Investors' NETwork）API から有価証券報告書・四半期報告書・大量保有報告書などの法定開示を自動収集します。TDnet では取得できない開示書類の補完層として機能します。
 
@@ -285,7 +308,7 @@ EDINET_API_KEY=your_subscription_key
 
 ---
 
-### B-2-5. Yahoo News RSS 収集の設定
+### B-2-5. Yahoo News RSS 収集の設定（News Addon — 任意）
 
 Yahoo News（ビジネスカテゴリ）の RSS フィードから当日のニュースを収集し、`raw_news` テーブルへ保存します。AI センチメント分析（`ENABLE_AI_SENTIMENT=true`）の前段データソースとして機能します。
 
@@ -314,29 +337,28 @@ ENABLE_YAHOONEWS=true
 
 ## B-3. 導入完了チェックリスト
 
-すべての項目にチェックが入れば、初期導入は完了です。
+### Core セットアップ完了チェック
 
-### Core 機能
+ここまで通れば Core は使い始められます。
 
 - [ ] `python -m kabusys.validate_config` がエラーなく完了する
 - [ ] `python scripts/setup_db.py` で `data/kabusys.duckdb` と `data/monitoring.db` が作成されている
 - [ ] `python scripts/setup_db.py --paper` で `data/paper_trading.db` が作成されている
 - [ ] DuckDB に市場データ（`prices_daily`, `stocks` など）が存在する
-- [ ] Task Scheduler にバッチジョブが登録されている
-
-### ペーパートレードの起動確認
-
+- [ ] Task Scheduler に Core 標準ジョブが登録されている
 - [ ] `.env` に `KABUSYS_ENV=paper_trading` が設定されている
 - [ ] `python -m kabusys.run_pre_market_report` が正常に動作する
 - [ ] `python -m kabusys.run_execution`（別ターミナルで起動）が起動エラーなく動く
 
-### オプション機能（有効化した場合のみ）
+### Addon 有効化時の追加チェック
 
-- [ ] LINE 通知: テストメッセージが LINE に届く
-- [ ] AI センチメント: `ENABLE_AI_SENTIMENT=true` で AI 分析バッチが正常完了する
-- [ ] TDnet 収集: `ENABLE_TDNET=true` で `run_tdnet_collection.py` が正常完了する
-- [ ] EDINET 収集: `ENABLE_EDINET=true` で `run_edinet_collection.py` が正常完了する
-- [ ] Yahoo News 収集: `ENABLE_YAHOONEWS=true` で `run_yahoonews_collection.py` が正常完了する
+（各 Addon を有効化した場合のみ確認します。未設定でも Core は動作します）
+
+- [ ] LINE 通知（Notification Addon）: テストメッセージが LINE に届く
+- [ ] AI センチメント（AI Addon）: `ENABLE_AI_SENTIMENT=true` で AI 分析バッチが正常完了する
+- [ ] TDnet 収集（Disclosure Addon）: `ENABLE_TDNET=true` で `run_tdnet_collection.py` が正常完了する
+- [ ] EDINET 収集（Disclosure Addon）: `ENABLE_EDINET=true` で `run_edinet_collection.py` が正常完了する
+- [ ] Yahoo News 収集（News Addon）: `ENABLE_YAHOONEWS=true` で `run_yahoonews_collection.py` が正常完了する
 
 ---
 

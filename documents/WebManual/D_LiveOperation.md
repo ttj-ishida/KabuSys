@@ -91,7 +91,7 @@ Streamlit:
 streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
 ```
 
-使うページ:
+**Core 標準導線 — 使うページ:**
 
 - `Home`（Kill Switch・プロセス状態・ドローダウン・エラーイベント）
 - `Pre-Market`（READY/BLOCKED 判定・データ鮮度確認）
@@ -101,7 +101,10 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 - `Performance`（エクイティカーブ・ポジション・取引履歴・Paper Verification）
 - `Failure Recovery`（障害イベント集約・復旧ガイド）
 - `WebManual`
-- `Strategy Lab`（市場レジーム・AI スコア）
+
+**Addon 導線 — 追加ページ:**（未設定でも Core は動作します）
+
+- `Strategy Lab`（市場レジーム・AI スコア — AI Addon 有効時に意味をもつ）
 
 ---
 
