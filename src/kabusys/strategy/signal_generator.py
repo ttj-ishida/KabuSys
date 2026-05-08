@@ -98,6 +98,10 @@ _STRATEGY_CONFIG_DEFAULTS: dict = {
     "max_holding_days": _MAX_HOLDING_DAYS,
     "trailing_stop_atr_mult": _TRAILING_STOP_ATR_MULT,
     "reentry_cooldown_days": _REENTRY_COOLDOWN_DAYS,
+    "sector_boost": _SECTOR_BOOST,
+    "sector_quartile": _SECTOR_QUARTILE,
+    "topix_drawdown_threshold": _TOPIX_DRAWDOWN_THRESHOLD,
+    "topix_size_multiplier_bear": _TOPIX_SIZE_MULTIPLIER_BEAR,
 }
 
 _STRATEGY_CONFIG_PATH = (
@@ -126,6 +130,10 @@ def _load_strategy_config() -> dict:
             "max_holding_days": int,
             "trailing_stop_atr_mult": float,
             "reentry_cooldown_days": int,
+            "sector_boost": float,
+            "sector_quartile": float,
+            "topix_drawdown_threshold": float,
+            "topix_size_multiplier_bear": float,
         }
     """
     global _strategy_config_cache, _strategy_config_mtime
@@ -226,6 +234,52 @@ def _load_strategy_config() -> dict:
             iv = int(v)
             if iv >= 0:
                 result[key] = iv
+
+    # sector セクション
+    sec = data.get("sector")
+    if isinstance(sec, dict):
+        v = sec.get("boost")
+        if (
+            v is not None
+            and isinstance(v, (int, float))
+            and not isinstance(v, bool)
+            and math.isfinite(float(v))
+            and float(v) >= 0
+        ):
+            result["sector_boost"] = float(v)
+
+        v = sec.get("quartile")
+        if (
+            v is not None
+            and isinstance(v, (int, float))
+            and not isinstance(v, bool)
+            and math.isfinite(float(v))
+            and 0.0 < float(v) < 1.0
+        ):
+            result["sector_quartile"] = float(v)
+
+    # regime セクション
+    reg = data.get("regime")
+    if isinstance(reg, dict):
+        v = reg.get("topix_drawdown_threshold")
+        if (
+            v is not None
+            and isinstance(v, (int, float))
+            and not isinstance(v, bool)
+            and math.isfinite(float(v))
+            and float(v) < 0
+        ):
+            result["topix_drawdown_threshold"] = float(v)
+
+        v = reg.get("topix_size_multiplier_bear")
+        if (
+            v is not None
+            and isinstance(v, (int, float))
+            and not isinstance(v, bool)
+            and math.isfinite(float(v))
+            and 0.0 < float(v) <= 1.0
+        ):
+            result["topix_size_multiplier_bear"] = float(v)
 
     _strategy_config_cache = result
     _strategy_config_mtime = current_mtime

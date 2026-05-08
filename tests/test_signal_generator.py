@@ -671,3 +671,78 @@ class TestGetTopixSizeMultiplier:
             conn, TARGET_DATE - timedelta(days=50), 50, 2000.0, 2000.0
         )
         assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Task 1: _load_strategy_config() sector/regime セクション
+# ---------------------------------------------------------------------------
+
+import kabusys.strategy.signal_generator as _sg
+
+
+def _load_cfg_with_yaml(yaml_text: str, tmp_path, monkeypatch) -> dict:
+    """tmp_path に YAML ファイルを書き、モジュールのパスとキャッシュをパッチして _load_strategy_config() を呼ぶ。"""
+    cfg_file = tmp_path / "strategy_config.yaml"
+    cfg_file.write_text(yaml_text, encoding="utf-8")
+    monkeypatch.setattr(_sg, "_STRATEGY_CONFIG_PATH", cfg_file)
+    monkeypatch.setattr(_sg, "_strategy_config_cache", None)
+    monkeypatch.setattr(_sg, "_strategy_config_mtime", -1.0)
+    return _sg._load_strategy_config()
+
+
+class TestLoadStrategyConfigSectorRegime:
+    """_load_strategy_config() の sector/regime セクション解析テスト。"""
+
+    def test_valid_sector_and_regime(self, tmp_path, monkeypatch):
+        yaml_text = """
+strategy:
+  threshold: 0.60
+sector:
+  boost: 0.05
+  quartile: 0.30
+regime:
+  topix_drawdown_threshold: -0.20
+  topix_size_multiplier_bear: 0.4
+"""
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["sector_boost"] == 0.05
+        assert cfg["sector_quartile"] == 0.30
+        assert cfg["topix_drawdown_threshold"] == -0.20
+        assert cfg["topix_size_multiplier_bear"] == 0.4
+
+    def test_missing_sector_section_uses_defaults(self, tmp_path, monkeypatch):
+        yaml_text = "strategy:\n  threshold: 0.60\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["sector_boost"] == 0.03
+        assert cfg["sector_quartile"] == 0.25
+
+    def test_missing_regime_section_uses_defaults(self, tmp_path, monkeypatch):
+        yaml_text = "strategy:\n  threshold: 0.60\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["topix_drawdown_threshold"] == -0.15
+        assert cfg["topix_size_multiplier_bear"] == 0.5
+
+    def test_sector_boost_negative_falls_back(self, tmp_path, monkeypatch):
+        yaml_text = "sector:\n  boost: -0.01\n  quartile: 0.25\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["sector_boost"] == 0.03  # default
+
+    def test_sector_quartile_zero_falls_back(self, tmp_path, monkeypatch):
+        yaml_text = "sector:\n  boost: 0.03\n  quartile: 0.0\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["sector_quartile"] == 0.25  # default
+
+    def test_sector_quartile_one_falls_back(self, tmp_path, monkeypatch):
+        yaml_text = "sector:\n  boost: 0.03\n  quartile: 1.0\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["sector_quartile"] == 0.25  # default
+
+    def test_topix_drawdown_threshold_positive_falls_back(self, tmp_path, monkeypatch):
+        yaml_text = "regime:\n  topix_drawdown_threshold: 0.10\n  topix_size_multiplier_bear: 0.5\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["topix_drawdown_threshold"] == -0.15  # default
+
+    def test_topix_size_multiplier_bear_over_one_falls_back(self, tmp_path, monkeypatch):
+        yaml_text = "regime:\n  topix_drawdown_threshold: -0.15\n  topix_size_multiplier_bear: 1.5\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["topix_size_multiplier_bear"] == 0.5  # default
