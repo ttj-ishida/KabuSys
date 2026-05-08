@@ -60,6 +60,11 @@ def test_build_regime_provider_enabled_returns_db(duck_conn):
     assert isinstance(p, DatabaseRegimeProvider)
 
 
+def test_build_regime_provider_enabled_true_conn_none_raises_value_error():
+    with pytest.raises(ValueError):
+        build_regime_provider(None, enabled=True)
+
+
 def test_regime_provider_isinstance_check(duck_conn):
     from kabusys.core.interfaces.regime import RegimeProvider
 

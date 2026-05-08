@@ -6,10 +6,13 @@ AI Addon 有効時は DatabaseRegimeProvider が market_regime テーブルを�
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from typing import Protocol, runtime_checkable
 
 import duckdb
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -39,4 +42,9 @@ class DatabaseRegimeProvider:
             "SELECT regime_label FROM market_regime WHERE date = ?",
             [target_date],
         ).fetchone()
-        return row[0] if row else "bull"
+        if row is None:
+            logger.debug(
+                "market_regime not found for %s; fallback to 'bull'", target_date
+            )
+            return "bull"
+        return row[0]
