@@ -23,7 +23,6 @@ from kabusys.strategy.signal_generator import (
     _compute_value_score,
     _compute_volatility_score,
     _fetch_gap_ratios,
-    _is_bear_regime,
     _sigmoid,
     generate_signals,
 )
@@ -191,35 +190,50 @@ def test_compute_liquidity_score_none():
 
 def test_is_bear_regime_empty(conn):
     """market_regime にデータなし → False（安全側）"""
-    assert _is_bear_regime(conn, TARGET_DATE) is False
+    from kabusys.core.interfaces import DatabaseRegimeProvider
+
+    provider = DatabaseRegimeProvider(conn)
+    assert provider.get_regime(TARGET_DATE) == "bull"
 
 
 def test_is_bear_regime_bull(conn):
     """regime_label='bull' → False"""
+    from kabusys.core.interfaces import DatabaseRegimeProvider
+
     conn.execute(
         "INSERT INTO market_regime (date, regime_score, regime_label) VALUES (?, ?, ?)",
         [TARGET_DATE, 0.5, "bull"],
     )
-    assert _is_bear_regime(conn, TARGET_DATE) is False
+    provider = DatabaseRegimeProvider(conn)
+    assert provider.get_regime(TARGET_DATE) == "bull"
 
 
 def test_is_bear_regime_bear(conn):
     """regime_label='bear' → True"""
+    from kabusys.core.interfaces import DatabaseRegimeProvider
+
     conn.execute(
         "INSERT INTO market_regime (date, regime_score, regime_label) VALUES (?, ?, ?)",
         [TARGET_DATE, -0.5, "bear"],
     )
-    assert _is_bear_regime(conn, TARGET_DATE) is True
+    provider = DatabaseRegimeProvider(conn)
+    assert provider.get_regime(TARGET_DATE) == "bear"
 
 
 def test_is_bear_regime_insufficient_samples(conn):
     """market_regime にデータなし（旧：サンプル不足）→ False"""
-    assert _is_bear_regime(conn, TARGET_DATE) is False
+    from kabusys.core.interfaces import DatabaseRegimeProvider
+
+    provider = DatabaseRegimeProvider(conn)
+    assert provider.get_regime(TARGET_DATE) == "bull"
 
 
 def test_is_bear_regime_all_none(conn):
     """market_regime にデータなし → False"""
-    assert _is_bear_regime(conn, TARGET_DATE) is False
+    from kabusys.core.interfaces import DatabaseRegimeProvider
+
+    provider = DatabaseRegimeProvider(conn)
+    assert provider.get_regime(TARGET_DATE) == "bull"
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +383,8 @@ def test_generate_signals_below_threshold_no_buy(conn):
 
 def test_generate_signals_bear_regime_suppresses_buy(conn):
     """Bear レジーム時は BUY シグナルが抑制される"""
+    from kabusys.core.interfaces import DatabaseRegimeProvider
+
     _insert_price_history(
         conn, [("A", 1000.0, 6e8), ("B", 1000.0, 6e8), ("C", 1000.0, 6e8)]
     )
@@ -382,7 +398,8 @@ def test_generate_signals_bear_regime_suppresses_buy(conn):
         "INSERT INTO market_regime (date, regime_score, regime_label) VALUES (?, ?, ?)",
         [TARGET_DATE, -0.8, "bear"],
     )
-    generate_signals(conn, TARGET_DATE, threshold=0.1)
+    regime_provider = DatabaseRegimeProvider(conn)
+    generate_signals(conn, TARGET_DATE, threshold=0.1, regime_provider=regime_provider)
     rows = conn.execute(
         "SELECT side FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
     ).fetchall()
@@ -769,11 +786,14 @@ def test_generate_signals_no_price_suppresses_sell(conn):
 
 def test_is_bear_regime_exactly_min_samples(conn):
     """regime_label='bear' → True（旧：_BEAR_MIN_SAMPLES ちょうどのサンプル数テスト）"""
+    from kabusys.core.interfaces import DatabaseRegimeProvider
+
     conn.execute(
         "INSERT INTO market_regime (date, regime_score, regime_label) VALUES (?, ?, ?)",
         [TARGET_DATE, -0.3, "bear"],
     )
-    assert _is_bear_regime(conn, TARGET_DATE) is True
+    provider = DatabaseRegimeProvider(conn)
+    assert provider.get_regime(TARGET_DATE) == "bear"
 
 
 # ---------------------------------------------------------------------------
@@ -1112,6 +1132,8 @@ def test_sector_unknown_not_affected(conn):
 
 def test_sector_filter_skipped_in_bear(conn):
     """Bear レジーム時はセクターフィルタが適用されない"""
+    from kabusys.core.interfaces import DatabaseRegimeProvider
+
     _insert_sector_test_data(
         conn,
         [
@@ -1131,7 +1153,8 @@ def test_sector_filter_skipped_in_bear(conn):
             "VALUES (?, ?, 3.0, 3.0, 0.0, 0.0, 20.0, 0.0)",
             [TARGET_DATE, code],
         )
-    generate_signals(conn, TARGET_DATE)
+    regime_provider = DatabaseRegimeProvider(conn)
+    generate_signals(conn, TARGET_DATE, regime_provider=regime_provider)
     buy_count = conn.execute(
         "SELECT COUNT(*) FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
     ).fetchone()[0]
