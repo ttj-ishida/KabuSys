@@ -587,6 +587,7 @@ def _fetch_gap_ratios(
 def _calc_sector_strengths(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
+    sector_quartile: float = _SECTOR_QUARTILE,
 ) -> tuple[frozenset[str], frozenset[str], dict[str, str]]:
     """セクター20営業日リターンを算出し、上位・下位セクターと銘柄→セクターマップを返す。
 
@@ -645,8 +646,8 @@ def _calc_sector_strengths(
         return frozenset(), frozenset(), sector_map
 
     n = len(rows)
-    top_n = max(1, math.ceil(n * _SECTOR_QUARTILE))
-    bottom_n = max(1, math.ceil(n * _SECTOR_QUARTILE))
+    top_n = max(1, math.ceil(n * sector_quartile))
+    bottom_n = max(1, math.ceil(n * sector_quartile))
 
     top_sectors = frozenset(s for s, _ in rows[:top_n])
     bottom_sectors = frozenset(s for s, _ in rows[-bottom_n:])
@@ -1236,7 +1237,7 @@ def generate_signals(
     boosted_count = 0
     if not regime_is_bear and not breadth_stop:
         top_sectors, bottom_sectors, sector_map = _calc_sector_strengths(
-            conn, target_date
+            conn, target_date, sector_quartile=_cfg["sector_quartile"]
         )
 
     # 4. 各銘柄の final_score 計算（Section 4.1）

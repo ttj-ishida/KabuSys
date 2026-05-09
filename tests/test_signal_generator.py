@@ -751,3 +751,47 @@ regime:
         yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_drawdown_threshold: -0.15\n  topix_size_multiplier_bear: 1.0\n"
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["topix_size_multiplier_bear"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Task 2: _calc_sector_strengths sector_quartile パラメータ
+# ---------------------------------------------------------------------------
+
+from kabusys.strategy.signal_generator import _calc_sector_strengths  # noqa: E402
+
+
+class TestCalcSectorStrengthsQuartile:
+    """_calc_sector_strengths の sector_quartile パラメータテスト。"""
+
+    def _setup_4sectors(self, conn) -> None:
+        """4セクター・4銘柄・21日分の価格データを挿入する。"""
+        sectors = [
+            ("1001", "製造業", 1.10),
+            ("1002", "金融業", 1.05),
+            ("1003", "情報通信", 1.02),
+            ("1004", "小売業", 0.98),
+        ]
+        for code, sector, _ in sectors:
+            conn.execute(
+                "INSERT INTO stocks (code, sector) VALUES (?, ?)", [code, sector]
+            )
+        base = date(2026, 1, 1)
+        for j in range(21):
+            d = base + timedelta(days=j)
+            for code, _, ret in sectors:
+                c = 1000.0 * ret if j == 20 else 1000.0
+                conn.execute(
+                    "INSERT INTO prices_daily (date, code, open, high, low, close, volume)"
+                    " VALUES (?, ?, 1000, 1000, 1000, ?, 1000)",
+                    [d, code, c],
+                )
+
+    def test_default_quartile_gives_1_top_sector(self, conn):
+        self._setup_4sectors(conn)
+        top, _, _ = _calc_sector_strengths(conn, date(2026, 1, 21))
+        assert len(top) == 1  # ceil(4 * 0.25) = 1
+
+    def test_custom_quartile_50_gives_2_top_sectors(self, conn):
+        self._setup_4sectors(conn)
+        top, _, _ = _calc_sector_strengths(conn, date(2026, 1, 21), sector_quartile=0.50)
+        assert len(top) == 2  # ceil(4 * 0.50) = 2
