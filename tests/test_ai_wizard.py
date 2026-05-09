@@ -154,3 +154,29 @@ class TestRenderWithApiKey:
         assert msgs[0]["role"] == "user"
         assert msgs[0]["content"] == "ドローダウンを改善したい"
         assert msgs[1]["role"] == "assistant"
+
+
+class TestHistoryClear:
+    def test_clear_button_deletes_session_messages(self, wizard_duckdb, wizard_sqlite):
+        """履歴クリアボタン押下 → SQLite の当該 session_id レコードが削除される。"""
+        import kabusys.monitoring.components.ai_wizard as mod
+
+        session_id = str(uuid.uuid4())
+        db = MonitoringDB(wizard_sqlite)
+        db.save_wizard_message(session_id, "user", "テストメッセージ")
+        assert len(db.load_wizard_messages(session_id)) == 1
+
+        state: dict = {"wizard_session_id": session_id}
+        mock_st = _make_st_mock(session_state=state)
+        mock_st.button.return_value = True  # simulate clear button click
+        mock_st.chat_input.return_value = None  # no user input
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+            with patch.object(mod, "st", mock_st):
+                with patch(
+                    "kabusys.monitoring.components.ai_wizard.load_latest_summary",
+                    return_value=None,
+                ):
+                    mod.render(wizard_duckdb, wizard_sqlite)
+
+        assert db.load_wizard_messages(session_id) == []
