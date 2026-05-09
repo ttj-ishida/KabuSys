@@ -36,7 +36,8 @@
 | 新規 | `src/kabusys/ai/backtest_summarizer.py` |
 | 新規 | `src/kabusys/monitoring/components/__init__.py` |
 | 新規 | `src/kabusys/monitoring/components/ai_wizard.py` |
-| 変更 | `src/kabusys/monitoring/monitoring_db.py`（`init_monitoring_db` に DDL 追加、`schema.py` 変更なし） |
+| 変更 | `src/kabusys/data/schema.py` |
+| 変更 | `src/kabusys/monitoring/monitoring_db.py` |
 | 変更 | `src/kabusys/monitoring/pages/10_Strategy_Lab.py` |
 | 新規 | `tests/test_backtest_summarizer.py` |
 | 新規 | `tests/test_ai_wizard.py` |
