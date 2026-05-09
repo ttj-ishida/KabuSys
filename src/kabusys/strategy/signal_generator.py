@@ -79,7 +79,7 @@ _REENTRY_COOLDOWN_DAYS: int = (
     5  # SELL 後この営業日数を経過するまで同一銘柄の BUY を禁止
 )
 
-_TOPIX_DRAWDOWN_THRESHOLD: float = -0.15  # 200MA 乖離率がこの値以下で縮小
+_TOPIX_DRAWDOWN_THRESHOLD: float = -0.15  # 200MA 乖離率がこの値未満で縮小
 _TOPIX_SIZE_MULTIPLIER_BEAR: float = 0.5  # 地合い悪化時の size_multiplier
 _TOPIX_MIN_DATA_COUNT: int = 100  # 200MA を信頼できる最低データ数（初期運用でのデータ蓄積期間を考慮し 200 でなく 100 に設定）
 
@@ -98,6 +98,10 @@ _STRATEGY_CONFIG_DEFAULTS: dict = {
     "max_holding_days": _MAX_HOLDING_DAYS,
     "trailing_stop_atr_mult": _TRAILING_STOP_ATR_MULT,
     "reentry_cooldown_days": _REENTRY_COOLDOWN_DAYS,
+    "sector_boost": _SECTOR_BOOST,
+    "sector_quartile": _SECTOR_QUARTILE,
+    "topix_drawdown_threshold": _TOPIX_DRAWDOWN_THRESHOLD,
+    "topix_size_multiplier_bear": _TOPIX_SIZE_MULTIPLIER_BEAR,
 }
 
 _STRATEGY_CONFIG_PATH = (
@@ -126,6 +130,10 @@ def _load_strategy_config() -> dict:
             "max_holding_days": int,
             "trailing_stop_atr_mult": float,
             "reentry_cooldown_days": int,
+            "sector_boost": float,
+            "sector_quartile": float,
+            "topix_drawdown_threshold": float,
+            "topix_size_multiplier_bear": float,
         }
     """
     global _strategy_config_cache, _strategy_config_mtime
@@ -226,6 +234,52 @@ def _load_strategy_config() -> dict:
             iv = int(v)
             if iv >= 0:
                 result[key] = iv
+
+    # sector セクション
+    sec = data.get("sector")
+    if isinstance(sec, dict):
+        v = sec.get("boost")
+        if (
+            v is not None
+            and isinstance(v, (int, float))
+            and not isinstance(v, bool)
+            and math.isfinite(float(v))
+            and float(v) >= 0
+        ):
+            result["sector_boost"] = float(v)
+
+        v = sec.get("quartile")
+        if (
+            v is not None
+            and isinstance(v, (int, float))
+            and not isinstance(v, bool)
+            and math.isfinite(float(v))
+            and 0.0 < float(v) < 1.0
+        ):
+            result["sector_quartile"] = float(v)
+
+    # regime セクション
+    reg = data.get("regime")
+    if isinstance(reg, dict):
+        v = reg.get("topix_drawdown_threshold")
+        if (
+            v is not None
+            and isinstance(v, (int, float))
+            and not isinstance(v, bool)
+            and math.isfinite(float(v))
+            and float(v) < 0
+        ):
+            result["topix_drawdown_threshold"] = float(v)
+
+        v = reg.get("topix_size_multiplier_bear")
+        if (
+            v is not None
+            and isinstance(v, (int, float))
+            and not isinstance(v, bool)
+            and math.isfinite(float(v))
+            and 0.0 < float(v) <= 1.0
+        ):
+            result["topix_size_multiplier_bear"] = float(v)
 
     _strategy_config_cache = result
     _strategy_config_mtime = current_mtime
@@ -447,19 +501,23 @@ def _is_breadth_stop(
 def _get_topix_size_multiplier(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
+    drawdown_threshold: float = _TOPIX_DRAWDOWN_THRESHOLD,
+    size_multiplier_bear: float = _TOPIX_SIZE_MULTIPLIER_BEAR,
 ) -> float:
     """TOPIX の 200 日移動平均乖離率に基づく size_multiplier を返す。
 
-    TOPIX が 200 日 MA から _TOPIX_DRAWDOWN_THRESHOLD (−15%) 以上下落している場合は
-    _TOPIX_SIZE_MULTIPLIER_BEAR (0.5) を返す。
+    TOPIX の 200 日 MA に対する乖離率が drawdown_threshold 未満（より低い側）の場合は
+    size_multiplier_bear を返す。
     データ不足または topix_daily が空の場合は 1.0 を返す（制限なし）。
 
     Args:
-        conn:        DuckDB 接続。topix_daily テーブルを参照する。
-        target_date: 基準日（この日以前の最新 TOPIX を使用）。
+        conn:                DuckDB 接続。topix_daily テーブルを参照する。
+        target_date:         基準日（この日以前の最新 TOPIX を使用）。
+        drawdown_threshold:  Bear 判定の乖離率閾値（デフォルト: _TOPIX_DRAWDOWN_THRESHOLD）。
+        size_multiplier_bear: Bear 時の size_multiplier（デフォルト: _TOPIX_SIZE_MULTIPLIER_BEAR）。
 
     Returns:
-        size_multiplier（0.5 または 1.0）。
+        size_multiplier（size_multiplier_bear または 1.0）。
     """
     try:
         row = conn.execute(
@@ -487,8 +545,8 @@ def _get_topix_size_multiplier(
     if row is None or row[1] is None or row[2] < _TOPIX_MIN_DATA_COUNT:
         return 1.0
     close, ma200, _ = float(row[0]), float(row[1]), row[2]
-    if ma200 > 0 and (close / ma200 - 1.0) < _TOPIX_DRAWDOWN_THRESHOLD:
-        return _TOPIX_SIZE_MULTIPLIER_BEAR
+    if ma200 > 0 and (close / ma200 - 1.0) < drawdown_threshold:
+        return size_multiplier_bear
     return 1.0
 
 
@@ -533,18 +591,19 @@ def _fetch_gap_ratios(
 def _calc_sector_strengths(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
+    sector_quartile: float = _SECTOR_QUARTILE,
 ) -> tuple[frozenset[str], frozenset[str], dict[str, str]]:
     """セクター20営業日リターンを算出し、上位・下位セクターと銘柄→セクターマップを返す。
 
     stocks テーブルの全銘柄 × prices_daily で等加重セクターリターンを計算し、
-    上位 _SECTOR_QUARTILE / 下位 _SECTOR_QUARTILE のセクターを分類する。
+    上位 sector_quartile / 下位 sector_quartile のセクターを分類する。
 
     データ欠損・セクター未登録銘柄は安全側（BUY 許可・スコアブーストなし）に倒す。
 
     Returns:
         (top_sectors, bottom_sectors, sector_map)
-        - top_sectors:    上位 _SECTOR_QUARTILE セクター名の frozenset
-        - bottom_sectors: 下位 _SECTOR_QUARTILE セクター名の frozenset
+        - top_sectors:    上位 sector_quartile セクター名の frozenset
+        - bottom_sectors: 下位 sector_quartile セクター名の frozenset
         - sector_map:     {code: sector}（NULL/空文字のセクターは除外）
 
     Note: 有効セクターが1つの場合は top と bottom が同一になるためフィルタ無効。
@@ -591,8 +650,8 @@ def _calc_sector_strengths(
         return frozenset(), frozenset(), sector_map
 
     n = len(rows)
-    top_n = max(1, math.ceil(n * _SECTOR_QUARTILE))
-    bottom_n = max(1, math.ceil(n * _SECTOR_QUARTILE))
+    top_n = max(1, math.ceil(n * sector_quartile))
+    bottom_n = max(1, math.ceil(n * sector_quartile))
 
     top_sectors = frozenset(s for s, _ in rows[:top_n])
     bottom_sectors = frozenset(s for s, _ in rows[-bottom_n:])
@@ -1036,6 +1095,7 @@ def generate_signals(
         max_holding_days = _cfg["max_holding_days"]
     if trailing_stop_atr is None:
         trailing_stop_atr = _cfg["trailing_stop_atr_mult"]
+    sector_boost = _cfg["sector_boost"]
 
     if min_holding_days < 0:
         raise ValueError(
@@ -1090,7 +1150,12 @@ def generate_signals(
 
     event_dates = event_dates or {}
     size_multiplier = _get_event_size_multiplier(event_dates, target_date, conn)
-    topix_multiplier = _get_topix_size_multiplier(conn, target_date)
+    topix_multiplier = _get_topix_size_multiplier(
+        conn,
+        target_date,
+        drawdown_threshold=_cfg["topix_drawdown_threshold"],
+        size_multiplier_bear=_cfg["topix_size_multiplier_bear"],
+    )
     size_multiplier = min(size_multiplier, topix_multiplier)
 
     # 1. features 読み込み（scope.mode="manual_codes" の場合は対象銘柄に限定）
@@ -1182,7 +1247,7 @@ def generate_signals(
     boosted_count = 0
     if not regime_is_bear and not breadth_stop:
         top_sectors, bottom_sectors, sector_map = _calc_sector_strengths(
-            conn, target_date
+            conn, target_date, sector_quartile=_cfg["sector_quartile"]
         )
 
     # 4. 各銘柄の final_score 計算（Section 4.1）
@@ -1214,11 +1279,11 @@ def generate_signals(
             + weights["liquidity"] * (s_liq if s_liq is not None else 0.5)
             + weights["news"] * (s_news if s_news is not None else 0.5)
         )
-        # セクター強弱スコア補正（上位セクターは +_SECTOR_BOOST）
+        # セクター強弱スコア補正（上位セクターは +sector_boost）
         sector = sector_map.get(code, "")
         if sector and sector in top_sectors:
             old_score = final_score
-            final_score += _SECTOR_BOOST
+            final_score += sector_boost
             logger.debug(
                 "sector boost: %s sector=%s score %.4f→%.4f date=%s",
                 code,

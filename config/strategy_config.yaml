@@ -37,3 +37,15 @@ value_score:
     per_mid: 20.0
     pbr_mid: 1.5
     div_yield_max: 3.0
+
+sector:
+  # 上位セクター銘柄への final_score 加算量（≥ 0）
+  boost: 0.03
+  # 上位・下位セクターの区切り割合（0 < x < 1）
+  quartile: 0.25
+
+regime:
+  # TOPIX 200MA 乖離率がこの値未満で地合い悪化と判定（負値）
+  topix_drawdown_threshold: -0.15
+  # 地合い悪化時の size_multiplier（0 < x ≤ 1）
+  topix_size_multiplier_bear: 0.5

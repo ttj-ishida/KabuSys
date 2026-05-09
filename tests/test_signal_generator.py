@@ -671,3 +671,166 @@ class TestGetTopixSizeMultiplier:
             conn, TARGET_DATE - timedelta(days=50), 50, 2000.0, 2000.0
         )
         assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
+
+    def test_custom_drawdown_threshold_and_multiplier(self, conn):
+        """カスタム drawdown_threshold と size_multiplier_bear が適用されることを確認する。"""
+        # 240日は 2000.0、直近11日は 1600.0（乖離率≈-20%）
+        self._make_topix_series(
+            conn, TARGET_DATE - timedelta(days=250), 240, 2000.0, 2000.0
+        )
+        recent_start = TARGET_DATE - timedelta(days=10)
+        self._make_topix_series(conn, recent_start, 11, 1600.0, 1600.0)
+
+        # drawdown_threshold=-0.10 → 乖離率-20% < -10% → Bear 判定 → 0.3 を返す
+        result = _get_topix_size_multiplier(
+            conn, TARGET_DATE, drawdown_threshold=-0.10, size_multiplier_bear=0.3
+        )
+        assert result == 0.3
+
+    def test_custom_threshold_not_triggered(self, conn):
+        """乖離率が drawdown_threshold を超えない場合は 1.0 を返すことを確認する。"""
+        # 250日すべて 2000.0（乖離率≈0%）
+        self._make_topix_series(
+            conn, TARGET_DATE - timedelta(days=250), 250, 2000.0, 2000.0
+        )
+        # drawdown_threshold=-0.10 → 乖離率≈0% > -10% → Bear 未判定 → 1.0
+        result = _get_topix_size_multiplier(
+            conn, TARGET_DATE, drawdown_threshold=-0.10, size_multiplier_bear=0.3
+        )
+        assert result == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Task 1: _load_strategy_config() sector/regime セクション
+# ---------------------------------------------------------------------------
+
+import kabusys.strategy.signal_generator as _sg  # noqa: E402
+
+
+def _load_cfg_with_yaml(yaml_text: str, tmp_path, monkeypatch) -> dict:
+    """tmp_path に YAML ファイルを書き、モジュールのパスとキャッシュをパッチして _load_strategy_config() を呼ぶ。"""
+    cfg_file = tmp_path / "strategy_config.yaml"
+    cfg_file.write_text(yaml_text, encoding="utf-8")
+    monkeypatch.setattr(_sg, "_STRATEGY_CONFIG_PATH", cfg_file)
+    monkeypatch.setattr(_sg, "_strategy_config_cache", None)
+    monkeypatch.setattr(_sg, "_strategy_config_mtime", -1.0)
+    return _sg._load_strategy_config()
+
+
+class TestLoadStrategyConfigSectorRegime:
+    """_load_strategy_config() の sector/regime セクション解析テスト。"""
+
+    def test_valid_sector_and_regime(self, tmp_path, monkeypatch):
+        yaml_text = """
+strategy:
+  threshold: 0.60
+sector:
+  boost: 0.05
+  quartile: 0.30
+regime:
+  topix_drawdown_threshold: -0.20
+  topix_size_multiplier_bear: 0.4
+"""
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["sector_boost"] == 0.05
+        assert cfg["sector_quartile"] == 0.30
+        assert cfg["topix_drawdown_threshold"] == -0.20
+        assert cfg["topix_size_multiplier_bear"] == 0.4
+
+    def test_missing_sector_section_uses_defaults(self, tmp_path, monkeypatch):
+        yaml_text = "strategy:\n  threshold: 0.60\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["sector_boost"] == 0.03
+        assert cfg["sector_quartile"] == 0.25
+
+    def test_missing_regime_section_uses_defaults(self, tmp_path, monkeypatch):
+        yaml_text = "strategy:\n  threshold: 0.60\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["topix_drawdown_threshold"] == -0.15
+        assert cfg["topix_size_multiplier_bear"] == 0.5
+
+    def test_sector_boost_negative_falls_back(self, tmp_path, monkeypatch):
+        yaml_text = (
+            "strategy:\n  threshold: 0.60\nsector:\n  boost: -0.01\n  quartile: 0.25\n"
+        )
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["sector_boost"] == 0.03  # default
+
+    def test_sector_quartile_zero_falls_back(self, tmp_path, monkeypatch):
+        yaml_text = (
+            "strategy:\n  threshold: 0.60\nsector:\n  boost: 0.03\n  quartile: 0.0\n"
+        )
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["sector_quartile"] == 0.25  # default
+
+    def test_sector_quartile_one_falls_back(self, tmp_path, monkeypatch):
+        yaml_text = (
+            "strategy:\n  threshold: 0.60\nsector:\n  boost: 0.03\n  quartile: 1.0\n"
+        )
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["sector_quartile"] == 0.25  # default
+
+    def test_topix_drawdown_threshold_positive_falls_back(self, tmp_path, monkeypatch):
+        yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_drawdown_threshold: 0.10\n  topix_size_multiplier_bear: 0.5\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["topix_drawdown_threshold"] == -0.15  # default
+
+    def test_topix_size_multiplier_bear_over_one_falls_back(
+        self, tmp_path, monkeypatch
+    ):
+        yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_drawdown_threshold: -0.15\n  topix_size_multiplier_bear: 1.5\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["topix_size_multiplier_bear"] == 0.5  # default
+
+    def test_topix_size_multiplier_bear_exactly_one_accepted(
+        self, tmp_path, monkeypatch
+    ):
+        yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_drawdown_threshold: -0.15\n  topix_size_multiplier_bear: 1.0\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["topix_size_multiplier_bear"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Task 2: _calc_sector_strengths sector_quartile パラメータ
+# ---------------------------------------------------------------------------
+
+from kabusys.strategy.signal_generator import _calc_sector_strengths  # noqa: E402
+
+
+class TestCalcSectorStrengthsQuartile:
+    """_calc_sector_strengths の sector_quartile パラメータテスト。"""
+
+    def _setup_4sectors(self, conn) -> None:
+        """4セクター・4銘柄・21日分の価格データを挿入する。"""
+        sectors = [
+            ("1001", "製造業", 1.10),
+            ("1002", "金融業", 1.05),
+            ("1003", "情報通信", 1.02),
+            ("1004", "小売業", 0.98),
+        ]
+        for code, sector, _ in sectors:
+            conn.execute(
+                "INSERT INTO stocks (code, sector) VALUES (?, ?)", [code, sector]
+            )
+        base = date(2026, 1, 1)
+        for j in range(21):
+            d = base + timedelta(days=j)
+            for code, _, ret in sectors:
+                c = 1000.0 * ret if j == 20 else 1000.0
+                conn.execute(
+                    "INSERT INTO prices_daily (date, code, open, high, low, close, volume)"
+                    " VALUES (?, ?, 1000, 1000, 1000, ?, 1000)",
+                    [d, code, c],
+                )
+
+    def test_default_quartile_gives_1_top_sector(self, conn):
+        self._setup_4sectors(conn)
+        top, _, _ = _calc_sector_strengths(conn, date(2026, 1, 21))
+        assert len(top) == 1  # ceil(4 * 0.25) = 1
+
+    def test_custom_quartile_50_gives_2_top_sectors(self, conn):
+        self._setup_4sectors(conn)
+        top, _, _ = _calc_sector_strengths(
+            conn, date(2026, 1, 21), sector_quartile=0.50
+        )
+        assert len(top) == 2  # ceil(4 * 0.50) = 2
