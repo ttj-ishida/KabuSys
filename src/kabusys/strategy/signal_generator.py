@@ -596,14 +596,14 @@ def _calc_sector_strengths(
     """セクター20営業日リターンを算出し、上位・下位セクターと銘柄→セクターマップを返す。
 
     stocks テーブルの全銘柄 × prices_daily で等加重セクターリターンを計算し、
-    上位 _SECTOR_QUARTILE / 下位 _SECTOR_QUARTILE のセクターを分類する。
+    上位 sector_quartile / 下位 sector_quartile のセクターを分類する。
 
     データ欠損・セクター未登録銘柄は安全側（BUY 許可・スコアブーストなし）に倒す。
 
     Returns:
         (top_sectors, bottom_sectors, sector_map)
-        - top_sectors:    上位 _SECTOR_QUARTILE セクター名の frozenset
-        - bottom_sectors: 下位 _SECTOR_QUARTILE セクター名の frozenset
+        - top_sectors:    上位 sector_quartile セクター名の frozenset
+        - bottom_sectors: 下位 sector_quartile セクター名の frozenset
         - sector_map:     {code: sector}（NULL/空文字のセクターは除外）
 
     Note: 有効セクターが1つの場合は top と bottom が同一になるためフィルタ無効。
@@ -1095,6 +1095,7 @@ def generate_signals(
         max_holding_days = _cfg["max_holding_days"]
     if trailing_stop_atr is None:
         trailing_stop_atr = _cfg["trailing_stop_atr_mult"]
+    sector_boost = _cfg["sector_boost"]
 
     if min_holding_days < 0:
         raise ValueError(
@@ -1278,11 +1279,11 @@ def generate_signals(
             + weights["liquidity"] * (s_liq if s_liq is not None else 0.5)
             + weights["news"] * (s_news if s_news is not None else 0.5)
         )
-        # セクター強弱スコア補正（上位セクターは +_SECTOR_BOOST）
+        # セクター強弱スコア補正（上位セクターは +sector_boost）
         sector = sector_map.get(code, "")
         if sector and sector in top_sectors:
             old_score = final_score
-            final_score += _SECTOR_BOOST
+            final_score += sector_boost
             logger.debug(
                 "sector boost: %s sector=%s score %.4f→%.4f date=%s",
                 code,
