@@ -723,26 +723,31 @@ regime:
         assert cfg["topix_size_multiplier_bear"] == 0.5
 
     def test_sector_boost_negative_falls_back(self, tmp_path, monkeypatch):
-        yaml_text = "sector:\n  boost: -0.01\n  quartile: 0.25\n"
+        yaml_text = "strategy:\n  threshold: 0.60\nsector:\n  boost: -0.01\n  quartile: 0.25\n"
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["sector_boost"] == 0.03  # default
 
     def test_sector_quartile_zero_falls_back(self, tmp_path, monkeypatch):
-        yaml_text = "sector:\n  boost: 0.03\n  quartile: 0.0\n"
+        yaml_text = "strategy:\n  threshold: 0.60\nsector:\n  boost: 0.03\n  quartile: 0.0\n"
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["sector_quartile"] == 0.25  # default
 
     def test_sector_quartile_one_falls_back(self, tmp_path, monkeypatch):
-        yaml_text = "sector:\n  boost: 0.03\n  quartile: 1.0\n"
+        yaml_text = "strategy:\n  threshold: 0.60\nsector:\n  boost: 0.03\n  quartile: 1.0\n"
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["sector_quartile"] == 0.25  # default
 
     def test_topix_drawdown_threshold_positive_falls_back(self, tmp_path, monkeypatch):
-        yaml_text = "regime:\n  topix_drawdown_threshold: 0.10\n  topix_size_multiplier_bear: 0.5\n"
+        yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_drawdown_threshold: 0.10\n  topix_size_multiplier_bear: 0.5\n"
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["topix_drawdown_threshold"] == -0.15  # default
 
     def test_topix_size_multiplier_bear_over_one_falls_back(self, tmp_path, monkeypatch):
-        yaml_text = "regime:\n  topix_drawdown_threshold: -0.15\n  topix_size_multiplier_bear: 1.5\n"
+        yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_drawdown_threshold: -0.15\n  topix_size_multiplier_bear: 1.5\n"
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["topix_size_multiplier_bear"] == 0.5  # default
+
+    def test_topix_size_multiplier_bear_exactly_one_accepted(self, tmp_path, monkeypatch):
+        yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_drawdown_threshold: -0.15\n  topix_size_multiplier_bear: 1.0\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["topix_size_multiplier_bear"] == 1.0
