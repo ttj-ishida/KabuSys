@@ -236,3 +236,39 @@ class TestUpsertDashboard:
         """レコードなし時は None を返す"""
         result = mdb.get_dashboard()
         assert result is None
+
+
+class TestWizardMessages:
+    def test_save_and_load_messages(self, monitoring_conn):
+        """save → load でメッセージが時系列順に返る。"""
+        db = MonitoringDB(monitoring_conn)
+        db.save_wizard_message("sess1", "user", "テスト質問")
+        db.save_wizard_message("sess1", "assistant", "テスト回答")
+        msgs = db.load_wizard_messages("sess1")
+        assert len(msgs) == 2
+        assert msgs[0] == {"role": "user", "content": "テスト質問"}
+        assert msgs[1] == {"role": "assistant", "content": "テスト回答"}
+
+    def test_load_empty_session(self, monitoring_conn):
+        """存在しない session_id は空リストを返す。"""
+        db = MonitoringDB(monitoring_conn)
+        assert db.load_wizard_messages("nonexistent") == []
+
+    def test_clear_removes_only_target_session(self, monitoring_conn):
+        """clear は対象 session_id のみ削除し、別セッションは残る。"""
+        db = MonitoringDB(monitoring_conn)
+        db.save_wizard_message("sess1", "user", "question")
+        db.save_wizard_message("sess2", "user", "other")
+        db.clear_wizard_messages("sess1")
+        assert db.load_wizard_messages("sess1") == []
+        assert len(db.load_wizard_messages("sess2")) == 1
+
+    def test_ai_wizard_messages_table_exists(self, monitoring_conn):
+        """init_monitoring_db 後に ai_wizard_messages テーブルが存在する。"""
+        tables = {
+            row[0]
+            for row in monitoring_conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert "ai_wizard_messages" in tables
