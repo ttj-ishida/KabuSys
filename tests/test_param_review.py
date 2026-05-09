@@ -270,3 +270,61 @@ class TestRollbackButton:
         assert "param_review_backup_path" not in state
         assert "param_review_suggested" not in state
         mock_st.rerun.assert_called()
+
+
+class TestComparisonDisplay:
+    def test_comparison_rendered_when_new_run_id_set(self, config_file, tmp_path):
+        import kabusys.monitoring.components.param_review as mod
+
+        state: dict = {
+            "param_review_applied": True,
+            "param_review_backup_path": str(tmp_path / "backup.yaml"),
+            "param_review_prev_run_id": "prev-001",
+            "param_review_new_run_id": "new-001",
+        }
+        mock_st = _make_st_mock(session_state=state)
+        mock_st.date_input.side_effect = [
+            __import__("datetime").date(2023, 1, 1),
+            __import__("datetime").date(2024, 12, 31),
+        ]
+        def columns_side_effect(n):
+            return [MagicMock() for _ in range(n)]
+
+        mock_st.columns.side_effect = columns_side_effect
+        mock_st.button.return_value = False
+
+        prev_metrics = {
+            "cagr": 0.123, "sharpe": 1.23, "max_drawdown": -0.185,
+            "win_rate": 0.55, "total_trades": 100.0,
+        }
+        new_metrics = {
+            "cagr": 0.141, "sharpe": 1.41, "max_drawdown": -0.162,
+            "win_rate": 0.58, "total_trades": 105.0,
+        }
+
+        def load_metrics_side_effect(duckdb_path, run_id):
+            if run_id == "prev-001":
+                return prev_metrics
+            if run_id == "new-001":
+                return new_metrics
+            return None
+
+        with patch.object(mod, "st", mock_st):
+            with patch(
+                "kabusys.monitoring.components.param_review._load_default_dates",
+                return_value=("2023-01-01", "2024-12-31"),
+            ):
+                with patch(
+                    "kabusys.monitoring.components.param_review._load_run_metrics",
+                    side_effect=load_metrics_side_effect,
+                ):
+                    mod.render_param_review(
+                        suggested_params={},
+                        config_path=config_file,
+                        duckdb_path=tmp_path / "test.duckdb",
+                        prev_run_id=None,
+                    )
+
+        mock_st.subheader.assert_called()
+        subheader_calls = [str(c) for c in mock_st.subheader.call_args_list]
+        assert any("比較" in c for c in subheader_calls)

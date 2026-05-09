@@ -228,20 +228,23 @@ def render_param_review(
 
     with col_roll:
         backup_path_str: str = st.session_state.get("param_review_backup_path", "")
-        if backup_path_str and st.button("⏪ ロールバック", key="param_review_rollback"):
-            try:
-                restore_backup(Path(backup_path_str), config_path)
-                for k in (
-                    "param_review_applied",
-                    "param_review_backup_path",
-                    "param_review_prev_run_id",
-                    "param_review_new_run_id",
-                    "param_review_suggested",
-                ):
-                    st.session_state.pop(k, None)
-                st.rerun()
-            except Exception as e:
-                st.error(f"ロールバックに失敗しました: {e}")
+        if st.button("⏪ ロールバック", key="param_review_rollback"):
+            if not backup_path_str:
+                st.error("バックアップが見つかりません。手動で設定を確認してください。")
+            else:
+                try:
+                    restore_backup(Path(backup_path_str), config_path)
+                    for k in (
+                        "param_review_applied",
+                        "param_review_backup_path",
+                        "param_review_prev_run_id",
+                        "param_review_new_run_id",
+                        "param_review_suggested",
+                    ):
+                        st.session_state.pop(k, None)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"ロールバックに失敗しました: {e}")
 
     # --- 比較表示 ---
     new_run_id_state: str | None = st.session_state.get("param_review_new_run_id")
@@ -264,12 +267,12 @@ def render_param_review(
         return f"{v:.{prec}f}" if v is not None else "N/A"
 
     metrics = [
-        ("CAGR", "cagr", _pct, True),
-        ("Sharpe Ratio", "sharpe", _f, True),
-        ("Max Drawdown", "max_drawdown", _pct, True),
-        ("Win Rate", "win_rate", _pct, True),
+        ("CAGR", "cagr", _pct, True, _pct),
+        ("Sharpe Ratio", "sharpe", _f, True, lambda v: f"{v:+.2f}" if v is not None else "N/A"),
+        ("Max Drawdown", "max_drawdown", _pct, True, _pct),
+        ("Win Rate", "win_rate", _pct, True, _pct),
         ("Total Trades", "total_trades",
-         lambda v: str(int(v)) if v is not None else "N/A", False),
+         lambda v: str(int(v)) if v is not None else "N/A", False, None),
     ]
 
     h1, h2, h3, h4 = st.columns(4)
@@ -278,16 +281,16 @@ def render_param_review(
     h3.markdown("**変更後**")
     h4.markdown("**差分**")
 
-    for label, mk, fmt, show_diff in metrics:
+    for label, mk, fmt, show_diff, diff_fmt in metrics:
         nv = new_m.get(mk) if new_m else None
         pv = prev_m.get(mk) if prev_m else None
         c1, c2, c3, c4 = st.columns(4)
         c1.write(label)
         c2.write(fmt(pv))
         c3.write(fmt(nv))
-        if show_diff and nv is not None and pv is not None:
+        if show_diff and nv is not None and pv is not None and diff_fmt is not None:
             diff = nv - pv
             icon = "🟢" if diff > 0 else "🔴"
-            c4.markdown(f"{icon} {diff:+.4f}")
+            c4.markdown(f"{icon} {diff_fmt(diff)}")
         else:
             c4.write("—")
