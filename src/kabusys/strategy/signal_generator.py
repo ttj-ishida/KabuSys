@@ -79,7 +79,7 @@ _REENTRY_COOLDOWN_DAYS: int = (
     5  # SELL 後この営業日数を経過するまで同一銘柄の BUY を禁止
 )
 
-_TOPIX_DRAWDOWN_THRESHOLD: float = -0.15  # 200MA 乖離率がこの値以下で縮小
+_TOPIX_DRAWDOWN_THRESHOLD: float = -0.15  # 200MA 乖離率がこの値未満で縮小
 _TOPIX_SIZE_MULTIPLIER_BEAR: float = 0.5  # 地合い悪化時の size_multiplier
 _TOPIX_MIN_DATA_COUNT: int = 100  # 200MA を信頼できる最低データ数（初期運用でのデータ蓄積期間を考慮し 200 でなく 100 に設定）
 
@@ -506,7 +506,7 @@ def _get_topix_size_multiplier(
 ) -> float:
     """TOPIX の 200 日移動平均乖離率に基づく size_multiplier を返す。
 
-    TOPIX が 200 日 MA から drawdown_threshold 以上下落している場合は
+    TOPIX の 200 日 MA に対する乖離率が drawdown_threshold 未満（より低い側）の場合は
     size_multiplier_bear を返す。
     データ不足または topix_daily が空の場合は 1.0 を返す（制限なし）。
 

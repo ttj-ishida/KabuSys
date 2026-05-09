@@ -45,7 +45,7 @@ sector:
   quartile: 0.25
 
 regime:
-  # TOPIX 200MA 乖離率がこの値以下で地合い悪化と判定（負値）
+  # TOPIX 200MA 乖離率がこの値未満で地合い悪化と判定（負値）
   topix_drawdown_threshold: -0.15
   # 地合い悪化時の size_multiplier（0 < x ≤ 1）
   topix_size_multiplier_bear: 0.5
