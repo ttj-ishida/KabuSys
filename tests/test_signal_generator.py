@@ -672,6 +672,33 @@ class TestGetTopixSizeMultiplier:
         )
         assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
 
+    def test_custom_drawdown_threshold_and_multiplier(self, conn):
+        """カスタム drawdown_threshold と size_multiplier_bear が適用されることを確認する。"""
+        # 240日は 2000.0、直近11日は 1600.0（乖離率≈-20%）
+        self._make_topix_series(
+            conn, TARGET_DATE - timedelta(days=250), 240, 2000.0, 2000.0
+        )
+        recent_start = TARGET_DATE - timedelta(days=10)
+        self._make_topix_series(conn, recent_start, 11, 1600.0, 1600.0)
+
+        # drawdown_threshold=-0.10 → 乖離率-20% < -10% → Bear 判定 → 0.3 を返す
+        result = _get_topix_size_multiplier(
+            conn, TARGET_DATE, drawdown_threshold=-0.10, size_multiplier_bear=0.3
+        )
+        assert result == 0.3
+
+    def test_custom_threshold_not_triggered(self, conn):
+        """乖離率が drawdown_threshold を超えない場合は 1.0 を返すことを確認する。"""
+        # 250日すべて 2000.0（乖離率≈0%）
+        self._make_topix_series(
+            conn, TARGET_DATE - timedelta(days=250), 250, 2000.0, 2000.0
+        )
+        # drawdown_threshold=-0.10 → 乖離率≈0% > -10% → Bear 未判定 → 1.0
+        result = _get_topix_size_multiplier(
+            conn, TARGET_DATE, drawdown_threshold=-0.10, size_multiplier_bear=0.3
+        )
+        assert result == 1.0
+
 
 # ---------------------------------------------------------------------------
 # Task 1: _load_strategy_config() sector/regime セクション

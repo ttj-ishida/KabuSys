@@ -501,19 +501,23 @@ def _is_breadth_stop(
 def _get_topix_size_multiplier(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
+    drawdown_threshold: float = _TOPIX_DRAWDOWN_THRESHOLD,
+    size_multiplier_bear: float = _TOPIX_SIZE_MULTIPLIER_BEAR,
 ) -> float:
     """TOPIX の 200 日移動平均乖離率に基づく size_multiplier を返す。
 
-    TOPIX が 200 日 MA から _TOPIX_DRAWDOWN_THRESHOLD (−15%) 以上下落している場合は
-    _TOPIX_SIZE_MULTIPLIER_BEAR (0.5) を返す。
+    TOPIX が 200 日 MA から drawdown_threshold 以上下落している場合は
+    size_multiplier_bear を返す。
     データ不足または topix_daily が空の場合は 1.0 を返す（制限なし）。
 
     Args:
-        conn:        DuckDB 接続。topix_daily テーブルを参照する。
-        target_date: 基準日（この日以前の最新 TOPIX を使用）。
+        conn:                DuckDB 接続。topix_daily テーブルを参照する。
+        target_date:         基準日（この日以前の最新 TOPIX を使用）。
+        drawdown_threshold:  Bear 判定の乖離率閾値（デフォルト: _TOPIX_DRAWDOWN_THRESHOLD）。
+        size_multiplier_bear: Bear 時の size_multiplier（デフォルト: _TOPIX_SIZE_MULTIPLIER_BEAR）。
 
     Returns:
-        size_multiplier（0.5 または 1.0）。
+        size_multiplier（size_multiplier_bear または 1.0）。
     """
     try:
         row = conn.execute(
@@ -541,8 +545,8 @@ def _get_topix_size_multiplier(
     if row is None or row[1] is None or row[2] < _TOPIX_MIN_DATA_COUNT:
         return 1.0
     close, ma200, _ = float(row[0]), float(row[1]), row[2]
-    if ma200 > 0 and (close / ma200 - 1.0) < _TOPIX_DRAWDOWN_THRESHOLD:
-        return _TOPIX_SIZE_MULTIPLIER_BEAR
+    if ma200 > 0 and (close / ma200 - 1.0) < drawdown_threshold:
+        return size_multiplier_bear
     return 1.0
 
 
@@ -1145,7 +1149,12 @@ def generate_signals(
 
     event_dates = event_dates or {}
     size_multiplier = _get_event_size_multiplier(event_dates, target_date, conn)
-    topix_multiplier = _get_topix_size_multiplier(conn, target_date)
+    topix_multiplier = _get_topix_size_multiplier(
+        conn,
+        target_date,
+        drawdown_threshold=_cfg["topix_drawdown_threshold"],
+        size_multiplier_bear=_cfg["topix_size_multiplier_bear"],
+    )
     size_multiplier = min(size_multiplier, topix_multiplier)
 
     # 1. features 読み込み（scope.mode="manual_codes" の場合は対象銘柄に限定）
