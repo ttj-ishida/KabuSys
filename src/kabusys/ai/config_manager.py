@@ -60,6 +60,8 @@ def apply_params(config_path: Path, params: dict) -> None:
 
     for key, value in params.items():
         if key == "weights":
+            if not isinstance(value, dict):
+                continue
             if not isinstance(data.get("strategy"), dict):
                 data["strategy"] = {}
             if not isinstance(data["strategy"].get("weights"), dict):

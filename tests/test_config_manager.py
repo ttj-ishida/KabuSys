@@ -76,14 +76,14 @@ class TestBackupConfig:
 
 
 class TestApplyParams:
-    def test_strategy_key_updated(self, config_file, backup_dir):
+    def test_strategy_key_updated(self, config_file):
         from kabusys.ai.config_manager import apply_params
 
         apply_params(config_file, {"threshold": 0.70})
         data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
         assert data["strategy"]["threshold"] == pytest.approx(0.70)
 
-    def test_weights_partial_update_preserves_other_factors(self, config_file, backup_dir):
+    def test_weights_partial_update_preserves_other_factors(self, config_file):
         from kabusys.ai.config_manager import apply_params
 
         apply_params(config_file, {"weights": {"momentum": 0.50}})
@@ -93,21 +93,21 @@ class TestApplyParams:
         assert w["value"] == pytest.approx(0.20)   # 変更なし
         assert w["volatility"] == pytest.approx(0.15)  # 変更なし
 
-    def test_sector_boost_mapped_correctly(self, config_file, backup_dir):
+    def test_sector_boost_mapped_correctly(self, config_file):
         from kabusys.ai.config_manager import apply_params
 
         apply_params(config_file, {"sector_boost": 0.05})
         data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
         assert data["sector"]["boost"] == pytest.approx(0.05)
 
-    def test_sector_quartile_mapped_correctly(self, config_file, backup_dir):
+    def test_sector_quartile_mapped_correctly(self, config_file):
         from kabusys.ai.config_manager import apply_params
 
         apply_params(config_file, {"sector_quartile": 0.30})
         data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
         assert data["sector"]["quartile"] == pytest.approx(0.30)
 
-    def test_regime_keys_mapped_correctly(self, config_file, backup_dir):
+    def test_regime_keys_mapped_correctly(self, config_file):
         from kabusys.ai.config_manager import apply_params
 
         apply_params(
@@ -121,7 +121,7 @@ class TestApplyParams:
         assert data["regime"]["topix_drawdown_threshold"] == pytest.approx(-0.20)
         assert data["regime"]["topix_size_multiplier_bear"] == pytest.approx(0.3)
 
-    def test_trailing_stop_updated(self, config_file, backup_dir):
+    def test_trailing_stop_updated(self, config_file):
         from kabusys.ai.config_manager import apply_params
 
         apply_params(config_file, {"trailing_stop_atr_mult": 2.5})
