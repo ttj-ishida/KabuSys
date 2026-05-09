@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import duckdb
 import streamlit as st
@@ -80,7 +81,12 @@ try:
         sqlite_conn = sqlite3.connect(str(settings.sqlite_path))
         try:
             init_monitoring_db(sqlite_conn)
-            render_wizard(conn, sqlite_conn)
+            render_wizard(
+                conn,
+                sqlite_conn,
+                duckdb_path=settings.duckdb_path,
+                config_path=Path("config/strategy_config.yaml"),
+            )
         finally:
             sqlite_conn.close()
 finally:
