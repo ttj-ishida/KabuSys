@@ -37,7 +37,8 @@ def _read_current_params(config_path: Path) -> dict:
     try:
         with open(config_path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
-    except Exception:
+    except (OSError, yaml.YAMLError) as e:
+        _logger.warning("_read_current_params: config 読み取り失敗: %s", e)
         return {}
 
     result: dict = {}
@@ -198,18 +199,23 @@ def render_param_review(
         if st.button("▶ バックテスト実行", key="param_review_run"):
             with st.status("バックテスト実行中...", expanded=True) as status:
                 st.write(f"期間: {start_date} 〜 {end_date}")
-                proc = subprocess.run(
-                    [
-                        sys.executable, "-m", "kabusys.backtest.run",
-                        "--start", start_date.isoformat(),
-                        "--end", end_date.isoformat(),
-                        "--db", str(duckdb_path),
-                        "--output-format", "json",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=600,
-                )
+                try:
+                    proc = subprocess.run(
+                        [
+                            sys.executable, "-m", "kabusys.backtest.run",
+                            "--start", start_date.isoformat(),
+                            "--end", end_date.isoformat(),
+                            "--db", str(duckdb_path),
+                            "--output-format", "json",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=600,
+                    )
+                except subprocess.TimeoutExpired:
+                    status.update(label="❌ タイムアウト", state="error")
+                    st.error("バックテストが600秒でタイムアウトしました。期間を短くするか、後で再試行してください。")
+                    return
                 if proc.returncode != 0:
                     status.update(label="❌ バックテスト失敗", state="error")
                     st.error(f"エラー:\n{proc.stderr}")
