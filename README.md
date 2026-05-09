@@ -80,7 +80,7 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 - LOG_LEVEL（`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`）
 - LINE_CHANNEL_ACCESS_TOKEN, LINE_USER_ID（任意; アラート用）
 - ENABLE_AI_SENTIMENT（`true` で AI ニュースセンチメント分析を有効化; デフォルト `false`）
-- OPENAI_API_KEY（ENABLE_AI_SENTIMENT=true 時に必須）
+- OPENAI_API_KEY（ENABLE_AI_SENTIMENT=true 時、または Strategy Lab の AI Co-Pilot チャット利用時に必須）
 - ENABLE_TDNET（`true` で TDnet 適時開示収集を有効化; デフォルト `false`）
 - ENABLE_EDINET（`true` で EDINET 法定開示収集を有効化; デフォルト `false`）
 - EDINET_API_KEY（ENABLE_EDINET=true 時に必須; EDINET API サブスクリプションキー）
@@ -378,12 +378,13 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 | **Performance** | エクイティカーブ / 保有ポジション / 取引履歴 / Paper Verification |
 | **Failure Recovery** | 障害イベント集約 / 復旧ガイド |
 | **WebManual** | 運用マニュアル閲覧ビュー |
-| **Strategy Lab** | 市場レジームスコア / AI スコアランキング / シグナル推移 |
+| **Strategy Lab** | 市場レジームスコア / AI スコアランキング / シグナル推移 / 🤖 AI Co-Pilot（GPT-4o チャット） |
 
 - Home は SQLite `monitoring.db`（read-only）。
 - Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Failure Recovery は `operations_data.py` 経由で SQLite `monitoring.db`（read-only）。
 - Performance > Paper Verification タブは SQLite `paper_trading.db`（read-only URI モード）。
-- Signal Queue / Performance（Paper Verification 以外）/ Strategy Lab は DuckDB `kabusys.duckdb` を読み取り専用で参照します。
+- Signal Queue / Performance（Paper Verification 以外）/ Strategy Lab（AI Co-Pilot タブ以外）は DuckDB `kabusys.duckdb` を読み取り専用で参照します。
+- Strategy Lab > AI Co-Pilot タブ: DuckDB `kabusys.duckdb`（backtest_runs 参照）+ SQLite `monitoring.db`（ai_wizard_messages 読み書き）を使用します。`OPENAI_API_KEY` 必須（環境変数または `st.secrets`）。
 
 ---
 
@@ -551,6 +552,8 @@ touch data/stop_requested.flag
     - dashboard_data.py            — Core 運用ページ向けデータロード関数（DuckDB / SQLite）
     - operations_data.py           — 運用フローページ向けデータロード関数（SQLite / Streamlit 非依存）
     - strategy_lab_data.py         — Strategy Lab ページ（AI Addon）専用データロード関数（DuckDB）
+    - components/
+      - ai_wizard.py               — AI Co-Pilot チャット UI コンポーネント（OpenAI GPT-4o ストリーミング）
     - pages/
       - 2_Initial_Setup.py         — 環境変数・設定・DB・Task Scheduler 確認
       - 3_Pre_Market.py            — 朝の READY/BLOCKED 判定・データ鮮度確認
@@ -560,7 +563,9 @@ touch data/stop_requested.flag
       - 7_Performance.py           — エクイティカーブ・ポジション・取引履歴・Paper Verification
       - 8_Failure_Recovery.py      — 障害イベント集約・復旧ガイド
       - 9_WebManual.py             — 運用マニュアル閲覧ビュー
-      - 10_Strategy_Lab.py         — 市場レジーム・AI スコア・シグナル推移
+      - 10_Strategy_Lab.py         — 市場レジーム・AI スコア・シグナル推移・AI Co-Pilot
+  - ai/
+    - backtest_summarizer.py     — DuckDB backtest_runs 最新結果 → system prompt 用 Markdown 生成
   - tools/
     - paper_verification_report.py
   - utils/

@@ -212,7 +212,7 @@ Core コードは返り値の型を意識せず `.send(message)` を呼ぶだけ
 
 | ページ | ファイル | 区分 | 表示内容 |
 |---|---|---|---|
-| Strategy Lab | `pages/10_Strategy_Lab.py` | Operations UI Addon | 市場レジーム・AI スコア・シグナル推移（AI Addon 有効時に意味をもつ） |
+| Strategy Lab | `pages/10_Strategy_Lab.py` | Operations UI Addon | 市場レジーム・AI スコア・シグナル推移・🤖 AI Co-Pilot チャット（AI Addon 有効時に意味をもつ） |
 
 推奨
 
@@ -279,11 +279,11 @@ Windows 1台での稼働を前提とし、オーバーヘッドの少ない構�
 
 | 種類 | ツール / 技術 | 用途・保存先 |
 |----|----|----|
-| データベース | SQLite | `monitoring.db` (テーブル: `system_status`, `trade_logs`, `positions`, `risk_logs`, `dashboard`) |
+| データベース | SQLite | `monitoring.db` (テーブル: `system_status`, `trade_logs`, `positions`, `risk_logs`, `dashboard`, `ai_wizard_messages`) |
 | ダッシュボード | Streamlit | Core 標準 9ページ（Home / Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Signal Queue / Performance / Failure Recovery / WebManual）+ Addon ページ（Strategy Lab）|
 | アラート | LINE | LINE Messaging API 経由での異常通知（Notification Addon — 任意） |
 
-### SQLite テーブル設計（Phase 7 実装）
+### SQLite テーブル設計（Phase 7 実装、Issue #233 で拡張）
 
 `src/kabusys/monitoring/monitoring_db.py` に `init_monitoring_db(conn)` + `MonitoringDB(conn)` として実装する。
 接続管理は呼び出し側（監視エンジン等）が担当し、`MonitoringDB` は `conn` を受け取るのみ。
@@ -295,6 +295,22 @@ Windows 1台での稼働を前提とし、オーバーヘッドの少ない構�
 | `positions` | upsert（code をキー） | 保有ポジション最新状態 |
 | `risk_logs` | 追記（イベント駆動） | DD超過・ポジション上限等のリスクイベント |
 | `dashboard` | 1行 upsert（id=1固定） | Streamlit向け最新集計値 |
+| `ai_wizard_messages` | 追記（ユーザー入力・AI応答） | AI Co-Pilot チャット履歴（セッション別） |
+
+`ai_wizard_messages` スキーマ:
+
+```sql
+CREATE TABLE IF NOT EXISTS ai_wizard_messages (
+    id          INTEGER   PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT      NOT NULL,
+    -- 現在は user/assistant のみ使用。system は将来の拡張用。
+    role        TEXT      NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    content     TEXT      NOT NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_wizard_messages_session
+    ON ai_wizard_messages (session_id, id);
+```
 
 `MonitoringDB` API:
 
@@ -307,6 +323,10 @@ MonitoringDB(conn)
   .log_risk_event(event_type, metric_name, metric_value, threshold, detail=None, logged_at=None)
   .upsert_dashboard(portfolio_value, cash, drawdown_pct, open_order_count, position_count, updated_at=None)
   .get_dashboard() -> dict | None
+  # AI Co-Pilot チャット履歴（Issue #233）
+  .save_wizard_message(session_id, role, content) -> None
+  .load_wizard_messages(session_id) -> list[dict]   # ORDER BY id ASC
+  .clear_wizard_messages(session_id) -> None
 ```
 
 ### SystemMonitor API（Phase 7 実装、Issue #37）
@@ -463,6 +483,7 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 | Strategy Lab | 市場レジーム | regime_score / regime_label 推移 | DuckDB `market_regime` |
 | Strategy Lab | AI スコア | 最新日の ai_score ランキング | DuckDB `ai_scores` |
 | Strategy Lab | シグナル推移 | 日別 buy/sell 件数集計 | DuckDB `signals` |
+| Strategy Lab | 🤖 AI Co-Pilot | 最新バックテスト結果を system prompt に注入した GPT-4o ストリーミングチャット。戦略パラメータのチューニング提案をインタラクティブに実施。チャット履歴は SQLite `ai_wizard_messages` に永続化 | DuckDB `backtest_runs` + SQLite `ai_wizard_messages` |
 
 **データソース分離:**
 

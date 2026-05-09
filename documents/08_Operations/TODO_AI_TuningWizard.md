@@ -1,36 +1,61 @@
-# TODO: AI対話ウィザード（Risk & Strategy Co-Pilot）の実装要件
+# AI Co-Pilot ウィザード（Risk & Strategy Co-Pilot）実装状況
+
+## ステータス
+
+- **Phase 1-3**: ✅ 実装済み（Issue #233 / PR #280、2026-05-09 main マージ）
+- **Phase 4**: 未着手（Issue #279）
+
+---
 
 ## 1. 背景と目的
-KabuSysのキラーコンテンツとして、単にバックテストを実行・閲覧するだけでなく、**「AI（LLM）と対話しながらリスクパラメータを試行錯誤（チューニング）できるアシスタント機能」**を構築する。
-ユーザー体験（UX）とシステムとしての付加価値を最大化するため、外部のChatGPTに頼るのではなく、**KabuSysの運用ダッシュボード（Streamlit）内に専用のチャットUIとして組み込む**。
 
-## 2. アーキテクチャと技術要件
+KabuSysのキラーコンテンツとして、バックテスト結果を踏まえながら **AI（LLM）と対話して戦略パラメータをチューニングできるアシスタント機能** を構築する。外部の ChatGPT に頼らず、KabuSys 運用ダッシュボード（Streamlit）内の専用チャット UI として組み込む。
 
-*   **フロントエンド**: Streamlit の標準チャットUIコンポーネント（`st.chat_message`, `st.chat_input`）を利用する。
-*   **バックエンド（LLM）**: OpenAI API（`gpt-4o` などを推奨。コードや数値の推論能力が高いため）。
-*   **コンテキスト注入（Context Injection）**: 
-    チャット開始時またはユーザーがボタンを押した際に、**最新のバックテスト結果（DuckDBから取得）を裏側で自動的にシステムプロンプトに埋め込み**、AIに「現在の状況」を把握させる。
-    *   *注入するデータの例*: 直近のCAGR、最大ドローダウン、勝率、Breadth Stopの発動回数、ATRストップロスのヒット率など。
-*   **状態管理**: `st.session_state` を利用してチャット履歴（対話の文脈）を保持する。
+---
 
-## 3. 実装ステップ（TODOリスト）
+## 2. 実装済み機能（Phase 1-3）
 
-### フェーズ1：チャットUI基盤の構築
-- [ ] `src/kabusys/ui/components/ai_wizard.py` の作成（再利用可能なチャットコンポーネント化）
-- [ ] `st.chat_input` と `st.chat_message` を用いた基本的な会話インターフェースの実装
-- [ ] `st.session_state.messages` によるチャット履歴の保存・復元機能の実装
-- [ ] OpenAI API との非同期（または同期）通信処理の実装
+### アーキテクチャ
 
-### フェーズ2：データ・コンテキストの統合
-- [ ] バックテスト結果（`backtest_results`テーブル等）から、主要なKPIを集計して文字列（Markdown等）に変換する関数の作成
-- [ ] ユーザーに見えない形で、集計したバックテスト結果をAIの「System Prompt」または初回メッセージとして注入するロジックの実装
-- [ ] 「KabuSysのクオンツ・リスク管理専門アナリスト」として振る舞うよう、システムプロンプトを設計・調整する（例: "あなたはKabuSysの戦略チューニングアシスタントです。以下のバックテスト結果を踏まえ、Breadth StopやATR乗数の改善案を提示してください..."）
+```
+10_Strategy_Lab.py
+    └─ components/ai_wizard.render(duckdb_conn, sqlite_conn)
+            ├─ ai/backtest_summarizer.load_latest_summary(duckdb_conn) → Markdown
+            ├─ monitoring.db: ai_wizard_messages テーブル（履歴永続化）
+            └─ OpenAI API (gpt-4o) ストリーミング
+```
 
-### フェーズ3：ダッシュボードへの組み込みとUX向上
-- [ ] `src/kabusys/ui/pages/04_backtest_analyzer.py`（または該当するバックテスト・成績ページ）の横または下部にチャットUIを配置
-- [ ] （オプション）ユーザーが「パラメータ変更案」をAIから提案された際、それを自動で設定ファイル（`config`）やDBに反映させるボタンを出す等の高度な連携（まずはテキストベースのアドバイスだけでも可）
+### 実装ファイル
 
-## 4. 期待されるユースケース（記事に書く際のフック）
-*   **ユーザー**: 「最近ドローダウンが大きいんだけど、どうすればいい？」
-*   **AI**: 「直近のバックテスト結果を見ると、決算発表時のATRストップロスヒット率が急増しています。決算前はイベント回避フラグ（Event Avoidance）を厳しめに設定するか、ATRの乗数を1.5から2.0に広げてノイズを吸収することを提案します。」
-*   **ユーザー**: 「じゃあATRを2.0にした場合の効果を推測して」
+| ファイル | 内容 |
+|---------|------|
+| `src/kabusys/ai/backtest_summarizer.py` | DuckDB `backtest_runs` 最新1件 → system prompt 用 Markdown 生成 |
+| `src/kabusys/monitoring/components/ai_wizard.py` | Streamlit チャット UI コンポーネント（ストリーミング・履歴・API key バリデーション） |
+| `src/kabusys/monitoring/monitoring_db.py` | `ai_wizard_messages` テーブル DDL + CRUD メソッド追加 |
+| `src/kabusys/monitoring/pages/10_Strategy_Lab.py` | 「🤖 AI Co-Pilot」タブを第4タブとして追加 |
+
+### 主な仕様
+
+- **フロントエンド**: `st.chat_input` / `st.chat_message` / `st.write_stream`（ストリーミング）
+- **LLM**: OpenAI GPT-4o（`OPENAI_API_KEY` 環境変数または `st.secrets` から取得）
+- **コンテキスト注入**: 最新バックテスト結果（CAGR・Sharpe・Max Drawdown・Win Rate 等 + 戦略パラメータ）を system prompt に自動注入
+- **履歴永続化**: SQLite `ai_wizard_messages` テーブル（セッション別・ページリロード後も復元）
+- **履歴クリア**: タブ内「🗑 履歴クリア」ボタン
+- **エラーハンドリング**: API key 未設定時は `st.error` + 早期 return、OpenAI エラーは UI に簡潔なメッセージ・詳細は `logging.exception`
+
+---
+
+## 3. 未実装機能（Phase 4 / Issue #279）
+
+- AI 提案パラメータの `strategy_config.yaml` 自動反映
+- 設定変更前の自動バックアップ機能
+- AI が変更できるキーの制限・破壊的変更防止の仕組み
+- バックテスト再実行ループ
+
+---
+
+## 4. 期待されるユースケース
+
+- **ユーザー**: 「最近ドローダウンが大きいんだけど、どうすればいい？」
+- **AI**: 「直近のバックテスト結果を見ると、ATRストップロスヒット率が急増しています。ATR乗数を1.5から2.0に広げてノイズを吸収することを提案します。」
+- **ユーザー**: 「じゃあATRを2.0にした場合の効果を推測して」

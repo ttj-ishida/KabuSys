@@ -104,7 +104,7 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 
 **Addon 導線 — 追加ページ:**（未設定でも Core は動作します）
 
-- `Strategy Lab`（市場レジーム・AI スコア — AI Addon 有効時に意味をもつ）
+- `Strategy Lab`（市場レジーム・AI スコア・🤖 AI Co-Pilot チャット — AI Addon 有効時に意味をもつ）
 
 ---
 
