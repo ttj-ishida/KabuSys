@@ -136,7 +136,9 @@ class TestRenderWithApiKey:
         state: dict = {}
         mock_st = _make_st_mock(session_state=state)
         mock_st.chat_input.return_value = "ドローダウンを改善したい"
-        mock_st.write_stream.return_value = "ATR乗数を2.0から2.5にすることを提案します。"
+        mock_st.write_stream.return_value = (
+            "ATR乗数を2.0から2.5にすることを提案します。"
+        )
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
             with patch.object(mod, "st", mock_st):
