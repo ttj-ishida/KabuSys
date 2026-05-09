@@ -240,13 +240,20 @@ class TestUpsertDashboard:
 
 class TestWizardMessages:
     def test_save_and_load_messages(self, mdb, monitoring_conn):
-        """save → load でメッセージが時系列順に返る。"""
+        """save → load でメッセージが挿入順に返る。"""
         mdb.save_wizard_message("sess1", "user", "テスト質問")
         mdb.save_wizard_message("sess1", "assistant", "テスト回答")
         msgs = mdb.load_wizard_messages("sess1")
         assert len(msgs) == 2
         assert msgs[0] == {"role": "user", "content": "テスト質問"}
         assert msgs[1] == {"role": "assistant", "content": "テスト回答"}
+
+    def test_load_order_is_stable_within_same_second(self, mdb):
+        """同一秒内に挿入された複数メッセージが挿入順（id 順）で返る。"""
+        for i in range(5):
+            mdb.save_wizard_message("sess_order", "user", f"msg{i}")
+        msgs = mdb.load_wizard_messages("sess_order")
+        assert [m["content"] for m in msgs] == [f"msg{i}" for i in range(5)]
 
     def test_load_empty_session(self, mdb):
         """存在しない session_id は空リストを返す。"""

@@ -51,6 +51,7 @@ def _make_st_mock(session_state=None):
     mock_st.chat_message.return_value.__enter__ = MagicMock(return_value=None)
     mock_st.chat_message.return_value.__exit__ = MagicMock(return_value=False)
     mock_st.chat_input.return_value = None
+    mock_st.secrets.get.return_value = None  # API key not in st.secrets by default
     return mock_st
 
 
@@ -156,6 +157,33 @@ class TestRenderWithApiKey:
         assert msgs[0]["role"] == "user"
         assert msgs[0]["content"] == "ドローダウンを改善したい"
         assert msgs[1]["role"] == "assistant"
+
+    def test_no_assistant_saved_when_write_stream_returns_none(
+        self, wizard_duckdb, wizard_sqlite
+    ):
+        """write_stream が None を返した場合、assistant メッセージは SQLite に保存しない。"""
+        import kabusys.monitoring.components.ai_wizard as mod
+
+        state: dict = {}
+        mock_st = _make_st_mock(session_state=state)
+        mock_st.chat_input.return_value = "質問"
+        mock_st.write_stream.return_value = None  # simulate empty stream
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+            with patch.object(mod, "st", mock_st):
+                with patch(
+                    "kabusys.monitoring.components.ai_wizard._stream_openai_response",
+                    return_value=iter([]),
+                ):
+                    with patch("kabusys.monitoring.components.ai_wizard.OpenAI"):
+                        mod.render(wizard_duckdb, wizard_sqlite)
+
+        session_id = state["wizard_session_id"]
+        db = MonitoringDB(wizard_sqlite)
+        msgs = db.load_wizard_messages(session_id)
+        # user は保存、assistant は保存しない
+        assert len(msgs) == 1
+        assert msgs[0]["role"] == "user"
 
 
 class TestHistoryClear:

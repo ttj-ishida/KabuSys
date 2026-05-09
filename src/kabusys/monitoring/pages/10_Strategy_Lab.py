@@ -1,4 +1,4 @@
-"""pages/4_Strategy_Lab.py — 市場レジーム・AI スコア・戦略状態ビュー。"""
+"""pages/10_Strategy_Lab.py — 市場レジーム・AI スコア・戦略状態ビュー。"""
 
 from __future__ import annotations
 

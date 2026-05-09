@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import uuid
@@ -14,6 +15,7 @@ from openai import OpenAI
 from kabusys.ai.backtest_summarizer import load_latest_summary
 from kabusys.monitoring.monitoring_db import MonitoringDB
 
+_logger = logging.getLogger(__name__)
 _MODEL = "gpt-4o"
 
 _SYSTEM_PROMPT_TEMPLATE = """\
@@ -79,7 +81,7 @@ def render(
     # session_state が更新されている可能性があるため、再取得する。
     session_id = st.session_state["wizard_session_id"]
 
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None)
     if not api_key:
         st.error("OPENAI_API_KEY が設定されていません。環境変数を設定してください。")
         return
@@ -109,6 +111,10 @@ def render(
     try:
         with st.chat_message("assistant"):
             response_text = st.write_stream(_stream_openai_response(client, messages))
-        db.save_wizard_message(session_id, "assistant", str(response_text))
-    except Exception as e:
-        st.error(f"OpenAI API エラー: {e}")
+        if response_text:
+            db.save_wizard_message(session_id, "assistant", str(response_text))
+    except Exception:
+        _logger.exception("OpenAI API 呼び出しに失敗しました")
+        st.error(
+            "OpenAI API の呼び出しに失敗しました。しばらく経ってから再度お試しください。"
+        )

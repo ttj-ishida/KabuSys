@@ -81,12 +81,14 @@ def init_monitoring_db(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS ai_wizard_messages (
             id          INTEGER   PRIMARY KEY AUTOINCREMENT,
             session_id  TEXT      NOT NULL,
+            -- 現在は user/assistant のみ使用。system は将来の拡張用。
             role        TEXT      NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
             content     TEXT      NOT NULL,
             created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
+        -- id は挿入順を保証するため ORDER BY id ASC で利用する
         CREATE INDEX IF NOT EXISTS idx_wizard_messages_session
-            ON ai_wizard_messages (session_id, created_at);
+            ON ai_wizard_messages (session_id, id);
     """)
     conn.commit()
 
@@ -336,7 +338,7 @@ class MonitoringDB:
         """
         rows = self._conn.execute(
             "SELECT role, content FROM ai_wizard_messages "
-            "WHERE session_id = ? ORDER BY created_at ASC",
+            "WHERE session_id = ? ORDER BY id ASC",
             (session_id,),
         ).fetchall()
         return [{"role": row["role"], "content": row["content"]} for row in rows]
