@@ -14,7 +14,7 @@ def mdb(monitoring_conn):
 
 class TestInitMonitoringDb:
     def test_tables_created_idempotently(self, monitoring_conn):
-        """init_monitoring_db を2回呼んでもエラーなし、5テーブルが存在する"""
+        """init_monitoring_db を2回呼んでもエラーなし、6テーブルが存在する"""
         init_monitoring_db(monitoring_conn)  # 2回目の呼び出し
         tables = {
             row[0]
@@ -239,20 +239,18 @@ class TestUpsertDashboard:
 
 
 class TestWizardMessages:
-    def test_save_and_load_messages(self, monitoring_conn):
+    def test_save_and_load_messages(self, mdb, monitoring_conn):
         """save → load でメッセージが時系列順に返る。"""
-        db = MonitoringDB(monitoring_conn)
-        db.save_wizard_message("sess1", "user", "テスト質問")
-        db.save_wizard_message("sess1", "assistant", "テスト回答")
-        msgs = db.load_wizard_messages("sess1")
+        mdb.save_wizard_message("sess1", "user", "テスト質問")
+        mdb.save_wizard_message("sess1", "assistant", "テスト回答")
+        msgs = mdb.load_wizard_messages("sess1")
         assert len(msgs) == 2
         assert msgs[0] == {"role": "user", "content": "テスト質問"}
         assert msgs[1] == {"role": "assistant", "content": "テスト回答"}
 
-    def test_load_empty_session(self, monitoring_conn):
+    def test_load_empty_session(self, mdb):
         """存在しない session_id は空リストを返す。"""
-        db = MonitoringDB(monitoring_conn)
-        assert db.load_wizard_messages("nonexistent") == []
+        assert mdb.load_wizard_messages("nonexistent") == []
 
     def test_clear_removes_only_target_session(self, monitoring_conn):
         """clear は対象 session_id のみ削除し、別セッションは残る。"""

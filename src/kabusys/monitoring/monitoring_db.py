@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 
 def init_monitoring_db(conn: sqlite3.Connection) -> None:
-    """5テーブル + インデックスを作成する（冪等）。"""
+    """6テーブル + インデックスを作成する（冪等）。"""
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS system_status (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
