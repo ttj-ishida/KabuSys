@@ -9,6 +9,7 @@ import streamlit as st
 
 from kabusys.config import Settings
 from kabusys.monitoring.components.ai_wizard import render as render_wizard
+from kabusys.monitoring.monitoring_db import init_monitoring_db
 from kabusys.monitoring.strategy_lab_data import (
     load_ai_scores,
     load_market_regime,
@@ -78,6 +79,7 @@ try:
     with tab_copilot:
         sqlite_conn = sqlite3.connect(str(settings.sqlite_path))
         try:
+            init_monitoring_db(sqlite_conn)
             render_wizard(conn, sqlite_conn)
         finally:
             sqlite_conn.close()
