@@ -71,20 +71,22 @@ def render(
 
     db = MonitoringDB(sqlite_conn)
 
-    with st.sidebar:
-        if st.button("🗑 履歴クリア", key="wizard_clear"):
-            db.clear_wizard_messages(session_id)
-            st.session_state["wizard_session_id"] = str(uuid.uuid4())
-            st.rerun()
-
-    # st.rerun() が呼ばれなかった場合 (= ボタンを押さなかった場合) でも
-    # session_state が更新されている可能性があるため、再取得する。
-    session_id = st.session_state["wizard_session_id"]
-
     api_key = os.environ.get("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None)
     if not api_key:
-        st.error("OPENAI_API_KEY が設定されていません。環境変数を設定してください。")
+        st.error(
+            "OPENAI_API_KEY が設定されていません。"
+            "環境変数または st.secrets に設定してください。"
+        )
         return
+
+    # 履歴クリアボタンをタブ内に配置（sidebar は全タブで常時表示されるため）
+    if st.button("🗑 履歴クリア", key="wizard_clear"):
+        db.clear_wizard_messages(session_id)
+        st.session_state["wizard_session_id"] = str(uuid.uuid4())
+        st.rerun()
+
+    # st.rerun() が呼ばれなかった場合でも session_state を再取得する
+    session_id = st.session_state["wizard_session_id"]
 
     summary = load_latest_summary(duckdb_conn)
     context = summary if summary is not None else _NO_DATA_CONTEXT
@@ -114,7 +116,9 @@ def render(
         if response_text:
             db.save_wizard_message(session_id, "assistant", str(response_text))
     except Exception:
-        _logger.exception("OpenAI API 呼び出しに失敗しました")
+        _logger.exception(
+            "OpenAI API 呼び出しに失敗しました (session_id=%s)", session_id
+        )
         st.error(
             "OpenAI API の呼び出しに失敗しました。しばらく経ってから再度お試しください。"
         )

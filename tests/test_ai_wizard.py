@@ -46,8 +46,6 @@ def _make_st_mock(session_state=None):
     """st モジュールのモックを生成する。"""
     mock_st = MagicMock()
     mock_st.session_state = session_state if session_state is not None else {}
-    mock_st.sidebar.__enter__ = MagicMock(return_value=None)
-    mock_st.sidebar.__exit__ = MagicMock(return_value=False)
     mock_st.chat_message.return_value.__enter__ = MagicMock(return_value=None)
     mock_st.chat_message.return_value.__exit__ = MagicMock(return_value=False)
     mock_st.chat_input.return_value = None
