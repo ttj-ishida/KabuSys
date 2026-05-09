@@ -704,7 +704,7 @@ class TestGetTopixSizeMultiplier:
 # Task 1: _load_strategy_config() sector/regime セクション
 # ---------------------------------------------------------------------------
 
-import kabusys.strategy.signal_generator as _sg
+import kabusys.strategy.signal_generator as _sg  # noqa: E402
 
 
 def _load_cfg_with_yaml(yaml_text: str, tmp_path, monkeypatch) -> dict:
