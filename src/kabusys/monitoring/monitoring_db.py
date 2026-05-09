@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 
 def init_monitoring_db(conn: sqlite3.Connection) -> None:
-    """5テーブル + インデックスを作成する（冪等）。"""
+    """6テーブル + インデックスを作成する（冪等）。"""
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS system_status (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,6 +77,18 @@ def init_monitoring_db(conn: sqlite3.Connection) -> None:
             position_count   INTEGER NOT NULL,
             peak_value       REAL
         );
+
+        CREATE TABLE IF NOT EXISTS ai_wizard_messages (
+            id          INTEGER   PRIMARY KEY AUTOINCREMENT,
+            session_id  TEXT      NOT NULL,
+            -- 現在は user/assistant のみ使用。system は将来の拡張用。
+            role        TEXT      NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+            content     TEXT      NOT NULL,
+            created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        -- id は挿入順を保証するため ORDER BY id ASC で利用する
+        CREATE INDEX IF NOT EXISTS idx_wizard_messages_session
+            ON ai_wizard_messages (session_id, id);
     """)
     conn.commit()
 
@@ -309,3 +321,32 @@ class MonitoringDB:
         cursor = self._conn.execute("SELECT * FROM dashboard WHERE id = 1")
         row = cursor.fetchone()
         return dict(row) if row else None
+
+    def save_wizard_message(self, session_id: str, role: str, content: str) -> None:
+        """AI ウィザードの発言を ai_wizard_messages テーブルに保存する。"""
+        self._conn.execute(
+            "INSERT INTO ai_wizard_messages (session_id, role, content) VALUES (?, ?, ?)",
+            (session_id, role, content),
+        )
+        self._conn.commit()
+
+    def load_wizard_messages(self, session_id: str) -> list[dict]:
+        """session_id に紐づく発言履歴を時系列順で返す。
+
+        Returns:
+            [{"role": "user"|"assistant", "content": "..."}, ...]
+        """
+        rows = self._conn.execute(
+            "SELECT role, content FROM ai_wizard_messages "
+            "WHERE session_id = ? ORDER BY id ASC",
+            (session_id,),
+        ).fetchall()
+        return [{"role": row["role"], "content": row["content"]} for row in rows]
+
+    def clear_wizard_messages(self, session_id: str) -> None:
+        """session_id に紐づく全発言を削除する。"""
+        self._conn.execute(
+            "DELETE FROM ai_wizard_messages WHERE session_id = ?",
+            (session_id,),
+        )
+        self._conn.commit()
