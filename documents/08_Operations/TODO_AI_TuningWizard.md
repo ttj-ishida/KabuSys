@@ -19,7 +19,7 @@ KabuSysのキラーコンテンツとして、バックテスト結果を踏ま�
 
 ```
 10_Strategy_Lab.py
-    └─ components/ai_wizard.render(duckdb_conn, sqlite_conn)
+    └─ components/ai_wizard.render(duckdb_conn, sqlite_conn, duckdb_path, config_path)
             ├─ ai/backtest_summarizer.load_latest_summary(duckdb_conn) → Markdown
             ├─ monitoring.db: ai_wizard_messages テーブル（履歴永続化）
             └─ OpenAI API (gpt-4o) ストリーミング
@@ -64,10 +64,37 @@ KabuSysのキラーコンテンツとして、バックテスト結果を踏ま�
 | `src/kabusys/monitoring/components/ai_wizard.py` | システムプロンプト更新（JSON ブロック出力指示追加）・`duckdb_path`/`config_path` 引数追加・param_review 統合 |
 | `src/kabusys/monitoring/pages/10_Strategy_Lab.py` | `render_wizard()` に `duckdb_path`/`config_path` 追加 |
 
+### Phase 4 アーキテクチャ
+
+```
+10_Strategy_Lab.py
+    └─ components/ai_wizard.render(duckdb_conn, sqlite_conn, duckdb_path, config_path)
+            ├─ [Phase 1-3 と同じ] backtest_summarizer → system prompt / streaming / 履歴永続化
+            ├─ ai/param_extractor.extract_params(response_text)
+            │       → ホワイトリスト検証済み dict | None
+            │           許可キー: threshold / stop_loss_rate / trailing_stop_atr_mult /
+            │                     sector_boost / sector_quartile / gap_up_threshold /
+            │                     gap_down_threshold / min_holding_days / max_holding_days /
+            │                     topix_drawdown_threshold / topix_size_multiplier_bear / weights
+            └─ components/param_review.render_param_review(params, config_path, duckdb_path, prev_run_id)
+                    ├─ 提案パラメータ表示（現在値との差分）
+                    ├─ [適用] ai/config_manager.backup_config() + apply_params()
+                    │           → config/strategy_config.yaml を更新・バックアップ保存
+                    ├─ [バックテスト] subprocess: python -m kabusys.backtest.run --output-format json
+                    │           → 実行前後の CAGR / Sharpe / MaxDD / WinRate 比較表示
+                    └─ [ロールバック] ai/config_manager.restore_backup()
+```
+
 ---
 
 ## 4. 期待されるユースケース
 
-- **ユーザー**: 「最近ドローダウンが大きいんだけど、どうすればいい？」
-- **AI**: 「直近のバックテスト結果を見ると、ATRストップロスヒット率が急増しています。ATR乗数を1.5から2.0に広げてノイズを吸収することを提案します。」
-- **ユーザー**: 「じゃあATRを2.0にした場合の効果を推測して」
+**典型的な対話フロー:**
+
+1. **ユーザー**: 「最近ドローダウンが大きいんだけど、どうすればいい？」
+2. **AI**: 「直近のバックテスト結果を見ると、ATRストップロスヒット率が急増しています。ATR乗数を1.5から2.0に広げてノイズを吸収することを提案します。\n```json\n{"trailing_stop_atr_mult": 2.0}\n```」
+3. **UI**: 提案パラメータのレビューパネルを自動表示（現在値 1.5 → 提案値 2.0）
+4. **ユーザー**: 「適用」ボタンをクリック → `strategy_config.yaml` をバックアップして更新
+5. **UI**: バックテスト期間を指定して「バックテスト実行」ボタンをクリック
+6. **UI**: 実行前後の成績比較（CAGR / Sharpe / Max Drawdown / Win Rate）を表示
+7. **ユーザー**: 結果が悪ければ「ロールバック」ボタンで設定を元に戻す
