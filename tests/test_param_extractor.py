@@ -72,3 +72,24 @@ class TestExtractParams:
         result = extract_params(text)
         assert result == {"min_holding_days": 3, "max_holding_days": 30}
         assert isinstance(result["min_holding_days"], int)
+
+    def test_bool_weight_value_excluded(self):
+        # bool は int のサブクラスだが weight 値として許可しない
+        text = '```json\n{"weights": {"momentum": true, "value": 0.25}}\n```'
+        result = extract_params(text)
+        assert result == {"weights": {"value": 0.25}}
+        assert "momentum" not in result["weights"]
+
+    def test_float_holding_days_excluded(self):
+        # min_holding_days は整数のみ許可; 小数点以下がある float は除外
+        text = '```json\n{"min_holding_days": 3.7, "max_holding_days": 30}\n```'
+        result = extract_params(text)
+        assert result == {"max_holding_days": 30}
+        assert "min_holding_days" not in result
+
+    def test_whole_float_holding_days_accepted(self):
+        # 小数点以下が 0 の float (例: 3.0) は整数として許可
+        text = '```json\n{"min_holding_days": 3.0}\n```'
+        result = extract_params(text)
+        assert result == {"min_holding_days": 3}
+        assert isinstance(result["min_holding_days"], int)

@@ -92,7 +92,11 @@ def extract_params(text: str) -> dict | None:
                 if wk not in ALLOWED_WEIGHT_KEYS:
                     _logger.warning("extract_params: 未知の weight キーを除外: %s", wk)
                     continue
-                if not isinstance(wv, (int, float)) or not (0.0 <= float(wv) <= 1.0):
+                if (
+                    not isinstance(wv, (int, float))
+                    or isinstance(wv, bool)
+                    or not (0.0 <= float(wv) <= 1.0)
+                ):
                     _logger.warning("extract_params: weight 値が値域外: %s=%s", wk, wv)
                     continue
                 filtered[wk] = float(wv)
@@ -105,7 +109,15 @@ def extract_params(text: str) -> dict | None:
             _logger.warning("extract_params: 数値でない値を除外: %s=%s", key, value)
             continue
 
-        v: int | float = int(value) if key in _INT_KEYS else float(value)
+        if key in _INT_KEYS:
+            if isinstance(value, float) and value != int(value):
+                _logger.warning(
+                    "extract_params: 整数でない float を除外: %s=%s", key, value
+                )
+                continue
+            v: int | float = int(value)
+        else:
+            v = float(value)
         if not (lo <= float(v) <= hi):
             _logger.warning(
                 "extract_params: 値域外の値を除外: %s=%s (範囲: %s〜%s)", key, v, lo, hi
