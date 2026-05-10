@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 def test_read_env_parses_existing_file(tmp_path):
@@ -149,7 +149,8 @@ def test_main_saves_file_on_y(tmp_path):
     """main() でユーザーが y を入力したとき .env が保存されること。"""
     from kabusys import config_setup
 
-    # _ITEMS は 10 項目 + 確認 1 回 = 11 回の input()
+    # _ITEMS と同数の input() + 確認 1 回。
+    # J-Quants ウィザードは空メール（Enter）→スキップのため 1 input() を消費。
     n_items = len(config_setup._ITEMS)
     env_file = tmp_path / ".env"
     inputs = iter(["development"] + [""] * (n_items - 1) + ["y"])
@@ -178,3 +179,136 @@ def test_main_does_not_save_on_n(tmp_path):
 
     assert result == 0
     assert not env_file.exists()
+
+
+# ---------------------------------------------------------------------------
+# _fetch_jquants_refresh_token テスト
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_jquants_refresh_token_success():
+    """正常レスポンスでリフレッシュトークンが返ること。"""
+    from kabusys.config_setup import _fetch_jquants_refresh_token
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"refreshToken": "tok_abc123"}
+
+    with patch("kabusys.config_setup.requests.post", return_value=mock_resp):
+        result = _fetch_jquants_refresh_token("user@example.com", "pass")
+
+    assert result == "tok_abc123"
+
+
+def test_fetch_jquants_refresh_token_bad_request(capsys):
+    """400 Bad Request のとき None が返りエラーメッセージが表示されること。"""
+    from kabusys.config_setup import _fetch_jquants_refresh_token
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 400
+    mock_resp.json.return_value = {"message": "'mailaddress' or 'password' is incorrect."}
+
+    with patch("kabusys.config_setup.requests.post", return_value=mock_resp):
+        result = _fetch_jquants_refresh_token("bad@example.com", "wrong")
+
+    assert result is None
+    captured = capsys.readouterr()
+    assert "400" in captured.out
+
+
+def test_fetch_jquants_refresh_token_connection_error(capsys):
+    """接続エラー発生時に None が返りエラーメッセージが表示されること。"""
+    from kabusys.config_setup import _fetch_jquants_refresh_token
+
+    with patch(
+        "kabusys.config_setup.requests.post",
+        side_effect=Exception("connection refused"),
+    ):
+        result = _fetch_jquants_refresh_token("user@example.com", "pass")
+
+    assert result is None
+    captured = capsys.readouterr()
+    assert "接続エラー" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# _prompt_jquants_auth テスト
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_jquants_auth_no_token_skip(capsys):
+    """既存トークンなし + 空メール入力でスキップし None が返ること。"""
+    from kabusys.config_setup import _prompt_jquants_auth
+
+    with patch("builtins.input", return_value=""):
+        result = _prompt_jquants_auth({})
+
+    assert result is None
+    assert "スキップ" in capsys.readouterr().out
+
+
+def test_prompt_jquants_auth_no_token_api_success():
+    """既存トークンなし + メール+パスワード入力 → API 成功でトークンが返ること。"""
+    from kabusys.config_setup import _prompt_jquants_auth
+
+    inputs = iter(["user@example.com"])  # メールアドレス
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"refreshToken": "new_tok"}
+
+    with (
+        patch("builtins.input", side_effect=inputs),
+        patch("getpass.getpass", return_value="mypassword"),
+        patch("kabusys.config_setup.requests.post", return_value=mock_resp),
+    ):
+        result = _prompt_jquants_auth({})
+
+    assert result == "new_tok"
+
+
+def test_prompt_jquants_auth_no_token_api_failure_manual_fallback():
+    """API 失敗後に手動入力したトークンが返ること。"""
+    from kabusys.config_setup import _prompt_jquants_auth
+
+    inputs = iter(["user@example.com", "manual_token_xyz"])
+    mock_resp = MagicMock()
+    mock_resp.status_code = 400
+    mock_resp.json.return_value = {"message": "'mailaddress' or 'password' is incorrect."}
+
+    with (
+        patch("builtins.input", side_effect=inputs),
+        patch("getpass.getpass", return_value="wrongpass"),
+        patch("kabusys.config_setup.requests.post", return_value=mock_resp),
+    ):
+        result = _prompt_jquants_auth({})
+
+    assert result == "manual_token_xyz"
+
+
+def test_prompt_jquants_auth_existing_token_keep():
+    """既存トークンあり + Enter（N）で None が返り既存値が維持されること。"""
+    from kabusys.config_setup import _prompt_jquants_auth
+
+    with patch("builtins.input", return_value=""):  # "再取得しますか？" に Enter
+        result = _prompt_jquants_auth({"JQUANTS_REFRESH_TOKEN": "old_tok"})
+
+    assert result is None  # 呼び出し元が既存値を維持
+
+
+def test_prompt_jquants_auth_existing_token_refresh():
+    """既存トークンあり + y → API 成功で新トークンが返ること。"""
+    from kabusys.config_setup import _prompt_jquants_auth
+
+    inputs = iter(["y", "user@example.com"])  # 再取得確認, メール
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"refreshToken": "refreshed_tok"}
+
+    with (
+        patch("builtins.input", side_effect=inputs),
+        patch("getpass.getpass", return_value="pass"),
+        patch("kabusys.config_setup.requests.post", return_value=mock_resp),
+    ):
+        result = _prompt_jquants_auth({"JQUANTS_REFRESH_TOKEN": "old_tok"})
+
+    assert result == "refreshed_tok"
