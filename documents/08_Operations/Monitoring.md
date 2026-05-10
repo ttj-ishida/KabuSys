@@ -212,7 +212,7 @@ Core コードは返り値の型を意識せず `.send(message)` を呼ぶだけ
 
 | ページ | ファイル | 区分 | 表示内容 |
 |---|---|---|---|
-| Strategy Lab | `pages/10_Strategy_Lab.py` | Operations UI Addon | 市場レジーム・AI スコア・シグナル推移・🤖 AI Co-Pilot チャット（AI Addon 有効時に意味をもつ） |
+| Strategy Lab | `pages/10_Strategy_Lab.py` | Operations UI Addon | 市場レジーム・AI スコア・シグナル推移・🤖 AI Co-Pilot チャット（パラメータ提案・適用・バックテスト再実行・比較） |
 
 推奨
 

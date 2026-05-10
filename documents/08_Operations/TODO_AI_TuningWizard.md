@@ -45,12 +45,24 @@ KabuSysのキラーコンテンツとして、バックテスト結果を踏ま�
 
 ---
 
-## 3. 未実装機能（Phase 4 / Issue #279）
+## 3. Phase 4: パラメータ自動反映・バックテスト再実行ループ（Issue #279, 2026-05-10）
 
-- AI 提案パラメータの `strategy_config.yaml` 自動反映
-- 設定変更前の自動バックアップ機能
-- AI が変更できるキーの制限・破壊的変更防止の仕組み
-- バックテスト再実行ループ
+**✅ 実装済み**
+
+### 実装ファイル
+
+| ファイル | 内容 |
+|---|---|
+| `src/kabusys/ai/param_extractor.py` | AI 返答から JSON ブロック抽出・ホワイトリスト検証 |
+| `src/kabusys/ai/config_manager.py` | strategy_config.yaml バックアップ・適用・ロールバック |
+| `src/kabusys/monitoring/components/param_review.py` | Streamlit: 確認→適用→subprocess→比較 |
+
+### 変更ファイル
+
+| ファイル | 内容 |
+|---|---|
+| `src/kabusys/monitoring/components/ai_wizard.py` | システムプロンプト更新（JSON ブロック出力指示追加）・`duckdb_path`/`config_path` 引数追加・param_review 統合 |
+| `src/kabusys/monitoring/pages/10_Strategy_Lab.py` | `render_wizard()` に `duckdb_path`/`config_path` 追加 |
 
 ---
 
