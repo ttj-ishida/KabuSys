@@ -165,6 +165,8 @@ EDINET API（15:40 ジョブ、法定開示補完）
 
 **冪等性**: `raw_disclosures` の主キーは開示 ID（TDnet: 開示番号 / EDINET: docID）。重複取得しても `ON CONFLICT DO NOTHING` で安全。
 
+**EDINET API v2 実装メモ**: 書類種別コードは `docTypeCode` フィールド（`docType` ではない）。銘柄コードは `secCode`（5桁: JPX 4桁 + "0"）で返るが、現実装では `code=NULL` にマップ。認証は `Subscription-Key` クエリパラメータ。
+
 **31日掲載制限への対策（TDnet）**: TDnet 閲覧サービスには掲載期限（約31日）がある。毎日の差分取得で取りこぼしを防ぐ。取得漏れは `raw_disclosures` の日付ギャップ検出で検知する。
 
 ---
