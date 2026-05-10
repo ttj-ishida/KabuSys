@@ -255,7 +255,9 @@ Bulk API からのファイル単位の処理状態を管理する。再実行�
 
 取得元: Yahoo News（RSS）。補助ニュース源として使用し、売買判断の主役にはしない。シグナルへの影響は AI スコア経由で最大 10% 以内に限定する。
 
-## news_articles
+## raw_news
+
+収集したニュース記事の生データを保存するテーブル。`news_collector.py` が書き込む。Night Batch レポートの `UpdateCounts.raw_news` はこのテーブルの当日行数を集計する。
 
   column     type        description
   ---------- ----------- --------------
@@ -265,6 +267,8 @@ Bulk API からのファイル単位の処理状態を管理する。再実行�
   title      string      タイトル
   content    text        本文（RSS 要約。提供元規約に従い全文は保存しない）
   url        string      記事URL
+
+> **注意**: テーブル名は `raw_news`。旧称 `news_articles` は廃止済み（Issue #286）。
 
 ------------------------------------------------------------------------
 
@@ -579,7 +583,7 @@ Executionの処理フロー:
     ↓
     TDnet 適時開示（15:35）→ raw_disclosures（source='tdnet'）
     EDINET API（15:40）    → raw_disclosures（source='edinet'）
-    news_articles（RSS取得、補助）
+    raw_news（RSS取得、補助）
     ↓
     features（16:00）
     ↓

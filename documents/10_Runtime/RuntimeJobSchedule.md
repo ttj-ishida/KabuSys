@@ -135,7 +135,18 @@ Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object 
 
 - `READY`: 全必須ジョブ成功かつ翌営業日の `signal_queue` が作成済み
 - `READY_WITH_WARNINGS`: warning はあるが翌営業日の準備は完了
-- `BLOCKED`: 必須ジョブ失敗または `signal_queue` が空
+- `BLOCKED`: 以下のいずれかに該当する場合
+
+| 条件 | 判定 |
+|------|------|
+| 必須ジョブが欠落 / `failed` / `skipped` | BLOCKED |
+| `signal_queue == 0` | BLOCKED |
+| `prices_daily == 0` | BLOCKED |
+| `features == 0` | BLOCKED |
+| `signals == 0` | READY_WITH_WARNINGS |
+| その他の warning | READY_WITH_WARNINGS |
+
+> `prices_daily == 0` および `features == 0` は、価格データ・特徴量なしではシグナル生成が不可能なため BLOCKED とする。`signals == 0` は Bear レジームなど戦略上ありうる正常系のため READY_WITH_WARNINGS に留める（Issue #288）。
 
 ---
 

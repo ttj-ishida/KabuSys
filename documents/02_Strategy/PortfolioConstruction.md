@@ -177,6 +177,23 @@ alloc_i  = 総資産 × weight_i × max_utilization（0.70）
 セクターデータ: J-Quants `/listed/info` → `stocks` テーブル（DataSchema.md Section 4参照）。
 セクター不明銘柄は制限なし（"unknown" 扱い）。
 
+### 価格欠損・不正値の扱い
+
+既存保有のセクター別エクスポージャーを集計する際、`price_map` に存在しない銘柄・不正値を持つ銘柄は **保守的ブロック** とする。
+
+対象とする不正値:
+
+| ケース | 理由 |
+|--------|------|
+| `price_map` にキーが存在しない | 価格未取得 |
+| 値が `None` | 価格未取得 |
+| 値が `0.0` または負値 | 価格として無効 |
+| 値が `NaN` / `inf` / `-inf` | 数値として無効 |
+
+不正値が検出されたセクターは `price_missing_sectors` に追加し、最終的に `blocked_sectors` へマージする（`blocked_sectors |= price_missing_sectors`）。不正値検出時は `logger.warning` で銘柄コード・不正値・セクター名を記録する。
+
+> **設計方針**: 価格不明の既存保有を 0 円として扱うと、エクスポージャーが過少見積りされ、本来ブロックすべきセクターに新規 BUY が通過するリスクがある。保守的ブロックにより、このリスクを排除する（Issue #287）。
+
 実装モジュール: `src/kabusys/portfolio/risk_adjustment.py`
 
 ## 8.2 セクター相対強弱フィルタ（Issue #172 実装済み）

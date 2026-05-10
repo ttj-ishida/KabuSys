@@ -152,7 +152,11 @@ Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object 
 
 - `READY`: 全必須ジョブ成功かつ `signal_queue` 作成済み → 翌日執行可
 - `READY_WITH_WARNINGS`: warning はあるが翌営業日の準備は完了 → 内容確認の上で判断
-- `BLOCKED`: 必須ジョブ失敗または `signal_queue` が空 → 自動執行を開始しない
+- `BLOCKED`: 以下のいずれかに該当 → 自動執行を開始しない
+  - 必須ジョブが失敗 / 欠落
+  - `signal_queue == 0`
+  - `prices_daily == 0`（価格データ未取得）
+  - `features == 0`（特徴量未生成）
 
 出力先:
 

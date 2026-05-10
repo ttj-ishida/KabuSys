@@ -188,7 +188,7 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 更新テーブル:
 
 - `prices_daily`
-- `news_articles`
+- `raw_news`
 - `fundamentals`
 
 #### 16:00 `feature_generation_job`
@@ -260,7 +260,11 @@ python scripts/run_night_batch_report.py
 
 - `READY`: 全必須ジョブ成功かつ `signal_queue` 作成済み → 翌日執行可
 - `READY_WITH_WARNINGS`: 警告はあるが翌営業日の準備は完了 → 内容確認の上で判断
-- `BLOCKED`: 必須ジョブ失敗または `signal_queue` が空 → 翌朝の自動執行を開始しない
+- `BLOCKED`: 以下のいずれかに該当 → 翌朝の自動執行を開始しない
+  - 必須ジョブが失敗 / 欠落
+  - `signal_queue == 0`
+  - `prices_daily == 0`（価格データ未取得）
+  - `features == 0`（特徴量未生成）
 
 夜間バッチが失敗している場合、翌朝の自動執行は危険です。  
 少なくとも `Signal Queue` が妥当かどうかは、ユーザーが確認する前提です。
