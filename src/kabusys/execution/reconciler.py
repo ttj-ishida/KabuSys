@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 
 class DiscrepancyKind(str, Enum):
     AMOUNT_MISMATCH = "AMOUNT_MISMATCH"  # 数量不一致（異常の可能性）
-    CLOSED_STATE_CONSTRAINT = "CLOSED_STATE_CONSTRAINT"  # Closed 未実装に起因する既知制約
+    CLOSED_STATE_CONSTRAINT = (
+        "CLOSED_STATE_CONSTRAINT"  # Closed 未実装に起因する既知制約
+    )
 
 
 @dataclass
