@@ -47,7 +47,7 @@ class UpdateCounts:
     """各テーブルへの更新件数。"""
 
     prices_daily: int = 0
-    news_articles: int = 0
+    raw_news: int = 0
     fundamentals: int = 0
     features: int = 0
     ai_scores: int = 0
@@ -235,7 +235,7 @@ def format_cli_summary(report: NightBatchReport) -> str:
     lines += [
         "  Update Counts:",
         f"    prices_daily : {uc.prices_daily:>6}    features     : {uc.features:>6}",
-        f"    news_articles: {uc.news_articles:>6}    ai_scores    : {uc.ai_scores:>6}",
+        f"    raw_news     : {uc.raw_news:>6}    ai_scores    : {uc.ai_scores:>6}",
         f"    fundamentals : {uc.fundamentals:>6}    market_regime: {uc.market_regime:>6}",
         f"    signals      : {uc.signals:>6}    signal_queue : {uc.signal_queue:>6}",
     ]
@@ -330,7 +330,7 @@ def format_markdown(report: NightBatchReport) -> str:
         "| テーブル | 更新件数 |",
         "|---------|--------|",
         f"| prices_daily | {uc.prices_daily} |",
-        f"| news_articles | {uc.news_articles} |",
+        f"| raw_news | {uc.raw_news} |",
         f"| fundamentals | {uc.fundamentals} |",
         f"| features | {uc.features} |",
         f"| ai_scores | {uc.ai_scores} |",

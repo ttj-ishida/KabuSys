@@ -45,7 +45,7 @@ def _make_job(
 def _make_counts(**kwargs) -> UpdateCounts:
     defaults = dict(
         prices_daily=1850,
-        news_articles=120,
+        raw_news=120,
         fundamentals=1850,
         features=1850,
         ai_scores=1850,
@@ -78,7 +78,7 @@ def test_update_counts_defaults():
     """UpdateCounts のデフォルト値がすべて 0。"""
     counts = UpdateCounts()
     assert counts.prices_daily == 0
-    assert counts.news_articles == 0
+    assert counts.raw_news == 0
     assert counts.fundamentals == 0
     assert counts.features == 0
     assert counts.ai_scores == 0
