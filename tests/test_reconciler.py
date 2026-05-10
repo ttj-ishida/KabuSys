@@ -472,6 +472,39 @@ class TestReconcilePositions:
         # broker 合計 100 == local 100 → 差分なし
         assert result.position_discrepancies == []
 
+    def test_reconcile_positions_closed_state_constraint_kind(self, repo):
+        """broker_qty==0, local_qty>0 → CLOSED_STATE_CONSTRAINT に分類される。"""
+        from kabusys.execution.reconciler import DiscrepancyKind
+
+        # local に Filled buy 100株、broker には保有なし（broker_qty=0）
+        self._insert_filled_order(repo, "1234", "buy", 100, "pos-kind-closed-001")
+        broker = MockBrokerClient()  # ポジションなし → broker_qty=0
+        reconciler = _make_reconciler(broker, repo)
+        result = reconciler.run()
+        assert len(result.position_discrepancies) == 1
+        d = result.position_discrepancies[0]
+        assert d.broker_qty == 0
+        assert d.local_qty == 100
+        assert d.kind == DiscrepancyKind.CLOSED_STATE_CONSTRAINT
+
+    def test_reconcile_positions_amount_mismatch_kind(self, repo):
+        """broker_qty>0, local_qty と一致しない → AMOUNT_MISMATCH に分類される。"""
+        from kabusys.execution.broker_api import Position
+        from kabusys.execution.reconciler import DiscrepancyKind
+
+        # local 80株、broker 100株 → diff=+20
+        self._insert_filled_order(repo, "5678", "buy", 80, "pos-kind-mismatch-001")
+        broker = MockBrokerClient(
+            initial_positions=[Position(code="5678", qty=100, avg_price=1500.0)]
+        )
+        reconciler = _make_reconciler(broker, repo)
+        result = reconciler.run()
+        assert len(result.position_discrepancies) == 1
+        d = result.position_discrepancies[0]
+        assert d.broker_qty == 100
+        assert d.local_qty == 80
+        assert d.kind == DiscrepancyKind.AMOUNT_MISMATCH
+
 
 class TestExecutionEngineIntegration:
     def test_run_session_calls_reconciler_before_signal_processing(
