@@ -15,8 +15,13 @@ def config_file(tmp_path: Path) -> Path:
     cfg = tmp_path / "strategy_config.yaml"
     content = {
         "strategy": {
-            "weights": {"momentum": 0.40, "value": 0.20, "volatility": 0.15,
-                        "liquidity": 0.15, "news": 0.10},
+            "weights": {
+                "momentum": 0.40,
+                "value": 0.20,
+                "volatility": 0.15,
+                "liquidity": 0.15,
+                "news": 0.10,
+            },
             "threshold": 0.60,
             "stop_loss_rate": -0.08,
             "trailing_stop_atr_mult": 2.0,
@@ -77,6 +82,7 @@ class TestApplyButton:
         backup_path = tmp_path / "backups" / "strategy_config_20260510_120000.yaml"
         backup_path.parent.mkdir(parents=True)
         import shutil
+
         shutil.copy2(config_file, backup_path)
 
         with patch.object(mod, "st", mock_st):
@@ -152,10 +158,12 @@ class TestSubprocessRun:
         status_ctx.__exit__ = MagicMock(return_value=False)
         mock_st.status.return_value = status_ctx
 
-        report_json = json.dumps({
-            "meta": {"run_id": "new-run-001"},
-            "headline": {},
-        })
+        report_json = json.dumps(
+            {
+                "meta": {"run_id": "new-run-001"},
+                "headline": {},
+            }
+        )
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = report_json
@@ -287,6 +295,7 @@ class TestComparisonDisplay:
             __import__("datetime").date(2023, 1, 1),
             __import__("datetime").date(2024, 12, 31),
         ]
+
         def columns_side_effect(n):
             return [MagicMock() for _ in range(n)]
 
@@ -294,12 +303,18 @@ class TestComparisonDisplay:
         mock_st.button.return_value = False
 
         prev_metrics = {
-            "cagr": 0.123, "sharpe": 1.23, "max_drawdown": -0.185,
-            "win_rate": 0.55, "total_trades": 100.0,
+            "cagr": 0.123,
+            "sharpe": 1.23,
+            "max_drawdown": -0.185,
+            "win_rate": 0.55,
+            "total_trades": 100.0,
         }
         new_metrics = {
-            "cagr": 0.141, "sharpe": 1.41, "max_drawdown": -0.162,
-            "win_rate": 0.58, "total_trades": 105.0,
+            "cagr": 0.141,
+            "sharpe": 1.41,
+            "max_drawdown": -0.162,
+            "win_rate": 0.58,
+            "total_trades": 105.0,
         }
 
         def load_metrics_side_effect(duckdb_path, run_id):

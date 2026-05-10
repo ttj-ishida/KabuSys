@@ -10,25 +10,29 @@ import yaml
 
 BACKUP_DIR = Path("config/backups")
 
-_STRATEGY_KEYS = frozenset({
-    "threshold",
-    "stop_loss_rate",
-    "trailing_stop_atr_mult",
-    "min_holding_days",
-    "max_holding_days",
-    "gap_up_threshold",
-    "gap_down_threshold",
-})
+_STRATEGY_KEYS = frozenset(
+    {
+        "threshold",
+        "stop_loss_rate",
+        "trailing_stop_atr_mult",
+        "min_holding_days",
+        "max_holding_days",
+        "gap_up_threshold",
+        "gap_down_threshold",
+    }
+)
 
 _SECTOR_KEY_MAP = {
     "sector_boost": "boost",
     "sector_quartile": "quartile",
 }
 
-_REGIME_KEYS = frozenset({
-    "topix_drawdown_threshold",
-    "topix_size_multiplier_bear",
-})
+_REGIME_KEYS = frozenset(
+    {
+        "topix_drawdown_threshold",
+        "topix_size_multiplier_bear",
+    }
+)
 
 
 def backup_config(config_path: Path, backup_dir: Path = BACKUP_DIR) -> Path:
@@ -84,7 +88,9 @@ def apply_params(config_path: Path, params: dict) -> None:
             data["regime"][key] = value
 
     with open(config_path, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        yaml.dump(
+            data, f, allow_unicode=True, default_flow_style=False, sort_keys=False
+        )
 
 
 def list_backups(backup_dir: Path = BACKUP_DIR) -> list[Path]:

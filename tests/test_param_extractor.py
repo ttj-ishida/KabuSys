@@ -42,9 +42,9 @@ class TestExtractParams:
 
     def test_last_block_used_when_multiple_blocks(self):
         text = (
-            "```json\n{\"threshold\": 0.55}\n```\n"
+            '```json\n{"threshold": 0.55}\n```\n'
             "詳細は以下の通りです。\n"
-            "```json\n{\"threshold\": 0.65}\n```"
+            '```json\n{"threshold": 0.65}\n```'
         )
         result = extract_params(text)
         assert result == {"threshold": 0.65}

@@ -212,7 +212,9 @@ class TestRenderWithApiKey:
         assert len(msgs) == 1
         assert msgs[0]["role"] == "user"
 
-    def test_suggested_params_stored_in_session_state(self, wizard_duckdb, wizard_sqlite):
+    def test_suggested_params_stored_in_session_state(
+        self, wizard_duckdb, wizard_sqlite
+    ):
         """AI 返答に JSON ブロックが含まれる場合、param_review_suggested が session_state に設定される。"""
         import kabusys.monitoring.components.ai_wizard as mod
 
@@ -221,7 +223,7 @@ class TestRenderWithApiKey:
         mock_st.chat_input.return_value = "ATRを改善してほしい"
         mock_st.write_stream.return_value = (
             "ATR乗数を2.5にすることを提案します。\n"
-            "```json\n{\"trailing_stop_atr_mult\": 2.5}\n```"
+            '```json\n{"trailing_stop_atr_mult": 2.5}\n```'
         )
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):

@@ -56,15 +56,15 @@ class TestBackupConfig:
         from kabusys.ai.config_manager import backup_config
 
         result = backup_config(config_file, backup_dir)
-        assert re.match(
-            r"strategy_config_\d{8}_\d{6}\.yaml", result.name
-        )
+        assert re.match(r"strategy_config_\d{8}_\d{6}\.yaml", result.name)
 
     def test_backup_content_matches_original(self, config_file, backup_dir):
         from kabusys.ai.config_manager import backup_config
 
         result = backup_config(config_file, backup_dir)
-        assert result.read_text(encoding="utf-8") == config_file.read_text(encoding="utf-8")
+        assert result.read_text(encoding="utf-8") == config_file.read_text(
+            encoding="utf-8"
+        )
 
     def test_backup_dir_created_if_not_exists(self, config_file, backup_dir):
         from kabusys.ai.config_manager import backup_config
@@ -89,7 +89,7 @@ class TestApplyParams:
         data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
         w = data["strategy"]["weights"]
         assert w["momentum"] == pytest.approx(0.50)
-        assert w["value"] == pytest.approx(0.20)   # 変更なし
+        assert w["value"] == pytest.approx(0.20)  # 変更なし
         assert w["volatility"] == pytest.approx(0.15)  # 変更なし
 
     def test_sector_boost_mapped_correctly(self, config_file):
@@ -150,7 +150,11 @@ class TestListBackups:
 
 class TestRestoreBackup:
     def test_restore_overwrites_config(self, config_file, backup_dir):
-        from kabusys.ai.config_manager import apply_params, backup_config, restore_backup
+        from kabusys.ai.config_manager import (
+            apply_params,
+            backup_config,
+            restore_backup,
+        )
 
         backup_path = backup_config(config_file, backup_dir)
         apply_params(config_file, {"threshold": 0.99})  # config を変更

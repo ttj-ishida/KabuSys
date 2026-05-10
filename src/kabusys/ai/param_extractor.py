@@ -8,24 +8,32 @@ import re
 
 _logger = logging.getLogger(__name__)
 
-ALLOWED_KEYS = frozenset({
-    "weights",
-    "threshold",
-    "sector_boost",
-    "sector_quartile",
-    "stop_loss_rate",
-    "trailing_stop_atr_mult",
-    "gap_up_threshold",
-    "gap_down_threshold",
-    "min_holding_days",
-    "max_holding_days",
-    "topix_drawdown_threshold",
-    "topix_size_multiplier_bear",
-})
+ALLOWED_KEYS = frozenset(
+    {
+        "weights",
+        "threshold",
+        "sector_boost",
+        "sector_quartile",
+        "stop_loss_rate",
+        "trailing_stop_atr_mult",
+        "gap_up_threshold",
+        "gap_down_threshold",
+        "min_holding_days",
+        "max_holding_days",
+        "topix_drawdown_threshold",
+        "topix_size_multiplier_bear",
+    }
+)
 
-ALLOWED_WEIGHT_KEYS = frozenset({
-    "momentum", "value", "volatility", "liquidity", "news",
-})
+ALLOWED_WEIGHT_KEYS = frozenset(
+    {
+        "momentum",
+        "value",
+        "volatility",
+        "liquidity",
+        "news",
+    }
+)
 
 _VALUE_RANGES: dict[str, tuple[float, float]] = {
     "threshold": (0.0, 1.0),
@@ -85,9 +93,7 @@ def extract_params(text: str) -> dict | None:
                     _logger.warning("extract_params: 未知の weight キーを除外: %s", wk)
                     continue
                 if not isinstance(wv, (int, float)) or not (0.0 <= float(wv) <= 1.0):
-                    _logger.warning(
-                        "extract_params: weight 値が値域外: %s=%s", wk, wv
-                    )
+                    _logger.warning("extract_params: weight 値が値域外: %s=%s", wk, wv)
                     continue
                 filtered[wk] = float(wv)
             if filtered:

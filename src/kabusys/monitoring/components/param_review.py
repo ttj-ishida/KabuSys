@@ -44,9 +44,13 @@ def _read_current_params(config_path: Path) -> dict:
     result: dict = {}
     s = data.get("strategy", {}) or {}
     for key in (
-        "threshold", "stop_loss_rate", "trailing_stop_atr_mult",
-        "min_holding_days", "max_holding_days",
-        "gap_up_threshold", "gap_down_threshold",
+        "threshold",
+        "stop_loss_rate",
+        "trailing_stop_atr_mult",
+        "min_holding_days",
+        "max_holding_days",
+        "gap_up_threshold",
+        "gap_down_threshold",
     ):
         if key in s:
             result[key] = s[key]
@@ -142,17 +146,21 @@ def render_param_review(
             if key == "weights":
                 for wk, wv in proposed.items():
                     curr_w = current.get("weights", {}).get(wk, "N/A")
-                    rows.append({
-                        "パラメータ": f"weights.{wk}",
-                        "現在値": curr_w,
-                        "提案値": wv,
-                    })
+                    rows.append(
+                        {
+                            "パラメータ": f"weights.{wk}",
+                            "現在値": curr_w,
+                            "提案値": wv,
+                        }
+                    )
             else:
-                rows.append({
-                    "パラメータ": _DISPLAY_NAMES.get(key, key),
-                    "現在値": current.get(key, "N/A"),
-                    "提案値": proposed,
-                })
+                rows.append(
+                    {
+                        "パラメータ": _DISPLAY_NAMES.get(key, key),
+                        "現在値": current.get(key, "N/A"),
+                        "提案値": proposed,
+                    }
+                )
         if rows:
             st.dataframe(rows, use_container_width=True)
 
@@ -175,7 +183,9 @@ def render_param_review(
         return
 
     # --- 適用済み: バックテスト実行フォーム ---
-    st.success("✅ パラメータを適用しました。バックテストを再実行して効果を確認できます。")
+    st.success(
+        "✅ パラメータを適用しました。バックテストを再実行して効果を確認できます。"
+    )
 
     default_start, default_end = _load_default_dates(duckdb_path)
 
@@ -184,9 +194,7 @@ def render_param_review(
         if default_start
         else date(date.today().year - 2, 1, 1)
     )
-    end_val = (
-        date.fromisoformat(default_end) if default_end else date.today()
-    )
+    end_val = date.fromisoformat(default_end) if default_end else date.today()
 
     col_s, col_e = st.columns(2)
     with col_s:
@@ -202,11 +210,17 @@ def render_param_review(
                 try:
                     proc = subprocess.run(
                         [
-                            sys.executable, "-m", "kabusys.backtest.run",
-                            "--start", start_date.isoformat(),
-                            "--end", end_date.isoformat(),
-                            "--db", str(duckdb_path),
-                            "--output-format", "json",
+                            sys.executable,
+                            "-m",
+                            "kabusys.backtest.run",
+                            "--start",
+                            start_date.isoformat(),
+                            "--end",
+                            end_date.isoformat(),
+                            "--db",
+                            str(duckdb_path),
+                            "--output-format",
+                            "json",
                         ],
                         capture_output=True,
                         text=True,
@@ -214,7 +228,9 @@ def render_param_review(
                     )
                 except subprocess.TimeoutExpired:
                     status.update(label="❌ タイムアウト", state="error")
-                    st.error("バックテストが600秒でタイムアウトしました。期間を短くするか、後で再試行してください。")
+                    st.error(
+                        "バックテストが600秒でタイムアウトしました。期間を短くするか、後で再試行してください。"
+                    )
                     return
                 if proc.returncode != 0:
                     status.update(label="❌ バックテスト失敗", state="error")
@@ -261,9 +277,7 @@ def render_param_review(
     st.subheader("📊 変更前後の比較")
     new_m = _load_run_metrics(duckdb_path, new_run_id_state)
     prev_m = (
-        _load_run_metrics(duckdb_path, prev_run_id_state)
-        if prev_run_id_state
-        else None
+        _load_run_metrics(duckdb_path, prev_run_id_state) if prev_run_id_state else None
     )
 
     def _pct(v: float | None) -> str:
@@ -274,11 +288,22 @@ def render_param_review(
 
     metrics = [
         ("CAGR", "cagr", _pct, True, _pct),
-        ("Sharpe Ratio", "sharpe", _f, True, lambda v: f"{v:+.2f}" if v is not None else "N/A"),
+        (
+            "Sharpe Ratio",
+            "sharpe",
+            _f,
+            True,
+            lambda v: f"{v:+.2f}" if v is not None else "N/A",
+        ),
         ("Max Drawdown", "max_drawdown", _pct, True, _pct),
         ("Win Rate", "win_rate", _pct, True, _pct),
-        ("Total Trades", "total_trades",
-         lambda v: str(int(v)) if v is not None else "N/A", False, None),
+        (
+            "Total Trades",
+            "total_trades",
+            lambda v: str(int(v)) if v is not None else "N/A",
+            False,
+            None,
+        ),
     ]
 
     h1, h2, h3, h4 = st.columns(4)
