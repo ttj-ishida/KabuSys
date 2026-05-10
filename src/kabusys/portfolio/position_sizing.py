@@ -25,6 +25,7 @@ def calc_position_sizes(
     max_position_pct: float = 0.10,
     max_utilization: float = 0.70,
     lot_size: int = 100,
+    lot_map: dict[str, int] | None = None,
     cost_buffer: float = 0.0,
 ) -> dict[str, int]:
     """allocation_method に応じて各銘柄の発注株数を計算する。
@@ -41,9 +42,10 @@ def calc_position_sizes(
         stop_loss_pct:     損切り率（risk_based 時）
         max_position_pct:  1銘柄上限（総資産比）
         max_utilization:   投下資金上限（総資産比）
-        lot_size:          単元株数（現状は全銘柄共通で 100 を想定）
-                           TODO: 将来的には stocks マスタに lot_size を持たせ、
-                                 銘柄別 lot_map: dict[str, int] を受け取る設計に拡張する
+        lot_size:          単元株数のデフォルト値。lot_map が None の場合は全銘柄に適用される。
+        lot_map:           銘柄別の単元株数 {code: lot_size}。指定した銘柄はこの値を使用し、
+                           未指定の銘柄は lot_size にフォールバックする。
+                           None の場合は全銘柄に lot_size を適用する。
         cost_buffer:       手数料・スリッページ見積り係数。aggregate cap 判定の際に
                            price に (1 + cost_buffer) を掛けて保守的に見積もる。
                            slippage_rate + commission_rate 程度を推奨。
@@ -53,6 +55,9 @@ def calc_position_sizes(
     """
     if not candidates:
         return {}
+
+    def _lot(code: str) -> int:
+        return lot_map.get(code, lot_size) if lot_map is not None else lot_size
 
     def _max_per_stock(price: float) -> int:
         if price <= 0:
@@ -75,7 +80,7 @@ def calc_position_sizes(
                 portfolio_value * risk_pct / (price * stop_loss_pct)
             )
             target_shares = min(base_shares, _max_per_stock(price))
-            target_shares = (target_shares // lot_size) * lot_size
+            target_shares = (target_shares // _lot(code)) * _lot(code)
 
             current = current_positions.get(code, 0)
             add_shares = max(0, target_shares - current)
@@ -102,7 +107,7 @@ def calc_position_sizes(
             alloc = portfolio_value * w * max_utilization
             base_shares = math.floor(alloc / price)
             target_shares = min(base_shares, _max_per_stock(price))
-            target_shares = (target_shares // lot_size) * lot_size
+            target_shares = (target_shares // _lot(code)) * _lot(code)
 
             current = current_positions.get(code, 0)
             add_shares = max(0, target_shares - current)
@@ -130,12 +135,12 @@ def calc_position_sizes(
                 if price <= 0:
                     continue
                 scaled_f = shares * scale
-                new_shares = (math.floor(scaled_f) // lot_size) * lot_size
+                new_shares = (math.floor(scaled_f) // _lot(code)) * _lot(code)
                 if new_shares > 0:
                     scaled[code] = new_shares
                     committed_cost += new_shares * price * price_factor
                 # fractional_remainder = lot_size 単位での端数部分
-                frac = (scaled_f / lot_size) - math.floor(scaled_f / lot_size)
+                frac = (scaled_f / _lot(code)) - math.floor(scaled_f / _lot(code))
                 remainders.append((frac, code))
 
             # 残余キャッシュで fractional 残差が大きい順に lot_size 単位を追加配分
@@ -147,8 +152,8 @@ def calc_position_sizes(
                 price = open_prices.get(code, 0)
                 if price <= 0:
                     continue
-                lot_cost = lot_size * price * price_factor
-                candidate_new = scaled.get(code, 0) + lot_size
+                lot_cost = _lot(code) * price * price_factor
+                candidate_new = scaled.get(code, 0) + _lot(code)
                 max_allowed = min(raw_shares.get(code, 0), _max_per_stock(price))
                 if remaining_cash >= lot_cost and candidate_new <= max_allowed:
                     scaled[code] = candidate_new
