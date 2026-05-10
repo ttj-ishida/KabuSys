@@ -155,7 +155,7 @@ def run_bootstrap(
         logger.info("%s: %d ファイル検出", endpoint, len(files))
 
         for f in files:
-            file_key = f.get("key", "")
+            file_key = f.get("Key", "")
             if not file_key:
                 logger.warning("file_key が空のエントリをスキップ: %s", f)
                 continue

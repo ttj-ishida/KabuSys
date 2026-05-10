@@ -52,7 +52,7 @@ def list_files(endpoint: str, api_key: str) -> list[dict]:
     """GET /v2/bulk/list?endpoint=<ep> → [{key, date, ...}, ...]"""
     encoded = urllib.parse.quote(endpoint, safe="")
     data = _bulk_get(f"/bulk/list?endpoint={encoded}", api_key, caller="list_files")
-    return data.get("files", [])
+    return data.get("data", [])
 
 
 def get_presigned_url(file_key: str, api_key: str) -> str:

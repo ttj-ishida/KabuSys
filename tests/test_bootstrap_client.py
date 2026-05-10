@@ -27,9 +27,9 @@ def _make_response(body: bytes, status: int = 200):
 def test_list_files_returns_list():
     payload = json.dumps(
         {
-            "files": [
-                {"key": "k1", "date": "2024-01-01"},
-                {"key": "k2", "date": "2024-01-02"},
+            "data": [
+                {"Key": "k1", "Size": 1024, "LastModified": "2024-01-01T00:00:00Z"},
+                {"Key": "k2", "Size": 2048, "LastModified": "2024-01-02T00:00:00Z"},
             ]
         }
     ).encode()
@@ -37,8 +37,8 @@ def test_list_files_returns_list():
         mock_open.return_value = _make_response(payload)
         result = list_files("/equities/bars/daily", "my_api_key")
     assert result == [
-        {"key": "k1", "date": "2024-01-01"},
-        {"key": "k2", "date": "2024-01-02"},
+        {"Key": "k1", "Size": 1024, "LastModified": "2024-01-01T00:00:00Z"},
+        {"Key": "k2", "Size": 2048, "LastModified": "2024-01-02T00:00:00Z"},
     ]
     req = mock_open.call_args[0][0]
     assert req.get_header("X-api-key") == "my_api_key"

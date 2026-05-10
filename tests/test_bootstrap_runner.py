@@ -142,7 +142,7 @@ def _gz_prices(tmp_path: Path) -> bytes:
 
 
 def test_run_bootstrap_dry_run_returns_result(conn, tmp_path):
-    file_list = [{"key": "prices_2024_01.csv.gz", "date": "2024-01"}]
+    file_list = [{"Key": "prices_2024_01.csv.gz", "Size": 1024, "LastModified": "2024-01-01T00:00:00Z"}]
     with (
         patch("kabusys.data.bootstrap.runner.list_files", return_value=file_list),
         patch(
@@ -168,7 +168,7 @@ def test_run_bootstrap_skips_loaded_files(conn, tmp_path):
         "INSERT INTO bootstrap_load_history (file_key, endpoint, file_name, status, row_count) "
         "VALUES ('prices_2024_01.csv.gz', '/equities/bars/daily', 'prices_2024_01.csv.gz', 'loaded', 100)"
     )
-    file_list = [{"key": "prices_2024_01.csv.gz", "date": "2024-01"}]
+    file_list = [{"Key": "prices_2024_01.csv.gz", "Size": 1024, "LastModified": "2024-01-01T00:00:00Z"}]
     with (
         patch("kabusys.data.bootstrap.runner.list_files", return_value=file_list),
         patch("kabusys.data.bootstrap.runner.download_file") as mock_dl,
@@ -189,7 +189,7 @@ def test_run_bootstrap_records_loaded_status(conn, tmp_path):
     gz_path = ep_dir / "prices_2024_01.csv.gz"
     gz_path.write_bytes(_gz_prices(tmp_path))
 
-    file_list = [{"key": "prices_2024_01.csv.gz", "date": "2024-01"}]
+    file_list = [{"Key": "prices_2024_01.csv.gz", "Size": 1024, "LastModified": "2024-01-01T00:00:00Z"}]
     with (
         patch("kabusys.data.bootstrap.runner.list_files", return_value=file_list),
         patch(
@@ -215,8 +215,8 @@ def test_run_bootstrap_records_loaded_status(conn, tmp_path):
 
 def test_run_bootstrap_continues_on_single_file_failure(conn, tmp_path):
     file_list = [
-        {"key": "prices_2024_01.csv.gz", "date": "2024-01"},
-        {"key": "prices_2024_02.csv.gz", "date": "2024-02"},
+        {"Key": "prices_2024_01.csv.gz", "Size": 1024, "LastModified": "2024-01-01T00:00:00Z"},
+        {"Key": "prices_2024_02.csv.gz", "Size": 2048, "LastModified": "2024-02-01T00:00:00Z"},
     ]
     ep_dir = tmp_path / "equities" / "bars" / "daily"
     ep_dir.mkdir(parents=True)
