@@ -218,10 +218,11 @@ def get_id_token(refresh_token: str | None = None) -> str:
     token = refresh_token or settings.jquants_refresh_token
     if not token:
         raise ValueError("refresh_token が指定されていません")
+    # refreshtoken はクエリパラメータで渡す（POST /token/auth_refresh?refreshtoken=...）
     data = _request(
         "/token/auth_refresh",
+        params={"refreshtoken": token},
         method="POST",
-        json_body={"refreshtoken": token},
         allow_refresh=False,  # 無限再帰防止
     )
     return data["idToken"]

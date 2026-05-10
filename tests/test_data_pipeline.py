@@ -245,15 +245,21 @@ class TestJQuantsClientMock:
         assert len(result) == 1
 
     def test_get_id_token(self, monkeypatch):
-        """リフレッシュトークンから ID トークンを取得できることを確認。"""
-        monkeypatch.setattr(
-            jquants,
-            "_request",
-            mock.MagicMock(return_value={"idToken": "my_id_token"}),
-        )
+        """リフレッシュトークンから ID トークンを取得できることを確認。
+        refreshtoken はクエリパラメータで渡されること（JSON body ではない）。
+        """
+        mock_request = mock.MagicMock(return_value={"idToken": "my_id_token"})
+        monkeypatch.setattr(jquants, "_request", mock_request)
         monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "dummy_refresh")
+
         token = jquants.get_id_token()
+
         assert token == "my_id_token"
+        # クエリパラメータで渡されていること
+        _, kwargs = mock_request.call_args
+        assert kwargs.get("params") == {"refreshtoken": "dummy_refresh"}
+        # JSON body は使わない
+        assert kwargs.get("json_body") is None
 
     def test_get_id_token_missing_raises(self, monkeypatch):
         """リフレッシュトークンが未設定の場合は ValueError を送出することを確認。"""
