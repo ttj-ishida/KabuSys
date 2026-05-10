@@ -28,6 +28,8 @@ from pathlib import Path
 # プロジェクトルートを sys.path に追加
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+import duckdb
+
 from kabusys.data.edinet_collector import (
     EDINET_DOCUMENTS_URL,
     _TARGET_DOC_TYPES,
@@ -66,7 +68,6 @@ def warn(msg: str) -> None:
 # 生 API 呼び出し（実装を経由せず直接確認）
 # ---------------------------------------------------------------------------
 
-
 def _raw_api_call(target_date: date, api_key: str) -> dict:
     date_str = target_date.strftime("%Y-%m-%d")
     params: dict[str, str] = {"date": date_str, "type": "2"}
@@ -82,20 +83,15 @@ def _raw_api_call(target_date: date, api_key: str) -> dict:
 # メイン検証
 # ---------------------------------------------------------------------------
 
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="EDINET API 実動作検証")
     parser.add_argument("--api-key", default=os.environ.get("EDINET_API_KEY", ""))
-    parser.add_argument(
-        "--date", default=None, help="YYYY-MM-DD（省略時: 今日〜3日前で自動選択）"
-    )
+    parser.add_argument("--date", default=None, help="YYYY-MM-DD（省略時: 今日〜3日前で自動選択）")
     args = parser.parse_args()
 
     api_key: str = args.api_key
     if not api_key:
-        print(
-            "❌ ERROR: --api-key を指定するか EDINET_API_KEY 環境変数を設定してください"
-        )
+        print("❌ ERROR: --api-key を指定するか EDINET_API_KEY 環境変数を設定してください")
         sys.exit(1)
 
     print("=" * 65)
@@ -149,22 +145,18 @@ def main() -> None:
     metadata = raw_data.get("metadata", {})
     actual_status = str(metadata.get("status", ""))
     check(
-        "metadata.status == '200'",
+        f"metadata.status == '200'",
         actual_status == "200",
         f"実際の status: {actual_status!r}",
     )
 
     results: list[dict] = raw_data.get("results", [])
-    check(
-        "results が list 型", isinstance(results, list), f"型: {type(results).__name__}"
-    )
+    check("results が list 型", isinstance(results, list), f"型: {type(results).__name__}")
     info(f"results 総件数: {len(results)} 件")
 
     if not results:
         warn(f"{target_date} の results は 0 件（休場日または開示なし）")
-        warn(
-            "フィールド検証をスキップします（別の --date を指定して再試行してください）"
-        )
+        warn("フィールド検証をスキップします（別の --date を指定して再試行してください）")
 
     # ------------------------------------------------------------------
     # [3] results 要素フィールド（TypedDict と照合）
@@ -173,16 +165,9 @@ def main() -> None:
 
     # 実装で参照するフィールドのみ確認（API は他にも多数のフィールドを返す）
     EXPECTED_FIELDS = {
-        "docID",
-        "edinetCode",
-        "docTypeCode",
-        "filerName",
-        "submitDateTime",
-        "docDescription",
-        "pdfFlag",
-        "xbrlFlag",
-        "withdrawalStatus",
-        "secCode",  # 銘柄コード（5桁 or None）
+        "docID", "edinetCode", "docTypeCode", "filerName",
+        "submitDateTime", "docDescription", "pdfFlag", "xbrlFlag", "withdrawalStatus",
+        "secCode",    # 銘柄コード（5桁 or None）
         "seqNumber",  # 連番（int）
     }
 
@@ -203,19 +188,13 @@ def main() -> None:
 
         # seqNumber は int が正常（str でないことを確認）
         seq = sample.get("seqNumber")
-        check(
-            "seqNumber が int 型",
-            isinstance(seq, int),
-            f"実際の型: {type(seq).__name__}",
-        )
+        check("seqNumber が int 型", isinstance(seq, int),
+              f"実際の型: {type(seq).__name__}")
 
         # 文字列フィールドが str または None であることを確認（seqNumber 除く）
         str_fields = EXPECTED_FIELDS - {"seqNumber"}
-        non_str = {
-            k: type(sample[k]).__name__
-            for k in str_fields
-            if k in sample and not isinstance(sample[k], (str, type(None)))
-        }
+        non_str = {k: type(sample[k]).__name__ for k in str_fields
+                   if k in sample and not isinstance(sample[k], (str, type(None)))}
         check(
             "文字列フィールドが str または None 型（seqNumber 除く）",
             not non_str,
@@ -277,8 +256,7 @@ def main() -> None:
 
     # 件数の一致確認（取り下げ済み除外 + 種別フィルタ後の期待値）
     expected_count = sum(
-        1
-        for doc in results
+        1 for doc in results
         if str(doc.get("withdrawalStatus", "0")) == "0"
         and str(doc.get("docTypeCode", "")) in _TARGET_DOC_TYPES
         and doc.get("docID", "")
@@ -292,17 +270,13 @@ def main() -> None:
     if disclosures:
         d0 = disclosures[0]
 
-        check("source == 'edinet'", d0["source"] == "edinet", f"実際: {d0['source']!r}")
-        check(
-            "code is None（銘柄コード非対応）",
-            d0["code"] is None,
-            f"実際: {d0['code']!r}",
-        )
+        check("source == 'edinet'", d0["source"] == "edinet",
+              f"実際: {d0['source']!r}")
+        check("code is None（銘柄コード非対応）", d0["code"] is None,
+              f"実際: {d0['code']!r}")
         check(
             "document_url が EDINET API ドメインで始まる",
-            (d0.get("document_url") or "").startswith(
-                "https://api.edinet-fsa.go.jp/api/v2/documents/"
-            ),
+            (d0.get("document_url") or "").startswith("https://api.edinet-fsa.go.jp/api/v2/documents/"),
             f"実際: {d0.get('document_url')!r}",
         )
         check(
@@ -328,9 +302,7 @@ def main() -> None:
         info(f"サンプル document_url : {d0['document_url']!r}")
 
         # PDF フラグと URL の type パラメータ一致確認
-        pdf_map = {
-            str(doc.get("docID", "")): doc.get("pdfFlag", "0") for doc in results
-        }
+        pdf_map = {str(doc.get("docID", "")): doc.get("pdfFlag", "0") for doc in results}
         type_mismatch = []
         for disc in disclosures:
             doc_id = disc["id"]
