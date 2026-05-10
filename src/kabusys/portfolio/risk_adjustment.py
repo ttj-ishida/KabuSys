@@ -42,15 +42,22 @@ def apply_sector_cap(
 
     # 既存保有のセクター別時価を計算（当日売却予定銘柄を除外）
     sector_exposure: dict[str, float] = {}
+    price_missing_sectors: set[str] = set()  # sectors with price-unknown positions → force-blocked
     for code, shares in current_positions.items():
         if code in excluded:
             continue
         sector = sector_map.get(code, "unknown")
         if sector == "unknown":
             continue
-        price = price_map.get(code, 0.0)
-        # TODO: price が欠損（0.0）の場合、エクスポージャーが過少見積りされブロックが外れる。
-        #       将来的には前日終値や取得原価などのフォールバック価格を使う拡張を検討。
+        if code not in price_map:
+            logger.warning(
+                "apply_sector_cap: %s の価格が price_map に存在しません。セクター '%s' を保守的にブロックします。",
+                code,
+                sector,
+            )
+            price_missing_sectors.add(sector)
+            continue
+        price = price_map[code]
         sector_exposure[sector] = sector_exposure.get(sector, 0.0) + shares * price
 
     # 超過セクターの集合を作成
@@ -64,6 +71,7 @@ def apply_sector_cap(
                 exposure / portfolio_value * 100,
                 max_sector_pct * 100,
             )
+    blocked_sectors |= price_missing_sectors
 
     if not blocked_sectors:
         return candidates

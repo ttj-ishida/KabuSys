@@ -748,6 +748,56 @@ def test_apply_sector_cap_just_below_limit_passes():
     assert result[0]["code"] == "B"
 
 
+def test_apply_sector_cap_missing_price_blocks_sector():
+    """既存保有の価格が price_map にない場合、そのセクターを保守的にブロックする。"""
+    from kabusys.portfolio.risk_adjustment import apply_sector_cap
+
+    candidates = [
+        {"code": "B", "score": 0.9, "signal_rank": 1},  # 電気機器
+        {"code": "C", "score": 0.8, "signal_rank": 2},  # 機械
+    ]
+    sector_map = {"A": "電気機器", "B": "電気機器", "C": "機械"}
+    current_positions = {"A": 1000}
+    price_map = {"B": 900.0, "C": 800.0}  # A の価格なし
+
+    result = apply_sector_cap(
+        candidates=candidates,
+        sector_map=sector_map,
+        portfolio_value=3_000_000,
+        current_positions=current_positions,
+        price_map=price_map,
+        max_sector_pct=0.30,
+    )
+
+    codes = {c["code"] for c in result}
+    assert "B" not in codes  # 電気機器は価格欠損のため保守的ブロック
+    assert "C" in codes  # 機械は影響なし
+
+
+def test_apply_sector_cap_missing_price_does_not_affect_other_sectors():
+    """既存保有の価格欠損は、そのセクター内の候補のみブロックし、他セクターは影響なし。"""
+    from kabusys.portfolio.risk_adjustment import apply_sector_cap
+
+    candidates = [
+        {"code": "C", "score": 0.8, "signal_rank": 1},  # 機械（無関係セクター）
+    ]
+    sector_map = {"A": "電気機器", "C": "機械"}
+    current_positions = {"A": 1000}
+    price_map = {"C": 800.0}  # A の価格なし（電気機器のみ影響）
+
+    result = apply_sector_cap(
+        candidates=candidates,
+        sector_map=sector_map,
+        portfolio_value=3_000_000,
+        current_positions=current_positions,
+        price_map=price_map,
+        max_sector_pct=0.30,
+    )
+
+    assert len(result) == 1
+    assert result[0]["code"] == "C"  # 機械は通過
+
+
 def test_calc_position_sizes_scale_down_greedy_no_zeroing():
     """スケールダウン後、残差貪欲配分により全銘柄ゼロ化が防止される。
 
