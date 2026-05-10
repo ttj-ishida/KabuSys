@@ -951,3 +951,108 @@ def test_calc_position_sizes_greedy_does_not_exceed_raw_shares():
 
     # 結果は raw_shares（≒600株）以内であること
     assert result.get("A", 0) <= 600
+
+
+# ---------------------------------------------------------------------------
+# Issue #291: lot_map による銘柄別売買単位
+# ---------------------------------------------------------------------------
+
+
+def test_calc_position_sizes_lot_map_per_symbol():
+    """lot_map を渡すと銘柄ごとの単元株で丸められる。
+
+    A: lot=100 (デフォルト), B: lot=1000
+    portfolio_value=10_000_000, price=1000
+    A: floor(10M*0.005 / (1000*0.08)) = 625 → (625 // 100) * 100 = 600 株
+    B: 625 → (625 // 1000) * 1000 = 0 株（資金が 1000株単位に満たない）
+    """
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    result = calc_position_sizes(
+        weights={},
+        candidates=[
+            {"code": "A", "score": 0.9, "signal_rank": 1},
+            {"code": "B", "score": 0.8, "signal_rank": 2},
+        ],
+        portfolio_value=10_000_000,
+        available_cash=10_000_000,
+        current_positions={},
+        open_prices={"A": 1000.0, "B": 1000.0},
+        allocation_method="risk_based",
+        risk_pct=0.005,
+        stop_loss_pct=0.08,
+        max_position_pct=0.10,
+        max_utilization=0.70,
+        lot_size=100,
+        lot_map={"B": 1000},
+    )
+    # A は lot=100 → 600 株
+    assert result.get("A", 0) == 600
+    assert result.get("A", 0) % 100 == 0
+    # B は lot=1000 → raw=625 < 1000 のため 0 株（lot に満たない）
+    assert result.get("B", 0) == 0
+
+
+def test_calc_position_sizes_lot_map_fallback_to_lot_size():
+    """lot_map にないコードは lot_size にフォールバックする。
+
+    lot_map={"C": 500} で、A と B は lot_map に未登録 → lot_size=100 が使われる。
+    portfolio_value=10_000_000, price=1000
+    A, B: floor(10M*0.005 / (1000*0.08)) = 625 → (625 // 100) * 100 = 600 株
+    C: 625 → (625 // 500) * 500 = 500 株
+    """
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    result = calc_position_sizes(
+        weights={},
+        candidates=[
+            {"code": "A", "score": 0.9, "signal_rank": 1},
+            {"code": "B", "score": 0.8, "signal_rank": 2},
+            {"code": "C", "score": 0.7, "signal_rank": 3},
+        ],
+        portfolio_value=10_000_000,
+        available_cash=10_000_000,
+        current_positions={},
+        open_prices={"A": 1000.0, "B": 1000.0, "C": 1000.0},
+        allocation_method="risk_based",
+        risk_pct=0.005,
+        stop_loss_pct=0.08,
+        max_position_pct=0.10,
+        max_utilization=0.70,
+        lot_size=100,
+        lot_map={"C": 500},
+    )
+    # A, B: lot_map に未登録 → lot_size=100 → 600 株
+    assert result.get("A", 0) == 600
+    assert result.get("B", 0) == 600
+    # C: lot_map["C"]=500 → (625 // 500) * 500 = 500 株
+    assert result.get("C", 0) == 500
+    assert result.get("C", 0) % 500 == 0
+
+
+def test_calc_position_sizes_lot_map_zero_when_below_lot():
+    """資金が単元に満たない場合は 0 株（発注なし）になる。
+
+    portfolio_value=500_000 (小規模), price=1000, lot=1000
+    base_shares = floor(500_000 * 0.005 / (1000 * 0.08)) = floor(2500/80) = floor(31.25) = 31
+    (31 // 1000) * 1000 = 0 → 発注なし
+    """
+    from kabusys.portfolio.position_sizing import calc_position_sizes
+
+    result = calc_position_sizes(
+        weights={},
+        candidates=[{"code": "X", "score": 0.9, "signal_rank": 1}],
+        portfolio_value=500_000,
+        available_cash=500_000,
+        current_positions={},
+        open_prices={"X": 1000.0},
+        allocation_method="risk_based",
+        risk_pct=0.005,
+        stop_loss_pct=0.08,
+        max_position_pct=0.10,
+        max_utilization=0.70,
+        lot_size=100,
+        lot_map={"X": 1000},
+    )
+    # 31 株計算されるが lot=1000 に満たないため 0
+    assert result.get("X", 0) == 0

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from enum import Enum
 
 from kabusys.execution.broker_api import BrokerAPIError, BrokerAPIProtocol
 from kabusys.execution.order_manager import OrderManager
@@ -17,12 +18,20 @@ from kabusys.execution.order_repository import OrderRepository
 logger = logging.getLogger(__name__)
 
 
+class DiscrepancyKind(str, Enum):
+    AMOUNT_MISMATCH = "AMOUNT_MISMATCH"  # 数量不一致（異常の可能性）
+    CLOSED_STATE_CONSTRAINT = (
+        "CLOSED_STATE_CONSTRAINT"  # Closed 未実装に起因する既知制約
+    )
+
+
 @dataclass
 class PositionDiscrepancy:
     code: str
     broker_qty: int  # ブローカー側の保有数量
     local_qty: int  # ローカルDB推定値（注文履歴から集計）
     diff: int  # broker_qty - local_qty
+    kind: DiscrepancyKind = DiscrepancyKind.AMOUNT_MISMATCH
 
 
 @dataclass
@@ -132,6 +141,7 @@ class Reconciler:
         # ※ Closed 状態（ポジションクローズ済）は list_active() では取得できないため対象外。
         #   現フェーズでは Filled → Closed 遷移は未実装のため、Filled buy - Filled sell のネットが
         #   現在保有数量に相当する。将来 Closed 遷移を実装する際は再検討が必要。
+        #   broker_qty==0 かつ local_qty>0 の差分は DiscrepancyKind.CLOSED_STATE_CONSTRAINT として分類される。
         local_map: dict[str, int] = {}
         try:
             active_orders = self._repo.list_active()
@@ -165,16 +175,21 @@ class Reconciler:
             local_qty = local_map.get(code, 0)
             diff = broker_qty - local_qty
             if diff != 0:
-                result.position_discrepancies.append(
-                    PositionDiscrepancy(
-                        code=code,
-                        broker_qty=broker_qty,
-                        local_qty=local_qty,
-                        diff=diff,
-                    )
+                if broker_qty == 0 and local_qty > 0:
+                    kind = DiscrepancyKind.CLOSED_STATE_CONSTRAINT
+                else:
+                    kind = DiscrepancyKind.AMOUNT_MISMATCH
+                discrepancy = PositionDiscrepancy(
+                    code=code,
+                    broker_qty=broker_qty,
+                    local_qty=local_qty,
+                    diff=diff,
+                    kind=kind,
                 )
+                result.position_discrepancies.append(discrepancy)
                 logger.warning(
-                    "ポジション差分検出: code=%s, broker=%d, local=%d, diff=%+d",
+                    "ポジション差分検出 [%s]: code=%s, broker=%d, local=%d, diff=%+d",
+                    discrepancy.kind.value,
                     code,
                     broker_qty,
                     local_qty,
