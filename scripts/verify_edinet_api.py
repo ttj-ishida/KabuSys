@@ -28,8 +28,6 @@ from pathlib import Path
 # プロジェクトルートを sys.path に追加
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-import duckdb
-
 from kabusys.data.edinet_collector import (
     EDINET_DOCUMENTS_URL,
     _TARGET_DOC_TYPES,
@@ -145,7 +143,7 @@ def main() -> None:
     metadata = raw_data.get("metadata", {})
     actual_status = str(metadata.get("status", ""))
     check(
-        f"metadata.status == '200'",
+        "metadata.status == '200'",
         actual_status == "200",
         f"実際の status: {actual_status!r}",
     )
