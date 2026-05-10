@@ -13,7 +13,6 @@ from kabusys.data.bootstrap.loaders import (
     load_master,
     load_financials,
     load_calendar,
-    load_dividend,
     load_topix,
 )
 
@@ -79,16 +78,6 @@ def conn():
             is_half_day BOOLEAN NOT NULL DEFAULT false,
             is_sq_day BOOLEAN NOT NULL DEFAULT false,
             holiday_name VARCHAR
-        )
-    """)
-    c.execute("""
-        CREATE TABLE dividends (
-            code VARCHAR NOT NULL, pub_date DATE NOT NULL,
-            ref_no VARCHAR NOT NULL,
-            ex_date DATE, record_date DATE, pay_date DATE,
-            div_rate DECIMAL(18,4),
-            fetched_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
-            PRIMARY KEY (code, pub_date, ref_no)
         )
     """)
     c.execute("""
@@ -270,30 +259,6 @@ def test_load_calendar_inserts_market_calendar(conn, tmp_path):
     ).fetchone()
     assert row[0] is False
     assert row[1] == "成人の日"
-
-
-# ---------------------------------------------------------------------------
-# load_dividend
-# ---------------------------------------------------------------------------
-
-
-def test_load_dividend_inserts_dividends(conn, tmp_path):
-    rows = [
-        {
-            "Code": "7203",
-            "PubDate": "2024-01-15",
-            "RefNo": "001",
-            "ExDate": "2024-03-27",
-            "RecDate": "2024-03-31",
-            "PayDate": "2024-06-05",
-            "DivRate": "30.0",
-        }
-    ]
-    path = _gz(rows, tmp_path, "div.csv.gz")
-    count = load_dividend(conn, path)
-    assert count == 1
-    row = conn.execute("SELECT div_rate FROM dividends WHERE code='7203'").fetchone()
-    assert float(row[0]) == 30.0
 
 
 # ---------------------------------------------------------------------------

@@ -254,51 +254,6 @@ def load_calendar(conn: duckdb.DuckDBPyConnection, csv_path: Path) -> int:
     return loaded
 
 
-def load_dividend(conn: duckdb.DuckDBPyConnection, csv_path: Path) -> int:
-    """fins/dividend CSV → dividends
-
-    Bulk CSV カラム: Code, PubDate, RefNo, ExDate, RecDate, PayDate, DivRate
-    """
-    loaded = 0
-    buf: list[tuple] = []
-    fetched_at = _now()
-
-    def _flush():
-        nonlocal loaded
-        if buf:
-            conn.executemany(
-                "INSERT INTO dividends (code, pub_date, ref_no, ex_date, record_date, pay_date, div_rate, fetched_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT (code, pub_date, ref_no) DO UPDATE SET "
-                "ex_date=EXCLUDED.ex_date, record_date=EXCLUDED.record_date, "
-                "pay_date=EXCLUDED.pay_date, div_rate=EXCLUDED.div_rate, fetched_at=EXCLUDED.fetched_at",
-                buf,
-            )
-            loaded += len(buf)
-            buf.clear()
-
-    for row in _iter_gz(csv_path):
-        code = row.get("Code", "").strip()
-        pub_date = row.get("PubDate", "").strip()
-        ref_no = row.get("RefNo", "").strip()
-        if not code or not pub_date or not ref_no:
-            logger.warning("load_dividend: PK 欠損行をスキップ: %s", row)
-            continue
-        ex_date = row.get("ExDate", "").strip() or None
-        rec_date = row.get("RecDate", "").strip() or None
-        pay_date = row.get("PayDate", "").strip() or None
-        div_rate = _to_float(row.get("DivRate"))
-        buf.append(
-            (code, pub_date, ref_no, ex_date, rec_date, pay_date, div_rate, fetched_at)
-        )
-        if len(buf) >= _CHUNK:
-            _flush()
-
-    _flush()
-    logger.info("load_dividend: %d 件ロード (%s)", loaded, csv_path.name)
-    return loaded
-
-
 def load_topix(conn: duckdb.DuckDBPyConnection, csv_path: Path) -> int:
     """indices/bars/daily/topix CSV → topix_daily
 

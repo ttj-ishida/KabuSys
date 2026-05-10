@@ -20,7 +20,6 @@ from kabusys.data.bootstrap.bulk_client import (
 )
 from kabusys.data.bootstrap.loaders import (
     load_calendar,
-    load_dividend,
     load_financials,
     load_master,
     load_prices,
@@ -34,7 +33,6 @@ ENDPOINTS = [
     "/equities/master",
     "/fins/summary",
     "/markets/calendar",
-    "/fins/dividend",
     "/indices/bars/daily/topix",
 ]
 
@@ -43,7 +41,6 @@ _LOADER_MAP = {
     "/equities/master": load_master,
     "/fins/summary": load_financials,
     "/markets/calendar": load_calendar,
-    "/fins/dividend": load_dividend,
     "/indices/bars/daily/topix": load_topix,
 }
 
