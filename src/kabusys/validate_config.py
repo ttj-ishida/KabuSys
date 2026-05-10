@@ -15,6 +15,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import kabusys.config  # noqa: F401  # .env を os.environ に自動ロード
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _CONFIG_DIR = _PROJECT_ROOT / "config"
 
