@@ -80,7 +80,7 @@ def collect_update_counts(
     """
     return UpdateCounts(
         prices_daily=_count_table(conn, "prices_daily", run_date),
-        news_articles=_count_table(conn, "news_articles", run_date),
+        raw_news=_count_table(conn, "raw_news", run_date),
         fundamentals=_count_table(conn, "fundamentals", run_date),
         features=_count_table(conn, "features", run_date),
         ai_scores=_count_table(conn, "ai_scores", run_date),

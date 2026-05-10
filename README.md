@@ -553,7 +553,8 @@ touch data/stop_requested.flag
     - operations_data.py           — 運用フローページ向けデータロード関数（SQLite / Streamlit 非依存）
     - strategy_lab_data.py         — Strategy Lab ページ（AI Addon）専用データロード関数（DuckDB）
     - components/
-      - ai_wizard.py               — AI Co-Pilot チャット UI コンポーネント（OpenAI GPT-4o ストリーミング）
+      - ai_wizard.py               — AI Co-Pilot チャット UI コンポーネント（OpenAI GPT-4o ストリーミング・param_review 統合）
+      - param_review.py            — パラメータ提案レビュー UI（確認→適用→バックテスト再実行→before/after 比較）
     - pages/
       - 2_Initial_Setup.py         — 環境変数・設定・DB・Task Scheduler 確認
       - 3_Pre_Market.py            — 朝の READY/BLOCKED 判定・データ鮮度確認
@@ -566,6 +567,8 @@ touch data/stop_requested.flag
       - 10_Strategy_Lab.py         — 市場レジーム・AI スコア・シグナル推移・AI Co-Pilot
   - ai/
     - backtest_summarizer.py     — DuckDB backtest_runs 最新結果 → system prompt 用 Markdown 生成
+    - param_extractor.py         — AI 返答の JSON ブロック抽出・ホワイトリスト検証（許可キー 12種 + weights 5因子）
+    - config_manager.py          — strategy_config.yaml へのパラメータ適用・バックアップ・ロールバック
   - tools/
     - paper_verification_report.py
   - utils/

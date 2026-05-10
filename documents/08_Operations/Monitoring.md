@@ -212,7 +212,7 @@ Core コードは返り値の型を意識せず `.send(message)` を呼ぶだけ
 
 | ページ | ファイル | 区分 | 表示内容 |
 |---|---|---|---|
-| Strategy Lab | `pages/10_Strategy_Lab.py` | Operations UI Addon | 市場レジーム・AI スコア・シグナル推移・🤖 AI Co-Pilot チャット（AI Addon 有効時に意味をもつ） |
+| Strategy Lab | `pages/10_Strategy_Lab.py` | Operations UI Addon | 市場レジーム・AI スコア・シグナル推移・🤖 AI Co-Pilot チャット（パラメータ提案・適用・バックテスト再実行・比較） |
 
 推奨
 
@@ -446,6 +446,8 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 | `dashboard_data.py` | Core 運用ページ向けデータロード関数群（Streamlit 非依存） |
 | `operations_data.py` | 運用フローページ向けデータロード関数群（Streamlit 非依存） |
 | `strategy_lab_data.py` | Strategy Lab ページ（AI Addon）専用データロード関数群（Streamlit 非依存） |
+| `components/ai_wizard.py` | AI Co-Pilot チャット UI（OpenAI GPT-4o ストリーミング・履歴永続化・param_review 統合） |
+| `components/param_review.py` | パラメータ提案レビュー UI（確認→適用→バックテスト再実行→before/after 比較） |
 | `pages/2_Initial_Setup.py` | 環境変数・設定・DB・Task Scheduler 確認（4タブ） |
 | `pages/3_Pre_Market.py` | 朝の READY/BLOCKED 判定・データ鮮度・停止フラグ確認 |
 | `pages/4_Execution_Startup.py` | 起動直後のリコンシリエーション差分・ポジション整合確認 |
@@ -454,7 +456,7 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 | `pages/7_Performance.py` | エクイティカーブ・ポジション・取引履歴・Paper Verification |
 | `pages/8_Failure_Recovery.py` | 障害イベント集約・復旧ガイド |
 | `pages/9_WebManual.py` | 運用マニュアル閲覧ビュー |
-| `pages/10_Strategy_Lab.py` | 市場レジーム・AI スコア・シグナル推移 |
+| `pages/10_Strategy_Lab.py` | 市場レジーム・AI スコア・シグナル推移・🤖 AI Co-Pilot チャット（パラメータ提案・適用・バックテスト再実行・比較） |
 
 **ページ別表示内容:**
 
@@ -483,7 +485,7 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 | Strategy Lab | 市場レジーム | regime_score / regime_label 推移 | DuckDB `market_regime` |
 | Strategy Lab | AI スコア | 最新日の ai_score ランキング | DuckDB `ai_scores` |
 | Strategy Lab | シグナル推移 | 日別 buy/sell 件数集計 | DuckDB `signals` |
-| Strategy Lab | 🤖 AI Co-Pilot | 最新バックテスト結果を system prompt に注入した GPT-4o ストリーミングチャット。戦略パラメータのチューニング提案をインタラクティブに実施。チャット履歴は SQLite `ai_wizard_messages` に永続化 | DuckDB `backtest_runs` + SQLite `ai_wizard_messages` |
+| Strategy Lab | 🤖 AI Co-Pilot | 最新バックテスト結果を system prompt に注入した GPT-4o ストリーミングチャット。AIが JSON ブロックでパラメータを提案 → レビューパネルで確認・適用（`strategy_config.yaml` 更新＋バックアップ）→ バックテスト再実行 → 実行前後の CAGR/Sharpe/MaxDD/WinRate を比較表示。ロールバック機能あり。チャット履歴は SQLite `ai_wizard_messages` に永続化 | DuckDB `backtest_runs` + SQLite `ai_wizard_messages` + ファイルシステム `strategy_config.yaml` |
 
 **データソース分離:**
 

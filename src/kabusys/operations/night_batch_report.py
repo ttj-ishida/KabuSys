@@ -47,7 +47,7 @@ class UpdateCounts:
     """各テーブルへの更新件数。"""
 
     prices_daily: int = 0
-    news_articles: int = 0
+    raw_news: int = 0
     fundamentals: int = 0
     features: int = 0
     ai_scores: int = 0
@@ -90,6 +90,8 @@ def _determine_status(
       - 必須ジョブのいずれかが job_results に存在しない（未実行）
       - 必須ジョブのいずれかが failed または skipped
       - signal_queue == 0
+      - prices_daily == 0（価格データなしではシグナル生成不可）
+      - features == 0（特徴量なしではシグナル生成不可）
 
     READY_WITH_WARNINGS 条件（BLOCKED でなく、いずれかが真）:
       - いずれかのジョブが status == "warning"
@@ -109,6 +111,8 @@ def _determine_status(
         has_missing_mandatory
         or has_blocked_mandatory
         or update_counts.signal_queue == 0
+        or update_counts.prices_daily == 0
+        or update_counts.features == 0
     ):
         return STATUS_BLOCKED
 
@@ -155,10 +159,8 @@ def _generate_warnings(
         warnings.append("signals が生成されていません")
     if update_counts.signal_queue == 0:
         warnings.append("signal_queue が空です（翌営業日の自動執行は不可）")
-    if update_counts.prices_daily == 0:
-        warnings.append("prices_daily の更新件数が 0 件です")
-    if update_counts.features == 0:
-        warnings.append("features の更新件数が 0 件です")
+    # prices_daily == 0 および features == 0 は BLOCKED 判定のため警告は生成しない
+    # （BLOCKED ステータス自体が問題を伝達する）
 
     return warnings
 
@@ -235,7 +237,7 @@ def format_cli_summary(report: NightBatchReport) -> str:
     lines += [
         "  Update Counts:",
         f"    prices_daily : {uc.prices_daily:>6}    features     : {uc.features:>6}",
-        f"    news_articles: {uc.news_articles:>6}    ai_scores    : {uc.ai_scores:>6}",
+        f"    raw_news     : {uc.raw_news:>6}    ai_scores    : {uc.ai_scores:>6}",
         f"    fundamentals : {uc.fundamentals:>6}    market_regime: {uc.market_regime:>6}",
         f"    signals      : {uc.signals:>6}    signal_queue : {uc.signal_queue:>6}",
     ]
@@ -330,7 +332,7 @@ def format_markdown(report: NightBatchReport) -> str:
         "| テーブル | 更新件数 |",
         "|---------|--------|",
         f"| prices_daily | {uc.prices_daily} |",
-        f"| news_articles | {uc.news_articles} |",
+        f"| raw_news | {uc.raw_news} |",
         f"| fundamentals | {uc.fundamentals} |",
         f"| features | {uc.features} |",
         f"| ai_scores | {uc.ai_scores} |",

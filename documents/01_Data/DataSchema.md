@@ -279,18 +279,24 @@ TDnet 適時開示閲覧サービスおよび EDINET API から取得した開�
   --------------- --------- -------------------------------------------------------
   id              string    開示ID（PRIMARY KEY。TDnet: 開示番号 / EDINET: docID）
   disclosed_at    timestamp 開示日時（JST）
-  code            string    銘柄コード（4桁。EDINET の場合は NULL の場合あり）
+  code            string    銘柄コード（4桁。EDINET の場合は NULL: API は secCode（5桁: 4桁JPX + "0"）を返すが JPX コード変換は未実装）
   company_name    string    会社名
   title           string    開示表題
   document_url    string    開示資料URL / EDINET の xbrl/pdf URL
-  document_type   string    書類種別（例: "決算短信（連結）", "業績予想修正" 等。生値のまま保存）
+  document_type   string    書類種別（TDnet: 表題テキスト生値 / EDINET: docTypeCode 数値文字列 "120"〜"172"）
   source          string    'tdnet' / 'edinet'
   fetched_at      timestamp 取込日時
 
 主キー: `(id)`
 更新方式: `ON CONFLICT DO NOTHING`（同一 id の再取得は無視）
 取得元(TDnet): 適時開示情報閲覧サービス（15:35 ジョブ）
-取得元(EDINET): EDINET API `/api/v2/documents.json`（15:40 ジョブ）
+取得元(EDINET): EDINET API v2 `/api/v2/documents.json`（15:40 ジョブ）
+
+EDINET API v2 レスポンスフィールド補足（`edinet_collector.py` 実装対応）:
+- `docTypeCode`: 書類種別コード（"120" 等）。実装で参照する正しいフィールド名（`docType` という名称ではない）
+- `secCode`: 銘柄コード（5桁: 4桁 JPX コード + 末尾 "0"。例: `"49660"` → JPX `"4966"`）。現在の実装では `code=None` にマップ（変換未実装）
+- `seqNumber`: 連番（`int` 型で返る）
+- `withdrawalStatus`: "0" が有効書類、それ以外は取り下げ済み（除外対象）
 
 ------------------------------------------------------------------------
 

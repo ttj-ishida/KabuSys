@@ -104,7 +104,7 @@ def test_collect_update_counts_empty_tables() -> None:
         assert counts.fundamentals == 0
         assert counts.ai_scores == 0
         assert counts.features == 0
-        assert counts.news_articles == 0
+        assert counts.raw_news == 0
     finally:
         conn.close()
 
@@ -146,7 +146,7 @@ def test_collect_update_counts_missing_tables_return_zero() -> None:
         assert counts.fundamentals == 0
         assert counts.ai_scores == 0
         assert counts.features == 0
-        assert counts.news_articles == 0
+        assert counts.raw_news == 0
         assert counts.signal_queue == 0
     finally:
         conn.close()

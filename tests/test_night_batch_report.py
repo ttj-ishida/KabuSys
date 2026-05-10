@@ -45,7 +45,7 @@ def _make_job(
 def _make_counts(**kwargs) -> UpdateCounts:
     defaults = dict(
         prices_daily=1850,
-        news_articles=120,
+        raw_news=120,
         fundamentals=1850,
         features=1850,
         ai_scores=1850,
@@ -78,7 +78,7 @@ def test_update_counts_defaults():
     """UpdateCounts のデフォルト値がすべて 0。"""
     counts = UpdateCounts()
     assert counts.prices_daily == 0
-    assert counts.news_articles == 0
+    assert counts.raw_news == 0
     assert counts.fundamentals == 0
     assert counts.features == 0
     assert counts.ai_scores == 0
@@ -204,6 +204,20 @@ def test_status_ready_with_warnings_nonmandatory_skipped():
     assert _determine_status(jobs, counts) == "READY_WITH_WARNINGS"
 
 
+def test_determine_status_blocked_when_prices_daily_zero():
+    """prices_daily == 0 → BLOCKED。"""
+    jobs = _all_success_jobs()
+    counts = _make_counts(prices_daily=0)
+    assert _determine_status(jobs, counts) == "BLOCKED"
+
+
+def test_determine_status_blocked_when_features_zero():
+    """features == 0 → BLOCKED。"""
+    jobs = _all_success_jobs()
+    counts = _make_counts(features=0)
+    assert _determine_status(jobs, counts) == "BLOCKED"
+
+
 # ---------------------------------------------------------------------------
 # _generate_warnings
 # ---------------------------------------------------------------------------
@@ -229,9 +243,9 @@ def test_warnings_signals_zero():
 
 
 def test_warnings_prices_daily_zero():
-    """prices_daily == 0 → 警告が生成される。"""
+    """prices_daily == 0 は BLOCKED 判定のため _generate_warnings では警告を生成しない。"""
     warnings = _generate_warnings([_make_job()], _make_counts(prices_daily=0))
-    assert any("prices_daily" in w for w in warnings)
+    assert not any("prices_daily" in w for w in warnings)
 
 
 def test_warnings_empty_on_healthy():

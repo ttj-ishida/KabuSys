@@ -80,17 +80,28 @@ _SUBMIT_DT_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M")
 
 
 class _EdinetDocument(TypedDict):
-    """EDINET API レスポンスの results 配列の1要素。"""
+    """EDINET API レスポンスの results 配列の1要素。
+
+    実際のレスポンスには他にも多数のフィールドが含まれるが、
+    本実装で使用するフィールドのみ定義する。
+    なお secCode（5桁）が返る場合があり、先頭4桁が JPX 銘柄コードに相当する。
+    """
 
     docID: str
     edinetCode: str
-    docType: str
+    docTypeCode: (
+        str  # 書類種別コード（"120" 等）。旧 API の "docType" ではなく "docTypeCode"
+    )
     filerName: str
     submitDateTime: str
     docDescription: str
     pdfFlag: str
     xbrlFlag: str
     withdrawalStatus: str
+    secCode: (
+        str | None
+    )  # 上場銘柄コード（5桁: 4桁JPXコード + "0"）。非上場・投資信託は None
+    seqNumber: int  # 連番（int型）
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +178,7 @@ def _parse_edinet_response(raw: bytes, target_date: date) -> list[RawDisclosure]
         if str(doc.get("withdrawalStatus", "0")) != "0":
             continue
 
-        doc_type = str(doc.get("docType", ""))
+        doc_type = str(doc.get("docTypeCode", ""))
         if doc_type not in _TARGET_DOC_TYPES:
             continue
 
