@@ -141,6 +141,17 @@ _ITEMS: list[dict] = [
         ),
     },
     {
+        "key": "OPENAI_API_KEY",
+        "label": "OpenAI API キー（AI Co-Pilot / AI センチメント分析用）",
+        "secret": True,
+        "optional": True,
+        "description": (
+            "  Strategy Lab の AI Co-Pilot チャット、および ENABLE_AI_SENTIMENT=true 時のニュース分析で使用\n"
+            "  未設定の場合 AI Co-Pilot タブは使用不可（Core 機能には影響しない）\n"
+            "  https://platform.openai.com/api-keys から取得"
+        ),
+    },
+    {
         "key": "ENABLE_TDNET",
         "label": "TDnet 適時開示収集の有効化",
         "choices": ["true", "false"],
@@ -254,6 +265,9 @@ def _write_env(path: Path, values: dict[str, str]) -> None:
         "# --- データベース ---",
         f"DUCKDB_PATH={values.get('DUCKDB_PATH', 'data/kabusys.duckdb')}",
         f"SQLITE_PATH={values.get('SQLITE_PATH', 'data/monitoring.db')}",
+        "",
+        "# --- OpenAI (AI Co-Pilot / AI センチメント分析) ---",
+        f"OPENAI_API_KEY={values.get('OPENAI_API_KEY', '')}",
         "",
         "# --- ペーパートレード設定 ---",
         f"PAPER_TRADING_INITIAL_CASH={values.get('PAPER_TRADING_INITIAL_CASH', '10000000')}",
