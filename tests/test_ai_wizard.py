@@ -1,4 +1,4 @@
-"""ai_wizard コンポーネント単体テスト（Issue #233）"""
+"""ai_wizard コンポーネント単体テスト（Issue #233 / #279）"""
 
 from __future__ import annotations
 
