@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from kabusys.ai.param_extractor import extract_params
 
 
