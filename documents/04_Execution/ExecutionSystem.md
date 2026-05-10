@@ -117,6 +117,25 @@ class Reconciler:
 | `orders_no_status` | broker_order_id 未設定 または broker に注文レコードなし（手動確認要）の件数 |
 | `position_discrepancies` | ブローカーとローカル推定の差分リスト（`PositionDiscrepancy` のリスト） |
 
+**`PositionDiscrepancy` のフィールド**:
+
+| フィールド | 型 | 内容 |
+|-----------|-----|------|
+| `code` | `str` | 銘柄コード |
+| `broker_qty` | `int` | ブローカー側の保有数量 |
+| `local_qty` | `int` | ローカル DB 推定値（注文履歴から集計） |
+| `diff` | `int` | `broker_qty - local_qty` |
+| `kind` | `DiscrepancyKind` | 差分の分類（下記参照） |
+
+**`DiscrepancyKind` — 差分の分類（Issue #292）**:
+
+| 値 | 意味 | 対応方針 |
+|---|------|---------|
+| `AMOUNT_MISMATCH` | 数量不一致（真の異常の可能性） | Execution を停止して原因調査 |
+| `CLOSED_STATE_CONSTRAINT` | `broker_qty==0 かつ local_qty>0`。`Filled→Closed` 遷移未実装に起因する既知制約 | 警告として記録するが執行継続可 |
+
+> `CLOSED_STATE_CONSTRAINT` は現フェーズで `Filled→Closed` 状態遷移が未実装なことによる既知差分。ブローカー側でクローズ済みのポジションがローカル DB では `Filled` のまま残るため恒常的に発生する。将来 `Closed` 遷移を実装する際に再評価する。
+
 **エラーハンドリング方針**:
 - `sync_order` が `BrokerAPIError` → そのレコードをスキップ、他は続行
 - `get_positions` が `BrokerAPIError` → ポジション照合ステップ全体をスキップ（`position_discrepancies=[]`）

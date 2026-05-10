@@ -155,6 +155,17 @@ Windows の自動更新・電源障害・OS クラッシュなどで PC が予�
 - ログに `position_discrepancies > 0` が出力されている
 - DB の `positions` テーブルと kabuステーション の口座ポジションが一致しない
 
+### 差分の種類（DiscrepancyKind）
+
+差分ログには `kind` フィールドが含まれる。対応方針はそれぞれ異なる。
+
+| kind | 意味 | 対応 |
+|------|------|------|
+| `CLOSED_STATE_CONSTRAINT` | `Filled→Closed` 遷移未実装による既知差分（`broker_qty==0, local_qty>0`） | 対応不要。正常運用中に発生する既知の状態 |
+| `AMOUNT_MISMATCH` | 数量が一致しない（真の異常の可能性） | 下記対応手順に従い調査・修正する |
+
+`CLOSED_STATE_CONSTRAINT` のみの場合はポジション修正不要。`AMOUNT_MISMATCH` が含まれる場合のみ以下の対応手順を実施する。
+
 ### 対応手順
 
 ```

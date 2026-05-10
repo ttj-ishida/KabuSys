@@ -94,7 +94,7 @@ Execution が自動で行うこと:
 Execution 起動直後に `artifacts/execution_startup/{date}/report.md` が自動生成されます。ステータスが `READY` であれば継続可能です。
 
 - `BLOCKED`（`orders_no_status > 0`）: 注文ステータス不明。二重発注リスクがあるため手動対応が必要
-- `READY_WITH_WARNINGS`（`position_discrepancies` あり）: 執行は継続可能だが DB とブローカー間の数量差分を確認すること
+- `READY_WITH_WARNINGS`（`position_discrepancies` あり）: 執行は継続可能だが DB とブローカー間の数量差分を確認すること。差分の `kind` が `CLOSED_STATE_CONSTRAINT` の場合は `Filled→Closed` 遷移未実装による既知差分のため対応不要
 - `READY`: 問題なし。発注ループを継続する
 
 ### 3.4 Monitoring 起動 / 前場開始（09:00）
