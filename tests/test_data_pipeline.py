@@ -38,12 +38,12 @@ def _sample_price_record(
     return {
         "Date": date_str,
         "Code": code,
-        "Open": open_,
-        "High": high,
-        "Low": low,
-        "Close": close,
-        "Volume": volume,
-        "TurnoverValue": turnover,
+        "O": open_,
+        "H": high,
+        "L": low,
+        "C": close,
+        "Vo": volume,
+        "Va": turnover,
     }
 
 
@@ -175,20 +175,20 @@ class TestJQuantsClientMock:
         monkeypatch.setattr(
             jquants,
             "_request",
-            mock.MagicMock(return_value={"daily_quotes": records}),
+            mock.MagicMock(return_value={"data": records}),
         )
-        result = jquants.fetch_daily_quotes(id_token="dummy")
+        result = jquants.fetch_daily_quotes()
         assert len(result) == 1
         assert result[0]["Code"] == "7203"
 
     def test_fetch_daily_quotes_pagination(self, monkeypatch):
         """2ページにわたる株価日足を結合して返すことを確認。"""
         page1 = {
-            "daily_quotes": [_sample_price_record("2024-01-10")],
+            "data": [_sample_price_record("2024-01-10")],
             "pagination_key": "page2_key",
         }
         page2 = {
-            "daily_quotes": [_sample_price_record("2024-01-11")],
+            "data": [_sample_price_record("2024-01-11")],
         }
         call_count = {"n": 0}
 
@@ -199,14 +199,14 @@ class TestJQuantsClientMock:
             return page1
 
         monkeypatch.setattr(jquants, "_request", fake_request)
-        result = jquants.fetch_daily_quotes(id_token="dummy")
+        result = jquants.fetch_daily_quotes()
         assert len(result) == 2
         assert call_count["n"] == 2
 
     def test_fetch_daily_quotes_dedup_pagination_key(self, monkeypatch):
         """同一 pagination_key が返り続けても無限ループしないことを確認。"""
         infinite = {
-            "daily_quotes": [_sample_price_record()],
+            "data": [_sample_price_record()],
             "pagination_key": "same_key",
         }
         call_count = {"n": 0}
@@ -216,7 +216,7 @@ class TestJQuantsClientMock:
             return infinite
 
         monkeypatch.setattr(jquants, "_request", fake_request)
-        result = jquants.fetch_daily_quotes(id_token="dummy")
+        result = jquants.fetch_daily_quotes()
         # 実装詳細（何回で打ち切るか）に依存しない: 有限回で終了し、データが無制限に蓄積されないことを確認
         assert 1 <= call_count["n"] <= 10
         assert len(result) < 100
@@ -227,9 +227,9 @@ class TestJQuantsClientMock:
         monkeypatch.setattr(
             jquants,
             "_request",
-            mock.MagicMock(return_value={"statements": records}),
+            mock.MagicMock(return_value={"data": records}),
         )
-        result = jquants.fetch_financial_statements(id_token="dummy")
+        result = jquants.fetch_financial_statements()
         assert len(result) == 1
         assert result[0]["LocalCode"] == "7203"
 
@@ -239,33 +239,10 @@ class TestJQuantsClientMock:
         monkeypatch.setattr(
             jquants,
             "_request",
-            mock.MagicMock(return_value={"trading_calendar": records}),
+            mock.MagicMock(return_value={"data": records}),
         )
-        result = jquants.fetch_market_calendar(id_token="dummy")
+        result = jquants.fetch_market_calendar()
         assert len(result) == 1
-
-    def test_get_id_token(self, monkeypatch):
-        """リフレッシュトークンから ID トークンを取得できることを確認。
-        refreshtoken はクエリパラメータで渡されること（JSON body ではない）。
-        """
-        mock_request = mock.MagicMock(return_value={"idToken": "my_id_token"})
-        monkeypatch.setattr(jquants, "_request", mock_request)
-        monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "dummy_refresh")
-
-        token = jquants.get_id_token()
-
-        assert token == "my_id_token"
-        # クエリパラメータで渡されていること
-        _, kwargs = mock_request.call_args
-        assert kwargs.get("params") == {"refreshtoken": "dummy_refresh"}
-        # JSON body は使わない
-        assert kwargs.get("json_body") is None
-
-    def test_get_id_token_missing_raises(self, monkeypatch):
-        """リフレッシュトークンが未設定の場合は ValueError を送出することを確認。"""
-        monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
-        with pytest.raises(ValueError):
-            jquants.get_id_token(refresh_token=None)
 
 
 # ---------------------------------------------------------------------------
@@ -304,18 +281,18 @@ class TestEtlIdempotency:
             {
                 "Date": None,
                 "Code": "7203",
-                "Open": 100.0,
-                "High": 110.0,
-                "Low": 90.0,
-                "Close": 105.0,
+                "O": 100.0,
+                "H": 110.0,
+                "L": 90.0,
+                "C": 105.0,
             },
             {
                 "Date": "2024-01-10",
                 "Code": "",
-                "Open": 100.0,
-                "High": 110.0,
-                "Low": 90.0,
-                "Close": 105.0,
+                "O": 100.0,
+                "H": 110.0,
+                "L": 90.0,
+                "C": 105.0,
             },
             _sample_price_record(),  # 正常レコード
         ]
@@ -486,13 +463,13 @@ class TestAdditionalCases:
         assert row[0] in (False, 0)
 
     def test_fetch_daily_quotes_empty_response(self, monkeypatch):
-        """API が空の daily_quotes を返した場合に空リストを返すことを確認。"""
+        """API が空の data を返した場合に空リストを返すことを確認。"""
         monkeypatch.setattr(
             jquants,
             "_request",
-            mock.MagicMock(return_value={"daily_quotes": []}),
+            mock.MagicMock(return_value={"data": []}),
         )
-        result = jquants.fetch_daily_quotes(id_token="dummy")
+        result = jquants.fetch_daily_quotes()
         assert result == []
 
 
@@ -538,10 +515,10 @@ class TestEarningsCalendarPipeline:
 def _sample_topix_record(date_str: str = "20240110") -> dict:
     return {
         "Date": date_str,
-        "Open": 2300.1,
-        "High": 2310.2,
-        "Low": 2295.0,
-        "Close": 2305.5,
+        "O": 2300.1,
+        "H": 2310.2,
+        "L": 2295.0,
+        "C": 2305.5,
     }
 
 
@@ -571,7 +548,7 @@ class TestSaveTopixDaily:
         assert row == 1
 
     def test_skips_missing_date(self, mem_db_topix):
-        saved = jquants.save_topix_daily(mem_db_topix, [{"Open": 2300.0}])
+        saved = jquants.save_topix_daily(mem_db_topix, [{"O": 2300.0}])
         assert saved == 0
 
     def test_skips_invalid_date(self, mem_db_topix):
@@ -580,10 +557,10 @@ class TestSaveTopixDaily:
             [
                 {
                     "Date": "BADDATE",
-                    "Open": 2300.0,
-                    "High": 2310.0,
-                    "Low": 2290.0,
-                    "Close": 2305.0,
+                    "O": 2300.0,
+                    "H": 2310.0,
+                    "L": 2290.0,
+                    "C": 2305.0,
                 }
             ],
         )

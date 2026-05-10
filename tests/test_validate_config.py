@@ -15,7 +15,7 @@ def _run_validate(env_overrides: dict | None = None, config_dir: Path | None = N
     from kabusys import validate_config as vc
 
     base_env = {
-        "JQUANTS_REFRESH_TOKEN": "test_token",
+        "JQUANTS_BULK_API_KEY": "test_token",
         "KABU_API_PASSWORD": "test_pass",
         "KABUSYS_ENV": "development",
         "DUCKDB_PATH": "data/kabusys.duckdb",
@@ -44,19 +44,19 @@ def test_valid_config_returns_no_errors(tmp_path):
 def test_missing_required_var_returns_error():
     """必須環境変数が未設定のとき errors に含まれること。"""
     errors, _, _ = _run_validate(
-        env_overrides={"JQUANTS_REFRESH_TOKEN": ""},
+        env_overrides={"JQUANTS_BULK_API_KEY": ""},
         config_dir=Path("/nonexistent"),
     )
-    assert any("JQUANTS_REFRESH_TOKEN" in e for e in errors)
+    assert any("JQUANTS_BULK_API_KEY" in e for e in errors)
 
 
 def test_placeholder_value_returns_warning():
     """プレースホルダ値のとき warnings に含まれること。"""
     _, warnings, _ = _run_validate(
-        env_overrides={"JQUANTS_REFRESH_TOKEN": "your_jquants_refresh_token_here"},
+        env_overrides={"JQUANTS_BULK_API_KEY": "your_jquants_refresh_token_here"},
         config_dir=Path("/nonexistent"),
     )
-    assert any("JQUANTS_REFRESH_TOKEN" in w for w in warnings)
+    assert any("JQUANTS_BULK_API_KEY" in w for w in warnings)
 
 
 def test_invalid_kabusys_env_returns_error():
@@ -116,7 +116,7 @@ def test_main_returns_0_on_success(tmp_path):
         patch.dict(
             os.environ,
             {
-                "JQUANTS_REFRESH_TOKEN": "tok",
+                "JQUANTS_BULK_API_KEY": "tok",
                 "KABU_API_PASSWORD": "pass",
                 "KABUSYS_ENV": "development",
                 "LOG_LEVEL": "INFO",
@@ -137,7 +137,7 @@ def test_main_returns_1_on_error():
         patch.dict(
             os.environ,
             {
-                "JQUANTS_REFRESH_TOKEN": "",
+                "JQUANTS_BULK_API_KEY": "",
                 "KABU_API_PASSWORD": "pass",
             },
             clear=False,
@@ -157,7 +157,7 @@ def test_strict_mode_fails_on_warning(tmp_path):
         patch.dict(
             os.environ,
             {
-                "JQUANTS_REFRESH_TOKEN": "tok",
+                "JQUANTS_BULK_API_KEY": "tok",
                 "KABU_API_PASSWORD": "pass",
                 "KABUSYS_ENV": "development",
                 "LOG_LEVEL": "INFO",
@@ -175,7 +175,7 @@ class TestRunChecks:
     def test_returns_validation_result_type(self, tmp_path, monkeypatch):
         from kabusys.validate_config import ValidationResult, run_checks
 
-        monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+        monkeypatch.setenv("JQUANTS_BULK_API_KEY", "tok")
         monkeypatch.setenv("KABU_API_PASSWORD", "pwd")
         monkeypatch.setenv("KABUSYS_ENV", "development")
         monkeypatch.chdir(tmp_path)
@@ -185,7 +185,7 @@ class TestRunChecks:
     def test_status_ok_when_no_errors_no_warnings(self, tmp_path, monkeypatch):
         from kabusys.validate_config import run_checks
 
-        monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+        monkeypatch.setenv("JQUANTS_BULK_API_KEY", "tok")
         monkeypatch.setenv("KABU_API_PASSWORD", "pwd")
         monkeypatch.setenv("KABUSYS_ENV", "development")
         monkeypatch.chdir(tmp_path)
@@ -195,7 +195,7 @@ class TestRunChecks:
     def test_status_error_when_required_var_missing(self, monkeypatch):
         from kabusys.validate_config import run_checks
 
-        monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
+        monkeypatch.delenv("JQUANTS_BULK_API_KEY", raising=False)
         monkeypatch.delenv("KABU_API_PASSWORD", raising=False)
         result = run_checks()
         assert result.status == "ERROR"
@@ -204,10 +204,10 @@ class TestRunChecks:
     def test_two_consecutive_calls_are_independent(self, monkeypatch):
         from kabusys.validate_config import run_checks
 
-        monkeypatch.delenv("JQUANTS_REFRESH_TOKEN", raising=False)
+        monkeypatch.delenv("JQUANTS_BULK_API_KEY", raising=False)
         monkeypatch.delenv("KABU_API_PASSWORD", raising=False)
         r1 = run_checks()
-        monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+        monkeypatch.setenv("JQUANTS_BULK_API_KEY", "tok")
         monkeypatch.setenv("KABU_API_PASSWORD", "pwd")
         monkeypatch.setenv("KABUSYS_ENV", "development")
         r2 = run_checks()

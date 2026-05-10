@@ -152,10 +152,6 @@ class Settings:
 
     # --- J-Quants API ---
     @property
-    def jquants_refresh_token(self) -> str:
-        return _require("JQUANTS_REFRESH_TOKEN")
-
-    @property
     def jquants_bulk_api_key(self) -> str:
         return _require("JQUANTS_BULK_API_KEY")
 

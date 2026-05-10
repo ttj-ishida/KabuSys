@@ -9,12 +9,8 @@
 
 from __future__ import annotations
 
-import getpass
-import json
 import sys
 from pathlib import Path
-
-import requests
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _ENV_PATH = _PROJECT_ROOT / ".env"
@@ -46,20 +42,14 @@ _ITEMS: list[dict] = [
         ),
     },
     {
-        "key": "JQUANTS_REFRESH_TOKEN",
-        "label": "J-Quants 認証",
+        "key": "JQUANTS_BULK_API_KEY",
+        "label": "J-Quants API キー",
         "secret": True,
         "description": (
-            "  メールアドレスとパスワードから J-Quants リフレッシュトークンを取得します\n"
-            "  （有効期間: 1週間。期限切れ時は本ウィザードを再実行してください）"
+            "  J-Quants v2 認証に使用する API キー（必須）\n"
+            "  J-Quants ダッシュボード → 設定 → API キー から取得\n"
+            "  https://jpx-jquants.com/"
         ),
-        "_jquants_wizard": True,
-    },
-    {
-        "key": "JQUANTS_BULK_API_KEY",
-        "label": "J-Quants Bulk Download API キー",
-        "secret": True,
-        "description": "  J-Quants ダッシュボード → 設定 → APIキー から取得",
     },
     {
         "key": "KABU_API_PASSWORD",
@@ -224,78 +214,6 @@ _ITEMS: list[dict] = [
     },
 ]
 
-# ---------------------------------------------------------------------------
-# J-Quants 認証
-# ---------------------------------------------------------------------------
-
-_JQUANTS_AUTH_URL = "https://api.jquants.com/v1/token/auth_user"
-
-
-def _fetch_jquants_refresh_token(email: str, password: str) -> str | None:
-    """J-Quants API でリフレッシュトークンを取得する。失敗時は None を返す。"""
-    try:
-        resp = requests.post(
-            _JQUANTS_AUTH_URL,
-            data=json.dumps({"mailaddress": email, "password": password}),
-            headers={"Content-Type": "application/json"},
-            timeout=15,
-        )
-    except Exception as exc:
-        print(f"  ✗ J-Quants API 接続エラー: {exc}")
-        return None
-
-    if resp.status_code == 200:
-        return resp.json().get("refreshToken")
-
-    try:
-        msg = resp.json().get("message", resp.text)
-    except Exception:
-        msg = resp.text
-    print(f"  ✗ J-Quants API エラー ({resp.status_code}): {msg}")
-    return None
-
-
-def _prompt_jquants_auth(existing: dict[str, str]) -> str | None:
-    """メール+パスワード入力 → API → リフレッシュトークンを返す。
-
-    Returns:
-        取得したトークン文字列。スキップ・Keep 時は None（呼び出し元が既存値を維持する）。
-    """
-    current_token = existing.get("JQUANTS_REFRESH_TOKEN", "")
-
-    print(f"\n{'─' * 60}")
-    print("  J-Quants 認証 [JQUANTS_REFRESH_TOKEN]")
-    print("  メールアドレスとパスワードからリフレッシュトークンを取得します（有効期間: 1週間）")
-
-    if current_token:
-        print("  ※ リフレッシュトークンは設定済みです（****）")
-        ans = input("  → 再取得しますか？ [y/N]: ").strip().lower()
-        if ans != "y":
-            print("  → 既存のトークンを使用します。")
-            return None
-
-    email = input("  → メールアドレス（Enterでスキップ）: ").strip()
-    if not email:
-        print("  → スキップしました。")
-        return None
-
-    password = getpass.getpass("  → パスワード: ")
-    if not password:
-        print("  → パスワードが空のためスキップしました。")
-        return None
-
-    print("  → API に接続中...", end="", flush=True)
-    token = _fetch_jquants_refresh_token(email, password)
-
-    if token:
-        print(" ✓")
-        print("  → リフレッシュトークンを取得しました。")
-        return token
-
-    # フォールバック: 手動入力
-    manual = input("  → リフレッシュトークンを直接入力（Enterでスキップ）: ").strip()
-    return manual or None
-
 
 # ---------------------------------------------------------------------------
 # .env ファイル読み書き
@@ -329,7 +247,6 @@ def _write_env(path: Path, values: dict[str, str]) -> None:
         "# =============================================================",
         "",
         "# --- J-Quants API ---",
-        f"JQUANTS_REFRESH_TOKEN={values.get('JQUANTS_REFRESH_TOKEN', '')}",
         f"JQUANTS_BULK_API_KEY={values.get('JQUANTS_BULK_API_KEY', '')}",
         "",
         "# --- kabuステーション API ---",
@@ -426,14 +343,9 @@ def run_wizard(env_path: Path = _ENV_PATH) -> dict[str, str]:
 
     for item in _ITEMS:
         try:
-            if item.get("_jquants_wizard"):
-                token = _prompt_jquants_auth(values)
-                if token is not None:
-                    values[item["key"]] = token
-            else:
-                result = _prompt(item, values)
-                if result is not None:
-                    values[item["key"]] = result
+            result = _prompt(item, values)
+            if result is not None:
+                values[item["key"]] = result
         except (EOFError, KeyboardInterrupt):
             return values  # 途中キャンセル時は現在値を返す
 

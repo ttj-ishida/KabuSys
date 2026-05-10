@@ -67,7 +67,7 @@ def _info(msg: str) -> None:
 # ---------------------------------------------------------------------------
 
 _REQUIRED_ENV_VARS = [
-    "JQUANTS_REFRESH_TOKEN",
+    "JQUANTS_BULK_API_KEY",
     "KABU_API_PASSWORD",
 ]
 

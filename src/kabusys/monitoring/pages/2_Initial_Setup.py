@@ -37,7 +37,7 @@ tab_env, tab_yaml, tab_db, tab_scheduler = st.tabs(
     ["環境変数", "設定ファイル", "DB ファイル", "Task Scheduler"]
 )
 
-_REQUIRED = {"JQUANTS_REFRESH_TOKEN", "KABU_API_PASSWORD"}
+_REQUIRED = {"JQUANTS_BULK_API_KEY", "KABU_API_PASSWORD"}
 _OPTIONAL = {
     "KABUSYS_ENV",
     "DUCKDB_PATH",

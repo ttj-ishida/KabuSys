@@ -303,7 +303,7 @@ def test_intraday_determine_status_and_formatting():
 
 def test_validate_config_checks_and_yaml(monkeypatch, tmp_path):
     # prepare a fake config dir and monkeypatch module variable
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "token_ok")
+    monkeypatch.setenv("JQUANTS_BULK_API_KEY", "token_ok")
     monkeypatch.setenv("KABU_API_PASSWORD", "pw_ok")
     # create a tmp config dir and some files
     fake_config = tmp_path / "config"
@@ -320,7 +320,7 @@ def test_validate_config_checks_and_yaml(monkeypatch, tmp_path):
     # There should be at least one error due to bad yaml parse
     assert any("risk_config.yaml" in e for e in errors)
     # infos should include required env infos
-    assert any("JQUANTS_REFRESH_TOKEN" in i for i in infos)
+    assert any("JQUANTS_BULK_API_KEY" in i for i in infos)
 
 
 def _make_valid_risk_config_yaml() -> str:
@@ -344,7 +344,7 @@ def _make_risk_config_dir(tmp_path, risk_yaml: str) -> Path:
 
 def test_check_risk_config_content_valid(monkeypatch, tmp_path):
     """有効な risk_config.yaml はエラーなしで通過すること。"""
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("JQUANTS_BULK_API_KEY", "tok")
     monkeypatch.setenv("KABU_API_PASSWORD", "pw")
     cfg_dir = _make_risk_config_dir(tmp_path, _make_valid_risk_config_yaml())
     monkeypatch.setattr(validate_config, "_CONFIG_DIR", cfg_dir)
@@ -355,7 +355,7 @@ def test_check_risk_config_content_valid(monkeypatch, tmp_path):
 
 def test_check_risk_config_content_missing_risk_section(monkeypatch, tmp_path):
     """'risk' セクションがない場合はエラーになること。"""
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("JQUANTS_BULK_API_KEY", "tok")
     monkeypatch.setenv("KABU_API_PASSWORD", "pw")
     cfg_dir = _make_risk_config_dir(tmp_path, "other: {}\n")
     monkeypatch.setattr(validate_config, "_CONFIG_DIR", cfg_dir)
@@ -365,7 +365,7 @@ def test_check_risk_config_content_missing_risk_section(monkeypatch, tmp_path):
 
 def test_check_risk_config_content_missing_key(monkeypatch, tmp_path):
     """必須キーが欠けている場合はエラーになること。"""
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("JQUANTS_BULK_API_KEY", "tok")
     monkeypatch.setenv("KABU_API_PASSWORD", "pw")
     yaml_missing_key = """
 risk:
@@ -384,7 +384,7 @@ risk:
 
 def test_check_risk_config_content_out_of_range(monkeypatch, tmp_path):
     """max_position_pct > max_utilization の場合はエラーになること。"""
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("JQUANTS_BULK_API_KEY", "tok")
     monkeypatch.setenv("KABU_API_PASSWORD", "pw")
     yaml_bad_range = """
 risk:
@@ -403,7 +403,7 @@ risk:
 
 def test_check_risk_config_content_zero_rate_limit(monkeypatch, tmp_path):
     """rate_limit_per_sec が 0 以下の場合はエラーになること。"""
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("JQUANTS_BULK_API_KEY", "tok")
     monkeypatch.setenv("KABU_API_PASSWORD", "pw")
     yaml_bad_rate = """
 risk:
@@ -422,7 +422,7 @@ risk:
 
 def test_check_risk_config_content_value_out_of_01(monkeypatch, tmp_path):
     """max_drawdown が (0, 1] 範囲外の場合はエラーになること。"""
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("JQUANTS_BULK_API_KEY", "tok")
     monkeypatch.setenv("KABU_API_PASSWORD", "pw")
     yaml_bad = """
 risk:
@@ -441,7 +441,7 @@ risk:
 
 def test_check_risk_config_bool_rejected_as_ratio(monkeypatch, tmp_path):
     """bool 値を比率フィールドに使った場合はエラーになること。"""
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("JQUANTS_BULK_API_KEY", "tok")
     monkeypatch.setenv("KABU_API_PASSWORD", "pw")
     yaml_bool = """
 risk:
@@ -460,7 +460,7 @@ risk:
 
 def test_check_risk_config_bool_rejected_as_int(monkeypatch, tmp_path):
     """bool 値を整数フィールドに使った場合はエラーになること。"""
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("JQUANTS_BULK_API_KEY", "tok")
     monkeypatch.setenv("KABU_API_PASSWORD", "pw")
     yaml_bool = """
 risk:
@@ -479,7 +479,7 @@ risk:
 
 def test_check_risk_config_float_for_int_rejected(monkeypatch, tmp_path):
     """小数値を整数フィールドに使った場合はエラーになること（例: 1.7）。"""
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("JQUANTS_BULK_API_KEY", "tok")
     monkeypatch.setenv("KABU_API_PASSWORD", "pw")
     yaml_float = """
 risk:
@@ -498,7 +498,7 @@ risk:
 
 def test_check_risk_config_unknown_key_warns(monkeypatch, tmp_path):
     """未知のキーが含まれている場合は警告になること。"""
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("JQUANTS_BULK_API_KEY", "tok")
     monkeypatch.setenv("KABU_API_PASSWORD", "pw")
     yaml_extra = """
 risk:
@@ -520,7 +520,7 @@ risk:
 
 def test_check_risk_config_relation_error_has_risk_prefix(monkeypatch, tmp_path):
     """max_position_pct > max_utilization のエラーメッセージに risk. 接頭辞があること。"""
-    monkeypatch.setenv("JQUANTS_REFRESH_TOKEN", "tok")
+    monkeypatch.setenv("JQUANTS_BULK_API_KEY", "tok")
     monkeypatch.setenv("KABU_API_PASSWORD", "pw")
     yaml_bad = """
 risk:

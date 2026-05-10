@@ -74,7 +74,7 @@ def test_fetch_listed_info_field_mapping():
     from kabusys.data.jquants_client import fetch_listed_info
 
     mock_response = {
-        "info": [
+        "data": [
             {
                 "Code": "13010",
                 "CompanyName": "テスト会社",
@@ -123,7 +123,7 @@ def test_fetch_listed_info_missing_fields_skipped():
     from kabusys.data.jquants_client import fetch_listed_info
 
     mock_response = {
-        "info": [
+        "data": [
             {
                 "Code": "1234",
                 "CompanyName": "正常",

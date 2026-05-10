@@ -13,7 +13,7 @@ DataPlatform.md Section 4, 5, 6 に基づき、以下のETL処理を実現する
   - backfill_days により最終取得日の数日前から再取得し、API 後出し修正を吸収する
   - 品質チェックはエラー重大度を持つ問題が検出されてもETLを継続し、
     呼び出し元がアクションを決定する（Fail-Fastではなく全件収集）
-  - 引数で id_token を注入可能にしてテスト容易性を確保する
+  - J-Quants v2 API キー認証: x-api-key ヘッダーは jquants_client 内で自動設定される
 """
 
 from __future__ import annotations
@@ -289,7 +289,6 @@ def get_last_topix_date(conn: duckdb.DuckDBPyConnection) -> date | None:
 def run_prices_etl(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
-    id_token: str | None = None,
     date_from: date | None = None,
     backfill_days: int = _DEFAULT_BACKFILL_DAYS,
 ) -> tuple[int, int]:
@@ -301,7 +300,6 @@ def run_prices_etl(
     Args:
         conn:          DuckDB 接続。
         target_date:   取得終了日（通常は当日）。
-        id_token:      J-Quants 認証トークン。
         date_from:     取得開始日。省略時は最終取得日 - backfill_days + 1。
         backfill_days: 最終取得日の何日前から再取得するか（デフォルト 3 日）。
 
@@ -325,7 +323,6 @@ def run_prices_etl(
 
     logger.info("run_prices_etl: date_from=%s date_to=%s", date_from, target_date)
     records = jq.fetch_daily_quotes(
-        id_token=id_token,
         date_from=date_from,
         date_to=target_date,
     )
@@ -337,7 +334,6 @@ def run_prices_etl(
 def run_financials_etl(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
-    id_token: str | None = None,
     date_from: date | None = None,
     backfill_days: int = _DEFAULT_BACKFILL_DAYS,
 ) -> tuple[int, int]:
@@ -349,7 +345,6 @@ def run_financials_etl(
     Args:
         conn:          DuckDB 接続。
         target_date:   取得終了日。
-        id_token:      J-Quants 認証トークン。
         date_from:     取得開始日。省略時は最終取得日 - backfill_days + 1。
         backfill_days: 最終取得日の何日前から再取得するか（デフォルト 3 日）。
 
@@ -373,7 +368,6 @@ def run_financials_etl(
 
     logger.info("run_financials_etl: date_from=%s date_to=%s", date_from, target_date)
     records = jq.fetch_financial_statements(
-        id_token=id_token,
         date_from=date_from,
         date_to=target_date,
     )
@@ -385,7 +379,6 @@ def run_financials_etl(
 def run_dividends_etl(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
-    id_token: str | None = None,
     date_from: date | None = None,
     backfill_days: int = _DEFAULT_BACKFILL_DAYS,
 ) -> tuple[int, int]:
@@ -397,7 +390,6 @@ def run_dividends_etl(
     Args:
         conn:          DuckDB 接続。
         target_date:   取得終了日。
-        id_token:      J-Quants 認証トークン。
         date_from:     取得開始日。省略時は最終取得日 - backfill_days + 1。
         backfill_days: 最終取得日の何日前から再取得するか（デフォルト 3 日）。
 
@@ -421,7 +413,6 @@ def run_dividends_etl(
 
     logger.info("run_dividends_etl: date_from=%s date_to=%s", date_from, target_date)
     records = jq.fetch_dividends(
-        id_token=id_token,
         date_from=date_from,
         date_to=target_date,
     )
@@ -433,7 +424,6 @@ def run_dividends_etl(
 def run_topix_etl(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
-    id_token: str | None = None,
     date_from: date | None = None,
     backfill_days: int = _DEFAULT_BACKFILL_DAYS,
 ) -> tuple[int, int]:
@@ -446,7 +436,6 @@ def run_topix_etl(
     Args:
         conn:          DuckDB 接続。
         target_date:   取得終了日。
-        id_token:      J-Quants 認証トークン。
         date_from:     取得開始日。省略時は最終取得日 - backfill_days + 1。
         backfill_days: バックフィル日数（デフォルト 3 日）。
 
@@ -475,9 +464,7 @@ def run_topix_etl(
         return 0, 0
 
     logger.info("run_topix_etl: date_from=%s date_to=%s", date_from, target_date)
-    records = jq.fetch_topix_daily(
-        id_token=id_token, date_from=date_from, date_to=target_date
-    )
+    records = jq.fetch_topix_daily(date_from=date_from, date_to=target_date)
     saved = jq.save_topix_daily(conn, records)
     logger.info("run_topix_etl: fetched=%d saved=%d", len(records), saved)
     return len(records), saved
@@ -486,7 +473,6 @@ def run_topix_etl(
 def run_calendar_etl(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
-    id_token: str | None = None,
     date_from: date | None = None,
     lookahead_days: int = _CALENDAR_LOOKAHEAD_DAYS,
 ) -> tuple[int, int]:
@@ -498,7 +484,6 @@ def run_calendar_etl(
     Args:
         conn:           DuckDB 接続。
         target_date:    基準日。
-        id_token:       J-Quants 認証トークン。
         date_from:      取得開始日。省略時は最終取得日の翌日。
         lookahead_days: 基準日から何日先まで取得するか（デフォルト 90 日）。
 
@@ -520,11 +505,7 @@ def run_calendar_etl(
         return 0, 0
 
     logger.info("run_calendar_etl: date_from=%s date_to=%s", date_from, date_to)
-    records = jq.fetch_market_calendar(
-        id_token=id_token,
-        date_from=date_from,
-        date_to=date_to,
-    )
+    records = jq.fetch_market_calendar()
     saved = jq.save_market_calendar(conn, records)
     logger.info("run_calendar_etl: fetched=%d saved=%d", len(records), saved)
     return len(records), saved
@@ -538,7 +519,6 @@ def run_calendar_etl(
 def run_daily_etl(
     conn: duckdb.DuckDBPyConnection,
     target_date: date | None = None,
-    id_token: str | None = None,
     run_quality_checks: bool = True,
     spike_threshold: float = 0.5,
     backfill_days: int = _DEFAULT_BACKFILL_DAYS,
@@ -561,7 +541,6 @@ def run_daily_etl(
     Args:
         conn:                    DuckDB 接続。
         target_date:             ETL対象日。省略時は今日。
-        id_token:                J-Quants 認証トークン。省略時はキャッシュを使用。
         run_quality_checks:      True の場合、ETL後に品質チェックを実行する。
         spike_threshold:         スパイク検出閾値（デフォルト 0.5 = 50%）。
         backfill_days:           株価・財務ETLのバックフィル日数（デフォルト 3 日）。
@@ -576,7 +555,7 @@ def run_daily_etl(
     # 1. 市場カレンダーETL（先に取得して営業日調整に使用できるようにする）
     try:
         fetched, saved = run_calendar_etl(
-            conn, today, id_token=id_token, lookahead_days=calendar_lookahead_days
+            conn, today, lookahead_days=calendar_lookahead_days
         )
         result.calendar_fetched = fetched
         result.calendar_saved = saved
@@ -589,9 +568,7 @@ def run_daily_etl(
 
     # 2. 株価日足ETL
     try:
-        fetched, saved = run_prices_etl(
-            conn, trading_day, id_token=id_token, backfill_days=backfill_days
-        )
+        fetched, saved = run_prices_etl(conn, trading_day, backfill_days=backfill_days)
         result.prices_fetched = fetched
         result.prices_saved = saved
     except Exception:
@@ -601,7 +578,7 @@ def run_daily_etl(
     # 3. 財務データETL
     try:
         fetched, saved = run_financials_etl(
-            conn, trading_day, id_token=id_token, backfill_days=backfill_days
+            conn, trading_day, backfill_days=backfill_days
         )
         result.financials_fetched = fetched
         result.financials_saved = saved
@@ -612,7 +589,7 @@ def run_daily_etl(
     # 4. 配当データETL（差分更新 + backfill）
     try:
         fetched, saved = run_dividends_etl(
-            conn, trading_day, id_token=id_token, backfill_days=backfill_days
+            conn, trading_day, backfill_days=backfill_days
         )
         result.dividends_fetched = fetched
         result.dividends_saved = saved
@@ -622,9 +599,7 @@ def run_daily_etl(
 
     # 5. TOPIX 日足 ETL
     try:
-        fetched, saved = run_topix_etl(
-            conn, trading_day, id_token=id_token, backfill_days=backfill_days
-        )
+        fetched, saved = run_topix_etl(conn, trading_day, backfill_days=backfill_days)
         result.topix_fetched = fetched
         result.topix_saved = saved
     except Exception:
@@ -634,7 +609,6 @@ def run_daily_etl(
     # 6. 決算カレンダー（翌30日分を先読み取得・冪等保存）
     try:
         ec_records = jq.fetch_earnings_calendar(
-            id_token=id_token,
             date_from=today,
             date_to=today + timedelta(days=30),
         )

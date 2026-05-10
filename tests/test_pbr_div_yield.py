@@ -214,10 +214,9 @@ class TestDividendsEtl:
             "kabusys.data.pipeline.jq.fetch_dividends", return_value=fake_records
         ) as mock_fetch:
             fetched, saved = run_dividends_etl(
-                conn, target_date=date(2024, 4, 1), id_token="dummy"
+                conn, target_date=date(2024, 4, 1)
             )
         mock_fetch.assert_called_once_with(
-            id_token="dummy",
             date_from=date(2017, 1, 1),  # _MIN_DATA_DATE (empty DB, no prior dividends)
             date_to=date(2024, 4, 1),
         )

@@ -1,15 +1,15 @@
 """
-J-Quants API クライアント
+J-Quants API クライアント（v2）
 
-J-Quants API から以下のデータを取得する。
+J-Quants API v2 から以下のデータを取得する。
   - 株価日足（OHLCV）
   - 財務データ（四半期 BS/PL）
   - JPX マーケットカレンダー（祝日・半日・SQ）
 
 設計原則:
+  - 認証は x-api-key ヘッダー（v2 移行後; 2025-12-22 以降登録ユーザーは API キーのみ対応）
   - APIレート制限（120 req/min）を厳守する（RateLimiter による制御）
   - リトライロジック付き（指数バックオフ、最大 3 回、対象: 408/429/5xx）
-  - 401 受信時はトークンを自動リフレッシュして 1 回リトライ
   - Look-ahead Bias 防止: 取得日時（fetched_at）を UTC で記録し、
     「いつシステムがそのデータを知り得たか」をトレース可能にする
   - 冪等性: DuckDB への INSERT は ON CONFLICT DO UPDATE で重複を排除する
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # 定数
 # ---------------------------------------------------------------------------
 
-_BASE_URL = "https://api.jquants.com/v1"
+_BASE_URL = "https://api.jquants.com/v2"
 _RATE_LIMIT_PER_MIN = 120
 _MIN_INTERVAL_SEC = 60.0 / _RATE_LIMIT_PER_MIN
 _MAX_RETRIES = 3
@@ -68,17 +68,6 @@ class _RateLimiter:
 
 _rate_limiter = _RateLimiter()
 
-# モジュールレベルの ID トークンキャッシュ（ページネーション間でトークンを共有）
-_ID_TOKEN_CACHE: str | None = None
-
-
-def _get_cached_token(force_refresh: bool = False) -> str:
-    """キャッシュ済み ID トークンを返す。未取得または force_refresh=True 時は再取得する。"""
-    global _ID_TOKEN_CACHE
-    if force_refresh or not _ID_TOKEN_CACHE:
-        _ID_TOKEN_CACHE = get_id_token()
-    return _ID_TOKEN_CACHE
-
 
 # ---------------------------------------------------------------------------
 # HTTP ユーティリティ
@@ -88,17 +77,14 @@ def _get_cached_token(force_refresh: bool = False) -> str:
 def _request(
     path: str,
     params: dict[str, str] | None = None,
-    id_token: str | None = None,
     method: str = "GET",
     json_body: dict[str, Any] | None = None,
-    allow_refresh: bool = True,
 ) -> Any:
     """J-Quants API へリクエストを送り、JSON を返す。
 
     Args:
-        path: APIパス（例: "/prices/daily_quotes"）
+        path: APIパス（例: "/equities/bars/daily"）
         params: クエリパラメータ
-        id_token: 認証トークン
         method: HTTP メソッド（"GET" または "POST"）
         json_body: POST 時のリクエストボディ（dict）
 
@@ -112,17 +98,17 @@ def _request(
     if params:
         url += "?" + urllib.parse.urlencode(params)
 
-    headers: dict[str, str] = {"Accept": "application/json"}
+    headers: dict[str, str] = {
+        "Accept": "application/json",
+        "x-api-key": settings.jquants_bulk_api_key,
+    }
     data_bytes: bytes | None = None
     if json_body is not None:
         headers["Content-Type"] = "application/json"
         data_bytes = json.dumps(json_body).encode("utf-8")
 
-    def _do_call(token: str | None) -> Any:
-        h = dict(headers)
-        if token:
-            h["Authorization"] = f"Bearer {token}"
-        req = urllib.request.Request(url, headers=h, method=method, data=data_bytes)
+    def _do_call() -> Any:
+        req = urllib.request.Request(url, headers=headers, method=method, data=data_bytes)
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw = resp.read().decode("utf-8")
         try:
@@ -133,29 +119,12 @@ def _request(
             ) from exc
 
     last_exc: Exception = RuntimeError("未初期化")
-    # id_token 未指定時はキャッシュを使用（ページネーション間でトークンを共有）
-    token = id_token or (_get_cached_token() if allow_refresh else None)
-    _token_refreshed = False  # 401 リフレッシュは 1 回のみ保証
     for attempt in range(_MAX_RETRIES):
         _rate_limiter.wait()
         try:
-            return _do_call(token)
+            return _do_call()
         except urllib.error.HTTPError as e:
             status = e.code
-            # 401: トークン期限切れ → 1 回だけリフレッシュしてリトライ
-            # allow_refresh=False の場合（get_id_token からの呼び出し等）は無限再帰を防ぐ
-            if status == 401 and allow_refresh and not _token_refreshed:
-                logger.warning("401 Unauthorized on %s, refreshing id_token", path)
-                try:
-                    token = _get_cached_token(force_refresh=True)  # キャッシュも更新
-                    _token_refreshed = True
-                    continue
-                except Exception as refresh_exc:
-                    raise RuntimeError(
-                        "id_token のリフレッシュに失敗しました"
-                    ) from refresh_exc
-            if status == 401:
-                raise  # リフレッシュ済みで再度 401 → 即座に失敗
             if status in _RETRY_STATUS_CODES or status >= 500:
                 last_exc = e
                 if attempt < _MAX_RETRIES - 1:  # 最終試行では sleep しない
@@ -201,48 +170,20 @@ def _request(
 
 
 # ---------------------------------------------------------------------------
-# 認証
-# ---------------------------------------------------------------------------
-
-
-def get_id_token(refresh_token: str | None = None) -> str:
-    """リフレッシュトークンから ID トークンを取得する（POST）。
-
-    Args:
-        refresh_token: J-Quants リフレッシュトークン。
-                       省略時は settings.jquants_refresh_token を使用。
-
-    Returns:
-        ID トークン文字列。
-    """
-    token = refresh_token or settings.jquants_refresh_token
-    if not token:
-        raise ValueError("refresh_token が指定されていません")
-    # refreshtoken はクエリパラメータで渡す（POST /token/auth_refresh?refreshtoken=...）
-    data = _request(
-        "/token/auth_refresh",
-        params={"refreshtoken": token},
-        method="POST",
-        allow_refresh=False,  # 無限再帰防止
-    )
-    return data["idToken"]
-
-
-# ---------------------------------------------------------------------------
 # データ取得関数
 # ---------------------------------------------------------------------------
 
 
 def fetch_daily_quotes(
-    id_token: str | None = None,
     code: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> list[dict[str, Any]]:
     """株価日足（OHLCV）を取得する（ページネーション対応）。
 
+    v2 フィールド: O, H, L, C, Vo（出来高）, Va（売買代金）
+
     Args:
-        id_token: 認証トークン。省略時はモジュールキャッシュを使用（自動リフレッシュ対応）。
         code: 銘柄コード（省略時は全銘柄）。
         date_from: 取得開始日。
         date_to: 取得終了日。
@@ -261,8 +202,8 @@ def fetch_daily_quotes(
     result: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
     while True:
-        data = _request("/prices/daily_quotes", params=params, id_token=id_token)
-        result.extend(data.get("daily_quotes", []))
+        data = _request("/equities/bars/daily", params=params)
+        result.extend(data.get("data", []))
         pagination_key = data.get("pagination_key")
         if not pagination_key or pagination_key in seen_keys:
             break
@@ -274,7 +215,6 @@ def fetch_daily_quotes(
 
 
 def fetch_financial_statements(
-    id_token: str | None = None,
     code: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
@@ -282,7 +222,6 @@ def fetch_financial_statements(
     """財務データ（四半期 BS/PL）を取得する（ページネーション対応）。
 
     Args:
-        id_token: 認証トークン。省略時はモジュールキャッシュを使用（自動リフレッシュ対応）。
         code: 銘柄コード（省略時は全銘柄）。
         date_from: 取得開始日。
         date_to: 取得終了日。
@@ -301,8 +240,8 @@ def fetch_financial_statements(
     result: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
     while True:
-        data = _request("/fins/statements", params=params, id_token=id_token)
-        result.extend(data.get("statements", []))
+        data = _request("/fins/summary", params=params)
+        result.extend(data.get("data", []))
         pagination_key = data.get("pagination_key")
         if not pagination_key or pagination_key in seen_keys:
             break
@@ -314,14 +253,12 @@ def fetch_financial_statements(
 
 
 def fetch_earnings_calendar(
-    id_token: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> list[dict[str, Any]]:
     """決算発表予定カレンダーを取得する（/equities/earnings-calendar）。
 
     Args:
-        id_token:  認証トークン。省略時はキャッシュを使用。
         date_from: 取得開始日。
         date_to:   取得終了日。
 
@@ -335,8 +272,8 @@ def fetch_earnings_calendar(
         params["dateTo"] = date_to.strftime("%Y%m%d")
     # 注: /equities/earnings-calendar は 30日以内の窓であればページネーションなしで全件返す。
     # 30日超の範囲を指定する場合は pagination_key ループを追加すること。
-    data = _request("/equities/earnings-calendar", params=params, id_token=id_token)
-    records = data.get("earningsCalendar", [])
+    data = _request("/equities/earnings-calendar", params=params)
+    records = data.get("data", [])
     logger.info("fetch_earnings_calendar: %d レコード取得", len(records))
     return records
 
@@ -385,13 +322,11 @@ def save_earnings_calendar(
 
 
 def fetch_market_calendar(
-    id_token: str | None = None,
     holiday_division: str | None = None,
 ) -> list[dict[str, Any]]:
     """JPX マーケットカレンダー（祝日・半日・SQ）を取得する。
 
     Args:
-        id_token: 認証トークン。省略時はモジュールキャッシュを使用（自動リフレッシュ対応）。
         holiday_division: 祝日区分フィルタ（省略時は全件）。
 
     Returns:
@@ -401,8 +336,8 @@ def fetch_market_calendar(
     if holiday_division:
         params["holidayDivision"] = holiday_division
 
-    data = _request("/markets/trading_calendar", params=params, id_token=id_token)
-    records = data.get("trading_calendar", [])
+    data = _request("/markets/calendar", params=params)
+    records = data.get("data", [])
     logger.info("fetch_market_calendar: %d レコード取得", len(records))
     return records
 
@@ -417,6 +352,8 @@ def save_daily_quotes(
     records: list[dict[str, Any]],
 ) -> int:
     """株価日足を raw_prices テーブルに保存する（冪等）。
+
+    v2 フィールドマッピング: O→open, H→high, L→low, C→close, Vo→volume, Va→turnover
 
     Args:
         conn: DuckDB 接続。
@@ -437,12 +374,12 @@ def save_daily_quotes(
         (
             r.get("Date"),
             str(r.get("Code", "") or ""),
-            _to_float(r.get("Open")),
-            _to_float(r.get("High")),
-            _to_float(r.get("Low")),
-            _to_float(r.get("Close")),
-            _to_int(r.get("Volume")),
-            _to_int(r.get("TurnoverValue")),
+            _to_float(r.get("O")),
+            _to_float(r.get("H")),
+            _to_float(r.get("L")),
+            _to_float(r.get("C")),
+            _to_int(r.get("Vo")),
+            _to_int(r.get("Va")),
             fetched_at,
         )
         for r in records
@@ -503,7 +440,7 @@ def save_financial_statements(
             _to_float(r.get("Profit")),
             _to_float(r.get("EarningsPerShare")),
             _to_float(r.get("ROE")),
-            _to_float(r.get("BookValuePerShare")),  # 追加
+            _to_float(r.get("BookValuePerShare")),
             fetched_at,
         )
         for r in records
@@ -539,7 +476,6 @@ def save_financial_statements(
 
 
 def fetch_dividends(
-    id_token: str | None = None,
     code: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
@@ -547,7 +483,6 @@ def fetch_dividends(
     """配当データを取得する（ページネーション対応）。
 
     Args:
-        id_token:  認証トークン。省略時はキャッシュを使用。
         code:      銘柄コード（省略時は全銘柄）。
         date_from: 取得開始日。
         date_to:   取得終了日。
@@ -566,8 +501,8 @@ def fetch_dividends(
     result: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
     while True:
-        data = _request("/fins/dividend", params=params, id_token=id_token)
-        result.extend(data.get("dividends", []))
+        data = _request("/fins/dividend", params=params)
+        result.extend(data.get("data", []))
         pagination_key = data.get("pagination_key")
         if not pagination_key or pagination_key in seen_keys:
             break
@@ -689,27 +624,27 @@ def save_market_calendar(
 
 
 def fetch_topix_daily(
-    id_token: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> list[dict[str, Any]]:
-    """TOPIX 日足 OHLC を取得する（/indices/topix エンドポイント）。
+    """TOPIX 日足 OHLC を取得する（/indices/bars/daily/topix エンドポイント）。
+
+    v2 フィールド: O, H, L, C
 
     Args:
-        id_token:  認証トークン。省略時はキャッシュを使用。
         date_from: 取得開始日。
         date_to:   取得終了日。
 
     Returns:
-        TOPIX 日足レコードのリスト。各要素は {"Date": "YYYYMMDD", "Open": float, ...} を含む。
+        TOPIX 日足レコードのリスト。各要素は {"Date": "YYYYMMDD", "O": float, ...} を含む。
     """
     params: dict[str, str] = {}
     if date_from:
         params["dateFrom"] = date_from.strftime("%Y%m%d")
     if date_to:
         params["dateTo"] = date_to.strftime("%Y%m%d")
-    data = _request("/indices/topix", params=params, id_token=id_token)
-    records = data.get("topix", [])
+    data = _request("/indices/bars/daily/topix", params=params)
+    records = data.get("data", [])
     logger.info("fetch_topix_daily: %d レコード取得", len(records))
     return records
 
@@ -719,6 +654,8 @@ def save_topix_daily(
     records: list[dict[str, Any]],
 ) -> int:
     """TOPIX 日足データを topix_daily テーブルへ冪等保存する。
+
+    v2 フィールドマッピング: O→open, H→high, L→low, C→close
 
     Args:
         conn:    DuckDB 接続。
@@ -737,10 +674,10 @@ def save_topix_daily(
         except (ValueError, IndexError):
             logger.warning("save_topix_daily: 不正な日付 '%s' — スキップ", date_str)
             continue
-        o = _to_float(r.get("Open"))
-        h = _to_float(r.get("High"))
-        lo = _to_float(r.get("Low"))
-        c = _to_float(r.get("Close"))
+        o = _to_float(r.get("O"))
+        h = _to_float(r.get("H"))
+        lo = _to_float(r.get("L"))
+        c = _to_float(r.get("C"))
         if None in (o, h, lo, c):
             logger.warning("save_topix_daily: OHLC 欠損行をスキップ: %s", r)
             continue
@@ -761,10 +698,9 @@ def save_topix_daily(
 
 
 def fetch_listed_info(
-    id_token: str | None = None,
     date_: date | None = None,
 ) -> list[dict[str, Any]]:
-    """全上場銘柄情報を GET /listed/info から取得する。
+    """全上場銘柄情報を GET /equities/master から取得する。
 
     J-Quants API フィールドと stocks テーブルのマッピング:
         "Code"             → code
@@ -773,7 +709,6 @@ def fetch_listed_info(
         "Sector33CodeName" → sector
 
     Args:
-        id_token: 認証トークン。省略時はモジュールキャッシュを使用。
         date_:    取得対象日（Look-ahead Bias 防止のため、取得日を明示することを推奨）。
                   省略時は当日のデータを返す。
 
@@ -798,9 +733,9 @@ def fetch_listed_info(
         params["date"] = date_.strftime("%Y%m%d")
 
     data = _request(
-        "/listed/info", params=params if params else None, id_token=id_token
+        "/equities/master", params=params if params else None
     )
-    records = data.get("info", [])
+    records = data.get("data", [])
 
     result: list[dict[str, Any]] = []
     skipped = 0
