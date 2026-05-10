@@ -1,10 +1,11 @@
-"""ai_wizard コンポーネント単体テスト（Issue #233）"""
+"""ai_wizard コンポーネント単体テスト（Issue #233 / #279）"""
 
 from __future__ import annotations
 
 import os
 import sqlite3
 import uuid
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import duckdb
@@ -49,6 +50,7 @@ def _make_st_mock(session_state=None):
     mock_st.chat_message.return_value.__enter__ = MagicMock(return_value=None)
     mock_st.chat_message.return_value.__exit__ = MagicMock(return_value=False)
     mock_st.chat_input.return_value = None
+    mock_st.button.return_value = False  # デフォルトはボタン未押下
     mock_st.secrets.get.return_value = None  # API key not in st.secrets by default
     return mock_st
 
@@ -61,7 +63,12 @@ class TestRenderApiKeyMissing:
         env = {k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}
         with patch.dict(os.environ, env, clear=True):
             with patch.object(mod, "st", mock_st):
-                mod.render(wizard_duckdb, wizard_sqlite)
+                mod.render(
+                    wizard_duckdb,
+                    wizard_sqlite,
+                    duckdb_path=Path("data/kabusys.duckdb"),
+                    config_path=Path("config/strategy_config.yaml"),
+                )
 
         mock_st.error.assert_called_once()
         assert "OPENAI_API_KEY" in mock_st.error.call_args[0][0]
@@ -74,7 +81,12 @@ class TestRenderApiKeyMissing:
         env = {k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}
         with patch.dict(os.environ, env, clear=True):
             with patch.object(mod, "st", mock_st):
-                mod.render(wizard_duckdb, wizard_sqlite)
+                mod.render(
+                    wizard_duckdb,
+                    wizard_sqlite,
+                    duckdb_path=Path("data/kabusys.duckdb"),
+                    config_path=Path("config/strategy_config.yaml"),
+                )
 
         mock_st.chat_input.assert_not_called()
 
@@ -88,7 +100,12 @@ class TestSessionIdInitialization:
         mock_st = _make_st_mock(session_state=state)
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
             with patch.object(mod, "st", mock_st):
-                mod.render(wizard_duckdb, wizard_sqlite)
+                mod.render(
+                    wizard_duckdb,
+                    wizard_sqlite,
+                    duckdb_path=Path("data/kabusys.duckdb"),
+                    config_path=Path("config/strategy_config.yaml"),
+                )
 
         assert "wizard_session_id" in state
         uuid.UUID(state["wizard_session_id"])  # 不正なら ValueError
@@ -146,7 +163,12 @@ class TestRenderWithApiKey:
                     return_value=iter(["ATR乗数を2.0から2.5にすることを提案します。"]),
                 ):
                     with patch("kabusys.monitoring.components.ai_wizard.OpenAI"):
-                        mod.render(wizard_duckdb, wizard_sqlite)
+                        mod.render(
+                            wizard_duckdb,
+                            wizard_sqlite,
+                            duckdb_path=Path("data/kabusys.duckdb"),
+                            config_path=Path("config/strategy_config.yaml"),
+                        )
 
         session_id = state["wizard_session_id"]
         db = MonitoringDB(wizard_sqlite)
@@ -155,6 +177,8 @@ class TestRenderWithApiKey:
         assert msgs[0]["role"] == "user"
         assert msgs[0]["content"] == "ドローダウンを改善したい"
         assert msgs[1]["role"] == "assistant"
+        # レスポンスに JSON ブロックがないので rerun は呼ばれない
+        mock_st.rerun.assert_not_called()
 
     def test_no_assistant_saved_when_write_stream_returns_none(
         self, wizard_duckdb, wizard_sqlite
@@ -174,7 +198,12 @@ class TestRenderWithApiKey:
                     return_value=iter([]),
                 ):
                     with patch("kabusys.monitoring.components.ai_wizard.OpenAI"):
-                        mod.render(wizard_duckdb, wizard_sqlite)
+                        mod.render(
+                            wizard_duckdb,
+                            wizard_sqlite,
+                            duckdb_path=Path("data/kabusys.duckdb"),
+                            config_path=Path("config/strategy_config.yaml"),
+                        )
 
         session_id = state["wizard_session_id"]
         db = MonitoringDB(wizard_sqlite)
@@ -182,6 +211,66 @@ class TestRenderWithApiKey:
         # user は保存、assistant は保存しない
         assert len(msgs) == 1
         assert msgs[0]["role"] == "user"
+
+    def test_suggested_params_stored_in_session_state(
+        self, wizard_duckdb, wizard_sqlite
+    ):
+        """AI 返答に JSON ブロックが含まれる場合、param_review_suggested が session_state に設定される。"""
+        import kabusys.monitoring.components.ai_wizard as mod
+
+        state: dict = {}
+        mock_st = _make_st_mock(session_state=state)
+        mock_st.chat_input.return_value = "ATRを改善してほしい"
+        mock_st.write_stream.return_value = (
+            "ATR乗数を2.5にすることを提案します。\n"
+            '```json\n{"trailing_stop_atr_mult": 2.5}\n```'
+        )
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+            with patch.object(mod, "st", mock_st):
+                with patch(
+                    "kabusys.monitoring.components.ai_wizard._stream_openai_response",
+                    return_value=iter([]),
+                ):
+                    with patch("kabusys.monitoring.components.ai_wizard.OpenAI"):
+                        with patch(
+                            "kabusys.monitoring.components.ai_wizard.render_param_review"
+                        ):
+                            mod.render(
+                                wizard_duckdb,
+                                wizard_sqlite,
+                                duckdb_path=Path("data/kabusys.duckdb"),
+                                config_path=Path("config/strategy_config.yaml"),
+                            )
+
+        assert state.get("param_review_suggested") == {"trailing_stop_atr_mult": 2.5}
+        mock_st.rerun.assert_called()
+
+    def test_no_json_block_does_not_set_suggested(self, wizard_duckdb, wizard_sqlite):
+        """AI 返答に JSON ブロックがない場合、param_review_suggested は設定されない。"""
+        import kabusys.monitoring.components.ai_wizard as mod
+
+        state: dict = {}
+        mock_st = _make_st_mock(session_state=state)
+        mock_st.chat_input.return_value = "現状維持でいいです"
+        mock_st.write_stream.return_value = "現状のパラメータで問題ありません。"
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+            with patch.object(mod, "st", mock_st):
+                with patch(
+                    "kabusys.monitoring.components.ai_wizard._stream_openai_response",
+                    return_value=iter([]),
+                ):
+                    with patch("kabusys.monitoring.components.ai_wizard.OpenAI"):
+                        mod.render(
+                            wizard_duckdb,
+                            wizard_sqlite,
+                            duckdb_path=Path("data/kabusys.duckdb"),
+                            config_path=Path("config/strategy_config.yaml"),
+                        )
+
+        assert "param_review_suggested" not in state
+        mock_st.rerun.assert_not_called()
 
 
 class TestHistoryClear:
@@ -205,6 +294,11 @@ class TestHistoryClear:
                     "kabusys.monitoring.components.ai_wizard.load_latest_summary",
                     return_value=None,
                 ):
-                    mod.render(wizard_duckdb, wizard_sqlite)
+                    mod.render(
+                        wizard_duckdb,
+                        wizard_sqlite,
+                        duckdb_path=Path("data/kabusys.duckdb"),
+                        config_path=Path("config/strategy_config.yaml"),
+                    )
 
         assert db.load_wizard_messages(session_id) == []
