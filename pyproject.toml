@@ -6,8 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "kabusys"
 version = "0.1.0"
 # テスト済み・推奨: Python 3.11 / 3.12 (CI は 3.11)
-# Python 3.13 は依存パッケージの wheel 未対応のため非推奨
-requires-python = ">=3.10,<3.13"
+# Python 3.13: 主要依存パッケージの wheel が揃い次第対応済みとみなす（2026-05 時点で動作確認）
+requires-python = ">=3.10"
 # 正確なバージョンは requirements.txt で管理。
 # pip install -r requirements.txt && pip install -e . --no-deps を推奨。
 dependencies = [
