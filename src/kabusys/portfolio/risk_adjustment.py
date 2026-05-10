@@ -7,6 +7,7 @@ DB 参照なし — メモリ内計算のみ。
 from __future__ import annotations
 
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -51,15 +52,22 @@ def apply_sector_cap(
         sector = sector_map.get(code, "unknown")
         if sector == "unknown":
             continue
-        if code not in price_map:
+        value = price_map.get(code)
+        if (
+            value is None
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0
+        ):
             logger.warning(
-                "apply_sector_cap: %s の価格が price_map に存在しません。セクター '%s' を保守的にブロックします。",
+                "apply_sector_cap: %s の価格が不正値（%r）。セクター '%s' を保守的にブロックします。",
                 code,
+                value,
                 sector,
             )
             price_missing_sectors.add(sector)
             continue
-        price = price_map[code]
+        price = value
         sector_exposure[sector] = sector_exposure.get(sector, 0.0) + shares * price
 
     # 超過セクターの集合を作成
