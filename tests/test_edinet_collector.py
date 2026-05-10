@@ -82,7 +82,7 @@ _SAMPLE_RESPONSE = {
         {
             "docID": "S100ABCD",
             "edinetCode": "E00001",
-            "docType": "120",
+            "docTypeCode": "120",
             "filerName": "トヨタ自動車株式会社",
             "submitDateTime": "2024-09-01 15:30",
             "docDescription": "有価証券報告書－第85期",
@@ -93,7 +93,7 @@ _SAMPLE_RESPONSE = {
         {
             "docID": "S100WXYZ",
             "edinetCode": "E00002",
-            "docType": "170",
+            "docTypeCode": "170",
             "filerName": "大量保有者テスト",
             "submitDateTime": "2024-09-01 16:00",
             "docDescription": "大量保有報告書",
@@ -104,7 +104,7 @@ _SAMPLE_RESPONSE = {
         {
             "docID": "S100SKIP",
             "edinetCode": "E00003",
-            "docType": "120",
+            "docTypeCode": "120",
             "filerName": "取り下げ会社",
             "submitDateTime": "2024-09-01 10:00",
             "docDescription": "有価証券報告書",
@@ -115,7 +115,7 @@ _SAMPLE_RESPONSE = {
         {
             "docID": "S100TYPE",
             "edinetCode": "E00004",
-            "docType": "999",  # 対象外書類種別
+            "docTypeCode": "999",  # 対象外書類種別
             "filerName": "対象外会社",
             "submitDateTime": "2024-09-01 11:00",
             "docDescription": "対象外書類",
@@ -187,7 +187,7 @@ def test_parse_edinet_response_api_status_int_200():
             {
                 "docID": "S100INT",
                 "edinetCode": "E00001",
-                "docType": "120",
+                "docTypeCode": "120",
                 "filerName": "テスト会社",
                 "submitDateTime": "2024-09-01 15:00",
                 "docDescription": "有価証券報告書",
@@ -217,7 +217,7 @@ def test_parse_edinet_response_fallback_datetime():
             {
                 "docID": "S100FB",
                 "edinetCode": "E00001",
-                "docType": "120",
+                "docTypeCode": "120",
                 "filerName": "フォールバック会社",
                 "submitDateTime": "invalid-datetime",
                 "docDescription": "有価証券報告書",
@@ -241,7 +241,7 @@ def test_parse_edinet_response_submit_datetime_with_seconds():
             {
                 "docID": "S100SEC",
                 "edinetCode": "E00001",
-                "docType": "150",
+                "docTypeCode": "150",
                 "filerName": "テスト会社",
                 "submitDateTime": "2024-09-01 09:15:30",
                 "docDescription": "訂正臨時報告書",
@@ -265,7 +265,7 @@ def test_parse_edinet_response_target_doc_types_171_172():
             {
                 "docID": "S100171",
                 "edinetCode": "E00001",
-                "docType": "171",
+                "docTypeCode": "171",
                 "filerName": "会社A",
                 "submitDateTime": "2024-09-01 10:00",
                 "docDescription": "大量保有報告書（特例対象）",
@@ -276,7 +276,7 @@ def test_parse_edinet_response_target_doc_types_171_172():
             {
                 "docID": "S100172",
                 "edinetCode": "E00002",
-                "docType": "172",
+                "docTypeCode": "172",
                 "filerName": "会社B",
                 "submitDateTime": "2024-09-01 11:00",
                 "docDescription": "変更報告書",
@@ -310,7 +310,7 @@ def test_parse_edinet_response_all_withdrawal_statuses():
             {
                 "docID": "S100W1",
                 "edinetCode": "E00001",
-                "docType": "120",
+                "docTypeCode": "120",
                 "filerName": "会社A",
                 "submitDateTime": "2024-09-01 10:00",
                 "docDescription": "有価証券報告書",
@@ -321,7 +321,7 @@ def test_parse_edinet_response_all_withdrawal_statuses():
             {
                 "docID": "S100W2",
                 "edinetCode": "E00002",
-                "docType": "130",
+                "docTypeCode": "130",
                 "filerName": "会社B",
                 "submitDateTime": "2024-09-01 11:00",
                 "docDescription": "四半期報告書",
