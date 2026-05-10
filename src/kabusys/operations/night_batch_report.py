@@ -90,6 +90,8 @@ def _determine_status(
       - 必須ジョブのいずれかが job_results に存在しない（未実行）
       - 必須ジョブのいずれかが failed または skipped
       - signal_queue == 0
+      - prices_daily == 0（価格データなしではシグナル生成不可）
+      - features == 0（特徴量なしではシグナル生成不可）
 
     READY_WITH_WARNINGS 条件（BLOCKED でなく、いずれかが真）:
       - いずれかのジョブが status == "warning"
@@ -109,6 +111,8 @@ def _determine_status(
         has_missing_mandatory
         or has_blocked_mandatory
         or update_counts.signal_queue == 0
+        or update_counts.prices_daily == 0
+        or update_counts.features == 0
     ):
         return STATUS_BLOCKED
 
@@ -155,10 +159,8 @@ def _generate_warnings(
         warnings.append("signals が生成されていません")
     if update_counts.signal_queue == 0:
         warnings.append("signal_queue が空です（翌営業日の自動執行は不可）")
-    if update_counts.prices_daily == 0:
-        warnings.append("prices_daily の更新件数が 0 件です")
-    if update_counts.features == 0:
-        warnings.append("features の更新件数が 0 件です")
+    # prices_daily == 0 および features == 0 は BLOCKED 判定のため警告は生成しない
+    # （BLOCKED ステータス自体が問題を伝達する）
 
     return warnings
 
