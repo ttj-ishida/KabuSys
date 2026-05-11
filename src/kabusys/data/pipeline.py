@@ -458,9 +458,7 @@ def run_topix_etl(
             date_from = _MIN_DATA_DATE
 
     if date_from > target_date:
-        logger.info(
-            "run_topix_etl: すでに最新 date_from=%s target=%s", date_from, target_date
-        )
+        logger.info("run_topix_etl: すでに最新 date_from=%s target=%s", date_from, target_date)
         return 0, 0
 
     logger.info("run_topix_etl: date_from=%s date_to=%s", date_from, target_date)
@@ -554,9 +552,7 @@ def run_daily_etl(
 
     # 1. 市場カレンダーETL（先に取得して営業日調整に使用できるようにする）
     try:
-        fetched, saved = run_calendar_etl(
-            conn, today, lookahead_days=calendar_lookahead_days
-        )
+        fetched, saved = run_calendar_etl(conn, today, lookahead_days=calendar_lookahead_days)
         result.calendar_fetched = fetched
         result.calendar_saved = saved
     except Exception:
@@ -577,9 +573,7 @@ def run_daily_etl(
 
     # 3. 財務データETL
     try:
-        fetched, saved = run_financials_etl(
-            conn, trading_day, backfill_days=backfill_days
-        )
+        fetched, saved = run_financials_etl(conn, trading_day, backfill_days=backfill_days)
         result.financials_fetched = fetched
         result.financials_saved = saved
     except Exception:
@@ -588,9 +582,7 @@ def run_daily_etl(
 
     # 4. 配当データETL（差分更新 + backfill）
     try:
-        fetched, saved = run_dividends_etl(
-            conn, trading_day, backfill_days=backfill_days
-        )
+        fetched, saved = run_dividends_etl(conn, trading_day, backfill_days=backfill_days)
         result.dividends_fetched = fetched
         result.dividends_saved = saved
     except Exception:

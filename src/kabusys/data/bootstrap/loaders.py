@@ -200,9 +200,7 @@ def load_financials(conn: duckdb.DuckDBPyConnection, csv_path: Path) -> int:
         eps = _to_float(row.get("EPS"))
         roe = _to_float(row.get("ROE"))
 
-        buf_raw.append(
-            (code, report_date, period_type, revenue, op, np_, eps, roe, fetched_at)
-        )
+        buf_raw.append((code, report_date, period_type, revenue, op, np_, eps, roe, fetched_at))
         buf_proc.append((code, report_date, period_type, revenue, op, np_, eps, roe))
 
         if len(buf_raw) >= _CHUNK:

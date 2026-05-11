@@ -110,12 +110,8 @@ def test_read_skips_malformed_json(tmp_path):
 def test_write_overwrites_same_job(tmp_path):
     from kabusys.operations.job_run_recorder import read_job_results, write_job_result
 
-    write_job_result(
-        _make_result(status="failed"), base_dir=tmp_path, run_date=date(2026, 5, 7)
-    )
-    write_job_result(
-        _make_result(status="success"), base_dir=tmp_path, run_date=date(2026, 5, 7)
-    )
+    write_job_result(_make_result(status="failed"), base_dir=tmp_path, run_date=date(2026, 5, 7))
+    write_job_result(_make_result(status="success"), base_dir=tmp_path, run_date=date(2026, 5, 7))
     loaded = read_job_results(date(2026, 5, 7), base_dir=tmp_path)
     assert len(loaded) == 1
     assert loaded[0].status == "success"

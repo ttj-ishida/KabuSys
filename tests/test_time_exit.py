@@ -103,9 +103,7 @@ def _setup_holding_env(
 
 
 def _sell_codes(c, d: date) -> set[str]:
-    rows = c.execute(
-        "SELECT code FROM signals WHERE date = ? AND side = 'sell'", [d]
-    ).fetchall()
+    rows = c.execute("SELECT code FROM signals WHERE date = ? AND side = 'sell'", [d]).fetchall()
     return {r[0] for r in rows}
 
 
@@ -121,15 +119,11 @@ class TestTimeExitFires:
         entry_date = date(2026, 4, 6)
         target_date = date(2026, 4, 7)
         code = "1001"
-        _setup_holding_env(
-            conn, code, target_date, entry_date=entry_date, high_score=True
-        )
+        _setup_holding_env(conn, code, target_date, entry_date=entry_date, high_score=True)
 
         generate_signals(conn, target_date, max_holding_days=1)
 
-        assert code in _sell_codes(conn, target_date), (
-            "held=1==max のとき SELL が発生すべき"
-        )
+        assert code in _sell_codes(conn, target_date), "held=1==max のとき SELL が発生すべき"
 
     def test_sell_generated_when_held_exceeds_max(self, conn):
         """held > max_holding_days のときも time_exit SELL が発生する。"""
@@ -137,15 +131,11 @@ class TestTimeExitFires:
         entry_date = date(2026, 4, 6)
         target_date = date(2026, 4, 8)
         code = "1002"
-        _setup_holding_env(
-            conn, code, target_date, entry_date=entry_date, high_score=True
-        )
+        _setup_holding_env(conn, code, target_date, entry_date=entry_date, high_score=True)
 
         generate_signals(conn, target_date, max_holding_days=1)
 
-        assert code in _sell_codes(conn, target_date), (
-            "held=2 > max=1 のとき SELL が発生すべき"
-        )
+        assert code in _sell_codes(conn, target_date), "held=2 > max=1 のとき SELL が発生すべき"
 
 
 # ---------------------------------------------------------------------------
@@ -160,9 +150,7 @@ class TestTimeExitSuppressed:
         entry_date = date(2026, 4, 6)
         target_date = date(2026, 4, 7)
         code = "2001"
-        _setup_holding_env(
-            conn, code, target_date, entry_date=entry_date, high_score=True
-        )
+        _setup_holding_env(conn, code, target_date, entry_date=entry_date, high_score=True)
 
         generate_signals(conn, target_date, max_holding_days=5)
 
@@ -184,9 +172,7 @@ class TestTimeExitBypassesMinHolding:
         entry_date = date(2026, 4, 6)
         target_date = date(2026, 4, 7)
         code = "3001"
-        _setup_holding_env(
-            conn, code, target_date, entry_date=entry_date, high_score=True
-        )
+        _setup_holding_env(conn, code, target_date, entry_date=entry_date, high_score=True)
 
         generate_signals(conn, target_date, min_holding_days=10, max_holding_days=1)
 

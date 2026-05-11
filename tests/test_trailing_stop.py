@@ -197,9 +197,7 @@ def _setup_env(conn, code: str, close: float, avg_price: float = 850.0) -> None:
 
 
 def _sell_codes(conn, d: date) -> set[str]:
-    rows = conn.execute(
-        "SELECT code FROM signals WHERE date = ? AND side = 'sell'", [d]
-    ).fetchall()
+    rows = conn.execute("SELECT code FROM signals WHERE date = ? AND side = 'sell'", [d]).fetchall()
     return {r[0] for r in rows}
 
 

@@ -254,9 +254,7 @@ def main() -> None:
     conn_persist = init_schema(str(Path(args.db)))
     try:
         save_backtest_to_db(conn_persist, report.meta.run_id, result, report)
-        logger.info(
-            "バックテスト結果を DB に保存しました: run_id=%s", report.meta.run_id
-        )
+        logger.info("バックテスト結果を DB に保存しました: run_id=%s", report.meta.run_id)
     except Exception:
         logger.warning(
             "DB 保存に失敗しました（ファイル保存は完了済み）: run_id=%s",

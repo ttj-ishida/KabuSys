@@ -30,9 +30,7 @@ class TestCheckOnce:
             mock_disk.return_value = MagicMock(percent=60.0)
             monitor.check_once(today=date(2026, 3, 31))
 
-        count = monitoring_conn.execute(
-            "SELECT COUNT(*) FROM system_status"
-        ).fetchone()[0]
+        count = monitoring_conn.execute("SELECT COUNT(*) FROM system_status").fetchone()[0]
         assert count == 1
 
     def test_returns_correct_result_fields(self, monitor):

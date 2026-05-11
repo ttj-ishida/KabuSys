@@ -24,9 +24,7 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     settings = Settings()
     if not settings.enable_tdnet:
-        logger.info(
-            "TDnet 収集はオプション機能です（ENABLE_TDNET=false）。スキップします。"
-        )
+        logger.info("TDnet 収集はオプション機能です（ENABLE_TDNET=false）。スキップします。")
         return
     conn = duckdb.connect(str(settings.duckdb_path))
     try:

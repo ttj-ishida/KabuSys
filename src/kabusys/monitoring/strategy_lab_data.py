@@ -34,9 +34,7 @@ def load_ai_scores(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     ).df()
 
 
-def load_signal_summary(
-    conn: duckdb.DuckDBPyConnection, days: int = 30
-) -> pd.DataFrame:
+def load_signal_summary(conn: duckdb.DuckDBPyConnection, days: int = 30) -> pd.DataFrame:
     """直近 N 日のシグナル集計（日別 buy/sell 件数）を返す。"""
     cutoff = (date.today() - timedelta(days=days)).isoformat()
     return conn.execute(

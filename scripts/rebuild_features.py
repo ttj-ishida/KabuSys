@@ -28,9 +28,7 @@ def main() -> None:
     target_date = date.today()
 
     try:
-        cursor = conn.execute(
-            "SELECT COUNT(*) FROM prices_daily WHERE date = ?", [target_date]
-        )
+        cursor = conn.execute("SELECT COUNT(*) FROM prices_daily WHERE date = ?", [target_date])
         count = cursor.fetchone()[0]
         if count == 0:
             logger.error(

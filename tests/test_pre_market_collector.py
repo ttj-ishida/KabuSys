@@ -45,9 +45,7 @@ def test_data_freshness_no_data():
 def test_data_freshness_datetime_type():
     """DuckDB が datetime で返しても正しく処理できる。"""
     mock_conn = MagicMock()
-    mock_conn.execute.return_value.fetchone.return_value = (
-        datetime(2026, 4, 25, 15, 30, 0),
-    )
+    mock_conn.execute.return_value.fetchone.return_value = (datetime(2026, 4, 25, 15, 30, 0),)
     result = check_data_freshness(mock_conn, today=date(2026, 4, 27))
     assert result is True
 
@@ -122,9 +120,7 @@ def test_stop_flag_not_exists(tmp_path):
 def test_task_scheduler_ready():
     mock_result = MagicMock()
     mock_result.returncode = 0
-    mock_result.stdout = (
-        '"\\\\KabuSys_ExecutionStart","4/28/2026 8:30:00 AM","Ready"\r\n'
-    )
+    mock_result.stdout = '"\\\\KabuSys_ExecutionStart","4/28/2026 8:30:00 AM","Ready"\r\n'
     with patch(
         "kabusys.operations.pre_market_collector.subprocess.run",
         return_value=mock_result,
@@ -159,9 +155,7 @@ def test_task_scheduler_ready_japanese_locale():
     """日本語 OS で "準備完了" が返った場合も True になる。"""
     mock_result = MagicMock()
     mock_result.returncode = 0
-    mock_result.stdout = (
-        '"\\\\KabuSys_ExecutionStart","2026/04/28 8:30:00","準備完了"\r\n'
-    )
+    mock_result.stdout = '"\\\\KabuSys_ExecutionStart","2026/04/28 8:30:00","準備完了"\r\n'
     with patch(
         "kabusys.operations.pre_market_collector.subprocess.run",
         return_value=mock_result,

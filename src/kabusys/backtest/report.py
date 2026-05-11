@@ -166,13 +166,9 @@ def build_report(
     history = result.history
     trades = result.trades
 
-    final_value = (
-        max(history, key=lambda s: s.date).portfolio_value if history else initial_cash
-    )
+    final_value = max(history, key=lambda s: s.date).portfolio_value if history else initial_cash
     realized_pnl = sum(
-        t.realized_pnl
-        for t in trades
-        if t.side == "sell" and t.realized_pnl is not None
+        t.realized_pnl for t in trades if t.side == "sell" and t.realized_pnl is not None
     )
     total_commission = sum(t.commission for t in trades)
     sell_trades = [t for t in trades if t.side == "sell" and t.realized_pnl is not None]
@@ -208,9 +204,7 @@ def build_report(
     headline = HeadlineMetrics(
         initial_cash=initial_cash,
         final_value=final_value,
-        total_return=(final_value - initial_cash) / initial_cash
-        if initial_cash > 0
-        else 0.0,
+        total_return=(final_value - initial_cash) / initial_cash if initial_cash > 0 else 0.0,
         cagr=m.cagr,
         realized_pnl=realized_pnl,
         total_commission=total_commission,
@@ -475,12 +469,8 @@ def save_report(
     trades_path = run_dir / "trades.csv"
     with trades_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(
-            ["date", "code", "side", "shares", "price", "commission", "realized_pnl"]
-        )
-        for t in sorted(
-            result.trades, key=lambda t: (t.date, 0 if t.side == "buy" else 1)
-        ):
+        writer.writerow(["date", "code", "side", "shares", "price", "commission", "realized_pnl"])
+        for t in sorted(result.trades, key=lambda t: (t.date, 0 if t.side == "buy" else 1)):
             writer.writerow(
                 [
                     t.date.isoformat(),
@@ -537,9 +527,7 @@ def _calc_monthly_returns(history: list["DailySnapshot"]) -> list[MonthlyReturn]
         value = month_end[key]
         if prev_value is not None:
             ret = (value - prev_value) / prev_value if prev_value > 0 else 0.0
-            results.append(
-                MonthlyReturn(year=key[0], month=key[1], return_pct=ret * 100)
-            )
+            results.append(MonthlyReturn(year=key[0], month=key[1], return_pct=ret * 100))
         prev_value = value
 
     return results
@@ -562,9 +550,7 @@ def _generate_warnings(result: "BacktestResult") -> list[str]:
     if len(history) >= 2:
         days = (max(s.date for s in history) - min(s.date for s in history)).days
         if days < 180:
-            warnings.append(
-                f"検証期間が短いです（{days}日）。180日以上の検証を推奨します。"
-            )
+            warnings.append(f"検証期間が短いです（{days}日）。180日以上の検証を推奨します。")
 
     # 1銘柄寄与が過大（正の pnl のみで集計。負含む総和では損失が大きいと比率が歪むため）
     sell_trades = [t for t in trades if t.side == "sell" and t.realized_pnl is not None]

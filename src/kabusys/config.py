@@ -87,9 +87,7 @@ def _load_env_file(
     except OSError as e:
         import warnings
 
-        warnings.warn(
-            f".env ファイルの読み込みに失敗しました: {path}: {e}", stacklevel=2
-        )
+        warnings.warn(f".env ファイルの読み込みに失敗しました: {path}: {e}", stacklevel=2)
         return
     with f_obj as f:
         for raw in f:
@@ -325,8 +323,7 @@ class Settings:
         value = os.environ.get("KABUSYS_ENV", "development").lower()
         if value not in _VALID_ENVS:
             raise ValueError(
-                f"KABUSYS_ENV の値が不正です: '{value}'. "
-                f"有効な値: {sorted(_VALID_ENVS)}"
+                f"KABUSYS_ENV の値が不正です: '{value}'. 有効な値: {sorted(_VALID_ENVS)}"
             )
         return value
 
@@ -335,8 +332,7 @@ class Settings:
         value = os.environ.get("LOG_LEVEL", "INFO").upper()
         if value not in _VALID_LOG_LEVELS:
             raise ValueError(
-                f"LOG_LEVEL の値が不正です: '{value}'. "
-                f"有効な値: {sorted(_VALID_LOG_LEVELS)}"
+                f"LOG_LEVEL の値が不正です: '{value}'. 有効な値: {sorted(_VALID_LOG_LEVELS)}"
             )
         return value
 

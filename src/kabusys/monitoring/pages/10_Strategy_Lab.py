@@ -54,9 +54,7 @@ try:
     with tab_ai:
         df = load_ai_scores(conn)
         if df.empty:
-            st.info(
-                "AI スコアデータがありません（ENABLE_AI_SENTIMENT=false の場合は空）。"
-            )
+            st.info("AI スコアデータがありません（ENABLE_AI_SENTIMENT=false の場合は空）。")
         else:
             st.caption(f"基準日: {df['date'].iloc[0]}")
             col1, col2 = st.columns(2)

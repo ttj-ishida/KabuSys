@@ -64,9 +64,7 @@ def test_load_job_results_or_empty_with_results(tmp_path: Path) -> None:
         "warnings": [],
         "errors": [],
     }
-    (job_dir / "data_update_job.json").write_text(
-        json.dumps(job_data), encoding="utf-8"
-    )
+    (job_dir / "data_update_job.json").write_text(json.dumps(job_data), encoding="utf-8")
 
     result = load_job_results_or_empty(run_date, base_dir=tmp_path)
     assert len(result) == 1
@@ -116,12 +114,8 @@ def test_collect_update_counts_with_data() -> None:
     try:
         conn.execute("INSERT INTO prices_daily VALUES (?, '1301', 100.0)", [run_date])
         conn.execute("INSERT INTO prices_daily VALUES (?, '1302', 200.0)", [run_date])
-        conn.execute(
-            "INSERT INTO signals VALUES (?, '1301', 'buy', 0.8, 1)", [run_date]
-        )
-        conn.execute(
-            "INSERT INTO signal_queue VALUES (?, '1301', 'pending')", [run_date]
-        )
+        conn.execute("INSERT INTO signals VALUES (?, '1301', 'buy', 0.8, 1)", [run_date])
+        conn.execute("INSERT INTO signal_queue VALUES (?, '1301', 'pending')", [run_date])
 
         counts = collect_update_counts(conn, run_date)
         assert counts.prices_daily == 2
@@ -211,15 +205,9 @@ def test_collect_next_day_summary_signal_counts() -> None:
     _setup_db(conn)
     run_date = date(2026, 5, 7)
     try:
-        conn.execute(
-            "INSERT INTO signals VALUES (?, '1301', 'buy', 0.9, 1)", [run_date]
-        )
-        conn.execute(
-            "INSERT INTO signals VALUES (?, '1302', 'buy', 0.8, 2)", [run_date]
-        )
-        conn.execute(
-            "INSERT INTO signals VALUES (?, '1303', 'sell', 0.7, 3)", [run_date]
-        )
+        conn.execute("INSERT INTO signals VALUES (?, '1301', 'buy', 0.9, 1)", [run_date])
+        conn.execute("INSERT INTO signals VALUES (?, '1302', 'buy', 0.8, 2)", [run_date])
+        conn.execute("INSERT INTO signals VALUES (?, '1303', 'sell', 0.7, 3)", [run_date])
 
         summary = collect_next_day_summary(conn, run_date)
         assert summary.buy_count == 2

@@ -15,8 +15,7 @@ try:
     import psutil
 except ImportError:
     print(
-        "ERROR: psutil がインストールされていません。"
-        "pip install psutil を実行してください。",
+        "ERROR: psutil がインストールされていません。pip install psutil を実行してください。",
         file=sys.stderr,
     )
     sys.exit(1)

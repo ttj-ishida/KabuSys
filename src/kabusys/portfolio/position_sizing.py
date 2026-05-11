@@ -71,14 +71,10 @@ def calc_position_sizes(
             code = c["code"]
             price = open_prices.get(code)
             if price is None or price <= 0:
-                logger.debug(
-                    "calc_position_sizes: %s の価格が取得できません。スキップ。", code
-                )
+                logger.debug("calc_position_sizes: %s の価格が取得できません。スキップ。", code)
                 continue
 
-            base_shares = math.floor(
-                portfolio_value * risk_pct / (price * stop_loss_pct)
-            )
+            base_shares = math.floor(portfolio_value * risk_pct / (price * stop_loss_pct))
             target_shares = min(base_shares, _max_per_stock(price))
             target_shares = (target_shares // _lot(code)) * _lot(code)
 
@@ -92,9 +88,7 @@ def calc_position_sizes(
             code = c["code"]
             price = open_prices.get(code)
             if price is None or price <= 0:
-                logger.debug(
-                    "calc_position_sizes: %s の価格が取得できません。スキップ。", code
-                )
+                logger.debug("calc_position_sizes: %s の価格が取得できません。スキップ。", code)
                 continue
             w = weights.get(code, 0.0)
             if w <= 0.0:

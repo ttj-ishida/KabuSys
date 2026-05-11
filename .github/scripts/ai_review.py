@@ -33,10 +33,7 @@ comments_url = f"https://api.github.com/repos/{repo}/issues/{pr}/comments"
 comments_resp = requests.get(comments_url, headers=headers)
 comments_data = comments_resp.json() if comments_resp.status_code == 200 else []
 comments_text = "\n".join(
-    [
-        f"- {c.get('user', {}).get('login', 'User')}: {c.get('body') or ''}"
-        for c in comments_data
-    ]
+    [f"- {c.get('user', {}).get('login', 'User')}: {c.get('body') or ''}" for c in comments_data]
 )
 if not comments_text:
     comments_text = "なし"

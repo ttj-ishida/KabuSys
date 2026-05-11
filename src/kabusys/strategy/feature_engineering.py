@@ -80,11 +80,7 @@ def _apply_universe_filter(
         avg_turnover = r.get("avg_turnover")
         if close is None or not math.isfinite(close) or close < _MIN_PRICE:
             continue
-        if (
-            avg_turnover is None
-            or not math.isfinite(avg_turnover)
-            or avg_turnover < _MIN_TURNOVER
-        ):
+        if avg_turnover is None or not math.isfinite(avg_turnover) or avg_turnover < _MIN_TURNOVER:
             continue
         result.append(r)
     return result
@@ -152,9 +148,7 @@ def build_features(
         merged.append(
             {
                 "code": code,
-                "avg_turnover": v.get(
-                    "avg_turnover"
-                ),  # フィルタ用（features には保存しない）
+                "avg_turnover": v.get("avg_turnover"),  # フィルタ用（features には保存しない）
                 "mom_1m": m.get("mom_1m"),
                 "mom_3m": m.get("mom_3m"),
                 "ma200_dev": m.get("ma200_dev"),

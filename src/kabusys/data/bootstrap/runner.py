@@ -317,19 +317,13 @@ def main(argv: list[str] | None = None) -> int:
     from kabusys.config import Settings
     from kabusys.data.schema import init_schema
 
-    parser = argparse.ArgumentParser(
-        description="J-Quants Bootstrap: 初回一括データ投入"
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true", help="ダウンロードせず件数確認のみ"
-    )
+    parser = argparse.ArgumentParser(description="J-Quants Bootstrap: 初回一括データ投入")
+    parser.add_argument("--dry-run", action="store_true", help="ダウンロードせず件数確認のみ")
     parser.add_argument("--endpoint", metavar="EP", help="特定エンドポイントのみ処理")
     parser.add_argument(
         "--raw-dir", default="data/bootstrap/raw", help="ローカルキャッシュディレクトリ"
     )
-    parser.add_argument(
-        "--verbose", "-v", action="store_true", help="DEBUG レベルのログを出力"
-    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="DEBUG レベルのログを出力")
     parser.add_argument(
         "--fresh",
         action="store_true",

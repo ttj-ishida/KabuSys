@@ -24,9 +24,7 @@ def _run_main(is_paper: bool = False):
         patch("kabusys.run_execution.sqlite3.connect") as mock_sqlite,
         patch("kabusys.run_execution.init_monitoring_db"),
         patch("kabusys.run_execution.duckdb.connect"),
-        patch(
-            "kabusys.run_execution.BrokerClientFactory.create", return_value=mock_broker
-        ),
+        patch("kabusys.run_execution.BrokerClientFactory.create", return_value=mock_broker),
         patch("kabusys.run_execution.OrderRepository"),
         patch("kabusys.run_execution.OrderManager"),
         patch("kabusys.run_execution.RiskManager"),

@@ -66,9 +66,7 @@ def calc_score_weights(candidates: list[dict]) -> dict[str, float]:
 
     total = sum(c.get("score", 0.0) for c in candidates)
     if total <= 0.0:
-        logger.warning(
-            "calc_score_weights: 全銘柄のスコアが 0.0。等金額配分にフォールバック。"
-        )
+        logger.warning("calc_score_weights: 全銘柄のスコアが 0.0。等金額配分にフォールバック。")
         return calc_equal_weights(candidates)
 
     return {c["code"]: c.get("score", 0.0) / total for c in candidates}

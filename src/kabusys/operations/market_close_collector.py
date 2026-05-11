@@ -80,8 +80,7 @@ def get_performance_row(duckdb_conn, today: date) -> tuple[float | None, float |
 def get_prev_equity(duckdb_conn, today: date) -> float | None:
     """today より前の最新 equity を返す。存在しなければ None。"""
     row = duckdb_conn.execute(
-        "SELECT equity FROM portfolio_performance"
-        " WHERE date < ? ORDER BY date DESC LIMIT 1",
+        "SELECT equity FROM portfolio_performance WHERE date < ? ORDER BY date DESC LIMIT 1",
         [today.isoformat()],
     ).fetchone()
     return float(row[0]) if row and row[0] is not None else None

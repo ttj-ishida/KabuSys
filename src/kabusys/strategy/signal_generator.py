@@ -69,15 +69,9 @@ _GAP_THRESHOLD_EPSILON: float = 1e-9
 _SECTOR_BOOST: float = 0.03  # 上位 _SECTOR_QUARTILE セクター銘柄への final_score 加算量
 _SECTOR_QUARTILE: float = 0.25  # 上位・下位の区切り割合（各 ceil(N×0.25) セクター）
 _MIN_HOLDING_DAYS: int = 5  # BUY 後この営業日数を経過するまで非ストップロス SELL を抑制
-_MAX_HOLDING_DAYS: int = (
-    60  # この営業日数を超えた保有は time_exit SELL を発動（最大保有期間）
-)
-_TRAILING_STOP_ATR_MULT: float = (
-    2.0  # peak_close から ATR × N 下落で trailing_stop SELL を発動
-)
-_REENTRY_COOLDOWN_DAYS: int = (
-    5  # SELL 後この営業日数を経過するまで同一銘柄の BUY を禁止
-)
+_MAX_HOLDING_DAYS: int = 60  # この営業日数を超えた保有は time_exit SELL を発動（最大保有期間）
+_TRAILING_STOP_ATR_MULT: float = 2.0  # peak_close から ATR × N 下落で trailing_stop SELL を発動
+_REENTRY_COOLDOWN_DAYS: int = 5  # SELL 後この営業日数を経過するまで同一銘柄の BUY を禁止
 
 _TOPIX_DRAWDOWN_THRESHOLD: float = -0.15  # 200MA 乖離率がこの値未満で縮小
 _TOPIX_SIZE_MULTIPLIER_BEAR: float = 0.5  # 地合い悪化時の size_multiplier
@@ -104,9 +98,7 @@ _STRATEGY_CONFIG_DEFAULTS: dict = {
     "topix_size_multiplier_bear": _TOPIX_SIZE_MULTIPLIER_BEAR,
 }
 
-_STRATEGY_CONFIG_PATH = (
-    Path(__file__).resolve().parents[3] / "config" / "strategy_config.yaml"
-)
+_STRATEGY_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "strategy_config.yaml"
 
 _strategy_config_cache: dict | None = None
 _strategy_config_mtime: float = -1.0
@@ -154,9 +146,7 @@ def _load_strategy_config() -> dict:
     try:
         current_mtime = _STRATEGY_CONFIG_PATH.stat().st_mtime
     except OSError as exc:
-        logger.warning(
-            "strategy_config.yaml の stat() に失敗: %s (デフォルトを使用)", exc
-        )
+        logger.warning("strategy_config.yaml の stat() に失敗: %s (デフォルトを使用)", exc)
         return _defaults()
 
     if _strategy_config_cache is not None and current_mtime == _strategy_config_mtime:
@@ -394,9 +384,7 @@ def _load_value_config() -> dict:
                         "strategy_config.yaml: value_score.weights が不正。デフォルトを使用"
                     )
                     return _cache_and_return(_defaults())
-                if any(
-                    n.get(k, 0) <= 0 for k in ("per_mid", "pbr_mid", "div_yield_max")
-                ):
+                if any(n.get(k, 0) <= 0 for k in ("per_mid", "pbr_mid", "div_yield_max")):
                     logger.warning(
                         "strategy_config.yaml: value_score.normalization に 0 以下の値。デフォルトを使用"
                     )
@@ -422,9 +410,7 @@ def _load_value_config() -> dict:
     }
 
     if any(v < 0 for v in w.values()) or sum(w.values()) <= 0:
-        logger.warning(
-            "value_score.weights が不正（負値または合計<=0）。デフォルトを使用"
-        )
+        logger.warning("value_score.weights が不正（負値または合計<=0）。デフォルトを使用")
         return _cache_and_return(_defaults())
     if any(n.get(k, 0) <= 0 for k in ("per_mid", "pbr_mid", "div_yield_max")):
         logger.warning("value_score.normalization に 0 以下の値。デフォルトを使用")
@@ -609,9 +595,7 @@ def _calc_sector_strengths(
     Note: 有効セクターが1つの場合は top と bottom が同一になるためフィルタ無効。
     """
     # sector_map を取得（NULL / 空白のみは除外）
-    sector_rows = conn.execute(
-        "SELECT code, NULLIF(TRIM(sector), '') FROM stocks"
-    ).fetchall()
+    sector_rows = conn.execute("SELECT code, NULLIF(TRIM(sector), '') FROM stocks").fetchall()
     sector_map: dict[str, str] = {code: sec for code, sec in sector_rows if sec}
 
     if not sector_map:
@@ -1034,9 +1018,7 @@ def _generate_sell_signals(
                 }
             )
 
-    logger.debug(
-        "_generate_sell_signals: %d シグナル date=%s", len(sell_signals), target_date
-    )
+    logger.debug("_generate_sell_signals: %d シグナル date=%s", len(sell_signals), target_date)
     return sell_signals
 
 
@@ -1098,13 +1080,9 @@ def generate_signals(
     sector_boost = _cfg["sector_boost"]
 
     if min_holding_days < 0:
-        raise ValueError(
-            f"min_holding_days は 0 以上を指定してください: {min_holding_days}"
-        )
+        raise ValueError(f"min_holding_days は 0 以上を指定してください: {min_holding_days}")
     if max_holding_days < 1:
-        raise ValueError(
-            f"max_holding_days は 1 以上を指定してください: {max_holding_days}"
-        )
+        raise ValueError(f"max_holding_days は 1 以上を指定してください: {max_holding_days}")
     if max_holding_days <= min_holding_days:
         logger.warning(
             "max_holding_days (%d) が min_holding_days (%d) 以下です。"
@@ -1114,9 +1092,7 @@ def generate_signals(
             min_holding_days,
         )
     if trailing_stop_atr <= 0:
-        raise ValueError(
-            f"trailing_stop_atr は正の値を指定してください: {trailing_stop_atr}"
-        )
+        raise ValueError(f"trailing_stop_atr は正の値を指定してください: {trailing_stop_atr}")
     # weights を _DEFAULT_WEIGHTS でフォールバック補完し、合計が 1.0 でなければ再スケール
     # 未知キー・非数値・NaN/Inf・負値は無視して既知キー（_DEFAULT_WEIGHTS）のみを受け付ける
     allowed = set(_DEFAULT_WEIGHTS)
@@ -1124,12 +1100,7 @@ def generate_signals(
     for k, v in (weights or {}).items():
         if k not in allowed:
             continue
-        if (
-            not isinstance(v, (int, float))
-            or isinstance(v, bool)
-            or not math.isfinite(v)
-            or v < 0
-        ):
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or v < 0:
             logger.warning(
                 "generate_signals: weights[%s]=%r は無効な値のためスキップします。",
                 k,
@@ -1324,8 +1295,7 @@ def generate_signals(
                 continue
             gap = gap_ratios.get(r["code"])
             if gap is not None and (
-                gap > _gap_up + _GAP_THRESHOLD_EPSILON
-                or gap <= _gap_down + _GAP_THRESHOLD_EPSILON
+                gap > _gap_up + _GAP_THRESHOLD_EPSILON or gap <= _gap_down + _GAP_THRESHOLD_EPSILON
             ):
                 logger.debug(
                     "gap filter: %s gap=%.2f%% — BUY を抑制 date=%s",
@@ -1413,8 +1383,7 @@ def generate_signals(
 
     # 8. signals テーブルへ日付単位の置換（トランザクション＋バルク挿入で原子性を保証）
     buy_params = [
-        (target_date, r["code"], r["score"], r["rank"], size_multiplier)
-        for r in buy_signals
+        (target_date, r["code"], r["score"], r["rank"], size_multiplier) for r in buy_signals
     ]
     sell_params = [(target_date, r["code"], r["score"]) for r in sell_signals]
     conn.execute("BEGIN")

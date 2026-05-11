@@ -67,10 +67,7 @@ def load_premarket_data(
 
     return {
         "status": report.status,
-        "checks": [
-            {"name": c.name, "status": c.status, "detail": c.detail}
-            for c in report.checks
-        ],
+        "checks": [{"name": c.name, "status": c.status, "detail": c.detail} for c in report.checks],
         "warnings": report.warnings,
         "generated_at": report.generated_at,
         "signal_queue_pending": data.signal_queue_pending,

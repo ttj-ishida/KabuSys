@@ -55,9 +55,7 @@ def main() -> None:
             if breadth_result == 1:
                 logger.info("breadth 挿入完了: date=%s", target_date)
             else:
-                logger.info(
-                    "breadth スキップ（既存 or データ不足）: date=%s", target_date
-                )
+                logger.info("breadth スキップ（既存 or データ不足）: date=%s", target_date)
         else:
             logger.warning("breadth 計算スキップ: prices_daily にデータなし")
     except Exception as exc:
@@ -72,9 +70,7 @@ def main() -> None:
         write_job_result(
             JobRunResult(
                 job_name=_JOB_NAME,
-                status="failed"
-                if _failed
-                else ("warning" if _has_warnings else "success"),
+                status="failed" if _failed else ("warning" if _has_warnings else "success"),
                 started_at=started_at,
                 finished_at=finished_at,
                 duration_sec=(finished_at - started_at).total_seconds(),

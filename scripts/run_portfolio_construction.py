@@ -49,12 +49,9 @@ _MAX_UTILIZATION = 0.70
 _JOB_NAME = "portfolio_construction_job"
 
 
-def _get_today_return(
-    conn: duckdb.DuckDBPyConnection, target_date: date, env: str
-) -> float | None:
+def _get_today_return(conn: duckdb.DuckDBPyConnection, target_date: date, env: str) -> float | None:
     row = conn.execute(
-        "SELECT daily_return FROM portfolio_performance"
-        " WHERE date = ? AND env = ? LIMIT 1",
+        "SELECT daily_return FROM portfolio_performance WHERE date = ? AND env = ? LIMIT 1",
         [target_date, env],
     ).fetchone()
     if row is None or row[0] is None:
@@ -72,9 +69,7 @@ def main() -> None:
     _updated_rows: dict[str, int] = {}
 
     try:
-        portfolio_value_str = os.environ.get(
-            "PORTFOLIO_VALUE", str(_DEFAULT_PORTFOLIO_VALUE)
-        )
+        portfolio_value_str = os.environ.get("PORTFOLIO_VALUE", str(_DEFAULT_PORTFOLIO_VALUE))
         try:
             portfolio_value = float(portfolio_value_str)
         except ValueError:
@@ -105,9 +100,7 @@ def main() -> None:
             else:
                 weights = calc_score_weights(candidates)
                 if not weights:
-                    logger.info(
-                        "重み計算結果が 0 件です。signal_queue を更新しません。"
-                    )
+                    logger.info("重み計算結果が 0 件です。signal_queue を更新しません。")
                     _updated_rows["signal_queue"] = 0
                 else:
                     codes = [c["code"] for c in candidates]
@@ -126,15 +119,11 @@ def main() -> None:
                         codes,
                     )
                     close_prices = {
-                        r[0]: float(r[1])
-                        for r in price_cur.fetchall()
-                        if r[1] is not None
+                        r[0]: float(r[1]) for r in price_cur.fetchall() if r[1] is not None
                     }
 
                     pos_cur = conn.execute(
-                        "SELECT code, size FROM positions WHERE code IN ("
-                        + code_params
-                        + ")",
+                        "SELECT code, size FROM positions WHERE code IN (" + code_params + ")",
                         codes,
                     )
                     current_positions = {r[0]: int(r[1]) for r in pos_cur.fetchall()}
@@ -170,9 +159,7 @@ def main() -> None:
                                 continue
                             price = close_prices.get(code)
                             if price is None:
-                                logger.warning(
-                                    "価格不明のため銘柄 %s をスキップします。", code
-                                )
+                                logger.warning("価格不明のため銘柄 %s をスキップします。", code)
                                 continue
                             conn.execute(
                                 """INSERT INTO signal_queue

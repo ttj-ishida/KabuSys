@@ -106,9 +106,7 @@ def test_load_error_logs_returns_only_error_events(mon_conn):
     from kabusys.monitoring.monitoring_db import MonitoringDB
 
     db = MonitoringDB(mon_conn)
-    db.log_risk_event(
-        "ORDER_ERROR", "order_fail_count", 1.0, 0.0, detail="注文エラー発生"
-    )
+    db.log_risk_event("ORDER_ERROR", "order_fail_count", 1.0, 0.0, detail="注文エラー発生")
     db.log_risk_event(
         "POSITION_UPDATE", "pos_update", 0.0, 0.0, detail="通常イベント"
     )  # 除外されるはず

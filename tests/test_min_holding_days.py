@@ -60,9 +60,7 @@ def _insert_price(c, code: str, d: date, close: float, open_: float = 100.0) -> 
     )
 
 
-def _insert_position(
-    c, code: str, d: date, avg_price: float = 1000.0, size: int = 100
-) -> None:
+def _insert_position(c, code: str, d: date, avg_price: float = 1000.0, size: int = 100) -> None:
     c.execute(
         "INSERT INTO positions (date, code, position_size, avg_price) VALUES (?, ?, ?, ?)",
         [d, code, size, avg_price],
@@ -76,9 +74,7 @@ def _insert_position_entry(c, code: str, entry_date: date) -> None:
     )
 
 
-def _setup_sell_env(
-    c, code: str, d: date, entry_date: date, avg_price: float = 1000.0
-) -> None:
+def _setup_sell_env(c, code: str, d: date, entry_date: date, avg_price: float = 1000.0) -> None:
     """score_drop SELL 判定に必要なデータを一括挿入する（close > avg_price → ストップロスなし）。"""
     _insert_regime(c, d, label="bull")
     _insert_breadth(c, d, stop=False)
@@ -188,9 +184,7 @@ class TestMinHoldingDaysExceptions:
         _insert_position_entry(conn, code, entry_date=TARGET_DATE)
 
         regime_provider = DatabaseRegimeProvider(conn)
-        generate_signals(
-            conn, TARGET_DATE, min_holding_days=5, regime_provider=regime_provider
-        )
+        generate_signals(conn, TARGET_DATE, min_holding_days=5, regime_provider=regime_provider)
 
         rows = conn.execute(
             "SELECT code FROM signals WHERE date = ? AND side = 'sell'",

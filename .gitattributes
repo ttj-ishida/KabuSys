@@ -1,0 +1,18 @@
+# Normalize line endings: Python and text files always use LF in the repo
+*.py        text eol=lf
+*.toml      text eol=lf
+*.cfg       text eol=lf
+*.ini       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.sh        text eol=lf
+*.gitignore text eol=lf
+
+# Binary files — no conversion
+*.gz        binary
+*.parquet   binary
+*.duckdb    binary
+*.db        binary

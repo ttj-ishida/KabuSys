@@ -58,9 +58,7 @@ class KabuStationClient:
     ) -> None:
         self._api_password = api_password
         # trade_password 省略時は api_password と同一とみなす（単一パスワード設定の場合）
-        self._trade_password = (
-            trade_password if trade_password is not None else api_password
-        )
+        self._trade_password = trade_password if trade_password is not None else api_password
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._token: str | None = None
@@ -187,9 +185,7 @@ class KabuStationClient:
         # kabu station は id クエリを持たない／無視するケースがあるため。
         resp = self._request("get", "/orders")
         if resp.status_code != 200:
-            raise BrokerAPIError(
-                f"注文照会失敗: {resp.status_code}", status_code=resp.status_code
-            )
+            raise BrokerAPIError(f"注文照会失敗: {resp.status_code}", status_code=resp.status_code)
 
         orders = self._json(resp)
         if not orders:
@@ -209,9 +205,7 @@ class KabuStationClient:
         filled_qty = sum(int(d.get("Qty", 0)) for d in filled_details)
         avg_price: float | None = None
         if filled_qty > 0:
-            weighted = sum(
-                float(d.get("Price", 0)) * int(d.get("Qty", 0)) for d in filled_details
-            )
+            weighted = sum(float(d.get("Price", 0)) * int(d.get("Qty", 0)) for d in filled_details)
             avg_price = weighted / filled_qty
 
         side_map = {"1": "sell", "2": "buy"}
@@ -229,9 +223,7 @@ class KabuStationClient:
         """現在の保有ポジション一覧を返す。"""
         resp = self._request("get", "/positions")
         if resp.status_code != 200:
-            raise BrokerAPIError(
-                f"残高照会失敗: {resp.status_code}", status_code=resp.status_code
-            )
+            raise BrokerAPIError(f"残高照会失敗: {resp.status_code}", status_code=resp.status_code)
         positions = []
         for p in self._json(resp) or []:
             raw_current = p.get("CurrentPrice")
@@ -240,9 +232,7 @@ class KabuStationClient:
                     code=str(p.get("Symbol", "")),
                     qty=int(p.get("LeavesQty", 0)),
                     avg_price=float(p.get("Price", 0.0)),
-                    current_price=float(raw_current)
-                    if raw_current is not None
-                    else None,
+                    current_price=float(raw_current) if raw_current is not None else None,
                 )
             )
         return positions
@@ -251,9 +241,7 @@ class KabuStationClient:
         """現物取引余力（円）を返す。"""
         resp = self._request("get", "/wallet/cash")
         if resp.status_code != 200:
-            raise BrokerAPIError(
-                f"余力照会失敗: {resp.status_code}", status_code=resp.status_code
-            )
+            raise BrokerAPIError(f"余力照会失敗: {resp.status_code}", status_code=resp.status_code)
         return float(self._json(resp).get("StockAccountWallet", 0.0))
 
     def stream_push(
@@ -286,9 +274,7 @@ class KabuStationClient:
         def _on_error(_ws: websocket.WebSocketApp, error: Exception) -> None:
             logger.error("WebSocket エラー: %s", error)
 
-        def _on_close(
-            _ws: websocket.WebSocketApp, code: int | None, msg: str | None
-        ) -> None:
+        def _on_close(_ws: websocket.WebSocketApp, code: int | None, msg: str | None) -> None:
             logger.info("WebSocket クローズ: code=%s", code)
 
         def _on_open(_ws: websocket.WebSocketApp) -> None:
@@ -304,9 +290,7 @@ class KabuStationClient:
             if _ws_current[0] is not None:
                 _ws_current[0].close()
 
-        threading.Thread(
-            target=_stop_watcher, daemon=True, name="ws-stop-watcher"
-        ).start()
+        threading.Thread(target=_stop_watcher, daemon=True, name="ws-stop-watcher").start()
 
         while not stop_event.is_set():
             try:

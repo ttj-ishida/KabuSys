@@ -49,9 +49,7 @@ class AlertManager:
         now = datetime.now(tz=timezone.utc)
         last = self._last_sent.get(key)
         if last is not None and now - last < self._cooldown:
-            logger.debug(
-                "Alert cooldown active for (%s, %s) — skipping", level, category
-            )
+            logger.debug("Alert cooldown active for (%s, %s) — skipping", level, category)
             return False
 
         now_jst = datetime.now(tz=timezone(timedelta(hours=9)))

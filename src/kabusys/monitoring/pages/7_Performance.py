@@ -71,9 +71,7 @@ try:
             st.info("保有ポジションはありません。")
         else:
             st.caption(f"基準日: {df['date'].iloc[0]}")
-            total_mv = float(
-                pd.to_numeric(df["market_value"], errors="coerce").fillna(0).sum()
-            )
+            total_mv = float(pd.to_numeric(df["market_value"], errors="coerce").fillna(0).sum())
             st.metric("時価総額合計", f"¥{total_mv:,.0f}")
             st.dataframe(df, use_container_width=True)
 
@@ -88,15 +86,11 @@ try:
     with tab_paper:
         st.subheader("Paper Verification")
         if settings.env != "paper_trading":
-            st.info(
-                "📋 Paper Verification は `KABUSYS_ENV=paper_trading` 環境でのみ表示されます。"
-            )
+            st.info("📋 Paper Verification は `KABUSYS_ENV=paper_trading` 環境でのみ表示されます。")
         else:
             col_from, col_to = st.columns(2)
             with col_from:
-                from_date = st.date_input(
-                    "開始日", value=date.today() - timedelta(days=30)
-                )
+                from_date = st.date_input("開始日", value=date.today() - timedelta(days=30))
             with col_to:
                 to_date = st.date_input("終了日", value=date.today())
 
@@ -104,9 +98,7 @@ try:
             to_dt = f"{to_date}T23:59:59.999999+00:00"
 
             paper_path = Path(str(settings.paper_sqlite_path))
-            data = load_paper_verification_data(
-                paper_path, from_dt=from_dt, to_dt=to_dt
-            )
+            data = load_paper_verification_data(paper_path, from_dt=from_dt, to_dt=to_dt)
 
             if not data.get("available"):
                 st.warning(

@@ -13,9 +13,7 @@ from datetime import datetime, timezone
 
 class OrderState(str, enum.Enum):
     OrderCreated = "created"  # 内部キューに登録済み、まだ送信前
-    OrderSent = (
-        "sent"  # broker API に送信済み、応答待ち（クラッシュ時に不明状態になりうる）
-    )
+    OrderSent = "sent"  # broker API に送信済み、応答待ち（クラッシュ時に不明状態になりうる）
     OrderAccepted = "accepted"  # 証券会社受付済み、市場待機中
     PartialFill = "partial"  # 一部約定済み
     Filled = "filled"  # 全量約定済み

@@ -47,9 +47,7 @@ class TestLoadExecutionStartup:
         today_str = date.today().isoformat()
         day_dir = base / today_str
         day_dir.mkdir(parents=True)
-        (day_dir / "summary.json").write_text(
-            json.dumps({"status": "BLOCKED"}), encoding="utf-8"
-        )
+        (day_dir / "summary.json").write_text(json.dumps({"status": "BLOCKED"}), encoding="utf-8")
         result = load_execution_startup(base)
         assert result is not None
         assert result["status"] == "BLOCKED"

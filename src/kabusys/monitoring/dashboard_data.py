@@ -97,9 +97,7 @@ def load_open_positions(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     ).df()
 
 
-def load_recent_trades(
-    conn: duckdb.DuckDBPyConnection, limit: int = 50
-) -> pd.DataFrame:
+def load_recent_trades(conn: duckdb.DuckDBPyConnection, limit: int = 50) -> pd.DataFrame:
     """直近 N 件の取引履歴を返す。"""
     return conn.execute(
         """SELECT trade_id, order_id, datetime, code, price, size

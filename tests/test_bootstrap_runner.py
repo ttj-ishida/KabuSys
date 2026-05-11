@@ -144,7 +144,9 @@ def _gz_prices(tmp_path: Path) -> bytes:
 
 
 def test_run_bootstrap_dry_run_returns_result(conn, tmp_path):
-    file_list = [{"Key": "prices_2024_01.csv.gz", "Size": 1024, "LastModified": "2024-01-01T00:00:00Z"}]
+    file_list = [
+        {"Key": "prices_2024_01.csv.gz", "Size": 1024, "LastModified": "2024-01-01T00:00:00Z"}
+    ]
     with (
         patch("kabusys.data.bootstrap.runner.list_files", return_value=file_list),
         patch(
@@ -170,7 +172,9 @@ def test_run_bootstrap_skips_loaded_files(conn, tmp_path):
         "INSERT INTO bootstrap_load_history (file_key, endpoint, file_name, status, row_count) "
         "VALUES ('prices_2024_01.csv.gz', '/equities/bars/daily', 'prices_2024_01.csv.gz', 'loaded', 100)"
     )
-    file_list = [{"Key": "prices_2024_01.csv.gz", "Size": 1024, "LastModified": "2024-01-01T00:00:00Z"}]
+    file_list = [
+        {"Key": "prices_2024_01.csv.gz", "Size": 1024, "LastModified": "2024-01-01T00:00:00Z"}
+    ]
     with (
         patch("kabusys.data.bootstrap.runner.list_files", return_value=file_list),
         patch("kabusys.data.bootstrap.runner.download_file") as mock_dl,
@@ -191,7 +195,9 @@ def test_run_bootstrap_records_loaded_status(conn, tmp_path):
     gz_path = ep_dir / "prices_2024_01.csv.gz"
     gz_path.write_bytes(_gz_prices(tmp_path))
 
-    file_list = [{"Key": "prices_2024_01.csv.gz", "Size": 1024, "LastModified": "2024-01-01T00:00:00Z"}]
+    file_list = [
+        {"Key": "prices_2024_01.csv.gz", "Size": 1024, "LastModified": "2024-01-01T00:00:00Z"}
+    ]
     with (
         patch("kabusys.data.bootstrap.runner.list_files", return_value=file_list),
         patch(
@@ -417,8 +423,7 @@ def test_run_bootstrap_local_mode_loads_existing_files(conn, tmp_path):
     assert result.loaded_files == 1
     assert result.failed_files == 0
     row = conn.execute(
-        "SELECT status FROM bootstrap_load_history "
-        "WHERE file_name='prices_2024_01.csv.gz'"
+        "SELECT status FROM bootstrap_load_history WHERE file_name='prices_2024_01.csv.gz'"
     ).fetchone()
     assert row[0] == "loaded"
 
@@ -481,9 +486,7 @@ def test_truncate_data_clears_all_tables(conn, tmp_path):
         "INSERT INTO bootstrap_load_history (file_key, endpoint, file_name, status) "
         "VALUES ('k1', '/equities/bars/daily', 'f1.gz', 'loaded')"
     )
-    conn.execute(
-        "INSERT INTO stocks (code, name, updated_at) VALUES ('7203', 'Toyota', now())"
-    )
+    conn.execute("INSERT INTO stocks (code, name, updated_at) VALUES ('7203', 'Toyota', now())")
 
     _truncate_data(conn)
 

@@ -197,9 +197,7 @@ class TestMarketCrashScenario:
             Position(code="1234", qty=500, avg_price=2000.0, current_price=1500.0),
             Position(code="5678", qty=300, avg_price=3000.0, current_price=2200.0),
         ]
-        broker = MockBrokerClient(
-            available_cash=3_000_000.0, initial_positions=positions
-        )
+        broker = MockBrokerClient(available_cash=3_000_000.0, initial_positions=positions)
         rm = _make_risk_manager(broker, repo, initial_portfolio_value=10_000_000.0)
         # ドローダウン超過チェック
         rm.check_metrics(current_portfolio_value=8_000_000.0)
@@ -354,9 +352,7 @@ class TestLiquidityExhaustionScenario:
         """ブローカーが全発注を拒否する場合、send_order は Rejected 状態を返す。"""
         broker = MockBrokerClient(fill_mode="reject")
         om = OrderManager(broker=broker, repo=repo)
-        request = OrderRequest(
-            code="1234", side="buy", qty=100, order_type="market", price=0.0
-        )
+        request = OrderRequest(code="1234", side="buy", qty=100, order_type="market", price=0.0)
         # create_order は broker 呼び出し前なので正常に作成される
         record = om.create_order("2026-04-18_1234_buy_001", request)
         assert record.state == OrderState.OrderCreated
@@ -375,9 +371,7 @@ class TestLiquidityExhaustionScenario:
         om = OrderManager(broker=broker, repo=repo)
 
         signal_id = "2026-04-18_1234_buy"
-        request = OrderRequest(
-            code="1234", side="buy", qty=100, order_type="market", price=0.0
-        )
+        request = OrderRequest(code="1234", side="buy", qty=100, order_type="market", price=0.0)
 
         # 1 回目: 注文作成 → OrderSent（never fill → active のまま）
         record1 = om.create_order(signal_id, request)
@@ -396,9 +390,7 @@ class TestLiquidityExhaustionScenario:
         """
         broker = MockBrokerClient(fill_mode="never")
         om = OrderManager(broker=broker, repo=repo)
-        request = OrderRequest(
-            code="5678", side="buy", qty=200, order_type="market", price=0.0
-        )
+        request = OrderRequest(code="5678", side="buy", qty=200, order_type="market", price=0.0)
         record = om.create_order("2026-04-18_5678_buy", request)
         with pytest.raises(OrderSentPendingError):
             om.send_order(record.client_order_id)
@@ -417,9 +409,7 @@ class TestLiquidityExhaustionScenario:
         """
         broker = MockBrokerClient(fill_mode="partial", available_cash=5_000_000.0)
         om = OrderManager(broker=broker, repo=repo)
-        request = OrderRequest(
-            code="9012", side="buy", qty=100, order_type="limit", price=1500.0
-        )
+        request = OrderRequest(code="9012", side="buy", qty=100, order_type="limit", price=1500.0)
         record = om.create_order("2026-04-18_9012_buy", request)
         sent = om.send_order(record.client_order_id)
         # partial fill は OrderAccepted に遷移（sync_order 前なので PartialFill ではない）
@@ -449,9 +439,7 @@ class TestLiquidityExhaustionScenario:
         """現金枯渇中でも売り注文はブロックされない（ポジション解消のため）。"""
         broker = MockBrokerClient(available_cash=0.0)
         rm = _make_risk_manager(broker, repo, initial_portfolio_value=10_000_000.0)
-        result = rm.check_signal(
-            "2026-04-18_3456_sell", "3456", order_value=500_000.0, side="sell"
-        )
+        result = rm.check_signal("2026-04-18_3456_sell", "3456", order_value=500_000.0, side="sell")
         assert result.passed
 
     def test_multiple_low_liquidity_rejections_trigger_circuit_breaker(self, repo):
@@ -468,12 +456,8 @@ class TestLiquidityExhaustionScenario:
     def test_position_limit_blocks_illiquid_stock_overallocation(self, repo):
         """流動性の低い銘柄へのオーバーアロケーションがポジション上限でブロックされる。"""
         # 1234 に既に 8% 投資済み（800,000 円）
-        illiquid_pos = Position(
-            code="1234", qty=400, avg_price=1800.0, current_price=2000.0
-        )
-        broker = MockBrokerClient(
-            available_cash=5_000_000.0, initial_positions=[illiquid_pos]
-        )
+        illiquid_pos = Position(code="1234", qty=400, avg_price=1800.0, current_price=2000.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, initial_positions=[illiquid_pos])
         rm = _make_risk_manager(
             broker, repo, initial_portfolio_value=10_000_000.0, max_position_pct=0.10
         )
@@ -491,9 +475,7 @@ class TestLiquidityExhaustionScenario:
             initial_positions=[pos],
         )
         om = OrderManager(broker=broker, repo=repo)
-        request = OrderRequest(
-            code="7777", side="sell", qty=100, order_type="limit", price=2000.0
-        )
+        request = OrderRequest(code="7777", side="sell", qty=100, order_type="limit", price=2000.0)
         record = om.create_order("2026-04-18_7777_sell", request)
         om.send_order(record.client_order_id)
 

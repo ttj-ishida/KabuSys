@@ -50,9 +50,7 @@ TARGET_DATE = date(2026, 3, 20)
 _WINDOW_DT = datetime(2026, 3, 19, 20, 0, 0)  # ウィンドウ内の UTC 時刻
 
 
-def _insert_article(
-    conn, news_id: str, dt: datetime, title: str, content: str = ""
-) -> None:
+def _insert_article(conn, news_id: str, dt: datetime, title: str, content: str = "") -> None:
     """raw_news に1件挿入するヘルパー。"""
     conn.execute(
         "INSERT INTO raw_news (id, datetime, source, title, content, url) "
@@ -143,16 +141,12 @@ def test_score_news_api_failure(conn):
     _insert_article(conn, "art1", _WINDOW_DT, "任天堂決算")
     _link_code(conn, "art1", "7974")
 
-    with patch(
-        "kabusys.ai.news_nlp._call_openai_api", side_effect=Exception("API error")
-    ):
+    with patch("kabusys.ai.news_nlp._call_openai_api", side_effect=Exception("API error")):
         count = score_news(conn, TARGET_DATE, api_key="test-key")
 
     assert count == 0
     assert (
-        conn.execute(
-            "SELECT COUNT(*) FROM ai_scores WHERE date = ?", [TARGET_DATE]
-        ).fetchone()[0]
+        conn.execute("SELECT COUNT(*) FROM ai_scores WHERE date = ?", [TARGET_DATE]).fetchone()[0]
         == 0
     )
 
@@ -284,9 +278,7 @@ def test_score_news_partial_chunk_failure(conn):
     assert count == 20
     saved_codes = {
         r[0]
-        for r in conn.execute(
-            "SELECT code FROM ai_scores WHERE date = ?", [TARGET_DATE]
-        ).fetchall()
+        for r in conn.execute("SELECT code FROM ai_scores WHERE date = ?", [TARGET_DATE]).fetchall()
     }
     assert saved_codes == set(codes[:20])
     assert codes[20] not in saved_codes
@@ -399,9 +391,7 @@ def test_score_news_code_as_integer(conn):
 
     # code を int で返すモックレスポンス
     mock_resp = MagicMock()
-    mock_resp.choices[0].message.content = json.dumps(
-        {"results": [{"code": 6501, "score": 0.7}]}
-    )
+    mock_resp.choices[0].message.content = json.dumps({"results": [{"code": 6501, "score": 0.7}]})
     with patch("kabusys.ai.news_nlp._call_openai_api", return_value=mock_resp):
         count = score_news(conn, TARGET_DATE, api_key="test-key")
 

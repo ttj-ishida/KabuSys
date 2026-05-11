@@ -99,9 +99,7 @@ def init_monitoring_db(conn: sqlite3.Connection) -> None:
         conn.commit()
 
     # 既存 DB に latency_ms カラムがない場合のマイグレーション
-    existing_trade_cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(trade_logs)")
-    }
+    existing_trade_cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_logs)")}
     if "latency_ms" not in existing_trade_cols:
         conn.execute("ALTER TABLE trade_logs ADD COLUMN latency_ms REAL")
         conn.commit()
@@ -337,8 +335,7 @@ class MonitoringDB:
             [{"role": "user"|"assistant", "content": "..."}, ...]
         """
         rows = self._conn.execute(
-            "SELECT role, content FROM ai_wizard_messages "
-            "WHERE session_id = ? ORDER BY id ASC",
+            "SELECT role, content FROM ai_wizard_messages WHERE session_id = ? ORDER BY id ASC",
             (session_id,),
         ).fetchall()
         return [{"role": row["role"], "content": row["content"]} for row in rows]

@@ -55,13 +55,9 @@ tests = response.choices[0].message.content
 # （最後のフェンスを採用すると複数ブロック間の説明文を巻き込む恐れがある）
 # ```python タグ付きフェンスを優先し、なければ最初の ``` にフォールバック。
 lines = tests.strip().splitlines()
-first_open = next(
-    (i for i, ln in enumerate(lines) if ln.strip().startswith("```python")), None
-)
+first_open = next((i for i, ln in enumerate(lines) if ln.strip().startswith("```python")), None)
 if first_open is None:
-    first_open = next(
-        (i for i, ln in enumerate(lines) if ln.strip().startswith("```")), None
-    )
+    first_open = next((i for i, ln in enumerate(lines) if ln.strip().startswith("```")), None)
 if first_open is not None:
     first_close = next(
         (i for i in range(first_open + 1, len(lines)) if lines[i].strip() == "```"),

@@ -44,9 +44,7 @@ def set_process_priority(level: str) -> None:
         ValueError: level が無効な場合
     """
     if level not in _VALID_LEVELS:
-        raise ValueError(
-            f"level が不正です: {level!r}. 有効な値: {sorted(_VALID_LEVELS)}"
-        )
+        raise ValueError(f"level が不正です: {level!r}. 有効な値: {sorted(_VALID_LEVELS)}")
     try:
         p = psutil.Process()
         sysname = platform.system()

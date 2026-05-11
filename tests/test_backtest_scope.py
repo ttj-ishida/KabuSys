@@ -41,9 +41,7 @@ class TestBacktestScope:
 
     def test_preserve_filters_false(self):
         """`preserve_universe_filters=False` が保持される。"""
-        scope = BacktestScope(
-            mode="manual_codes", codes=["1234"], preserve_universe_filters=False
-        )
+        scope = BacktestScope(mode="manual_codes", codes=["1234"], preserve_universe_filters=False)
         assert scope.preserve_universe_filters is False
 
 
@@ -248,9 +246,7 @@ class TestRunBacktestScope:
         from kabusys.data.schema import init_schema
 
         conn = init_schema(":memory:")
-        scope = BacktestScope(
-            mode="manual_codes", codes=["1234"], preserve_universe_filters=False
-        )
+        scope = BacktestScope(mode="manual_codes", codes=["1234"], preserve_universe_filters=False)
         try:
             result = run_backtest(
                 conn,

@@ -94,9 +94,7 @@ class TestSystemStability:
         """シグナル処理後に monitoring_db.trade_logs へ 'Sent' イベントが記録される"""
         _sig(duckdb_conn, "1234")
         _tgt(duckdb_conn, "1234")
-        engine = _engine(
-            orders_conn, duckdb_conn, fill_mode="instant", mon_conn=mon_conn
-        )
+        engine = _engine(orders_conn, duckdb_conn, fill_mode="instant", mon_conn=mon_conn)
         engine._process_signals()
         count = mon_conn.execute(
             "SELECT COUNT(*) FROM trade_logs WHERE event_type = 'Sent'"
@@ -188,9 +186,7 @@ class TestApiLatency:
         """_process_signals() 後に trade_logs の Sent イベントに latency_ms が記録される"""
         _sig(duckdb_conn, "1234")
         _tgt(duckdb_conn, "1234")
-        engine = _engine(
-            orders_conn, duckdb_conn, fill_mode="instant", mon_conn=mon_conn
-        )
+        engine = _engine(orders_conn, duckdb_conn, fill_mode="instant", mon_conn=mon_conn)
         engine._process_signals()
         row = mon_conn.execute(
             "SELECT latency_ms FROM trade_logs WHERE event_type = 'Sent'"

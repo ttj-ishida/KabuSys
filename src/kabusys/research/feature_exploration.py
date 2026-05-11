@@ -213,9 +213,7 @@ def factor_summary(
         values = sorted(
             v
             for r in records
-            if (v := r.get(col)) is not None
-            and isinstance(v, (int, float))
-            and math.isfinite(v)
+            if (v := r.get(col)) is not None and isinstance(v, (int, float)) and math.isfinite(v)
         )
         n = len(values)
         if n == 0:
@@ -231,11 +229,7 @@ def factor_summary(
         mean = sum(values) / n
         variance = sum((v - mean) ** 2 for v in values) / n
         std = math.sqrt(variance)
-        median = (
-            values[n // 2]
-            if n % 2 == 1
-            else (values[n // 2 - 1] + values[n // 2]) / 2.0
-        )
+        median = values[n // 2] if n % 2 == 1 else (values[n // 2 - 1] + values[n // 2]) / 2.0
         result[col] = {
             "count": n,
             "mean": mean,

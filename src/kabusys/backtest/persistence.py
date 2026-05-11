@@ -56,9 +56,7 @@ def save_backtest_to_db(
     params_json = json.dumps(params, ensure_ascii=False)
 
     scope_codes_json = (
-        json.dumps(meta.scope_codes, ensure_ascii=False)
-        if meta.scope_codes is not None
-        else None
+        json.dumps(meta.scope_codes, ensure_ascii=False) if meta.scope_codes is not None else None
     )
 
     conn.execute("BEGIN")

@@ -88,9 +88,7 @@ def apply_params(config_path: Path, params: dict) -> None:
             data["regime"][key] = value
 
     with open(config_path, "w", encoding="utf-8") as f:
-        yaml.dump(
-            data, f, allow_unicode=True, default_flow_style=False, sort_keys=False
-        )
+        yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
 
 def list_backups(backup_dir: Path = BACKUP_DIR) -> list[Path]:

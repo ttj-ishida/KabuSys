@@ -198,9 +198,7 @@ def calc_and_save_breadth(
     """
     # 冪等チェック（regime_detector と異なり DELETE+INSERT しない。
     # 仕様により同日の再実行は上書きせず 0 を返す）
-    existing = conn.execute(
-        "SELECT 1 FROM market_breadth WHERE date = ?", [target_date]
-    ).fetchone()
+    existing = conn.execute("SELECT 1 FROM market_breadth WHERE date = ?", [target_date]).fetchone()
     if existing:
         logger.info("calc_and_save_breadth: date=%s は既存スキップ", target_date)
         return 0
@@ -241,9 +239,7 @@ def calc_and_save_breadth(
     new_high_low_ratio = _calc_new_high_low_ratio(conn, target_date)
 
     if ma25_above_pct is None:
-        logger.warning(
-            "calc_and_save_breadth: ma25_above_pct の計算失敗 date=%s", target_date
-        )
+        logger.warning("calc_and_save_breadth: ma25_above_pct の計算失敗 date=%s", target_date)
         return 0
 
     breadth_stop: bool = ma25_above_pct < _BREADTH_STOP_THRESHOLD

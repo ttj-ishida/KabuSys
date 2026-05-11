@@ -152,9 +152,7 @@ def test_simulator_buy_slippage():
     sim = _make_simulator()
     signals = [{"code": "1234", "side": "buy", "shares": 100}]
     open_prices = {"1234": 2000.0}
-    sim.execute_orders(
-        signals, open_prices, slippage_rate=0.001, commission_rate=0.00055
-    )
+    sim.execute_orders(signals, open_prices, slippage_rate=0.001, commission_rate=0.00055)
 
     assert len(sim.trades) == 1
     trade = sim.trades[0]
@@ -274,9 +272,7 @@ def test_build_backtest_conn_copies_prices(conn):
     d = date(2024, 1, 5)
     _insert_price(conn, "1234", d, open_=1000.0, close=1010.0)
 
-    bt_conn = _build_backtest_conn(
-        conn, date(2024, 1, 5), date(2024, 1, 5), ai_enabled=False
-    )
+    bt_conn = _build_backtest_conn(conn, date(2024, 1, 5), date(2024, 1, 5), ai_enabled=False)
     row = bt_conn.execute(
         "SELECT close FROM prices_daily WHERE code = ? AND date = ?", ["1234", d]
     ).fetchone()
@@ -313,9 +309,7 @@ def test_write_positions_idempotent(conn):
     _write_positions(conn, d, {"1234": 100}, {"1234": 950.0})
     _write_positions(conn, d, {"1234": 100}, {"1234": 950.0})
 
-    count = conn.execute(
-        "SELECT COUNT(*) FROM positions WHERE date = ?", [d]
-    ).fetchone()[0]
+    count = conn.execute("SELECT COUNT(*) FROM positions WHERE date = ?", [d]).fetchone()[0]
     assert count == 1
 
 
@@ -326,9 +320,7 @@ def test_write_positions_values(conn):
     from kabusys.backtest.engine import _write_positions
 
     d = date(2024, 1, 11)
-    _write_positions(
-        conn, d, {"1234": 200, "5678": 50}, {"1234": 1050.0, "5678": 600.0}
-    )
+    _write_positions(conn, d, {"1234": 200, "5678": 50}, {"1234": 1050.0, "5678": 600.0})
 
     rows = {
         row[0]: (row[1], float(row[2]))
@@ -433,9 +425,7 @@ def test_run_backtest_no_lookahead(conn):
 
     # end_date 以降のスナップショットが存在しないこと
     for snap in result1.history:
-        assert snap.date <= date(2024, 1, 9), (
-            f"未来日付 {snap.date} が履歴に含まれている"
-        )
+        assert snap.date <= date(2024, 1, 9), f"未来日付 {snap.date} が履歴に含まれている"
 
 
 def test_run_backtest_idempotent(conn):
@@ -446,12 +436,8 @@ def test_run_backtest_idempotent(conn):
 
     _setup_minimal_backtest(conn)
 
-    result1 = run_backtest(
-        conn=conn, start_date=date(2024, 1, 4), end_date=date(2024, 1, 9)
-    )
-    result2 = run_backtest(
-        conn=conn, start_date=date(2024, 1, 4), end_date=date(2024, 1, 9)
-    )
+    result1 = run_backtest(conn=conn, start_date=date(2024, 1, 4), end_date=date(2024, 1, 9))
+    result2 = run_backtest(conn=conn, start_date=date(2024, 1, 4), end_date=date(2024, 1, 9))
 
     assert abs(result1.metrics.cagr - result2.metrics.cagr) < 1e-9
     assert len(result1.history) == len(result2.history)
@@ -546,9 +532,7 @@ def test_build_backtest_conn_copies_stocks(conn):
         "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
         ["1234", "テスト", "Prime", "電気機器"],
     )
-    bt_conn = _build_backtest_conn(
-        conn, date(2024, 1, 5), date(2024, 1, 5), ai_enabled=False
-    )
+    bt_conn = _build_backtest_conn(conn, date(2024, 1, 5), date(2024, 1, 5), ai_enabled=False)
     row = bt_conn.execute("SELECT sector FROM stocks WHERE code = '1234'").fetchone()
     assert row is not None
     assert row[0] == "電気機器"
@@ -620,9 +604,7 @@ def test_run_backtest_default_max_position_pct_is_010(conn):
 
     sig = inspect.signature(run_backtest)
     default = sig.parameters["max_position_pct"].default
-    assert default == 0.10, (
-        f"max_position_pct のデフォルトが {default}（0.10 であること）"
-    )
+    assert default == 0.10, f"max_position_pct のデフォルトが {default}（0.10 であること）"
 
 
 # ---------------------------------------------------------------------------
@@ -826,9 +808,7 @@ def test_execute_buy_non_lot_multiple_warns(caplog):
             trading_day=date(2024, 1, 5),
             lot_size=100,
         )
-    assert any("単元株数" in r.message for r in caplog.records), (
-        "WARNING ログが出ること"
-    )
+    assert any("単元株数" in r.message for r in caplog.records), "WARNING ログが出ること"
 
 
 def test_execute_buy_lot_multiple_no_warn(caplog):
@@ -849,9 +829,7 @@ def test_execute_buy_lot_multiple_no_warn(caplog):
             trading_day=date(2024, 1, 5),
             lot_size=100,
         )
-    assert not any("単元株数" in r.message for r in caplog.records), (
-        "WARNING ログが出ないこと"
-    )
+    assert not any("単元株数" in r.message for r in caplog.records), "WARNING ログが出ないこと"
 
 
 def test_run_backtest_invalid_risk_pct_raises(conn):
@@ -976,9 +954,7 @@ def test_position_entries_sell_date_updated(conn):
     _write_position_entries(bt_conn, buy_trades, date(2026, 4, 1))
 
     # 次に SELL
-    sell_trades = [
-        TradeRecord(date(2026, 4, 5), "1001", "sell", 100, 1050.0, 57.0, 4443.0)
-    ]
+    sell_trades = [TradeRecord(date(2026, 4, 5), "1001", "sell", 100, 1050.0, 57.0, 4443.0)]
     _write_position_entries(bt_conn, sell_trades, date(2026, 4, 5))
 
     row = bt_conn.execute(
@@ -1021,8 +997,7 @@ def test_populate_backtest_breadth_inserts_rows(conn):
     _populate_backtest_breadth(conn, target, target)
 
     row = conn.execute(
-        "SELECT adv_decline_ratio, ma25_above_pct, breadth_stop "
-        "FROM market_breadth WHERE date = ?",
+        "SELECT adv_decline_ratio, ma25_above_pct, breadth_stop FROM market_breadth WHERE date = ?",
         [target],
     ).fetchone()
     assert row is not None, "market_breadth に行が挿入されているべき"
@@ -1040,9 +1015,9 @@ def test_populate_backtest_breadth_idempotent(conn):
     _populate_backtest_breadth(conn, target, target)
     _populate_backtest_breadth(conn, target, target)
 
-    count = conn.execute(
-        "SELECT COUNT(*) FROM market_breadth WHERE date = ?", [target]
-    ).fetchone()[0]
+    count = conn.execute("SELECT COUNT(*) FROM market_breadth WHERE date = ?", [target]).fetchone()[
+        0
+    ]
     assert count == 1, "同日を2回呼んでも1行のみであるべき"
 
 

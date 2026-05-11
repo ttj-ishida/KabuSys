@@ -107,13 +107,9 @@ def _build_backtest_conn(
             cols = [desc[0] for desc in result.description]
             col_list = ", ".join(cols)
             placeholders = ", ".join(["?" for _ in cols])
-            bt_conn.executemany(
-                f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})", rows
-            )
+            bt_conn.executemany(f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})", rows)
         except Exception as exc:
-            logger.warning(
-                "_build_backtest_conn: %s のコピーをスキップ: %s", table, exc
-            )
+            logger.warning("_build_backtest_conn: %s のコピーをスキップ: %s", table, exc)
 
     # market_calendar は全件コピー
     try:
@@ -128,16 +124,12 @@ def _build_backtest_conn(
                 rows,
             )
     except Exception as exc:
-        logger.warning(
-            "_build_backtest_conn: market_calendar のコピーをスキップ: %s", exc
-        )
+        logger.warning("_build_backtest_conn: market_calendar のコピーをスキップ: %s", exc)
 
     # stocks は全件コピー（銘柄のセクターは日付フィルタなし）
     # TIMESTAMPTZ 型の updated_at 列は pytz 依存のため除外し、明示列のみコピーする
     try:
-        rows = source_conn.execute(
-            "SELECT code, name, market, sector FROM stocks"
-        ).fetchall()
+        rows = source_conn.execute("SELECT code, name, market, sector FROM stocks").fetchall()
         if rows:
             bt_conn.executemany(
                 "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
@@ -149,8 +141,7 @@ def _build_backtest_conn(
     # earnings_calendar は end_date 以前の全件コピー
     try:
         rows = source_conn.execute(
-            "SELECT code, announcement_date FROM earnings_calendar "
-            "WHERE announcement_date <= ?",
+            "SELECT code, announcement_date FROM earnings_calendar WHERE announcement_date <= ?",
             [end_date],
         ).fetchall()
         if rows:
@@ -159,9 +150,7 @@ def _build_backtest_conn(
                 rows,
             )
     except Exception as exc:
-        logger.warning(
-            "_build_backtest_conn: earnings_calendar のコピーをスキップ: %s", exc
-        )
+        logger.warning("_build_backtest_conn: earnings_calendar のコピーをスキップ: %s", exc)
 
     # market_breadth はインメモリDB上の prices_daily から計算（外部データ依存なし）
     _populate_backtest_breadth(bt_conn, start_date, end_date)
@@ -420,13 +409,9 @@ def run_backtest(
     if stop_loss_pct <= 0:
         raise ValueError(f"stop_loss_pct は正の値を指定してください: {stop_loss_pct}")
     if not (0 < max_position_pct <= 1):
-        raise ValueError(
-            f"max_position_pct は (0, 1] の範囲で指定してください: {max_position_pct}"
-        )
+        raise ValueError(f"max_position_pct は (0, 1] の範囲で指定してください: {max_position_pct}")
     if not (0 <= max_utilization <= 1):
-        raise ValueError(
-            f"max_utilization は [0, 1] の範囲で指定してください: {max_utilization}"
-        )
+        raise ValueError(f"max_utilization は [0, 1] の範囲で指定してください: {max_utilization}")
     if max_positions < 1:
         raise ValueError(f"max_positions は 1 以上を指定してください: {max_positions}")
     if slippage_rate < 0 or commission_rate < 0:
@@ -436,17 +421,11 @@ def run_backtest(
     if lot_size < 1:
         raise ValueError(f"lot_size は 1 以上を指定してください: {lot_size}")
     if min_holding_days < 0:
-        raise ValueError(
-            f"min_holding_days は 0 以上を指定してください: {min_holding_days}"
-        )
+        raise ValueError(f"min_holding_days は 0 以上を指定してください: {min_holding_days}")
     if max_holding_days < 1:
-        raise ValueError(
-            f"max_holding_days は 1 以上を指定してください: {max_holding_days}"
-        )
+        raise ValueError(f"max_holding_days は 1 以上を指定してください: {max_holding_days}")
     if trailing_stop_atr <= 0:
-        raise ValueError(
-            f"trailing_stop_atr は正の値を指定してください: {trailing_stop_atr}"
-        )
+        raise ValueError(f"trailing_stop_atr は正の値を指定してください: {trailing_stop_atr}")
 
     # try ブロック外でも参照できるようデフォルト初期化
     _scope_mode: Literal["default_universe", "manual_codes"] = (
@@ -457,9 +436,7 @@ def run_backtest(
         raw = backtest_scope.codes if backtest_scope.codes is not None else []
         # 順序を保持しつつ重複を排除する
         _scope_codes = list(dict.fromkeys(raw))
-    _preserve_filters: bool = (
-        backtest_scope.preserve_universe_filters if backtest_scope else True
-    )
+    _preserve_filters: bool = backtest_scope.preserve_universe_filters if backtest_scope else True
     _effective_universe_size: int | None = None
     _excluded_codes: list[str] = []
     _excluded_reasons: dict[str, str] = {}
@@ -533,9 +510,7 @@ def run_backtest(
             _write_position_entries(bt_conn, simulator.trades, trading_day)
 
             # Step 2: positions テーブルに書き戻し（generate_signals の SELL 判定に必要）
-            _write_positions(
-                bt_conn, trading_day, simulator.positions, simulator.cost_basis
-            )
+            _write_positions(bt_conn, trading_day, simulator.positions, simulator.cost_basis)
 
             # Step 3: 終値で時価評価・スナップショット記録
             close_prices = _fetch_close_prices(bt_conn, trading_day)
@@ -558,14 +533,10 @@ def run_backtest(
             multiplier = calc_regime_multiplier(regime)
             # 当日 mark_to_market 後の最新ポートフォリオ価値（翌日用発注サイジングに使用）
             current_pv = (
-                simulator.history[-1].portfolio_value
-                if simulator.history
-                else initial_cash
+                simulator.history[-1].portfolio_value if simulator.history else initial_cash
             )
             # max_utilization を全配分方式に一貫適用（risk_based 含む）
-            available_cash = min(
-                simulator.cash * multiplier, current_pv * max_utilization
-            )
+            available_cash = min(simulator.cash * multiplier, current_pv * max_utilization)
 
             # セクター制限を全候補に先行適用し、除外後に上位 max_positions を選ぶ
             # （従来の select → filter では除外後の補充がなかった）
@@ -615,9 +586,7 @@ def run_backtest(
                 {
                     "code": code,
                     "side": "buy",
-                    "shares": max(
-                        0, (int(shares * sm_map.get(code, 1.0)) // lot_size) * lot_size
-                    ),
+                    "shares": max(0, (int(shares * sm_map.get(code, 1.0)) // lot_size) * lot_size),
                 }
                 for code, shares in sized.items()
                 if shares > 0 and code not in sell_codes

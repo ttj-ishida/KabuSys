@@ -62,9 +62,7 @@ class TestBackupConfig:
         from kabusys.ai.config_manager import backup_config
 
         result = backup_config(config_file, backup_dir)
-        assert result.read_text(encoding="utf-8") == config_file.read_text(
-            encoding="utf-8"
-        )
+        assert result.read_text(encoding="utf-8") == config_file.read_text(encoding="utf-8")
 
     def test_backup_dir_created_if_not_exists(self, config_file, backup_dir):
         from kabusys.ai.config_manager import backup_config

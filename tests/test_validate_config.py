@@ -400,9 +400,7 @@ strategy:
   gap_down_threshold: -0.03
 """
         errors, _ = self._run_with_yaml(content, tmp_path)
-        assert any(
-            "strategy_config" in e and "trailing_stop_atr_mult" in e for e in errors
-        )
+        assert any("strategy_config" in e and "trailing_stop_atr_mult" in e for e in errors)
 
     def test_max_holding_days_zero_errors(self, tmp_path):
         content = """\
@@ -444,9 +442,7 @@ strategy:
   gap_down_threshold: -0.03
 """
         errors, _ = self._run_with_yaml(content, tmp_path)
-        assert any(
-            "strategy_config" in e and "reentry_cooldown_days" in e for e in errors
-        )
+        assert any("strategy_config" in e and "reentry_cooldown_days" in e for e in errors)
 
     def test_min_holding_days_gte_max_warns(self, tmp_path):
         content = """\
@@ -468,8 +464,6 @@ strategy:
 """
         _, warnings = self._run_with_yaml(content, tmp_path)
         assert any(
-            "strategy_config" in w
-            and "min_holding_days" in w
-            and "max_holding_days" in w
+            "strategy_config" in w and "min_holding_days" in w and "max_holding_days" in w
             for w in warnings
         )

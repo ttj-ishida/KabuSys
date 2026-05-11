@@ -139,10 +139,7 @@ def test_is_private_host_default_allows_cgnat():
 def test_is_private_host_strict_dns_fail_closed():
     """strict=True かつ fail_closed=True のとき DNS 失敗でブロックされることを確認する。"""
     with patch("socket.getaddrinfo", side_effect=OSError("NXDOMAIN")):
-        assert (
-            is_private_host("nonexistent.invalid", strict=True, fail_closed=True)
-            is True
-        )
+        assert is_private_host("nonexistent.invalid", strict=True, fail_closed=True) is True
 
 
 def test_is_private_host_strict_public_ip_passes():

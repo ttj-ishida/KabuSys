@@ -190,9 +190,7 @@ def _call_openai_api(client: Any, messages: list[dict]) -> Any:
     )
 
 
-def _score_macro(
-    client: Any, titles: list[str], *, _sleep_fn: Any = time.sleep
-) -> float:
+def _score_macro(client: Any, titles: list[str], *, _sleep_fn: Any = time.sleep) -> float:
     """マクロニュースタイトルを LLM に渡し、市場センチメントスコアを返す。
 
     titles が空の場合は LLM を呼ばず 0.0 を返す。
@@ -225,9 +223,7 @@ def _score_macro(
                 )
                 return 0.0
             wait = _RETRY_BASE_SECONDS * (2**attempt)
-            logger.warning(
-                "_score_macro: リトライ %d/%d: %s", attempt + 1, _MAX_RETRIES, exc
-            )
+            logger.warning("_score_macro: リトライ %d/%d: %s", attempt + 1, _MAX_RETRIES, exc)
             _sleep_fn(wait)
         except APIError as exc:
             # openai v1 SDK では APIStatusError（APIError のサブクラス）が status_code を持つ。
@@ -241,19 +237,13 @@ def _score_macro(
                     )
                     return 0.0
                 wait = _RETRY_BASE_SECONDS * (2**attempt)
-                logger.warning(
-                    "_score_macro: リトライ %d/%d: %s", attempt + 1, _MAX_RETRIES, exc
-                )
+                logger.warning("_score_macro: リトライ %d/%d: %s", attempt + 1, _MAX_RETRIES, exc)
                 _sleep_fn(wait)
             else:
-                logger.warning(
-                    "_score_macro: API失敗（非5xx）: %s, macro_sentiment=0.0", exc
-                )
+                logger.warning("_score_macro: API失敗（非5xx）: %s, macro_sentiment=0.0", exc)
                 return 0.0
         except (json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
-            logger.warning(
-                "_score_macro: レスポンスパース失敗: %s, macro_sentiment=0.0", exc
-            )
+            logger.warning("_score_macro: レスポンスパース失敗: %s, macro_sentiment=0.0", exc)
             return 0.0
 
     return 0.0
@@ -329,9 +319,7 @@ def score_regime(
     macro_sentiment = _score_macro(client, titles)
 
     # [5] レジームスコア合成
-    raw_score = (
-        _MA_WEIGHT * (ma200_ratio - 1.0) * _MA_SCALE + _MACRO_WEIGHT * macro_sentiment
-    )
+    raw_score = _MA_WEIGHT * (ma200_ratio - 1.0) * _MA_SCALE + _MACRO_WEIGHT * macro_sentiment
 
     # [5b] breadth 補正（騰落レシオによる調整）
     breadth = _fetch_breadth(conn, target_date)

@@ -29,9 +29,7 @@ logger = logging.getLogger(__name__)
 _JST = timezone(timedelta(hours=9))
 
 
-def _fetch_targets(
-    conn: duckdb.DuckDBPyConnection, code: str, target_date: date
-) -> list[dict]:
+def _fetch_targets(conn: duckdb.DuckDBPyConnection, code: str, target_date: date) -> list[dict]:
     """status が 'pending' または 'processing' の対象レコードを返す。"""
     rows = conn.execute(
         """

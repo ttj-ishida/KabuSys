@@ -111,9 +111,7 @@ def extract_params(text: str) -> dict | None:
 
         if key in _INT_KEYS:
             if isinstance(value, float) and value != int(value):
-                _logger.warning(
-                    "extract_params: 整数でない float を除外: %s=%s", key, value
-                )
+                _logger.warning("extract_params: 整数でない float を除外: %s=%s", key, value)
                 continue
             v: int | float = int(value)
         else:

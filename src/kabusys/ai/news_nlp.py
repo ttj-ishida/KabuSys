@@ -125,9 +125,7 @@ def score_news(
     from kabusys.config import Settings
 
     if not Settings().enable_ai_sentiment:
-        logger.info(
-            "score_news: AI センチメント分析は無効 (ENABLE_AI_SENTIMENT=false) — スキップ"
-        )
+        logger.info("score_news: AI センチメント分析は無効 (ENABLE_AI_SENTIMENT=false) — スキップ")
         return 0
 
     # 1. API キー解決
@@ -316,9 +314,7 @@ def _validate_and_extract(resp: Any, requested_codes: set[str]) -> dict[str, flo
         try:
             score = float(raw_score)
         except (TypeError, ValueError):
-            logger.warning(
-                "score_news: code=%s のスコアが数値でない: %r", code, raw_score
-            )
+            logger.warning("score_news: code=%s のスコアが数値でない: %r", code, raw_score)
             continue
         if not math.isfinite(score):
             continue

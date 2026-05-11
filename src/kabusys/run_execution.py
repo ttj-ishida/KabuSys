@@ -68,17 +68,13 @@ def _load_risk_config(path: Path, initial_portfolio_value: float) -> RiskConfig:
     try:
         r = data["risk"]
     except (TypeError, KeyError) as exc:
-        raise KeyError(
-            f"risk_config.yaml にトップレベルキー 'risk' がありません: {path}"
-        ) from exc
+        raise KeyError(f"risk_config.yaml にトップレベルキー 'risk' がありません: {path}") from exc
 
     def _get(key: str) -> object:
         try:
             return r[key]
         except KeyError as exc:
-            raise KeyError(
-                f"risk_config.yaml に 'risk.{key}' がありません: {path}"
-            ) from exc
+            raise KeyError(f"risk_config.yaml に 'risk.{key}' がありません: {path}") from exc
 
     max_position_pct = float(_get("max_position_pct"))
     max_utilization = float(_get("max_utilization"))
@@ -241,9 +237,7 @@ def main() -> None:
     logger.info("起動環境: KABUSYS_ENV=%s", settings.env)
 
     # 2. DB 接続 — paper_trading は専用 DB で本番と分離
-    sqlite_path = (
-        settings.paper_sqlite_path if settings.is_paper else settings.sqlite_path
-    )
+    sqlite_path = settings.paper_sqlite_path if settings.is_paper else settings.sqlite_path
     sqlite_conn = sqlite3.connect(str(sqlite_path))
     init_monitoring_db(sqlite_conn)  # 監視テーブルが存在することを保証（冪等）
     duckdb_conn = duckdb.connect(str(settings.duckdb_path))
@@ -279,9 +273,7 @@ def main() -> None:
         risk_manager = RiskManager(
             broker=broker,
             repo=repo,
-            config=_load_risk_config(
-                _RISK_CONFIG, initial_portfolio_value=total_assets
-            ),
+            config=_load_risk_config(_RISK_CONFIG, initial_portfolio_value=total_assets),
         )
         reconciler = Reconciler(broker=broker, repo=repo, order_manager=order_manager)
 
@@ -290,9 +282,7 @@ def main() -> None:
         reconcile_result = reconciler.run()
         _report = None
         try:
-            _report = build_report(
-                reconcile_result=reconcile_result, startup_date=today
-            )
+            _report = build_report(reconcile_result=reconcile_result, startup_date=today)
             print(format_cli_summary(_report))
             save_report(_report)
         except Exception:
@@ -315,9 +305,7 @@ def main() -> None:
             )
             notifier.send(msg)
         except Exception:
-            logger.warning(
-                "朝の LINE 通知に失敗しました（起動を続行します）", exc_info=True
-            )
+            logger.warning("朝の LINE 通知に失敗しました（起動を続行します）", exc_info=True)
 
         # 5. ExecutionEngine 起動（reconciliation は上で完了済みのため reconciler=None）
         engine = ExecutionEngine(

@@ -118,9 +118,7 @@ class PortfolioSimulator:
 
         open_price = open_prices.get(code)
         if open_price is None:
-            logger.warning(
-                "execute_orders: BUY %s の始値が取得できません。スキップ。", code
-            )
+            logger.warning("execute_orders: BUY %s の始値が取得できません。スキップ。", code)
             return
 
         entry_price = open_price * (1.0 + slippage_rate)
@@ -194,9 +192,7 @@ class PortfolioSimulator:
 
         open_price = open_prices.get(code)
         if open_price is None:
-            logger.warning(
-                "execute_orders: SELL %s の始値が取得できません。スキップ。", code
-            )
+            logger.warning("execute_orders: SELL %s の始値が取得できません。スキップ。", code)
             return
 
         exit_price = open_price * (1.0 - slippage_rate)

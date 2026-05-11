@@ -122,9 +122,7 @@ def test_breadth_stop_skips_buy_signals(conn):
 
     generate_signals(conn, TARGET_DATE)
 
-    rows = conn.execute(
-        "SELECT side FROM signals WHERE date = ?", [TARGET_DATE]
-    ).fetchall()
+    rows = conn.execute("SELECT side FROM signals WHERE date = ?", [TARGET_DATE]).fetchall()
     buy_signals = [r for r in rows if r[0] == "buy"]
     assert len(buy_signals) == 0, (
         f"breadth_stop=True なのに BUY が生成された: {len(buy_signals)} 件"
@@ -143,9 +141,7 @@ def test_breadth_stop_false_allows_buy(conn):
 
     generate_signals(conn, TARGET_DATE)
 
-    rows = conn.execute(
-        "SELECT side FROM signals WHERE date = ?", [TARGET_DATE]
-    ).fetchall()
+    rows = conn.execute("SELECT side FROM signals WHERE date = ?", [TARGET_DATE]).fetchall()
     buy_signals = [r for r in rows if r[0] == "buy"]
     assert len(buy_signals) > 0, "breadth_stop=False なのに BUY が生成されなかった"
 
@@ -162,9 +158,7 @@ def test_breadth_stop_bear_regime_both_block_buy(conn):
 
     generate_signals(conn, TARGET_DATE)
 
-    rows = conn.execute(
-        "SELECT side FROM signals WHERE date = ?", [TARGET_DATE]
-    ).fetchall()
+    rows = conn.execute("SELECT side FROM signals WHERE date = ?", [TARGET_DATE]).fetchall()
     buy_signals = [r for r in rows if r[0] == "buy"]
     assert len(buy_signals) == 0
 
@@ -188,9 +182,7 @@ def _insert_position_entry(conn, code: str, entry_date: date, sell_date=None) ->
     )
 
 
-def _insert_price(
-    conn, code: str, d: date, close: float = 1000.0, open_: float = 1000.0
-) -> None:
+def _insert_price(conn, code: str, d: date, close: float = 1000.0, open_: float = 1000.0) -> None:
     conn.execute(
         "INSERT INTO prices_daily (date, code, open, high, low, close, volume) "
         "VALUES (?, ?, ?, ?, ?, ?, 1000000)",
@@ -527,17 +519,13 @@ class TestMinHoldingDaysBearException:
             [target_date],
         )
 
-        generate_signals(
-            conn, target_date, regime_provider=DatabaseRegimeProvider(conn)
-        )
+        generate_signals(conn, target_date, regime_provider=DatabaseRegimeProvider(conn))
 
         sell_rows = conn.execute(
             "SELECT code FROM signals WHERE date = ? AND side = 'sell'",
             [target_date],
         ).fetchall()
-        assert any(r[0] == code for r in sell_rows), (
-            "Bear レジームは保有日数スキップで SELL"
-        )
+        assert any(r[0] == code for r in sell_rows), "Bear レジームは保有日数スキップで SELL"
 
 
 class TestEventSizeMultiplier:
@@ -618,9 +606,7 @@ def test_generate_signals_no_ai_warning_when_ai_disabled(conn, monkeypatch, capl
     with caplog.at_level(logging.WARNING, logger="kabusys.strategy.signal_generator"):
         generate_signals(conn, TARGET_DATE)
 
-    ai_warnings = [
-        r for r in caplog.records if "AI スコアが見つかりません" in r.getMessage()
-    ]
+    ai_warnings = [r for r in caplog.records if "AI スコアが見つかりません" in r.getMessage()]
     assert len(ai_warnings) == 0, (
         f"ENABLE_AI_SENTIMENT=false なのに AI 警告が {len(ai_warnings)} 件出力された"
     )
@@ -659,17 +645,13 @@ class TestGetTopixSizeMultiplier:
         assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
 
     def test_returns_1_when_above_ma200(self, conn):
-        self._make_topix_series(
-            conn, TARGET_DATE - timedelta(days=250), 250, 2000.0, 2000.0
-        )
+        self._make_topix_series(conn, TARGET_DATE - timedelta(days=250), 250, 2000.0, 2000.0)
         assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
 
     def test_returns_05_when_below_ma200_by_15_percent(self, conn):
         from datetime import timedelta
 
-        self._make_topix_series(
-            conn, TARGET_DATE - timedelta(days=250), 240, 2000.0, 2000.0
-        )
+        self._make_topix_series(conn, TARGET_DATE - timedelta(days=250), 240, 2000.0, 2000.0)
         # 直近 10 日を 1600 に設定（200MA ≈ 2000 なので乖離率 ≈ -0.20）
         recent_start = TARGET_DATE - timedelta(days=10)
         self._make_topix_series(conn, recent_start, 11, 1600.0, 1600.0)
@@ -679,17 +661,13 @@ class TestGetTopixSizeMultiplier:
     def test_returns_1_when_insufficient_data(self, conn):
         from datetime import timedelta
 
-        self._make_topix_series(
-            conn, TARGET_DATE - timedelta(days=50), 50, 2000.0, 2000.0
-        )
+        self._make_topix_series(conn, TARGET_DATE - timedelta(days=50), 50, 2000.0, 2000.0)
         assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
 
     def test_custom_drawdown_threshold_and_multiplier(self, conn):
         """カスタム drawdown_threshold と size_multiplier_bear が適用されることを確認する。"""
         # 240日は 2000.0、直近11日は 1600.0（乖離率≈-20%）
-        self._make_topix_series(
-            conn, TARGET_DATE - timedelta(days=250), 240, 2000.0, 2000.0
-        )
+        self._make_topix_series(conn, TARGET_DATE - timedelta(days=250), 240, 2000.0, 2000.0)
         recent_start = TARGET_DATE - timedelta(days=10)
         self._make_topix_series(conn, recent_start, 11, 1600.0, 1600.0)
 
@@ -702,9 +680,7 @@ class TestGetTopixSizeMultiplier:
     def test_custom_threshold_not_triggered(self, conn):
         """乖離率が drawdown_threshold を超えない場合は 1.0 を返すことを確認する。"""
         # 250日すべて 2000.0（乖離率≈0%）
-        self._make_topix_series(
-            conn, TARGET_DATE - timedelta(days=250), 250, 2000.0, 2000.0
-        )
+        self._make_topix_series(conn, TARGET_DATE - timedelta(days=250), 250, 2000.0, 2000.0)
         # drawdown_threshold=-0.10 → 乖離率≈0% > -10% → Bear 未判定 → 1.0
         result = _get_topix_size_multiplier(
             conn, TARGET_DATE, drawdown_threshold=-0.10, size_multiplier_bear=0.3
@@ -762,23 +738,17 @@ regime:
         assert cfg["topix_size_multiplier_bear"] == 0.5
 
     def test_sector_boost_negative_falls_back(self, tmp_path, monkeypatch):
-        yaml_text = (
-            "strategy:\n  threshold: 0.60\nsector:\n  boost: -0.01\n  quartile: 0.25\n"
-        )
+        yaml_text = "strategy:\n  threshold: 0.60\nsector:\n  boost: -0.01\n  quartile: 0.25\n"
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["sector_boost"] == 0.03  # default
 
     def test_sector_quartile_zero_falls_back(self, tmp_path, monkeypatch):
-        yaml_text = (
-            "strategy:\n  threshold: 0.60\nsector:\n  boost: 0.03\n  quartile: 0.0\n"
-        )
+        yaml_text = "strategy:\n  threshold: 0.60\nsector:\n  boost: 0.03\n  quartile: 0.0\n"
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["sector_quartile"] == 0.25  # default
 
     def test_sector_quartile_one_falls_back(self, tmp_path, monkeypatch):
-        yaml_text = (
-            "strategy:\n  threshold: 0.60\nsector:\n  boost: 0.03\n  quartile: 1.0\n"
-        )
+        yaml_text = "strategy:\n  threshold: 0.60\nsector:\n  boost: 0.03\n  quartile: 1.0\n"
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["sector_quartile"] == 0.25  # default
 
@@ -787,16 +757,12 @@ regime:
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["topix_drawdown_threshold"] == -0.15  # default
 
-    def test_topix_size_multiplier_bear_over_one_falls_back(
-        self, tmp_path, monkeypatch
-    ):
+    def test_topix_size_multiplier_bear_over_one_falls_back(self, tmp_path, monkeypatch):
         yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_drawdown_threshold: -0.15\n  topix_size_multiplier_bear: 1.5\n"
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["topix_size_multiplier_bear"] == 0.5  # default
 
-    def test_topix_size_multiplier_bear_exactly_one_accepted(
-        self, tmp_path, monkeypatch
-    ):
+    def test_topix_size_multiplier_bear_exactly_one_accepted(self, tmp_path, monkeypatch):
         yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_drawdown_threshold: -0.15\n  topix_size_multiplier_bear: 1.0\n"
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["topix_size_multiplier_bear"] == 1.0
@@ -821,9 +787,7 @@ class TestCalcSectorStrengthsQuartile:
             ("1004", "小売業", 0.98),
         ]
         for code, sector, _ in sectors:
-            conn.execute(
-                "INSERT INTO stocks (code, sector) VALUES (?, ?)", [code, sector]
-            )
+            conn.execute("INSERT INTO stocks (code, sector) VALUES (?, ?)", [code, sector])
         base = date(2026, 1, 1)
         for j in range(21):
             d = base + timedelta(days=j)
@@ -842,7 +806,5 @@ class TestCalcSectorStrengthsQuartile:
 
     def test_custom_quartile_50_gives_2_top_sectors(self, conn):
         self._setup_4sectors(conn)
-        top, _, _ = _calc_sector_strengths(
-            conn, date(2026, 1, 21), sector_quartile=0.50
-        )
+        top, _, _ = _calc_sector_strengths(conn, date(2026, 1, 21), sector_quartile=0.50)
         assert len(top) == 2  # ceil(4 * 0.50) = 2

@@ -326,9 +326,7 @@ class TestReconcileOrders:
 
 
 class TestReconcilePositions:
-    def _insert_filled_order(
-        self, repo, code: str, side: str, qty: int, cid: str
-    ) -> None:
+    def _insert_filled_order(self, repo, code: str, side: str, qty: int, cid: str) -> None:
         """Filled 状態の注文を DB に直接挿入するヘルパー。"""
         from datetime import datetime, timezone
 
@@ -410,9 +408,7 @@ class TestReconcilePositions:
         self._insert_filled_order(repo, "1234", "buy", 100, "pos-004")
         broker = MockBrokerClient()
         reconciler = _make_reconciler(broker, repo)
-        with patch.object(
-            broker, "get_positions", side_effect=BrokerAPIError("API error")
-        ):
+        with patch.object(broker, "get_positions", side_effect=BrokerAPIError("API error")):
             result = reconciler.run()
         assert result.position_discrepancies == []
         # 処理は続行している（例外が伝播していない）
@@ -461,9 +457,7 @@ class TestReconcilePositions:
         )
         reconciler = _make_reconciler(broker, repo)
         # list_active() に buy_record + unknown_record を返させる
-        with patch.object(
-            repo, "list_active", return_value=[buy_record, unknown_record]
-        ):
+        with patch.object(repo, "list_active", return_value=[buy_record, unknown_record]):
             result = reconciler.run()
         # "short" はスキップされ local=100 == broker=100 → 差分なし
         assert result.position_discrepancies == []
@@ -522,9 +516,7 @@ class TestReconcilePositions:
 
 
 class TestExecutionEngineIntegration:
-    def test_run_session_calls_reconciler_before_signal_processing(
-        self, sqlite_conn, duckdb_conn
-    ):
+    def test_run_session_calls_reconciler_before_signal_processing(self, sqlite_conn, duckdb_conn):
         """reconciler.run() が run_session 内で WebSocket 起動より先に呼ばれる"""
         from datetime import date, time
         from unittest.mock import MagicMock
@@ -563,9 +555,7 @@ class TestExecutionEngineIntegration:
         engine.run_session()
         reconciler.run.assert_called_once()
 
-    def test_run_session_without_reconciler_does_not_raise(
-        self, sqlite_conn, duckdb_conn
-    ):
+    def test_run_session_without_reconciler_does_not_raise(self, sqlite_conn, duckdb_conn):
         """reconciler=None（デフォルト）でも run_session は正常動作する"""
         from datetime import date, time
 

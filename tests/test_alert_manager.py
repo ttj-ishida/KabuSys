@@ -33,9 +33,7 @@ class TestAlertManagerNotify:
 
     def test_cooldown_suppresses_duplicate_within_window(self):
         """同一 (level, category) の cooldown 内 → スキップ"""
-        manager = AlertManager(
-            channel_access_token="token", user_id="uid", cooldown_minutes=30
-        )
+        manager = AlertManager(channel_access_token="token", user_id="uid", cooldown_minutes=30)
         with patch("kabusys.monitoring.alert_manager.requests") as mock_requests:
             mock_requests.post.return_value = MagicMock(status_code=200)
             manager.notify("first", level="CRITICAL", category="DRAWDOWN")
@@ -45,9 +43,7 @@ class TestAlertManagerNotify:
 
     def test_sends_after_cooldown_expires(self):
         """cooldown 経過後 → 送信"""
-        manager = AlertManager(
-            channel_access_token="token", user_id="uid", cooldown_minutes=30
-        )
+        manager = AlertManager(channel_access_token="token", user_id="uid", cooldown_minutes=30)
         # 31分前の時刻を直接セット
         past = datetime.now(tz=timezone.utc) - timedelta(minutes=31)
         manager._last_sent[("CRITICAL", "DRAWDOWN")] = past
@@ -59,9 +55,7 @@ class TestAlertManagerNotify:
 
     def test_different_categories_do_not_share_cooldown(self):
         """同一 level・異なる category → クールダウン非干渉（両方送信）"""
-        manager = AlertManager(
-            channel_access_token="token", user_id="uid", cooldown_minutes=30
-        )
+        manager = AlertManager(channel_access_token="token", user_id="uid", cooldown_minutes=30)
         with patch("kabusys.monitoring.alert_manager.requests") as mock_requests:
             mock_requests.post.return_value = MagicMock(status_code=200)
             r1 = manager.notify("msg1", level="CRITICAL", category="DRAWDOWN")
@@ -74,12 +68,8 @@ class TestAlertManagerNotify:
         """requests.exceptions.RequestException → False 返却・例外非伝播"""
         manager = AlertManager(channel_access_token="token", user_id="uid")
         with patch("kabusys.monitoring.alert_manager.requests") as mock_requests:
-            mock_requests.post.side_effect = requests.exceptions.ConnectionError(
-                "no network"
-            )
-            mock_requests.exceptions.RequestException = (
-                requests.exceptions.RequestException
-            )
+            mock_requests.post.side_effect = requests.exceptions.ConnectionError("no network")
+            mock_requests.exceptions.RequestException = requests.exceptions.RequestException
             result = manager.notify("msg", level="CRITICAL")
         assert result is False
 

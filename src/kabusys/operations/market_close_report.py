@@ -98,9 +98,7 @@ def _build_check_items(
             name="positions",
             status="ok" if positions_updated else "failed",
             detail=(
-                "positions: 当日分 更新済み"
-                if positions_updated
-                else "positions: 当日分 未更新"
+                "positions: 当日分 更新済み" if positions_updated else "positions: 当日分 未更新"
             ),
         ),
         CheckItem(
@@ -133,9 +131,7 @@ def build_report(
         performance_recorded=performance_recorded,
     )
     pnl_amount = (
-        equity_today - equity_prev
-        if equity_today is not None and equity_prev is not None
-        else None
+        equity_today - equity_prev if equity_today is not None and equity_prev is not None else None
     )
     return MarketCloseReport(
         report_date=report_date.isoformat(),

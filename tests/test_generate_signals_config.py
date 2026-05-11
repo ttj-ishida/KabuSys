@@ -104,9 +104,7 @@ class TestGenerateSignalsConfigWeights:
         with patch.object(sg, "_STRATEGY_CONFIG_PATH", cfg_path):
             count = sg.generate_signals(conn, target, weights=None)
 
-        rows = conn.execute(
-            "SELECT code, side FROM signals WHERE date = ?", [target]
-        ).fetchall()
+        rows = conn.execute("SELECT code, side FROM signals WHERE date = ?", [target]).fetchall()
         assert count >= 1
         assert any(r[0] == "1001" and r[1] == "buy" for r in rows)
 
@@ -165,9 +163,7 @@ class TestGenerateSignalsConfigWeights:
                     "news": 0.0,
                 },
             )
-        rows = conn.execute(
-            "SELECT code, side FROM signals WHERE date = ?", [target]
-        ).fetchall()
+        rows = conn.execute("SELECT code, side FROM signals WHERE date = ?", [target]).fetchall()
         # With all-volatility weight and low volatility z-score, score should be above 0.5
         assert any(r[0] == "1001" for r in rows)
 
@@ -323,9 +319,7 @@ class TestGenerateSignalsConfigStopLoss:
         with patch.object(sg, "_STRATEGY_CONFIG_PATH", cfg_path):
             sg.generate_signals(conn, target)
 
-        rows = conn.execute(
-            "SELECT code, side FROM signals WHERE date = ?", [target]
-        ).fetchall()
+        rows = conn.execute("SELECT code, side FROM signals WHERE date = ?", [target]).fetchall()
         assert any(r[0] == "1001" and r[1] == "sell" for r in rows)
 
 

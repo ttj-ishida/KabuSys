@@ -62,9 +62,7 @@ def _generate_warnings(*, signals: list[dict], total_count: int) -> list[str]:
     warnings: list[str] = []
     if total_count == 0:
         warnings.append("翌営業日のシグナルがありません（自動執行は行われません）")
-    buy_no_size = [
-        s["code"] for s in signals if s["side"] == "buy" and s["target_size"] is None
-    ]
+    buy_no_size = [s["code"] for s in signals if s["side"] == "buy" and s["target_size"] is None]
     if buy_no_size:
         warnings.append(f"target_size 未設定の BUY シグナル: {', '.join(buy_no_size)}")
     return warnings
@@ -113,15 +111,11 @@ def format_cli_summary(report: SignalQueueReport) -> str:
     ]
     if report.signals:
         lines.append(thin)
-        lines.append(
-            f"  {'Code':<8}  {'Side':<5}  {'Shares':>8}  {'Weight':>8}  {'Rank':>5}"
-        )
+        lines.append(f"  {'Code':<8}  {'Side':<5}  {'Shares':>8}  {'Weight':>8}  {'Rank':>5}")
         lines.append(f"  {'-' * 8}  {'-' * 5}  {'-' * 8}  {'-' * 8}  {'-' * 5}")
         for s in report.signals:
             weight_str = (
-                f"{s['target_weight'] * 100:.1f}%"
-                if s["target_weight"] is not None
-                else "N/A"
+                f"{s['target_weight'] * 100:.1f}%" if s["target_weight"] is not None else "N/A"
             )
             size_str = str(s["target_size"]) if s["target_size"] is not None else "N/A"
             rank_str = str(s["signal_rank"]) if s["signal_rank"] is not None else "-"
@@ -170,15 +164,11 @@ def format_markdown(report: SignalQueueReport) -> str:
         ]
         for s in report.signals:
             weight_str = (
-                f"{s['target_weight'] * 100:.1f}%"
-                if s["target_weight"] is not None
-                else "N/A"
+                f"{s['target_weight'] * 100:.1f}%" if s["target_weight"] is not None else "N/A"
             )
             size_str = str(s["target_size"]) if s["target_size"] is not None else "N/A"
             rank_str = str(s["signal_rank"]) if s["signal_rank"] is not None else "-"
-            lines.append(
-                f"| {s['code']} | {s['side']} | {size_str} | {weight_str} | {rank_str} |"
-            )
+            lines.append(f"| {s['code']} | {s['side']} | {size_str} | {weight_str} | {rank_str} |")
         lines.append("")
         sec += 1
 
@@ -230,9 +220,7 @@ def save_report(
     try:
         date.fromisoformat(report.report_date)
     except ValueError:
-        raise ValueError(
-            f"Invalid report_date (not a valid calendar date): {report.report_date!r}"
-        )
+        raise ValueError(f"Invalid report_date (not a valid calendar date): {report.report_date!r}")
     base = Path(output_dir) if output_dir else Path("artifacts") / "signal_queue"
     run_dir = base / report.report_date
     run_dir.mkdir(parents=True, exist_ok=True)

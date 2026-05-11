@@ -50,9 +50,7 @@ try:
 
     _setup_logging(app_name="start_system")
 except ImportError:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -112,9 +110,7 @@ def _run_dry_run() -> None:
     try:
         settings = _Settings()
         if not settings.duckdb_path.exists():
-            logger.warning(
-                "%s DuckDB ファイルが見つかりません: %s", prefix, settings.duckdb_path
-            )
+            logger.warning("%s DuckDB ファイルが見つかりません: %s", prefix, settings.duckdb_path)
             logger.info(
                 "%s 発注は行いません。通常起動は --clear-stop-flag を指定してください。",
                 prefix,

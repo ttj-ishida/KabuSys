@@ -56,9 +56,7 @@ def test_stocks_table_upsert(conn):
         """,
         ["1234", "新名称", "Standard", "機械"],
     )
-    row = conn.execute(
-        "SELECT name, market, sector FROM stocks WHERE code = '1234'"
-    ).fetchone()
+    row = conn.execute("SELECT name, market, sector FROM stocks WHERE code = '1234'").fetchone()
     assert row[0] == "新名称"
     assert row[1] == "Standard"
     assert row[2] == "機械"
@@ -353,9 +351,7 @@ def test_calc_position_sizes_max_utilization_aggregate_cap():
         max_utilization=0.70,
         lot_size=100,
     )
-    total_invested = sum(
-        result.get(c["code"], 0) * open_prices[c["code"]] for c in candidates
-    )
+    total_invested = sum(result.get(c["code"], 0) * open_prices[c["code"]] for c in candidates)
     assert total_invested <= 1_000_000 * 1.001  # 0.1% の誤差許容
 
 
@@ -888,9 +884,7 @@ def test_calc_position_sizes_scale_down_stays_within_budget():
         lot_size=100,
     )
 
-    total_cost = sum(
-        result.get(c["code"], 0) * open_prices[c["code"]] for c in candidates
-    )
+    total_cost = sum(result.get(c["code"], 0) * open_prices[c["code"]] for c in candidates)
     assert total_cost <= available_cash * 1.001
 
 
@@ -925,8 +919,7 @@ def test_calc_position_sizes_cost_buffer_reduces_total():
 
     # cost_buffer あり: 実取得コスト（buffer なし）は available_cash 以内
     raw_cost = sum(
-        result_with_buffer.get(c["code"], 0) * open_prices[c["code"]]
-        for c in candidates
+        result_with_buffer.get(c["code"], 0) * open_prices[c["code"]] for c in candidates
     )
     assert raw_cost <= available_cash
 

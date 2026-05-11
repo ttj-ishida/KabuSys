@@ -102,9 +102,7 @@ class TestLineNotifierSend:
         """接続エラー → False、例外非伝播"""
         n = _notifier()
         with patch("kabusys.operations.notifier.requests") as mock_req:
-            mock_req.post.side_effect = requests.exceptions.ConnectionError(
-                "no network"
-            )
+            mock_req.post.side_effect = requests.exceptions.ConnectionError("no network")
             mock_req.exceptions.RequestException = requests.exceptions.RequestException
             result = n.send("hello")
         assert result is False

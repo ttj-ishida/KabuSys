@@ -23,9 +23,7 @@ def conn():
     c.close()
 
 
-def _insert_prices(
-    conn, code: str, start: date, days: int, base: float = 1000.0
-) -> None:
+def _insert_prices(conn, code: str, start: date, days: int, base: float = 1000.0) -> None:
     rows = []
     for i in range(days):
         d = start + timedelta(days=i)
@@ -141,7 +139,5 @@ class TestBuildFeaturesWithNewColumns:
         _insert_financials(conn, "1001")
         build_features(conn, TARGET)
         build_features(conn, TARGET)
-        count = conn.execute(
-            "SELECT COUNT(*) FROM features WHERE date=?", [TARGET]
-        ).fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) FROM features WHERE date=?", [TARGET]).fetchone()[0]
         assert count == 1  # 日付単位で置換されるため重複なし

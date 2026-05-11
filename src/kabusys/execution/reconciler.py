@@ -20,9 +20,7 @@ logger = logging.getLogger(__name__)
 
 class DiscrepancyKind(str, Enum):
     AMOUNT_MISMATCH = "AMOUNT_MISMATCH"  # 数量不一致（異常の可能性）
-    CLOSED_STATE_CONSTRAINT = (
-        "CLOSED_STATE_CONSTRAINT"  # Closed 未実装に起因する既知制約
-    )
+    CLOSED_STATE_CONSTRAINT = "CLOSED_STATE_CONSTRAINT"  # Closed 未実装に起因する既知制約
 
 
 @dataclass
@@ -126,9 +124,7 @@ class Reconciler:
         try:
             broker_positions = self._broker.get_positions()
         except BrokerAPIError:
-            logger.warning(
-                "get_positions() 失敗: ポジション照合をスキップします", exc_info=True
-            )
+            logger.warning("get_positions() 失敗: ポジション照合をスキップします", exc_info=True)
             return
 
         # ブローカーポジション: {code: qty} — 同一コードの複数エントリは合算
@@ -146,22 +142,16 @@ class Reconciler:
         try:
             active_orders = self._repo.list_active()
         except Exception:
-            logger.warning(
-                "list_active() 失敗: ポジション照合をスキップします", exc_info=True
-            )
+            logger.warning("list_active() 失敗: ポジション照合をスキップします", exc_info=True)
             return
         for record in active_orders:
             if record.state not in {OrderState.Filled, OrderState.PartialFill}:
                 continue
             side = record.side.lower()
             if side == "buy":
-                local_map[record.code] = (
-                    local_map.get(record.code, 0) + record.filled_qty
-                )
+                local_map[record.code] = local_map.get(record.code, 0) + record.filled_qty
             elif side == "sell":
-                local_map[record.code] = (
-                    local_map.get(record.code, 0) - record.filled_qty
-                )
+                local_map[record.code] = local_map.get(record.code, 0) - record.filled_qty
             else:
                 logger.warning(
                     "未知のsideをスキップ（ポジション集計から除外）: client_order_id=%s, side=%s",

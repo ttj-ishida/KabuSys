@@ -104,8 +104,7 @@ def _determine_status(
     present = {j.job_name for j in job_results}
     has_missing_mandatory = any(name not in present for name in MANDATORY_JOBS)
     has_blocked_mandatory = any(
-        j.job_name in MANDATORY_JOBS and j.status in ("failed", "skipped")
-        for j in job_results
+        j.job_name in MANDATORY_JOBS and j.status in ("failed", "skipped") for j in job_results
     )
     if (
         has_missing_mandatory
@@ -309,15 +308,9 @@ def format_markdown(report: NightBatchReport) -> str:
         "|---------|-----------|---------|---------|------------|",
     ]
     for j in report.job_results:
-        started = (
-            j.started_at.isoformat()
-            if isinstance(j.started_at, datetime)
-            else j.started_at
-        )
+        started = j.started_at.isoformat() if isinstance(j.started_at, datetime) else j.started_at
         finished = (
-            j.finished_at.isoformat()
-            if isinstance(j.finished_at, datetime)
-            else j.finished_at
+            j.finished_at.isoformat() if isinstance(j.finished_at, datetime) else j.finished_at
         )
         lines.append(
             f"| {j.job_name} | {j.status} | {started} | {finished} | {j.duration_sec:.1f} |"

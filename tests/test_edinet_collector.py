@@ -345,9 +345,7 @@ def test_fetch_edinet_disclosures_returns_list(monkeypatch):
     from kabusys.data import edinet_collector
 
     raw = json.dumps(_SAMPLE_RESPONSE).encode("utf-8")
-    monkeypatch.setattr(
-        edinet_collector, "_fetch_edinet_json", lambda url, timeout=30: raw
-    )
+    monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", lambda url, timeout=30: raw)
 
     result = fetch_edinet_disclosures(date(2024, 9, 1), api_key="test-key")
     assert len(result) == 2
@@ -362,9 +360,7 @@ def test_fetch_edinet_disclosures_subscription_key_in_url(monkeypatch):
 
     def fake_fetch(url, timeout=30):
         captured_urls.append(url)
-        return json.dumps({"metadata": {"status": "200"}, "results": []}).encode(
-            "utf-8"
-        )
+        return json.dumps({"metadata": {"status": "200"}, "results": []}).encode("utf-8")
 
     monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", fake_fetch)
     fetch_edinet_disclosures(date(2024, 9, 1), api_key="my-secret-key")
@@ -381,9 +377,7 @@ def test_fetch_edinet_disclosures_no_api_key_no_subscription_param(monkeypatch):
 
     def fake_fetch(url, timeout=30):
         captured_urls.append(url)
-        return json.dumps({"metadata": {"status": "200"}, "results": []}).encode(
-            "utf-8"
-        )
+        return json.dumps({"metadata": {"status": "200"}, "results": []}).encode("utf-8")
 
     monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", fake_fetch)
     fetch_edinet_disclosures(date(2024, 9, 1), api_key="")
@@ -449,9 +443,7 @@ def test_run_edinet_collection_saves_disclosures(disc_db, monkeypatch):
     from kabusys.data import edinet_collector
 
     raw = json.dumps(_SAMPLE_RESPONSE).encode("utf-8")
-    monkeypatch.setattr(
-        edinet_collector, "_fetch_edinet_json", lambda url, timeout=30: raw
-    )
+    monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", lambda url, timeout=30: raw)
 
     saved = run_edinet_collection(disc_db, target_date=date(2024, 9, 1))
     assert saved == 2
@@ -464,9 +456,7 @@ def test_run_edinet_collection_idempotent(disc_db, monkeypatch):
     from kabusys.data import edinet_collector
 
     raw = json.dumps(_SAMPLE_RESPONSE).encode("utf-8")
-    monkeypatch.setattr(
-        edinet_collector, "_fetch_edinet_json", lambda url, timeout=30: raw
-    )
+    monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", lambda url, timeout=30: raw)
 
     first = run_edinet_collection(disc_db, target_date=date(2024, 9, 1))
     second = run_edinet_collection(disc_db, target_date=date(2024, 9, 1))
@@ -484,9 +474,7 @@ def test_run_edinet_collection_default_date(disc_db, monkeypatch):
 
     def fake_fetch(url, timeout=30):
         captured_urls.append(url)
-        return json.dumps({"metadata": {"status": "200"}, "results": []}).encode(
-            "utf-8"
-        )
+        return json.dumps({"metadata": {"status": "200"}, "results": []}).encode("utf-8")
 
     monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", fake_fetch)
     run_edinet_collection(disc_db, target_date=None)
@@ -500,9 +488,7 @@ def test_run_edinet_collection_source_edinet_in_db(disc_db, monkeypatch):
     from kabusys.data import edinet_collector
 
     raw = json.dumps(_SAMPLE_RESPONSE).encode("utf-8")
-    monkeypatch.setattr(
-        edinet_collector, "_fetch_edinet_json", lambda url, timeout=30: raw
-    )
+    monkeypatch.setattr(edinet_collector, "_fetch_edinet_json", lambda url, timeout=30: raw)
 
     run_edinet_collection(disc_db, target_date=date(2024, 9, 1))
     rows = disc_db.execute("SELECT DISTINCT source FROM raw_disclosures").fetchall()

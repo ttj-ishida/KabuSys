@@ -216,9 +216,7 @@ class TestOrderRepository:
         ]
         for i, s in enumerate(active_states):
             repo.save(
-                _make_record(
-                    client_order_id=f"active-{i}", signal_id=f"sig-active-{i}", state=s
-                )
+                _make_record(client_order_id=f"active-{i}", signal_id=f"sig-active-{i}", state=s)
             )
         for i, s in enumerate(terminal_states):
             repo.save(
@@ -232,9 +230,7 @@ class TestOrderRepository:
         active = repo.list_active()
         active_ids = {r.client_order_id for r in active}
         assert all(f"active-{i}" in active_ids for i in range(len(active_states)))
-        assert all(
-            f"terminal-{i}" not in active_ids for i in range(len(terminal_states))
-        )
+        assert all(f"terminal-{i}" not in active_ids for i in range(len(terminal_states)))
 
     def test_list_uncertain_returns_only_sent(self, repo):
         """list_uncertain は OrderSent のみ返す"""
@@ -276,9 +272,7 @@ class TestOrderRepository:
             )
         )
         repo.save(_make_record(client_order_id="sig-test-002", signal_id="same-signal"))
-        repo.save(
-            _make_record(client_order_id="sig-test-003", signal_id="other-signal")
-        )
+        repo.save(_make_record(client_order_id="sig-test-003", signal_id="other-signal"))
 
         results = repo.get_by_signal("same-signal")
         assert len(results) == 2

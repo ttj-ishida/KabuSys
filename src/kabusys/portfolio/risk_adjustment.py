@@ -43,9 +43,7 @@ def apply_sector_cap(
 
     # 既存保有のセクター別時価を計算（当日売却予定銘柄を除外）
     sector_exposure: dict[str, float] = {}
-    price_missing_sectors: set[str] = (
-        set()
-    )  # sectors with price-unknown positions → force-blocked
+    price_missing_sectors: set[str] = set()  # sectors with price-unknown positions → force-blocked
     for code, shares in current_positions.items():
         if code in excluded:
             continue
@@ -93,9 +91,7 @@ def apply_sector_cap(
         if sector == "unknown" or sector not in blocked_sectors:
             filtered.append(c)
         else:
-            logger.debug(
-                "apply_sector_cap: %s（%s）を除外（セクター上限）", c["code"], sector
-            )
+            logger.debug("apply_sector_cap: %s（%s）を除外（セクター上限）", c["code"], sector)
 
     return filtered
 

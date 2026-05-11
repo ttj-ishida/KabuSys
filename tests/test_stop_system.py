@@ -27,16 +27,10 @@ def _run_stop(
     flag_path = tmp_path / "stop.flag"
 
     if exec_pid:
-        content = (
-            str(exec_pid)
-            if exec_create_time is None
-            else f"{exec_pid}\n{exec_create_time}"
-        )
+        content = str(exec_pid) if exec_create_time is None else f"{exec_pid}\n{exec_create_time}"
         exec_pid_path.write_text(content)
     if mon_pid:
-        content = (
-            str(mon_pid) if mon_create_time is None else f"{mon_pid}\n{mon_create_time}"
-        )
+        content = str(mon_pid) if mon_create_time is None else f"{mon_pid}\n{mon_create_time}"
         mon_pid_path.write_text(content)
 
     # is_process_running: initially True (process running), then:
@@ -77,16 +71,12 @@ def test_stop_creates_flag(tmp_path):
 
 
 def test_stop_graceful_no_kill(tmp_path):
-    _, _, _, mock_proc, mock_psutil = _run_stop(
-        tmp_path, exec_pid=1234, exits_within_timeout=True
-    )
+    _, _, _, mock_proc, mock_psutil = _run_stop(tmp_path, exec_pid=1234, exits_within_timeout=True)
     mock_psutil.Process.return_value.kill.assert_not_called()
 
 
 def test_stop_force_kill_on_timeout(tmp_path):
-    _, _, _, mock_proc, mock_psutil = _run_stop(
-        tmp_path, exec_pid=1234, exits_within_timeout=False
-    )
+    _, _, _, mock_proc, mock_psutil = _run_stop(tmp_path, exec_pid=1234, exits_within_timeout=False)
     mock_psutil.Process.return_value.kill.assert_called()
 
 

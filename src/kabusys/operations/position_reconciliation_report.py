@@ -67,9 +67,7 @@ def collect_position_snapshot(broker, repo) -> list[PositionEntry]:
         elif side == "sell":
             local_map[record.code] = local_map.get(record.code, 0) - record.filled_qty
         else:
-            logger.warning(
-                "未知の side 値を無視: code=%s side=%r", record.code, record.side
-            )
+            logger.warning("未知の side 値を無視: code=%s side=%r", record.code, record.side)
 
     entries: list[PositionEntry] = []
     for code in sorted(set(broker_map) | set(local_map)):
@@ -143,9 +141,7 @@ def format_cli_summary(report: PositionReconciliationReport) -> str:
     ]
     if report.positions:
         lines.append(thin)
-        lines.append(
-            f"  {'':3}{'Code':<8}  {'Broker':>8}  {'Local':>8}  {'Diff':>6}  Status"
-        )
+        lines.append(f"  {'':3}{'Code':<8}  {'Broker':>8}  {'Local':>8}  {'Diff':>6}  Status")
         lines.append(f"  {'':3}{'-' * 8}  {'-' * 8}  {'-' * 8}  {'-' * 6}  {'-' * 10}")
         for p in report.positions:
             mark = "[!]" if p["status"] == ENTRY_MISMATCH else "   "
@@ -254,14 +250,8 @@ def save_report(
     try:
         date.fromisoformat(report.report_date)
     except ValueError:
-        raise ValueError(
-            f"Invalid report_date (not a valid calendar date): {report.report_date!r}"
-        )
-    base = (
-        Path(output_dir)
-        if output_dir
-        else Path("artifacts") / "position_reconciliation"
-    )
+        raise ValueError(f"Invalid report_date (not a valid calendar date): {report.report_date!r}")
+    base = Path(output_dir) if output_dir else Path("artifacts") / "position_reconciliation"
     run_dir = base / report.report_date
     run_dir.mkdir(parents=True, exist_ok=True)
 

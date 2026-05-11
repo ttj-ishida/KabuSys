@@ -24,9 +24,7 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     settings = Settings()
     if not settings.enable_edinet:
-        logger.info(
-            "EDINET 収集はオプション機能です（ENABLE_EDINET=false）。スキップします。"
-        )
+        logger.info("EDINET 収集はオプション機能です（ENABLE_EDINET=false）。スキップします。")
         return
     if not settings.edinet_api_key:
         logger.error(

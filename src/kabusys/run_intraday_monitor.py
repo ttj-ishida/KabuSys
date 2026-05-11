@@ -90,22 +90,14 @@ def format_cli_summary(snap: IntradaySnapshot, interval: int | None = None) -> s
         lines.append(f"    [ok  ] ドローダウン      {snap.drawdown_pct * 100:.1f}%")
 
     if snap.order_error_count > 0:
-        lines.append(
-            f"    [WARN] 注文エラー        {snap.order_error_count} 件（直近1時間）"
-        )
+        lines.append(f"    [WARN] 注文エラー        {snap.order_error_count} 件（直近1時間）")
     else:
-        lines.append(
-            f"    [ok  ] 注文エラー        {snap.order_error_count} 件（直近1時間）"
-        )
+        lines.append(f"    [ok  ] 注文エラー        {snap.order_error_count} 件（直近1時間）")
 
     if snap.stale_order_count > 0:
-        lines.append(
-            f"    [WARN] 滞留注文          {snap.stale_order_count} 件（直近1時間）"
-        )
+        lines.append(f"    [WARN] 滞留注文          {snap.stale_order_count} 件（直近1時間）")
     else:
-        lines.append(
-            f"    [ok  ] 滞留注文          {snap.stale_order_count} 件（直近1時間）"
-        )
+        lines.append(f"    [ok  ] 滞留注文          {snap.stale_order_count} 件（直近1時間）")
 
     lines.append("----------------------------------------------------")
     lines.append("  システム:")

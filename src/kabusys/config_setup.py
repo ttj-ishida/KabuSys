@@ -355,9 +355,7 @@ def run_wizard(env_path: Path = _ENV_PATH) -> dict[str, str]:
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="KabuSys 環境設定ウィザード（.env の作成・更新）"
-    )
+    parser = argparse.ArgumentParser(description="KabuSys 環境設定ウィザード（.env の作成・更新）")
     parser.add_argument(
         "--env-file",
         default=str(_ENV_PATH),
@@ -394,9 +392,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _write_env(env_path, values)
     print(f"\n✓ .env を保存しました: {env_path}")
-    print(
-        "  次のステップ: python -m kabusys.validate_config で設定を検証してください。"
-    )
+    print("  次のステップ: python -m kabusys.validate_config で設定を検証してください。")
     return 0
 
 

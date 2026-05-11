@@ -127,9 +127,7 @@ def collect_weekly_rows(
         weekly_return = (eq_end / eq_start - 1.0) if eq_start != 0.0 else None
         drawdowns = [r.drawdown for r in group if r.drawdown is not None]
         max_dd = min(drawdowns) if drawdowns else None
-        win_days = sum(
-            1 for r in group if r.daily_return is not None and r.daily_return > 0
-        )
+        win_days = sum(1 for r in group if r.daily_return is not None and r.daily_return > 0)
         result.append(
             WeeklyRow(
                 week_label=week_label,
@@ -169,9 +167,7 @@ def collect_monthly_rows(
         monthly_return = (eq_end / eq_start - 1.0) if eq_start != 0.0 else None
         drawdowns = [r.drawdown for r in group if r.drawdown is not None]
         max_dd = min(drawdowns) if drawdowns else None
-        win_days = sum(
-            1 for r in group if r.daily_return is not None and r.daily_return > 0
-        )
+        win_days = sum(1 for r in group if r.daily_return is not None and r.daily_return > 0)
         result.append(
             MonthlyRow(
                 month_label=month_label,

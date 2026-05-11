@@ -72,9 +72,7 @@ class TestGate1CheckSignal:
         # 総資産 10,000,000 円、max_position_pct=0.10 → 1銘柄上限 1,000,000 円
         # 既存ポジション: 1234 @ current_price=2000, qty=400 → 800,000 円
         # 追加注文: 300,000 円 → 合計 1,100,000 円 > 1,000,000 円 → NG
-        existing_pos = Position(
-            code="1234", qty=400, avg_price=1800.0, current_price=2000.0
-        )
+        existing_pos = Position(code="1234", qty=400, avg_price=1800.0, current_price=2000.0)
         broker = MockBrokerClient(
             available_cash=5_000_000.0,
             initial_positions=[existing_pos],
@@ -89,18 +87,14 @@ class TestGate1CheckSignal:
         # 余力ゼロでも sell は通過する
         broker = MockBrokerClient(available_cash=0.0)
         rm = _make_manager(broker, repo)
-        result = rm.check_signal(
-            "2026-03-29_1234_sell", "1234", order_value=500_000.0, side="sell"
-        )
+        result = rm.check_signal("2026-03-29_1234_sell", "1234", order_value=500_000.0, side="sell")
         assert result.passed
 
     def test_fails_when_utilization_limit_exceeded(self, repo):
         # 総資産 10,000,000 円、max_utilization=0.80 → 全ポジション上限 8,000,000 円
         # 既存ポジション評価額: 7,800,000 円 (current_price あり)
         # 追加注文: 300,000 円 → 合計 8,100,000 円 > 8,000,000 円 → NG
-        big_pos = Position(
-            code="9999", qty=780, avg_price=9000.0, current_price=10000.0
-        )
+        big_pos = Position(code="9999", qty=780, avg_price=9000.0, current_price=10000.0)
         broker = MockBrokerClient(
             available_cash=5_000_000.0,
             initial_positions=[big_pos],

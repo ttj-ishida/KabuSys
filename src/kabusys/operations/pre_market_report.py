@@ -79,19 +79,13 @@ def _generate_warnings(
     warnings: list[str] = []
 
     if signal_queue_pending == 0:
-        warnings.append(
-            "signal_queue に本日の pending シグナルがありません（自動執行不可）"
-        )
+        warnings.append("signal_queue に本日の pending シグナルがありません（自動執行不可）")
     if stop_flag_exists:
         warnings.append("停止フラグ（stop_requested.flag）が存在します（自動執行不可）")
     if not task_scheduler_ready:
-        warnings.append(
-            "Task Scheduler の KabuSys_ExecutionStart が Ready 状態ではありません"
-        )
+        warnings.append("Task Scheduler の KabuSys_ExecutionStart が Ready 状態ではありません")
     if not data_freshness_ok:
-        warnings.append(
-            "prices_daily の最終更新日が直近営業日と一致しません（データが古い可能性）"
-        )
+        warnings.append("prices_daily の最終更新日が直近営業日と一致しません（データが古い可能性）")
 
     return warnings
 
@@ -309,9 +303,7 @@ def save_report(
     try:
         date.fromisoformat(report.report_date)
     except ValueError:
-        raise ValueError(
-            f"Invalid report_date (not a valid calendar date): {report.report_date!r}"
-        )
+        raise ValueError(f"Invalid report_date (not a valid calendar date): {report.report_date!r}")
     base = Path(output_dir) if output_dir else Path("artifacts") / "pre_market"
     run_dir = base / report.report_date
     run_dir.mkdir(parents=True, exist_ok=True)

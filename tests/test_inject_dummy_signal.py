@@ -53,9 +53,7 @@ class TestResolveTargetDate:
 
 class TestInjectSignal:
     def test_buy_signal_inserted(self, conn):
-        inject_signal(
-            conn, target_date=date(2026, 5, 7), code="7203", side="buy", qty=100
-        )
+        inject_signal(conn, target_date=date(2026, 5, 7), code="7203", side="buy", qty=100)
         rows = conn.execute(
             "SELECT code, side, size, order_type, status FROM signal_queue WHERE code='7203'"
         ).fetchall()
@@ -68,12 +66,8 @@ class TestInjectSignal:
         assert status == "pending"
 
     def test_sell_signal_inserted(self, conn):
-        inject_signal(
-            conn, target_date=date(2026, 5, 7), code="9984", side="sell", qty=200
-        )
-        rows = conn.execute(
-            "SELECT side, size FROM signal_queue WHERE code='9984'"
-        ).fetchall()
+        inject_signal(conn, target_date=date(2026, 5, 7), code="9984", side="sell", qty=200)
+        rows = conn.execute("SELECT side, size FROM signal_queue WHERE code='9984'").fetchall()
         assert rows[0] == ("sell", 200)
 
     def test_default_qty_is_100(self, conn):
@@ -83,9 +77,7 @@ class TestInjectSignal:
 
     def test_signal_id_has_dummy_prefix(self, conn):
         inject_signal(conn, target_date=date(2026, 5, 7), code="7203", side="buy")
-        row = conn.execute(
-            "SELECT signal_id FROM signal_queue WHERE code='7203'"
-        ).fetchone()
+        row = conn.execute("SELECT signal_id FROM signal_queue WHERE code='7203'").fetchone()
         assert row[0].startswith("DUMMY_")
 
     def test_duplicate_raises_without_force(self, conn):
@@ -94,9 +86,7 @@ class TestInjectSignal:
             inject_signal(conn, target_date=date(2026, 5, 7), code="7203", side="buy")
 
     def test_duplicate_overwrites_with_force(self, conn):
-        inject_signal(
-            conn, target_date=date(2026, 5, 7), code="7203", side="buy", qty=100
-        )
+        inject_signal(conn, target_date=date(2026, 5, 7), code="7203", side="buy", qty=100)
         inject_signal(
             conn,
             target_date=date(2026, 5, 7),
@@ -110,9 +100,7 @@ class TestInjectSignal:
 
     def test_price_is_null_for_market_order(self, conn):
         inject_signal(conn, target_date=date(2026, 5, 7), code="7203", side="buy")
-        row = conn.execute(
-            "SELECT price FROM signal_queue WHERE code='7203'"
-        ).fetchone()
+        row = conn.execute("SELECT price FROM signal_queue WHERE code='7203'").fetchone()
         assert row[0] is None
 
     def test_multiple_codes_same_date(self, conn):
@@ -125,9 +113,7 @@ class TestInjectSignal:
         """同一銘柄・同一日でも BUY と SELL は別レコード（signal_id が異なる）。"""
         inject_signal(conn, target_date=date(2026, 5, 7), code="7203", side="buy")
         inject_signal(conn, target_date=date(2026, 5, 7), code="7203", side="sell")
-        count = conn.execute(
-            "SELECT COUNT(*) FROM signal_queue WHERE code='7203'"
-        ).fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) FROM signal_queue WHERE code='7203'").fetchone()[0]
         assert count == 2
 
     def test_side_uppercase_normalized_to_lowercase(self, conn):
@@ -144,13 +130,9 @@ class TestInjectSignal:
     def test_zero_qty_raises_value_error(self, conn):
         """qty=0 は ValueError を送出する。"""
         with pytest.raises(ValueError, match="1 以上"):
-            inject_signal(
-                conn, target_date=date(2026, 5, 7), code="7203", side="buy", qty=0
-            )
+            inject_signal(conn, target_date=date(2026, 5, 7), code="7203", side="buy", qty=0)
 
     def test_negative_qty_raises_value_error(self, conn):
         """負数 qty は ValueError を送出する。"""
         with pytest.raises(ValueError, match="1 以上"):
-            inject_signal(
-                conn, target_date=date(2026, 5, 7), code="7203", side="buy", qty=-1
-            )
+            inject_signal(conn, target_date=date(2026, 5, 7), code="7203", side="buy", qty=-1)

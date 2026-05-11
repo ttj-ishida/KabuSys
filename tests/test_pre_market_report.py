@@ -71,16 +71,11 @@ def test_status_blocked_stop_flag():
 
 
 def test_status_blocked_task_scheduler_not_ready():
-    assert (
-        _determine_status(**_make_checks(task_scheduler_ready=False)) == STATUS_BLOCKED
-    )
+    assert _determine_status(**_make_checks(task_scheduler_ready=False)) == STATUS_BLOCKED
 
 
 def test_status_ready_with_warnings_stale_data():
-    assert (
-        _determine_status(**_make_checks(data_freshness_ok=False))
-        == STATUS_READY_WITH_WARNINGS
-    )
+    assert _determine_status(**_make_checks(data_freshness_ok=False)) == STATUS_READY_WITH_WARNINGS
 
 
 # --- _generate_warnings ---
@@ -122,9 +117,7 @@ def test_build_report_ready():
 
 
 def test_build_report_blocked_no_signals():
-    report = build_report(
-        report_date=date(2026, 4, 27), **_make_checks(signal_queue_pending=0)
-    )
+    report = build_report(report_date=date(2026, 4, 27), **_make_checks(signal_queue_pending=0))
     assert report.status == STATUS_BLOCKED
     assert any("signal_queue" in w for w in report.warnings)
 
@@ -140,9 +133,7 @@ def test_format_cli_summary_contains_status():
 
 
 def test_format_cli_summary_blocked_shows_blocked():
-    report = build_report(
-        report_date=date(2026, 4, 27), **_make_checks(signal_queue_pending=0)
-    )
+    report = build_report(report_date=date(2026, 4, 27), **_make_checks(signal_queue_pending=0))
     summary = format_cli_summary(report)
     assert "BLOCKED" in summary
 
@@ -175,9 +166,7 @@ def test_format_markdown_no_warnings_section_when_empty():
 
 
 def test_format_markdown_with_warnings_section():
-    report = build_report(
-        report_date=date(2026, 4, 27), **_make_checks(stop_flag_exists=True)
-    )
+    report = build_report(report_date=date(2026, 4, 27), **_make_checks(stop_flag_exists=True))
     md = format_markdown(report)
     assert "Warnings" in md
 

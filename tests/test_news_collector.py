@@ -455,9 +455,7 @@ def test_save_raw_news_empty(news_db):
 
 
 def test_extract_stock_codes_finds_known_codes():
-    codes = extract_stock_codes(
-        "Toyota 7203 surge, Sony 6758 up", {"7203", "6758", "9999"}
-    )
+    codes = extract_stock_codes("Toyota 7203 surge, Sony 6758 up", {"7203", "6758", "9999"})
     assert "7203" in codes
     assert "6758" in codes
 
@@ -520,9 +518,7 @@ def test_run_news_collection_uses_default_sources(monkeypatch, news_db):
         return [_make_article(1)]
 
     monkeypatch.setattr("kabusys.data.news_collector.fetch_rss", fake_fetch_rss)
-    monkeypatch.setattr(
-        "kabusys.data.news_collector.save_raw_news", lambda conn, arts: []
-    )
+    monkeypatch.setattr("kabusys.data.news_collector.save_raw_news", lambda conn, arts: [])
 
     results = run_news_collection(news_db)
     assert set(results.keys()) == set(DEFAULT_RSS_SOURCES.keys())

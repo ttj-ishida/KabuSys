@@ -181,9 +181,7 @@ def format_markdown(report: ExecutionStartupReport) -> str:
             "|-----------|-----------|----------|------|",
         ]
         for d in report.position_discrepancies:
-            lines.append(
-                f"| {d['code']} | {d['broker_qty']} | {d['local_qty']} | {d['diff']:+d} |"
-            )
+            lines.append(f"| {d['code']} | {d['broker_qty']} | {d['local_qty']} | {d['diff']:+d} |")
         lines.append("")
 
     sec = 3

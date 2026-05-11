@@ -32,8 +32,7 @@ try:
     conn = sqlite3.connect(uri, uri=True)
 except sqlite3.OperationalError:
     st.error(
-        f"Database not found or cannot open: {settings.sqlite_path}. "
-        "Start MonitoringEngine first."
+        f"Database not found or cannot open: {settings.sqlite_path}. Start MonitoringEngine first."
     )
     st.stop()
 
@@ -72,8 +71,7 @@ try:
     with tab_risk:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT event_type, message, logged_at FROM risk_logs "
-            "ORDER BY logged_at DESC LIMIT 50"
+            "SELECT event_type, message, logged_at FROM risk_logs ORDER BY logged_at DESC LIMIT 50"
         ).fetchall()
         if rows:
             st.dataframe([dict(r) for r in rows], use_container_width=True)
@@ -84,8 +82,7 @@ try:
     with tab_trade:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT event_type, message, logged_at FROM trade_logs "
-            "ORDER BY logged_at DESC LIMIT 50"
+            "SELECT event_type, message, logged_at FROM trade_logs ORDER BY logged_at DESC LIMIT 50"
         ).fetchall()
         if rows:
             st.dataframe([dict(r) for r in rows], use_container_width=True)

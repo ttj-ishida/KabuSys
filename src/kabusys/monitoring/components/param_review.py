@@ -77,8 +77,7 @@ def _load_default_dates(duckdb_path: Path) -> tuple[str | None, str | None]:
         conn = duckdb.connect(str(duckdb_path), read_only=True)
         try:
             row = conn.execute(
-                "SELECT start_date, end_date FROM backtest_runs"
-                " ORDER BY created_at DESC LIMIT 1"
+                "SELECT start_date, end_date FROM backtest_runs ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
         finally:
             conn.close()
@@ -183,16 +182,12 @@ def render_param_review(
         return
 
     # --- 適用済み: バックテスト実行フォーム ---
-    st.success(
-        "✅ パラメータを適用しました。バックテストを再実行して効果を確認できます。"
-    )
+    st.success("✅ パラメータを適用しました。バックテストを再実行して効果を確認できます。")
 
     default_start, default_end = _load_default_dates(duckdb_path)
 
     start_val = (
-        date.fromisoformat(default_start)
-        if default_start
-        else date(date.today().year - 2, 1, 1)
+        date.fromisoformat(default_start) if default_start else date(date.today().year - 2, 1, 1)
     )
     end_val = date.fromisoformat(default_end) if default_end else date.today()
 
@@ -276,9 +271,7 @@ def render_param_review(
 
     st.subheader("📊 変更前後の比較")
     new_m = _load_run_metrics(duckdb_path, new_run_id_state)
-    prev_m = (
-        _load_run_metrics(duckdb_path, prev_run_id_state) if prev_run_id_state else None
-    )
+    prev_m = _load_run_metrics(duckdb_path, prev_run_id_state) if prev_run_id_state else None
 
     def _pct(v: float | None) -> str:
         return f"{v:+.2%}" if v is not None else "N/A"

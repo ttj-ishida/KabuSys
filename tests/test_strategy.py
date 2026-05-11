@@ -118,12 +118,8 @@ def test_compute_momentum_score_partial():
 
 
 def test_compute_momentum_score_positive_higher():
-    pos = _compute_momentum_score(
-        {"momentum_20": 2.0, "momentum_60": 2.0, "ma200_dev": 2.0}
-    )
-    neg = _compute_momentum_score(
-        {"momentum_20": -2.0, "momentum_60": -2.0, "ma200_dev": -2.0}
-    )
+    pos = _compute_momentum_score({"momentum_20": 2.0, "momentum_60": 2.0, "ma200_dev": 2.0})
+    neg = _compute_momentum_score({"momentum_20": -2.0, "momentum_60": -2.0, "ma200_dev": -2.0})
     assert pos > neg
 
 
@@ -280,9 +276,7 @@ def test_build_features_price_filter(conn):
     """株価 < 300 の銘柄はフィルタされる"""
     _insert_price_history(conn, [("LOW", 200.0, 6e8), ("HIGH", 1000.0, 6e8)])
     build_features(conn, TARGET_DATE)
-    rows = conn.execute(
-        "SELECT code FROM features WHERE date = ?", [TARGET_DATE]
-    ).fetchall()
+    rows = conn.execute("SELECT code FROM features WHERE date = ?", [TARGET_DATE]).fetchall()
     codes = {r[0] for r in rows}
     assert "HIGH" in codes
     assert "LOW" not in codes
@@ -292,9 +286,7 @@ def test_build_features_turnover_filter(conn):
     """平均売買代金 < 5 億の銘柄はフィルタされる"""
     _insert_price_history(conn, [("POOR", 1000.0, 1e7), ("RICH", 1000.0, 6e8)])
     build_features(conn, TARGET_DATE)
-    rows = conn.execute(
-        "SELECT code FROM features WHERE date = ?", [TARGET_DATE]
-    ).fetchall()
+    rows = conn.execute("SELECT code FROM features WHERE date = ?", [TARGET_DATE]).fetchall()
     codes = {r[0] for r in rows}
     assert "RICH" in codes
     assert "POOR" not in codes
@@ -311,21 +303,15 @@ def test_build_features_idempotent(conn):
     """2 回実行しても features の行数が変わらない"""
     _insert_price_history(conn, [("A", 1000.0, 6e8), ("B", 2000.0, 6e8)])
     build_features(conn, TARGET_DATE)
-    c1 = conn.execute(
-        "SELECT COUNT(*) FROM features WHERE date = ?", [TARGET_DATE]
-    ).fetchone()[0]
+    c1 = conn.execute("SELECT COUNT(*) FROM features WHERE date = ?", [TARGET_DATE]).fetchone()[0]
     build_features(conn, TARGET_DATE)
-    c2 = conn.execute(
-        "SELECT COUNT(*) FROM features WHERE date = ?", [TARGET_DATE]
-    ).fetchone()[0]
+    c2 = conn.execute("SELECT COUNT(*) FROM features WHERE date = ?", [TARGET_DATE]).fetchone()[0]
     assert c1 == c2
 
 
 def test_build_features_zscore_clipped(conn):
     """Z スコア値は ±3 内に収まる"""
-    _insert_price_history(
-        conn, [("A", 1000.0, 6e8), ("B", 500.0, 6e8), ("C", 800.0, 6e8)]
-    )
+    _insert_price_history(conn, [("A", 1000.0, 6e8), ("B", 500.0, 6e8), ("C", 800.0, 6e8)])
     build_features(conn, TARGET_DATE)
     rows = conn.execute(
         "SELECT momentum_20, momentum_60, ma200_dev FROM features WHERE date = ?",
@@ -351,9 +337,7 @@ def test_generate_signals_empty_features(conn):
 
 def test_generate_signals_buy_signal(conn):
     """高スコアの銘柄に BUY シグナルが生成される"""
-    _insert_price_history(
-        conn, [("A", 1000.0, 6e8), ("B", 1000.0, 6e8), ("C", 1000.0, 6e8)]
-    )
+    _insert_price_history(conn, [("A", 1000.0, 6e8), ("B", 1000.0, 6e8), ("C", 1000.0, 6e8)])
     build_features(conn, TARGET_DATE)
     # A に高い momentum z スコアを手動設定
     conn.execute(
@@ -385,9 +369,7 @@ def test_generate_signals_bear_regime_suppresses_buy(conn):
     """Bear レジーム時は BUY シグナルが抑制される"""
     from kabusys.core.interfaces import DatabaseRegimeProvider
 
-    _insert_price_history(
-        conn, [("A", 1000.0, 6e8), ("B", 1000.0, 6e8), ("C", 1000.0, 6e8)]
-    )
+    _insert_price_history(conn, [("A", 1000.0, 6e8), ("B", 1000.0, 6e8), ("C", 1000.0, 6e8)])
     build_features(conn, TARGET_DATE)
     conn.execute(
         "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 WHERE date = ?",
@@ -448,13 +430,9 @@ def test_generate_signals_idempotent(conn):
     _insert_price_history(conn, [("A", 1000.0, 6e8)])
     build_features(conn, TARGET_DATE)
     generate_signals(conn, TARGET_DATE)
-    c1 = conn.execute(
-        "SELECT COUNT(*) FROM signals WHERE date = ?", [TARGET_DATE]
-    ).fetchone()[0]
+    c1 = conn.execute("SELECT COUNT(*) FROM signals WHERE date = ?", [TARGET_DATE]).fetchone()[0]
     generate_signals(conn, TARGET_DATE)
-    c2 = conn.execute(
-        "SELECT COUNT(*) FROM signals WHERE date = ?", [TARGET_DATE]
-    ).fetchone()[0]
+    c2 = conn.execute("SELECT COUNT(*) FROM signals WHERE date = ?", [TARGET_DATE]).fetchone()[0]
     assert c1 == c2
 
 
@@ -512,8 +490,7 @@ def test_generate_signals_isolation():
         forbidden = [
             name
             for name in dir(mod)
-            if "kabusys.execution"
-            in getattr(getattr(mod, name, None), "__module__", "")
+            if "kabusys.execution" in getattr(getattr(mod, name, None), "__module__", "")
         ]
         assert forbidden == [], f"{mod_name} が execution 層に依存している: {forbidden}"
 
@@ -608,9 +585,7 @@ def test_generate_signals_weights_unknown_key_ignored(conn):
         [TARGET_DATE],
     )
     # 未知キー "foo" を含む weights で実行しても例外にならず BUY シグナルが生成される
-    generate_signals(
-        conn, TARGET_DATE, threshold=0.5, weights={"momentum": 0.8, "foo": 99.9}
-    )
+    generate_signals(conn, TARGET_DATE, threshold=0.5, weights={"momentum": 0.8, "foo": 99.9})
     row = conn.execute(
         "SELECT side FROM signals WHERE date = ? AND code = 'A'", [TARGET_DATE]
     ).fetchone()
@@ -1176,8 +1151,7 @@ def test_sector_sell_not_affected(conn):
     )
     # A を保有中でストップロス水準に設定
     conn.execute(
-        "INSERT INTO positions (date, code, position_size, avg_price) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO positions (date, code, position_size, avg_price) VALUES (?, ?, ?, ?)",
         [TARGET_DATE, "A", 100, 1200.0],
     )
     # A の終値を avg_price の 91% に設定（-9% < ストップロス -8%）
@@ -1304,8 +1278,7 @@ def test_gap_up_suppresses_buy(conn):
     build_features(conn, TARGET_DATE)
     # A に高スコアを設定（BUY 候補）
     conn.execute(
-        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 "
-        "WHERE code = 'A' AND date = ?",
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 WHERE code = 'A' AND date = ?",
         [TARGET_DATE],
     )
     # A の当日 open を前日終値 (1000) 比 +5.1% に設定
@@ -1327,8 +1300,7 @@ def test_gap_down_at_boundary_suppresses_buy(conn):
     _insert_price_history(conn, [("A", 1000.0, 6e8)])
     build_features(conn, TARGET_DATE)
     conn.execute(
-        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 "
-        "WHERE code = 'A' AND date = ?",
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 WHERE code = 'A' AND date = ?",
         [TARGET_DATE],
     )
     # open = 970.0 → gap = 970/1000 - 1 = -0.03（ちょうど -3%、以下に含む → 抑制）
@@ -1348,8 +1320,7 @@ def test_gap_up_at_threshold_allows_buy(conn):
     _insert_price_history(conn, [("A", 1000.0, 6e8)])
     build_features(conn, TARGET_DATE)
     conn.execute(
-        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 "
-        "WHERE code = 'A' AND date = ?",
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 WHERE code = 'A' AND date = ?",
         [TARGET_DATE],
     )
     # open = 1050.0 → gap = 1050/1000 - 1 = 0.05（ちょうど +5%、超ではない → 許可）
@@ -1371,8 +1342,7 @@ def test_gap_down_just_above_threshold_allows_buy(conn):
     _insert_price_history(conn, [("A", 1000.0, 6e8)])
     build_features(conn, TARGET_DATE)
     conn.execute(
-        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 "
-        "WHERE code = 'A' AND date = ?",
+        "UPDATE features SET momentum_20 = 3.0, momentum_60 = 3.0 WHERE code = 'A' AND date = ?",
         [TARGET_DATE],
     )
     # open = 971.0 → gap = 971/1000 - 1 = -0.029 > -0.03 → 許可

@@ -126,9 +126,7 @@ class TestStreamOpenaiResponse:
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = [chunk1, chunk2, chunk3]
 
-        result = list(
-            _stream_openai_response(mock_client, [{"role": "user", "content": "test"}])
-        )
+        result = list(_stream_openai_response(mock_client, [{"role": "user", "content": "test"}]))
         assert result == ["テスト", "回答"]
 
     def test_calls_openai_with_stream_true(self):
@@ -152,9 +150,7 @@ class TestRenderWithApiKey:
         state: dict = {}
         mock_st = _make_st_mock(session_state=state)
         mock_st.chat_input.return_value = "ドローダウンを改善したい"
-        mock_st.write_stream.return_value = (
-            "ATR乗数を2.0から2.5にすることを提案します。"
-        )
+        mock_st.write_stream.return_value = "ATR乗数を2.0から2.5にすることを提案します。"
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
             with patch.object(mod, "st", mock_st):
@@ -180,9 +176,7 @@ class TestRenderWithApiKey:
         # レスポンスに JSON ブロックがないので rerun は呼ばれない
         mock_st.rerun.assert_not_called()
 
-    def test_no_assistant_saved_when_write_stream_returns_none(
-        self, wizard_duckdb, wizard_sqlite
-    ):
+    def test_no_assistant_saved_when_write_stream_returns_none(self, wizard_duckdb, wizard_sqlite):
         """write_stream が None を返した場合、assistant メッセージは SQLite に保存しない。"""
         import kabusys.monitoring.components.ai_wizard as mod
 
@@ -212,9 +206,7 @@ class TestRenderWithApiKey:
         assert len(msgs) == 1
         assert msgs[0]["role"] == "user"
 
-    def test_suggested_params_stored_in_session_state(
-        self, wizard_duckdb, wizard_sqlite
-    ):
+    def test_suggested_params_stored_in_session_state(self, wizard_duckdb, wizard_sqlite):
         """AI 返答に JSON ブロックが含まれる場合、param_review_suggested が session_state に設定される。"""
         import kabusys.monitoring.components.ai_wizard as mod
 
@@ -222,8 +214,7 @@ class TestRenderWithApiKey:
         mock_st = _make_st_mock(session_state=state)
         mock_st.chat_input.return_value = "ATRを改善してほしい"
         mock_st.write_stream.return_value = (
-            "ATR乗数を2.5にすることを提案します。\n"
-            '```json\n{"trailing_stop_atr_mult": 2.5}\n```'
+            'ATR乗数を2.5にすることを提案します。\n```json\n{"trailing_stop_atr_mult": 2.5}\n```'
         )
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
@@ -233,9 +224,7 @@ class TestRenderWithApiKey:
                     return_value=iter([]),
                 ):
                     with patch("kabusys.monitoring.components.ai_wizard.OpenAI"):
-                        with patch(
-                            "kabusys.monitoring.components.ai_wizard.render_param_review"
-                        ):
+                        with patch("kabusys.monitoring.components.ai_wizard.render_param_review"):
                             mod.render(
                                 wizard_duckdb,
                                 wizard_sqlite,

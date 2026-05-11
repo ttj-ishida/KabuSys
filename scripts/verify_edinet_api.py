@@ -87,16 +87,12 @@ def _raw_api_call(target_date: date, api_key: str) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="EDINET API 実動作検証")
     parser.add_argument("--api-key", default=os.environ.get("EDINET_API_KEY", ""))
-    parser.add_argument(
-        "--date", default=None, help="YYYY-MM-DD（省略時: 今日〜3日前で自動選択）"
-    )
+    parser.add_argument("--date", default=None, help="YYYY-MM-DD（省略時: 今日〜3日前で自動選択）")
     args = parser.parse_args()
 
     api_key: str = args.api_key
     if not api_key:
-        print(
-            "❌ ERROR: --api-key を指定するか EDINET_API_KEY 環境変数を設定してください"
-        )
+        print("❌ ERROR: --api-key を指定するか EDINET_API_KEY 環境変数を設定してください")
         sys.exit(1)
 
     print("=" * 65)
@@ -156,16 +152,12 @@ def main() -> None:
     )
 
     results: list[dict] = raw_data.get("results", [])
-    check(
-        "results が list 型", isinstance(results, list), f"型: {type(results).__name__}"
-    )
+    check("results が list 型", isinstance(results, list), f"型: {type(results).__name__}")
     info(f"results 総件数: {len(results)} 件")
 
     if not results:
         warn(f"{target_date} の results は 0 件（休場日または開示なし）")
-        warn(
-            "フィールド検証をスキップします（別の --date を指定して再試行してください）"
-        )
+        warn("フィールド検証をスキップします（別の --date を指定して再試行してください）")
 
     # ------------------------------------------------------------------
     # [3] results 要素フィールド（TypedDict と照合）
@@ -329,9 +321,7 @@ def main() -> None:
         info(f"サンプル document_url : {d0['document_url']!r}")
 
         # PDF フラグと URL の type パラメータ一致確認
-        pdf_map = {
-            str(doc.get("docID", "")): doc.get("pdfFlag", "0") for doc in results
-        }
+        pdf_map = {str(doc.get("docID", "")): doc.get("pdfFlag", "0") for doc in results}
         type_mismatch = []
         for disc in disclosures:
             doc_id = disc["id"]
@@ -363,9 +353,7 @@ def main() -> None:
     saved2 = run_edinet_collection(conn, target_date=target_date, api_key=api_key)
     check("冪等性: 同日 2 回目の saved == 0", saved2 == 0, f"実際の saved={saved2}")
 
-    rows = conn.execute(
-        "SELECT COUNT(*) FROM raw_disclosures WHERE source = 'edinet'"
-    ).fetchone()
+    rows = conn.execute("SELECT COUNT(*) FROM raw_disclosures WHERE source = 'edinet'").fetchone()
     db_count = rows[0] if rows else 0
     check(
         f"DB の source='edinet' 件数 == 初回保存件数 ({saved1})",

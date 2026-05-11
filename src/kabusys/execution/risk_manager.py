@@ -120,9 +120,7 @@ class RiskManager:
 
         # 評価額計算: current_price=None は avg_price でフォールバック（過小評価を防ぐ）
         def _eval(p) -> float:
-            return p.qty * (
-                p.current_price if p.current_price is not None else p.avg_price
-            )
+            return p.qty * (p.current_price if p.current_price is not None else p.avg_price)
 
         total_market_value = sum(_eval(p) for p in positions)
         same_code_value = sum(_eval(p) for p in positions if p.code == code)

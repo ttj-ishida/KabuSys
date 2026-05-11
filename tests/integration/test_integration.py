@@ -258,9 +258,7 @@ class TestMonitoringCapture:
         _insert_signal(duck_conn, "7203")
         _insert_target(duck_conn, "7203", qty=100, price=2500.0)
 
-        engine = _build_engine(
-            orders_conn, duck_conn, fill_mode="instant", mon_conn=mon_conn
-        )
+        engine = _build_engine(orders_conn, duck_conn, fill_mode="instant", mon_conn=mon_conn)
         engine._process_signals()
 
         rows = mon_conn.execute("SELECT COUNT(*) FROM trade_logs").fetchone()[0]
@@ -268,25 +266,19 @@ class TestMonitoringCapture:
 
     def test_no_trade_log_when_no_signals(self, orders_conn, duck_conn, mon_conn):
         """シグナルなし時はトレードログが記録されないこと"""
-        engine = _build_engine(
-            orders_conn, duck_conn, fill_mode="instant", mon_conn=mon_conn
-        )
+        engine = _build_engine(orders_conn, duck_conn, fill_mode="instant", mon_conn=mon_conn)
         engine._process_signals()
 
         rows = mon_conn.execute("SELECT COUNT(*) FROM trade_logs").fetchone()[0]
         assert rows == 0
 
-    def test_monitoring_captures_fill_mode_instant(
-        self, orders_conn, duck_conn, mon_conn
-    ):
+    def test_monitoring_captures_fill_mode_instant(self, orders_conn, duck_conn, mon_conn):
         """fill_mode=instant の場合、Filled レコードがログに残ること"""
         for code in ["7203", "9984"]:
             _insert_signal(duck_conn, code)
             _insert_target(duck_conn, code, qty=100, price=1500.0)
 
-        engine = _build_engine(
-            orders_conn, duck_conn, fill_mode="instant", mon_conn=mon_conn
-        )
+        engine = _build_engine(orders_conn, duck_conn, fill_mode="instant", mon_conn=mon_conn)
         engine._process_signals()
 
         rows = mon_conn.execute("SELECT COUNT(*) FROM trade_logs").fetchone()[0]

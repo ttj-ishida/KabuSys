@@ -8,9 +8,7 @@ from kabusys.monitoring.system_monitor import SystemCheckResult
 from kabusys.monitoring.trade_monitor import TradeCheckResult
 
 
-def _make_sys(
-    process_ok: bool = True, data_freshness_ok: bool = True
-) -> SystemCheckResult:
+def _make_sys(process_ok: bool = True, data_freshness_ok: bool = True) -> SystemCheckResult:
     return SystemCheckResult(
         recorded_at="2026-04-02T09:05:00+09:00",
         cpu_percent=30.0,
@@ -107,9 +105,7 @@ class TestKillSwitchEvaluate:
         reason = ks.evaluate(
             _make_sys(),
             _make_trade(),
-            _make_risk(
-                drawdown_alert=True, position_limit_alert=True, drawdown_pct=0.12
-            ),
+            _make_risk(drawdown_alert=True, position_limit_alert=True, drawdown_pct=0.12),
         )
         assert reason is not None
         assert "DRAWDOWN" in reason

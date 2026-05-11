@@ -113,9 +113,7 @@ def _request(
         try:
             return json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                f"J-Quants API: JSON デコード失敗 ({path}): {raw[:200]!r}"
-            ) from exc
+            raise RuntimeError(f"J-Quants API: JSON デコード失敗 ({path}): {raw[:200]!r}") from exc
 
     last_exc: Exception = RuntimeError("未初期化")
     for attempt in range(_MAX_RETRIES):
@@ -130,9 +128,7 @@ def _request(
                     # 429 は Retry-After ヘッダを優先、なければ指数バックオフ
                     wait = _RETRY_BACKOFF_BASE**attempt
                     if status == 429:
-                        retry_after = (
-                            e.headers.get("Retry-After") if e.headers else None
-                        )
+                        retry_after = e.headers.get("Retry-After") if e.headers else None
                         if retry_after:
                             try:
                                 wait = float(retry_after)
@@ -299,9 +295,7 @@ def save_earnings_calendar(
         try:
             ann_date = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
         except (ValueError, IndexError):
-            logger.warning(
-                "save_earnings_calendar: 不正な日付フォーマット '%s'—スキップ", date_str
-            )
+            logger.warning("save_earnings_calendar: 不正な日付フォーマット '%s'—スキップ", date_str)
             continue
         rows.append((code, ann_date))
 
@@ -364,11 +358,7 @@ def save_daily_quotes(
     if not records:
         return 0
 
-    fetched_at = (
-        datetime.now(tz=timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
-    )
+    fetched_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     rows = [
         (
             r.get("Date"),
@@ -424,11 +414,7 @@ def save_financial_statements(
     if not records:
         return 0
 
-    fetched_at = (
-        datetime.now(tz=timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
-    )
+    fetched_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     rows = [
         (
             str(r.get("LocalCode", "") or ""),
@@ -449,9 +435,7 @@ def save_financial_statements(
     ]
     skipped = len(records) - len(rows)
     if skipped:
-        logger.warning(
-            "save_financial_statements: %d 件を PK 欠損によりスキップ", skipped
-        )
+        logger.warning("save_financial_statements: %d 件を PK 欠損によりスキップ", skipped)
 
     conn.executemany(
         """
@@ -529,11 +513,7 @@ def save_dividends(
     if not records:
         return 0
 
-    fetched_at = (
-        datetime.now(tz=timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
-    )
+    fetched_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     rows = [
         (
             str(r.get("Code", "") or ""),
@@ -731,9 +711,7 @@ def fetch_listed_info(
     if date_ is not None:
         params["date"] = date_.strftime("%Y%m%d")
 
-    data = _request(
-        "/equities/master", params=params if params else None
-    )
+    data = _request("/equities/master", params=params if params else None)
     records = data.get("data", [])
 
     result: list[dict[str, Any]] = []

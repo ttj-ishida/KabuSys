@@ -38,9 +38,7 @@ class TestMainSkipsWhenDisabled:
         with (
             patch.object(script_mod, "Settings", return_value=mock_settings),
             patch.object(script_mod.duckdb, "connect", return_value=mock_conn),
-            patch.object(
-                script_mod, "run_news_collection", return_value=5
-            ) as mock_collect,
+            patch.object(script_mod, "run_news_collection", return_value=5) as mock_collect,
         ):
             script_mod.main()
             mock_collect.assert_called_once()
@@ -59,9 +57,7 @@ class TestMainSkipsWhenDisabled:
         with (
             patch.object(script_mod, "Settings", return_value=mock_settings),
             patch.object(script_mod.duckdb, "connect", return_value=mock_conn),
-            patch.object(
-                script_mod, "run_news_collection", side_effect=RuntimeError("fail")
-            ),
+            patch.object(script_mod, "run_news_collection", side_effect=RuntimeError("fail")),
         ):
             with pytest.raises(SystemExit) as exc_info:
                 script_mod.main()
@@ -79,9 +75,7 @@ class TestMainSkipsWhenDisabled:
         with (
             patch.object(script_mod, "Settings", return_value=mock_settings),
             patch.object(script_mod.duckdb, "connect", return_value=mock_conn),
-            patch.object(
-                script_mod, "run_news_collection", side_effect=RuntimeError("fail")
-            ),
+            patch.object(script_mod, "run_news_collection", side_effect=RuntimeError("fail")),
         ):
             with pytest.raises(SystemExit):
                 script_mod.main()
@@ -95,9 +89,7 @@ class TestMainSkipsWhenDisabled:
 
         with (
             patch.object(script_mod, "Settings", return_value=mock_settings),
-            patch.object(
-                script_mod.duckdb, "connect", side_effect=RuntimeError("cannot open")
-            ),
+            patch.object(script_mod.duckdb, "connect", side_effect=RuntimeError("cannot open")),
         ):
             with pytest.raises(SystemExit) as exc_info:
                 script_mod.main()
@@ -115,9 +107,7 @@ class TestMainSkipsWhenDisabled:
         with (
             patch.object(script_mod, "Settings", return_value=mock_settings),
             patch.object(script_mod.duckdb, "connect", return_value=mock_conn),
-            patch.object(
-                script_mod, "run_news_collection", return_value=0
-            ) as mock_collect,
+            patch.object(script_mod, "run_news_collection", return_value=0) as mock_collect,
         ):
             script_mod.main()
             call_kwargs = mock_collect.call_args

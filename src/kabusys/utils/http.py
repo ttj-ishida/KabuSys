@@ -110,7 +110,5 @@ class SSRFBlockRedirectHandler(urllib.request.HTTPRedirectHandler):
         if parsed.scheme.lower() not in ("http", "https"):
             raise urllib.error.URLError(f"リダイレクト先のスキームが不正: {abs_url!r}")
         if is_private_host(parsed.hostname):
-            raise urllib.error.URLError(
-                f"リダイレクト先がプライベートアドレス: {abs_url!r}"
-            )
+            raise urllib.error.URLError(f"リダイレクト先がプライベートアドレス: {abs_url!r}")
         return super().redirect_request(req, fp, code, msg, headers, abs_url)

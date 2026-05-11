@@ -176,9 +176,7 @@ def _parse_rss_datetime(date_str: str | None) -> datetime:
                 dt = dt.replace(tzinfo=timezone.utc)
             return dt.astimezone(timezone.utc).replace(tzinfo=None)
         except Exception:
-            logger.warning(
-                "_parse_rss_datetime: パース失敗 pubDate=%r、現在時刻で代替", date_str
-            )
+            logger.warning("_parse_rss_datetime: パース失敗 pubDate=%r、現在時刻で代替", date_str)
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
@@ -320,16 +318,12 @@ def fetch_rss(
             continue
         # <link> のスキームを検証（mailto:, javascript:, file: 等を排除）
         if urllib.parse.urlparse(link).scheme.lower() not in ("http", "https"):
-            logger.warning(
-                "fetch_rss: 不正なlinkスキームをスキップ url=%r source=%s", link, source
-            )
+            logger.warning("fetch_rss: 不正なlinkスキームをスキップ url=%r source=%s", link, source)
             continue
 
         title = preprocess_text(item.findtext("title"))
         # content:encoded が存在する場合は description より優先する
-        raw_content = item.findtext(f"{_CONTENT_NS}encoded") or item.findtext(
-            "description"
-        )
+        raw_content = item.findtext(f"{_CONTENT_NS}encoded") or item.findtext("description")
         content = preprocess_text(raw_content)
         pub_date = _parse_rss_datetime(item.findtext("pubDate"))
 
@@ -553,9 +547,7 @@ def run_news_collection(
             articles = fetch_rss(rss_url, source=source_name, timeout=timeout)
             new_ids = save_raw_news(conn, articles)
         except Exception:
-            logger.exception(
-                "run_news_collection: ソース取得失敗 source=%s", source_name
-            )
+            logger.exception("run_news_collection: ソース取得失敗 source=%s", source_name)
             results[source_name] = 0
             continue
 

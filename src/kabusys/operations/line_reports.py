@@ -75,9 +75,7 @@ def format_weekly_message(
     to_date: str,
 ) -> str:
     """週次サマリ通知メッセージを生成する。"""
-    return _format_periodic_message(
-        "週次", summary=summary, from_date=from_date, to_date=to_date
-    )
+    return _format_periodic_message("週次", summary=summary, from_date=from_date, to_date=to_date)
 
 
 def format_monthly_message(
@@ -87,6 +85,4 @@ def format_monthly_message(
     to_date: str,
 ) -> str:
     """月次サマリ通知メッセージを生成する。"""
-    return _format_periodic_message(
-        "月次", summary=summary, from_date=from_date, to_date=to_date
-    )
+    return _format_periodic_message("月次", summary=summary, from_date=from_date, to_date=to_date)

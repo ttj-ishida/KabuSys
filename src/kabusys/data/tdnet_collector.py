@@ -284,9 +284,7 @@ def fetch_tdnet_disclosures(
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 break
-            logger.warning(
-                "fetch_tdnet_disclosures: HTTPエラー page=%d code=%d", page, e.code
-            )
+            logger.warning("fetch_tdnet_disclosures: HTTPエラー page=%d code=%d", page, e.code)
             break
         except Exception:
             logger.exception("fetch_tdnet_disclosures: 取得失敗 page=%d", page)
@@ -297,9 +295,7 @@ def fetch_tdnet_disclosures(
             break
 
         all_disclosures.extend(page_disclosures)
-        logger.info(
-            "fetch_tdnet_disclosures: page=%d fetched=%d", page, len(page_disclosures)
-        )
+        logger.info("fetch_tdnet_disclosures: page=%d fetched=%d", page, len(page_disclosures))
     else:
         logger.warning(
             "fetch_tdnet_disclosures: MAX_PAGES到達 date=%s total=%d",
@@ -307,9 +303,7 @@ def fetch_tdnet_disclosures(
             len(all_disclosures),
         )
 
-    logger.info(
-        "fetch_tdnet_disclosures: date=%s total=%d", target_date, len(all_disclosures)
-    )
+    logger.info("fetch_tdnet_disclosures: date=%s total=%d", target_date, len(all_disclosures))
     return all_disclosures
 
 

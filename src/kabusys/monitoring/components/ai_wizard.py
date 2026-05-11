@@ -97,8 +97,7 @@ def render(
     api_key = os.environ.get("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None)
     if not api_key:
         st.error(
-            "OPENAI_API_KEY が設定されていません。"
-            "環境変数または st.secrets に設定してください。"
+            "OPENAI_API_KEY が設定されていません。環境変数または st.secrets に設定してください。"
         )
         return
 
@@ -153,9 +152,5 @@ def render(
                 st.session_state["param_review_suggested"] = suggested
                 st.rerun()
     except Exception:
-        _logger.exception(
-            "OpenAI API 呼び出しに失敗しました (session_id=%s)", session_id
-        )
-        st.error(
-            "OpenAI API の呼び出しに失敗しました。しばらく経ってから再度お試しください。"
-        )
+        _logger.exception("OpenAI API 呼び出しに失敗しました (session_id=%s)", session_id)
+        st.error("OpenAI API の呼び出しに失敗しました。しばらく経ってから再度お試しください。")

@@ -76,9 +76,7 @@ class LineNotifier:
             return False
 
         if resp.status_code < 200 or resp.status_code >= 300:
-            logger.error(
-                "LineNotifier: LINE API returned non-2xx status %d", resp.status_code
-            )
+            logger.error("LineNotifier: LINE API returned non-2xx status %d", resp.status_code)
             return False
 
         logger.info("LineNotifier: message sent (%d chars)", len(message))

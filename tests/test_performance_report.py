@@ -74,9 +74,7 @@ def test_schema_env_column_exists():
     conn = _make_conn(
         {"date": "2026-04-21", "equity": 5_000_000.0, "env": "live"},
     )
-    row = conn.execute(
-        "SELECT env FROM portfolio_performance WHERE date = '2026-04-21'"
-    ).fetchone()
+    row = conn.execute("SELECT env FROM portfolio_performance WHERE date = '2026-04-21'").fetchone()
     assert row is not None
     assert row[0] == "live"
 
@@ -207,9 +205,7 @@ def test_collect_weekly_rows_trading_days():
         ],
     )
     rows = collect_weekly_rows(conn, "live", date(2026, 4, 21), date(2026, 4, 22))
-    assert (
-        rows[0].trading_days == 2
-    )  # 21 と 22 のみ（portfolio_performance の範囲で集計）
+    assert rows[0].trading_days == 2  # 21 と 22 のみ（portfolio_performance の範囲で集計）
 
 
 def test_collect_weekly_rows_empty():
@@ -669,8 +665,7 @@ def test_same_date_different_envs_can_coexist():
         {"date": "2026-04-21", "equity": 4_800_000.0, "env": "paper_trading"},
     )
     rows = conn.execute(
-        "SELECT env, equity FROM portfolio_performance WHERE date = '2026-04-21'"
-        " ORDER BY env"
+        "SELECT env, equity FROM portfolio_performance WHERE date = '2026-04-21' ORDER BY env"
     ).fetchall()
     assert len(rows) == 2
     assert rows[0] == ("live", 5_000_000)
@@ -706,9 +701,7 @@ def test_collect_daily_rows_env_isolation_mixed_data():
         },
     )
     live_rows = collect_daily_rows(conn, "live", date(2026, 4, 21), date(2026, 4, 22))
-    paper_rows = collect_daily_rows(
-        conn, "paper_trading", date(2026, 4, 21), date(2026, 4, 22)
-    )
+    paper_rows = collect_daily_rows(conn, "paper_trading", date(2026, 4, 21), date(2026, 4, 22))
 
     assert len(live_rows) == 2
     assert all(r.env == "live" for r in live_rows)

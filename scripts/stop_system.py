@@ -49,9 +49,7 @@ def _wait_or_kill(pid: int, label: str) -> None:
             logger.info("%s (PID=%d) がグレースフルに終了しました。", label, pid)
             return
         time.sleep(_POLL_INTERVAL_SEC)
-    logger.warning(
-        "%s (PID=%d) がタイムアウト後も終了しません。強制終了します。", label, pid
-    )
+    logger.warning("%s (PID=%d) がタイムアウト後も終了しません。強制終了します。", label, pid)
     try:
         psutil.Process(pid).kill()
     except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
@@ -108,9 +106,7 @@ def main() -> None:
         _wait_or_kill(pid, label)
         delete_pid(pid_path)
 
-    logger.info(
-        "停止処理完了。停止フラグ (%s) は次回起動時にクリアされます。", STOP_FLAG_PATH
-    )
+    logger.info("停止処理完了。停止フラグ (%s) は次回起動時にクリアされます。", STOP_FLAG_PATH)
 
 
 if __name__ == "__main__":

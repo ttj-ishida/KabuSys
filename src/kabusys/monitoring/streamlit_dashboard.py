@@ -33,25 +33,19 @@ def _get_db_path() -> str:
 
 def load_positions(conn: sqlite3.Connection) -> list[dict]:
     conn.row_factory = sqlite3.Row
-    cursor = conn.execute(
-        "SELECT * FROM positions WHERE qty != 0 ORDER BY updated_at DESC"
-    )
+    cursor = conn.execute("SELECT * FROM positions WHERE qty != 0 ORDER BY updated_at DESC")
     return [dict(row) for row in cursor.fetchall()]
 
 
 def load_recent_orders(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
     conn.row_factory = sqlite3.Row
-    cursor = conn.execute(
-        "SELECT * FROM trade_logs ORDER BY logged_at DESC LIMIT ?", (limit,)
-    )
+    cursor = conn.execute("SELECT * FROM trade_logs ORDER BY logged_at DESC LIMIT ?", (limit,))
     return [dict(row) for row in cursor.fetchall()]
 
 
 def load_latest_system_status(conn: sqlite3.Connection) -> dict | None:
     conn.row_factory = sqlite3.Row
-    cursor = conn.execute(
-        "SELECT * FROM system_status ORDER BY recorded_at DESC LIMIT 1"
-    )
+    cursor = conn.execute("SELECT * FROM system_status ORDER BY recorded_at DESC LIMIT 1")
     row = cursor.fetchone()
     return dict(row) if row else None
 
@@ -114,9 +108,7 @@ def main(db_path: str) -> None:
             else:
                 st.info("No dashboard data yet.")
 
-            st.info(
-                "📡 ザラ場監視の詳細は **Intraday Monitor** ページを確認してください。"
-            )
+            st.info("📡 ザラ場監視の詳細は **Intraday Monitor** ページを確認してください。")
 
         with tab_positions:
             positions = load_positions(conn)

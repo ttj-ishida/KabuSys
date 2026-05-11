@@ -93,18 +93,14 @@ class _EdinetDocument(TypedDict):
 
     docID: str
     edinetCode: str
-    docTypeCode: (
-        str  # 書類種別コード（"120" 等）。旧 API の "docType" ではなく "docTypeCode"
-    )
+    docTypeCode: str  # 書類種別コード（"120" 等）。旧 API の "docType" ではなく "docTypeCode"
     filerName: str
     submitDateTime: str
     docDescription: str
     pdfFlag: str
     xbrlFlag: str
     withdrawalStatus: str
-    secCode: (
-        str | None
-    )  # 上場銘柄コード（5桁: 4桁JPXコード + "0"）。非上場・投資信託は None
+    secCode: str | None  # 上場銘柄コード（5桁: 4桁JPXコード + "0"）。非上場・投資信託は None
     seqNumber: int  # 連番（int型）
 
 
@@ -198,9 +194,7 @@ def _parse_edinet_response(raw: bytes, target_date: date) -> list[RawDisclosure]
         pdf_flag: str = doc.get("pdfFlag", "0")
 
         file_type = "2" if pdf_flag == "1" else "1"
-        document_url = (
-            f"{EDINET_DOCUMENT_URL_TEMPLATE.format(doc_id=doc_id)}?type={file_type}"
-        )
+        document_url = f"{EDINET_DOCUMENT_URL_TEMPLATE.format(doc_id=doc_id)}?type={file_type}"
 
         disclosures.append(
             RawDisclosure(
@@ -265,9 +259,7 @@ def fetch_edinet_disclosures(
         return []
 
     disclosures = _parse_edinet_response(raw, target_date)
-    logger.info(
-        "fetch_edinet_disclosures: date=%s total=%d", target_date, len(disclosures)
-    )
+    logger.info("fetch_edinet_disclosures: date=%s total=%d", target_date, len(disclosures))
     return disclosures
 
 
@@ -298,9 +290,7 @@ def run_edinet_collection(
     if target_date is None:
         target_date = date_cls.today()
 
-    disclosures = fetch_edinet_disclosures(
-        target_date, api_key=api_key, timeout=timeout
-    )
+    disclosures = fetch_edinet_disclosures(target_date, api_key=api_key, timeout=timeout)
     saved = save_raw_disclosures(conn, disclosures)
     logger.info("run_edinet_collection: date=%s saved=%d", target_date, saved)
     return saved

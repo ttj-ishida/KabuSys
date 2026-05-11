@@ -51,8 +51,7 @@ def _make_dates(n: int, before: date = TARGET_DATE) -> list[date]:
 def test_market_breadth_table_exists(conn):
     """init_schema() 後に market_breadth テーブルが存在する。"""
     row = conn.execute(
-        "SELECT table_name FROM information_schema.tables "
-        "WHERE table_name = 'market_breadth'"
+        "SELECT table_name FROM information_schema.tables WHERE table_name = 'market_breadth'"
     ).fetchone()
     assert row is not None, "market_breadth テーブルが存在しない"
 
@@ -312,9 +311,7 @@ def test_insufficient_data_returns_zero(conn):
     result = calc_and_save_breadth(conn, TARGET_DATE)
     assert result == 0
 
-    row = conn.execute(
-        "SELECT 1 FROM market_breadth WHERE date = ?", [TARGET_DATE]
-    ).fetchone()
+    row = conn.execute("SELECT 1 FROM market_breadth WHERE date = ?", [TARGET_DATE]).fetchone()
     assert row is None
 
 
@@ -330,9 +327,7 @@ def test_insufficient_stocks_returns_zero(conn):
     result = calc_and_save_breadth(conn, TARGET_DATE)
     assert result == 0
 
-    row = conn.execute(
-        "SELECT 1 FROM market_breadth WHERE date = ?", [TARGET_DATE]
-    ).fetchone()
+    row = conn.execute("SELECT 1 FROM market_breadth WHERE date = ?", [TARGET_DATE]).fetchone()
     assert row is None
 
 

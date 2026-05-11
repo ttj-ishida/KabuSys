@@ -60,13 +60,11 @@ class OrderManager:
         active = [
             r
             for r in existing
-            if r.state
-            not in {OrderState.Closed, OrderState.Cancelled, OrderState.Rejected}
+            if r.state not in {OrderState.Closed, OrderState.Cancelled, OrderState.Rejected}
         ]
         if active:
             raise DuplicateOrderError(
-                f"signal_id={signal_id} の active 注文が既に存在します: "
-                f"{active[0].client_order_id}"
+                f"signal_id={signal_id} の active 注文が既に存在します: {active[0].client_order_id}"
             )
 
         now = datetime.now(timezone.utc)
@@ -87,9 +85,7 @@ class OrderManager:
         except sqlite3.IntegrityError as exc:
             # signal_id の部分ユニークインデックス違反のみ DuplicateOrderError に変換する。
             # CHECK 制約違反（qty/price/side 不正など）は原因を隠蔽せず再スローする。
-            if "UNIQUE constraint failed" in str(exc) and "orders.signal_id" in str(
-                exc
-            ):
+            if "UNIQUE constraint failed" in str(exc) and "orders.signal_id" in str(exc):
                 raise DuplicateOrderError(
                     f"signal_id={signal_id} の active 注文が既に存在します（DB 制約）"
                 ) from exc

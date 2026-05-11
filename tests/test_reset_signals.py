@@ -112,9 +112,7 @@ def test_proceeds_on_open_orders_user_says_yes(tmp_path, monkeypatch):
     monkeypatch.setattr("reset_signals._is_trading_hours", lambda: False)
     monkeypatch.setattr("reset_signals._count_open_orders", lambda p: 2)
     monkeypatch.setattr("builtins.input", lambda prompt="": "y")
-    monkeypatch.setattr(
-        "reset_signals._backup_duckdb", lambda p: tmp_path / "backup.duckdb"
-    )
+    monkeypatch.setattr("reset_signals._backup_duckdb", lambda p: tmp_path / "backup.duckdb")
 
     duckdb_path = tmp_path / "kabusys.duckdb"
     duckdb_path.write_bytes(b"fake")  # B1: ファイル存在チェックを通過させる
@@ -169,9 +167,7 @@ def test_exits_when_duckdb_missing(tmp_path, monkeypatch):
 def test_noop_when_signal_queue_table_missing(tmp_path, monkeypatch):
     monkeypatch.setattr("reset_signals._is_trading_hours", lambda: False)
     monkeypatch.setattr("reset_signals._count_open_orders", lambda p: 0)
-    monkeypatch.setattr(
-        "reset_signals._backup_duckdb", lambda p: tmp_path / "backup.duckdb"
-    )
+    monkeypatch.setattr("reset_signals._backup_duckdb", lambda p: tmp_path / "backup.duckdb")
 
     duckdb_path = tmp_path / "kabusys.duckdb"
     duckdb_path.write_bytes(b"fake")

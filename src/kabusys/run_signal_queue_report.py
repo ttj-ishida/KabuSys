@@ -29,9 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Signal Queue Confirmation View を生成する"
-    )
+    parser = argparse.ArgumentParser(description="Signal Queue Confirmation View を生成する")
     parser.add_argument(
         "--date",
         type=lambda s: date.fromisoformat(s),
@@ -39,9 +37,7 @@ def main(argv: list[str] | None = None) -> int:
         metavar="YYYY-MM-DD",
         help="対象日（省略時は今日）",
     )
-    parser.add_argument(
-        "--save", action="store_true", help="artifacts/signal_queue/ に保存する"
-    )
+    parser.add_argument("--save", action="store_true", help="artifacts/signal_queue/ に保存する")
     parser.add_argument("--json", action="store_true", help="JSON 形式で出力する")
     args = parser.parse_args(argv)
 

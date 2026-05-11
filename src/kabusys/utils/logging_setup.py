@@ -59,9 +59,7 @@ def setup_logging(
     if isinstance(level, int):
         numeric_level = level
     else:
-        resolved_level_str = (
-            level or os.environ.get("LOG_LEVEL", _DEFAULT_LOG_LEVEL)
-        ).upper()
+        resolved_level_str = (level or os.environ.get("LOG_LEVEL", _DEFAULT_LOG_LEVEL)).upper()
         numeric_level = getattr(logging, resolved_level_str, logging.INFO)
 
     # ログディレクトリ解決・作成

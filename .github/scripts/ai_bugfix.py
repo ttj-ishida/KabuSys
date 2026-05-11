@@ -9,9 +9,7 @@ code = ""
 
 for root, dirs, files in os.walk("."):
     # .github, .git, __pycache__ は除外
-    dirs[:] = [
-        d for d in dirs if d not in {".git", ".github", "__pycache__", "node_modules"}
-    ]
+    dirs[:] = [d for d in dirs if d not in {".git", ".github", "__pycache__", "node_modules"}]
     for file in files:
         if file.endswith(".py"):
             with open(os.path.join(root, file)) as f:
@@ -58,13 +56,9 @@ fixed = response.choices[0].message.content
 # （最後のフェンスを採用すると複数ブロック間の説明文を巻き込む恐れがある）
 # ```diff タグ付きフェンスを優先し、なければ最初の ``` にフォールバック。
 lines = fixed.strip().splitlines()
-first_open = next(
-    (i for i, ln in enumerate(lines) if ln.strip().startswith("```diff")), None
-)
+first_open = next((i for i, ln in enumerate(lines) if ln.strip().startswith("```diff")), None)
 if first_open is None:
-    first_open = next(
-        (i for i, ln in enumerate(lines) if ln.strip().startswith("```")), None
-    )
+    first_open = next((i for i, ln in enumerate(lines) if ln.strip().startswith("```")), None)
 if first_open is not None:
     first_close = next(
         (i for i in range(first_open + 1, len(lines)) if lines[i].strip() == "```"),

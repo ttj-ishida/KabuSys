@@ -25,9 +25,7 @@ class MockBrokerClient:
         self.fill_mode = fill_mode
         self._cash = available_cash
         self._orders: dict[str, OrderStatus] = {}
-        self._positions: dict[str, Position] = {
-            p.code: p for p in (initial_positions or [])
-        }
+        self._positions: dict[str, Position] = {p.code: p for p in (initial_positions or [])}
         self._order_counter = 0
 
     def _next_order_id(self) -> str:
@@ -142,9 +140,7 @@ class MockBrokerClient:
             raise BrokerAPIError(f"注文が見つかりません: {order_id}")
         status = self._orders[order_id]
         if status.status in ("filled", "cancelled", "rejected"):
-            raise BrokerAPIError(
-                f"fill_order: 状態 '{status.status}' の注文は変更できません"
-            )
+            raise BrokerAPIError(f"fill_order: 状態 '{status.status}' の注文は変更できません")
         remaining = status.qty - status.filled_qty
         if remaining > 0:
             price = status.price if status.price is not None else 0.0

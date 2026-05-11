@@ -62,16 +62,12 @@ class RiskMonitor:
             self._peak_value = portfolio_value
 
         drawdown_pct = (
-            (self._peak_value - portfolio_value) / self._peak_value
-            if self._peak_value > 0
-            else 0.0
+            (self._peak_value - portfolio_value) / self._peak_value if self._peak_value > 0 else 0.0
         )
         drawdown_alert = drawdown_pct > self._dd_threshold
 
         # ポジション数（qty != 0 のみ）
-        row = self._conn.execute(
-            "SELECT COUNT(*) FROM positions WHERE qty != 0"
-        ).fetchone()
+        row = self._conn.execute("SELECT COUNT(*) FROM positions WHERE qty != 0").fetchone()
         position_count = row[0]
         position_limit_alert = position_count > self._max_positions
 

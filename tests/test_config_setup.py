@@ -191,5 +191,3 @@ def test_main_does_not_save_on_n(tmp_path):
 
     assert result == 0
     assert not env_file.exists()
-
-

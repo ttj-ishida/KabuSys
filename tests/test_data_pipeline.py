@@ -93,8 +93,7 @@ class TestSchemaIntegrity:
         cols = {
             row[0]
             for row in mem_db.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name = 'raw_prices'"
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'raw_prices'"
             ).fetchall()
         }
         assert {
@@ -328,8 +327,7 @@ class TestEtlIdempotency:
 
         def fetch(d):
             return mem_db.execute(
-                "SELECT is_trading_day, is_half_day, is_sq_day "
-                "FROM market_calendar WHERE date = ?",
+                "SELECT is_trading_day, is_half_day, is_sq_day FROM market_calendar WHERE date = ?",
                 [d],
             ).fetchone()
 
@@ -450,9 +448,7 @@ class TestAdditionalCases:
 
     def test_save_market_calendar_unknown_holiday_division(self, mem_db):
         """未知の HolidayDivision（例: '9'）はデフォルト非営業日として扱われることを確認。"""
-        records = [
-            {"Date": "2024-01-15", "HolidayDivision": "9", "HolidayName": "Unknown"}
-        ]
+        records = [{"Date": "2024-01-15", "HolidayDivision": "9", "HolidayName": "Unknown"}]
         count = jquants.save_market_calendar(mem_db, records)
         assert count == 1
         row = mem_db.execute(

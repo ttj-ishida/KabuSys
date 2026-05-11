@@ -114,10 +114,7 @@ def _check_required_env_vars() -> None:
 def _check_kabusys_env() -> None:
     env = os.environ.get("KABUSYS_ENV", "development").lower()
     if env not in _VALID_KABUSYS_ENVS:
-        _error(
-            f"KABUSYS_ENV の値が不正です: '{env}'. "
-            f"有効な値: {sorted(_VALID_KABUSYS_ENVS)}"
-        )
+        _error(f"KABUSYS_ENV の値が不正です: '{env}'. 有効な値: {sorted(_VALID_KABUSYS_ENVS)}")
     elif env == "live":
         _warn(
             "KABUSYS_ENV=live が設定されています。"
@@ -130,10 +127,7 @@ def _check_kabusys_env() -> None:
 def _check_log_level() -> None:
     level = os.environ.get("LOG_LEVEL", "INFO").upper()
     if level not in _VALID_LOG_LEVELS:
-        _warn(
-            f"LOG_LEVEL の値が不正です: '{level}'. "
-            f"有効な値: {sorted(_VALID_LOG_LEVELS)}"
-        )
+        _warn(f"LOG_LEVEL の値が不正です: '{level}'. 有効な値: {sorted(_VALID_LOG_LEVELS)}")
     else:
         _info(f"LOG_LEVEL: {level}")
 
@@ -143,10 +137,7 @@ def _check_path(var: str, default: str, label: str) -> None:
     path = Path(raw).expanduser()
     parent = path.parent
     if not parent.exists():
-        _warn(
-            f"{label} の親ディレクトリが存在しません: {parent}"
-            " (起動時に自動作成される場合あり)"
-        )
+        _warn(f"{label} の親ディレクトリが存在しません: {parent} (起動時に自動作成される場合あり)")
     else:
         _info(f"{label}: {path} (親ディレクトリ存在)")
 
@@ -219,9 +210,7 @@ def _check_risk_config_content(data: object) -> None:
         max_position_pct = _parse_ratio("max_position_pct", r["max_position_pct"])
         max_utilization = _parse_ratio("max_utilization", r["max_utilization"])
         max_drawdown = _parse_ratio("max_drawdown", r["max_drawdown"])
-        rate_limit_per_sec = _parse_positive_int(
-            "rate_limit_per_sec", r["rate_limit_per_sec"]
-        )
+        rate_limit_per_sec = _parse_positive_int("rate_limit_per_sec", r["rate_limit_per_sec"])
         circuit_breaker_errors = _parse_positive_int(
             "circuit_breaker_errors", r["circuit_breaker_errors"]
         )
@@ -239,8 +228,7 @@ def _check_risk_config_content(data: object) -> None:
     ):
         if not (0 < val <= 1):
             _error(
-                f"risk_config.yaml: risk.{name} は (0, 1] の範囲で設定してください"
-                f"（現在値: {val}）"
+                f"risk_config.yaml: risk.{name} は (0, 1] の範囲で設定してください（現在値: {val}）"
             )
 
     if max_position_pct > max_utilization:
@@ -255,15 +243,10 @@ def _check_risk_config_content(data: object) -> None:
         ("circuit_breaker_window_sec", circuit_breaker_window_sec),
     ):
         if val < 1:
-            _error(
-                f"risk_config.yaml: risk.{name} は 1 以上で設定してください"
-                f"（現在値: {val}）"
-            )
+            _error(f"risk_config.yaml: risk.{name} は 1 以上で設定してください（現在値: {val}）")
 
 
-_KNOWN_STRATEGY_WEIGHT_KEYS = frozenset(
-    {"momentum", "value", "volatility", "liquidity", "news"}
-)
+_KNOWN_STRATEGY_WEIGHT_KEYS = frozenset({"momentum", "value", "volatility", "liquidity", "news"})
 
 
 def _check_strategy_config_content(data: object) -> None:
@@ -310,9 +293,7 @@ def _check_strategy_config_content(data: object) -> None:
     # threshold
     t = s.get("threshold")
     if t is None:
-        _warn(
-            "strategy_config.yaml: strategy.threshold がありません（デフォルト値を使用）。"
-        )
+        _warn("strategy_config.yaml: strategy.threshold がありません（デフォルト値を使用）。")
     elif isinstance(t, bool) or not isinstance(t, (int, float)):
         _error(
             f"strategy_config.yaml: strategy.threshold は数値で設定してください（現在値: {t!r}）。"
@@ -325,9 +306,7 @@ def _check_strategy_config_content(data: object) -> None:
     # stop_loss_rate
     slr = s.get("stop_loss_rate")
     if slr is None:
-        _warn(
-            "strategy_config.yaml: strategy.stop_loss_rate がありません（デフォルト値を使用）。"
-        )
+        _warn("strategy_config.yaml: strategy.stop_loss_rate がありません（デフォルト値を使用）。")
     elif isinstance(slr, bool) or not isinstance(slr, (int, float)):
         _error(
             f"strategy_config.yaml: strategy.stop_loss_rate は数値で設定してください（現在値: {slr!r}）。"
@@ -409,12 +388,8 @@ def _check_strategy_config_content(data: object) -> None:
             )
 
     # min/max 整合性チェック
-    mhd_valid = (
-        mhd is not None and not isinstance(mhd, bool) and isinstance(mhd, (int, float))
-    )
-    xhd_valid = (
-        xhd is not None and not isinstance(xhd, bool) and isinstance(xhd, (int, float))
-    )
+    mhd_valid = mhd is not None and not isinstance(mhd, bool) and isinstance(mhd, (int, float))
+    xhd_valid = xhd is not None and not isinstance(xhd, bool) and isinstance(xhd, (int, float))
     if mhd_valid and xhd_valid and int(mhd) >= int(xhd):
         _warn(
             f"strategy_config.yaml: strategy.min_holding_days({int(mhd)}) >= "
@@ -431,9 +406,7 @@ def _check_config_yaml_files() -> None:
         _yaml_available = True
     except ImportError:
         _yaml_available = False
-        _warn(
-            "PyYAML がインストールされていません。YAML ファイルの内容検証をスキップします。"
-        )
+        _warn("PyYAML がインストールされていません。YAML ファイルの内容検証をスキップします。")
 
     for filename in _CONFIG_FILES:
         path = _CONFIG_DIR / filename
@@ -484,14 +457,10 @@ def _check_paper_trading_cash() -> None:
     try:
         val = float(raw)
     except ValueError:
-        _error(
-            f"PAPER_TRADING_INITIAL_CASH の値が不正です: '{raw}'. 正の数値で設定してください。"
-        )
+        _error(f"PAPER_TRADING_INITIAL_CASH の値が不正です: '{raw}'. 正の数値で設定してください。")
         return
     if val <= 0:
-        _error(
-            f"PAPER_TRADING_INITIAL_CASH は正の値で設定してください（現在値: {val}）"
-        )
+        _error(f"PAPER_TRADING_INITIAL_CASH は正の値で設定してください（現在値: {val}）")
 
 
 def _check_live_guards() -> None:
@@ -502,9 +471,7 @@ def _check_live_guards() -> None:
 
     # LINE 通知の設定確認
     if not os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", ""):
-        _warn(
-            "本番環境で LINE_CHANNEL_ACCESS_TOKEN が未設定です。アラートが届きません。"
-        )
+        _warn("本番環境で LINE_CHANNEL_ACCESS_TOKEN が未設定です。アラートが届きません。")
     if not os.environ.get("LINE_USER_ID", ""):
         _warn("本番環境で LINE_USER_ID が未設定です。アラートが届きません。")
 

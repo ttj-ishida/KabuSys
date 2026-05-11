@@ -123,15 +123,11 @@ class TestIsTradingDay:
     def test_fallback_weekday_when_date_out_of_db_range(self, mem_db):
         # DB には 2025-01-06 のみ存在、範囲外の 2025-02-01 は曜日フォールバック
         _insert_calendar(mem_db, [{"date": date(2025, 1, 6), "is_trading_day": True}])
-        assert (
-            cm.is_trading_day(mem_db, date(2025, 2, 1)) is False
-        )  # 土曜日（フォールバック）
+        assert cm.is_trading_day(mem_db, date(2025, 2, 1)) is False  # 土曜日（フォールバック）
 
     def test_fallback_weekday_out_of_range_weekday(self, mem_db):
         _insert_calendar(mem_db, [{"date": date(2025, 1, 6), "is_trading_day": True}])
-        assert (
-            cm.is_trading_day(mem_db, date(2025, 2, 3)) is True
-        )  # 月曜日（フォールバック）
+        assert cm.is_trading_day(mem_db, date(2025, 2, 3)) is True  # 月曜日（フォールバック）
 
 
 # ---------------------------------------------------------------------------
@@ -450,9 +446,7 @@ class TestCalendarUpdateJob:
         _insert_calendar(mem_db, [{"date": far_future, "is_trading_day": True}])
 
         fetch_called = []
-        monkeypatch.setattr(
-            jq, "fetch_market_calendar", lambda **kw: fetch_called.append(kw) or []
-        )
+        monkeypatch.setattr(jq, "fetch_market_calendar", lambda **kw: fetch_called.append(kw) or [])
         monkeypatch.setattr(jq, "save_market_calendar", lambda conn, recs: 0)
 
         result = cm.calendar_update_job(mem_db)
@@ -514,9 +508,7 @@ class TestCalendarUpdateJob:
         _insert_calendar(mem_db, [{"date": abnormal_date, "is_trading_day": True}])
 
         fetch_called = []
-        monkeypatch.setattr(
-            jq, "fetch_market_calendar", lambda **kw: fetch_called.append(kw) or []
-        )
+        monkeypatch.setattr(jq, "fetch_market_calendar", lambda **kw: fetch_called.append(kw) or [])
         monkeypatch.setattr(jq, "save_market_calendar", lambda conn, recs: 0)
 
         result = cm.calendar_update_job(mem_db)
@@ -534,9 +526,7 @@ class TestCalendarUpdateJob:
         _insert_calendar(mem_db, [{"date": beyond, "is_trading_day": True}])
 
         fetch_called = []
-        monkeypatch.setattr(
-            jq, "fetch_market_calendar", lambda **kw: fetch_called.append(kw) or []
-        )
+        monkeypatch.setattr(jq, "fetch_market_calendar", lambda **kw: fetch_called.append(kw) or [])
 
         result = cm.calendar_update_job(mem_db)
         assert result == 0

@@ -173,9 +173,7 @@ def main() -> None:
         try:
             run_date = date.fromisoformat(args.date)
         except ValueError:
-            logger.error(
-                "--date の形式が不正です: %s (YYYY-MM-DD が必要です)", args.date
-            )
+            logger.error("--date の形式が不正です: %s (YYYY-MM-DD が必要です)", args.date)
             sys.exit(1)
     else:
         run_date = date.today()
@@ -200,9 +198,7 @@ def main() -> None:
             if row and row[0]:
                 target_date = row[0]
         except Exception:
-            logger.warning(
-                "翌営業日の取得に失敗しました。run_date+1 を使用します。", exc_info=True
-            )
+            logger.warning("翌営業日の取得に失敗しました。run_date+1 を使用します。", exc_info=True)
     finally:
         conn.close()
 

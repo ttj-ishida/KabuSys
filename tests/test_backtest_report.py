@@ -12,14 +12,10 @@ from kabusys.backtest.simulator import DailySnapshot, TradeRecord
 # ---------------------------------------------------------------------------
 
 
-def _make_history(
-    values: list[float], start: date | None = None
-) -> list[DailySnapshot]:
+def _make_history(values: list[float], start: date | None = None) -> list[DailySnapshot]:
     base = start or date(2024, 1, 1)
     return [
-        DailySnapshot(
-            date=base + timedelta(days=i), cash=0.0, positions={}, portfolio_value=v
-        )
+        DailySnapshot(date=base + timedelta(days=i), cash=0.0, positions={}, portfolio_value=v)
         for i, v in enumerate(values)
     ]
 
@@ -190,9 +186,7 @@ def test_build_report_returns_backtest_report():
         _make_trade(pnl=-5_000.0, day_offset=1),
     ]
     result = _make_result(history, trades)
-    report = build_report(
-        result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
-    )
+    report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18))
     assert isinstance(report, BacktestReport)
 
 
@@ -202,9 +196,7 @@ def test_build_report_run_id_auto_generated():
 
     history = _make_history([1_000_000] * 10)
     result = _make_result(history, [])
-    report = build_report(
-        result, start_date=date(2024, 1, 1), end_date=date(2024, 1, 10)
-    )
+    report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 1, 10))
     import re
 
     assert re.match(
@@ -255,20 +247,12 @@ def test_build_report_final_value_uses_latest_date():
 
     # 逆順の history（古い日付が末尾）
     history = [
-        DailySnapshot(
-            date=date(2024, 3, 1), cash=0.0, positions={}, portfolio_value=12_000_000.0
-        ),
-        DailySnapshot(
-            date=date(2024, 1, 1), cash=0.0, positions={}, portfolio_value=10_000_000.0
-        ),
-        DailySnapshot(
-            date=date(2024, 2, 1), cash=0.0, positions={}, portfolio_value=11_000_000.0
-        ),
+        DailySnapshot(date=date(2024, 3, 1), cash=0.0, positions={}, portfolio_value=12_000_000.0),
+        DailySnapshot(date=date(2024, 1, 1), cash=0.0, positions={}, portfolio_value=10_000_000.0),
+        DailySnapshot(date=date(2024, 2, 1), cash=0.0, positions={}, portfolio_value=11_000_000.0),
     ]
     result = _make_result(history, [])
-    report = build_report(
-        result, start_date=date(2024, 1, 1), end_date=date(2024, 3, 1)
-    )
+    report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 3, 1))
     assert report.headline.final_value == 12_000_000.0
 
 
@@ -284,9 +268,7 @@ def test_build_report_trade_section_win_rate():
         _make_trade(pnl=-500.0, day_offset=3),
     ]
     result = _make_result(history, trades)
-    report = build_report(
-        result, start_date=date(2024, 1, 1), end_date=date(2024, 2, 19)
-    )
+    report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 2, 19))
     assert abs(report.trades.win_rate - 0.75) < 1e-9
 
 
@@ -301,9 +283,7 @@ def test_format_cli_summary_contains_cagr():
 
     history = _make_history([1_000_000] * 200)
     result = _make_result(history, [])
-    report = build_report(
-        result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
-    )
+    report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18))
     text = format_cli_summary(report)
     assert "CAGR" in text
 
@@ -330,9 +310,7 @@ def test_format_cli_summary_contains_warnings():
 
     history = _make_history([1_000_000] * 10)  # 短期間 → warning 発生
     result = _make_result(history, [])
-    report = build_report(
-        result, start_date=date(2024, 1, 1), end_date=date(2024, 1, 10)
-    )
+    report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 1, 10))
     text = format_cli_summary(report)
     assert "Warnings" in text or "Warning" in text or "[!]" in text
 
@@ -348,9 +326,7 @@ def test_format_json_is_valid_json():
 
     history = _make_history([1_000_000] * 200)
     result = _make_result(history, [])
-    report = build_report(
-        result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
-    )
+    report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18))
     text = format_json(report)
     parsed = json.loads(text)
     assert isinstance(parsed, dict)
@@ -362,9 +338,7 @@ def test_format_json_contains_expected_keys():
 
     history = _make_history([1_000_000] * 200)
     result = _make_result(history, [])
-    report = build_report(
-        result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
-    )
+    report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18))
     parsed = json.loads(format_json(report))
     for key in ("meta", "headline", "trades", "performance", "warnings"):
         assert key in parsed
@@ -397,9 +371,7 @@ def test_format_markdown_contains_sections():
 
     history = _make_history([1_000_000] * 200)
     result = _make_result(history, [])
-    report = build_report(
-        result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
-    )
+    report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18))
     md = format_markdown(report)
     for section in (
         "Overview",
@@ -571,9 +543,7 @@ def test_no_warnings_healthy_run():
 
     history = _make_history([1_000_000] * 400)
     # 10銘柄、均等に利益
-    trades = [
-        _make_trade(code=str(1000 + i), pnl=1000.0, day_offset=i) for i in range(10)
-    ]
+    trades = [_make_trade(code=str(1000 + i), pnl=1000.0, day_offset=i) for i in range(10)]
     result = _make_result(history, trades)
     warnings = _generate_warnings(result)
     assert warnings == []
@@ -649,15 +619,9 @@ def test_sharpe_zero_prev_value_no_zerodivision():
     from kabusys.backtest.metrics import _calc_sharpe
 
     history = [
-        DailySnapshot(
-            date=date(2024, 1, 1), cash=0.0, positions={}, portfolio_value=0.0
-        ),
-        DailySnapshot(
-            date=date(2024, 1, 2), cash=0.0, positions={}, portfolio_value=1_000_000.0
-        ),
-        DailySnapshot(
-            date=date(2024, 1, 3), cash=0.0, positions={}, portfolio_value=1_100_000.0
-        ),
+        DailySnapshot(date=date(2024, 1, 1), cash=0.0, positions={}, portfolio_value=0.0),
+        DailySnapshot(date=date(2024, 1, 2), cash=0.0, positions={}, portfolio_value=1_000_000.0),
+        DailySnapshot(date=date(2024, 1, 3), cash=0.0, positions={}, portfolio_value=1_100_000.0),
     ]
     result = _calc_sharpe(history)
     assert isinstance(result, float)
@@ -724,9 +688,7 @@ class TestBacktestReportScopeIntegration:
         from kabusys.backtest.report import build_report
 
         result = self._make_scoped_result(scope_mode="manual_codes")
-        report = build_report(
-            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
-        )
+        report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18))
         assert report.meta.report_type == "targeted_backtest"
 
     def test_report_type_auto_derived_portfolio(self):
@@ -734,9 +696,7 @@ class TestBacktestReportScopeIntegration:
         from kabusys.backtest.report import build_report
 
         result = self._make_scoped_result(scope_mode="default_universe")
-        report = build_report(
-            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
-        )
+        report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18))
         assert report.meta.report_type == "portfolio_backtest"
 
     def test_meta_has_scope_fields(self):
@@ -744,9 +704,7 @@ class TestBacktestReportScopeIntegration:
         from kabusys.backtest.report import build_report
 
         result = self._make_scoped_result()
-        report = build_report(
-            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
-        )
+        report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18))
         assert report.meta.scope_mode == "manual_codes"
         assert report.meta.scope_codes == ["1234", "5678"]
         assert report.meta.effective_universe_size == 2
@@ -769,9 +727,7 @@ class TestBacktestReportScopeIntegration:
         from kabusys.backtest.report import build_report
 
         result = self._make_scoped_result(scope_mode="manual_codes")
-        report = build_report(
-            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
-        )
+        report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18))
         assert any("個別銘柄指定" in w for w in report.warnings)
 
     def test_excluded_codes_warning(self):
@@ -779,9 +735,7 @@ class TestBacktestReportScopeIntegration:
         from kabusys.backtest.report import build_report
 
         result = self._make_scoped_result(excluded=["9999"])
-        report = build_report(
-            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
-        )
+        report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18))
         assert any("除外" in w for w in report.warnings)
 
     def test_save_report_creates_warnings_json(self, tmp_path):
@@ -807,9 +761,7 @@ class TestBacktestReportScopeIntegration:
         from kabusys.backtest.report import build_report, format_cli_summary
 
         result = self._make_scoped_result()
-        report = build_report(
-            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
-        )
+        report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18))
         summary = format_cli_summary(report)
         assert "targeted_backtest" in summary or "manual_codes" in summary
 
@@ -818,9 +770,7 @@ class TestBacktestReportScopeIntegration:
         from kabusys.backtest.report import build_report, format_markdown
 
         result = self._make_scoped_result()
-        report = build_report(
-            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
-        )
+        report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18))
         md = format_markdown(report)
         assert "manual_codes" in md or "Scope" in md
 
@@ -831,9 +781,7 @@ class TestBacktestReportScopeIntegration:
         from kabusys.backtest.report import build_report, format_json
 
         result = self._make_scoped_result()
-        report = build_report(
-            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
-        )
+        report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18))
         data = json.loads(format_json(report))
         assert data["meta"]["scope_mode"] == "manual_codes"
 
@@ -890,9 +838,7 @@ class TestBacktestReportScopeIntegration:
         metrics = calc_metrics(history, trades)
         result = BacktestResult(history=history, trades=trades, metrics=metrics)
 
-        report = build_report(
-            result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18)
-        )
+        report = build_report(result, start_date=date(2024, 1, 1), end_date=date(2024, 7, 18))
         summary = format_cli_summary(report)
         assert "portfolio_backtest" in summary
         assert "default_universe" in summary

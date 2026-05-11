@@ -187,9 +187,7 @@ def check_spike(
                 check_name="spike",
                 table="raw_prices",
                 severity="warning",
-                detail=(
-                    f"前日比 {threshold * 100:.0f}% 超のスパイクが {count} 件あります"
-                ),
+                detail=(f"前日比 {threshold * 100:.0f}% 超のスパイクが {count} 件あります"),
                 rows=[dict(zip(cols, row)) for row in sample_rows],
             )
         )

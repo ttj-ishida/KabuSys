@@ -38,9 +38,7 @@ class TestPaperSqlitePath:
         monkeypatch.delenv("PAPER_TRADING_SQLITE_PATH", raising=False)
         from pathlib import Path
 
-        assert (
-            Settings().paper_sqlite_path == Path("data/paper_trading.db").expanduser()
-        )
+        assert Settings().paper_sqlite_path == Path("data/paper_trading.db").expanduser()
 
     def test_override(self, monkeypatch, tmp_path):
         custom = str(tmp_path / "custom.db")
@@ -94,9 +92,7 @@ class TestBrokerClientFactory:
         assert broker._trade_password == "trade_pass"
         broker.close()
 
-    def test_live_mode_falls_back_to_api_password_when_trade_password_not_set(
-        self, monkeypatch
-    ):
+    def test_live_mode_falls_back_to_api_password_when_trade_password_not_set(self, monkeypatch):
         from kabusys.execution.kabu_client import KabuStationClient
 
         monkeypatch.setenv("KABUSYS_ENV", "live")

@@ -174,9 +174,7 @@ def test_status_ready_with_warnings_signals_zero():
 def test_status_ready_with_warnings_job_has_warning_message():
     """ジョブの warnings リストが空でない → READY_WITH_WARNINGS。"""
     jobs = [
-        _make_job(
-            name=n, warnings=["データ件数が少ない"] if n == "data_update_job" else []
-        )
+        _make_job(name=n, warnings=["データ件数が少ない"] if n == "data_update_job" else [])
         for n in MANDATORY_JOBS
     ]
     counts = _make_counts()

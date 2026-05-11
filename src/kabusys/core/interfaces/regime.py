@@ -43,8 +43,6 @@ class DatabaseRegimeProvider:
             [target_date],
         ).fetchone()
         if row is None:
-            logger.debug(
-                "market_regime not found for %s; fallback to 'bull'", target_date
-            )
+            logger.debug("market_regime not found for %s; fallback to 'bull'", target_date)
             return "bull"
         return row[0]

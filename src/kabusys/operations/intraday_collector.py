@@ -60,9 +60,7 @@ def get_dashboard_row(conn: sqlite3.Connection) -> dict | None:
     return dict(row) if row else None
 
 
-def count_recent_risk_events(
-    conn: sqlite3.Connection, event_type: str, minutes: int = 60
-) -> int:
+def count_recent_risk_events(conn: sqlite3.Connection, event_type: str, minutes: int = 60) -> int:
     """指定 event_type の直近 N 分以内の件数を返す。"""
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
     conn.row_factory = None
@@ -76,9 +74,7 @@ def count_recent_risk_events(
 def get_latest_system_status(conn: sqlite3.Connection) -> dict | None:
     """system_status の最新1件を dict で返す。レコードなしなら None。"""
     conn.row_factory = sqlite3.Row
-    cursor = conn.execute(
-        "SELECT * FROM system_status ORDER BY recorded_at DESC LIMIT 1"
-    )
+    cursor = conn.execute("SELECT * FROM system_status ORDER BY recorded_at DESC LIMIT 1")
     row = cursor.fetchone()
     return dict(row) if row else None
 
@@ -86,23 +82,17 @@ def get_latest_system_status(conn: sqlite3.Connection) -> dict | None:
 def get_recent_risk_events(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
     """risk_logs を logged_at DESC で最新 limit 件返す。"""
     conn.row_factory = sqlite3.Row
-    cursor = conn.execute(
-        "SELECT * FROM risk_logs ORDER BY logged_at DESC LIMIT ?", (limit,)
-    )
+    cursor = conn.execute("SELECT * FROM risk_logs ORDER BY logged_at DESC LIMIT ?", (limit,))
     return [dict(row) for row in cursor.fetchall()]
 
 
-def collect_intraday_snapshot(
-    conn: sqlite3.Connection, settings: Settings
-) -> IntradaySnapshot:
+def collect_intraday_snapshot(conn: sqlite3.Connection, settings: Settings) -> IntradaySnapshot:
     """全チェック関数を呼び出して IntradaySnapshot を返す。"""
     now = datetime.now(timezone.utc).isoformat()
 
     execution_pid_ok = check_pid_file(Path(settings.pid_file_path))
     monitoring_pid_ok = check_pid_file(_MONITORING_PID)
-    kill_switch_active, kill_switch_reason = check_kill_switch(
-        Path(settings.kill_flag_path)
-    )
+    kill_switch_active, kill_switch_reason = check_kill_switch(Path(settings.kill_flag_path))
 
     dashboard = get_dashboard_row(conn)
     drawdown_pct = dashboard["drawdown_pct"] if dashboard else None

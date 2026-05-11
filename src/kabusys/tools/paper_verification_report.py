@@ -282,9 +282,7 @@ def generate_report(
 
     fill_rate_pct = orders["fill_rate_pct"]
     if fill_rate_pct is not None and fill_rate_pct < THRESHOLD_FILL_RATE_PCT:
-        failures.append(
-            f"注文成功率: {fill_rate_pct:.1f}% < {THRESHOLD_FILL_RATE_PCT}%"
-        )
+        failures.append(f"注文成功率: {fill_rate_pct:.1f}% < {THRESHOLD_FILL_RATE_PCT}%")
 
     send_rate_pct = orders["send_rate_pct"]
     if send_rate_pct is not None and send_rate_pct < THRESHOLD_SEND_RATE_PCT:
@@ -292,16 +290,10 @@ def generate_report(
 
     p95_ms = latency["p95_ms"]
     if p95_ms is not None and p95_ms > THRESHOLD_P95_LATENCY_MS:
-        failures.append(
-            f"P95レイテンシ: {p95_ms:.1f} ms > {THRESHOLD_P95_LATENCY_MS} ms"
-        )
+        failures.append(f"P95レイテンシ: {p95_ms:.1f} ms > {THRESHOLD_P95_LATENCY_MS} ms")
 
     passed = len(failures) == 0
-    verdict = (
-        "PASS (全指標が基準値を満たしています)"
-        if passed
-        else f"FAIL ({'; '.join(failures)})"
-    )
+    verdict = "PASS (全指標が基準値を満たしています)" if passed else f"FAIL ({'; '.join(failures)})"
 
     # レポート出力
     print("========================================")
@@ -335,9 +327,7 @@ def generate_report(
 
 def main() -> None:
     """コマンドラインエントリポイント。"""
-    parser = argparse.ArgumentParser(
-        description="Paper Trading 検証レポートを生成します。"
-    )
+    parser = argparse.ArgumentParser(description="Paper Trading 検証レポートを生成します。")
     parser.add_argument(
         "--from",
         dest="from_date",
@@ -359,11 +349,7 @@ def main() -> None:
     args = parser.parse_args()
 
     # DB パスの解決: --db > 環境変数 > デフォルト
-    db_path = (
-        args.db_path
-        or os.environ.get("PAPER_TRADING_SQLITE_PATH")
-        or "data/paper_trading.db"
-    )
+    db_path = args.db_path or os.environ.get("PAPER_TRADING_SQLITE_PATH") or "data/paper_trading.db"
 
     generate_report(
         db_path=db_path,

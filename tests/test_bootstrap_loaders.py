@@ -198,9 +198,7 @@ def test_load_master_inserts_stocks(conn, tmp_path):
     path = _gz(rows, tmp_path, "master.csv.gz")
     count = load_master(conn, path)
     assert count == 1
-    row = conn.execute(
-        "SELECT name, market, sector FROM stocks WHERE code='7203'"
-    ).fetchone()
+    row = conn.execute("SELECT name, market, sector FROM stocks WHERE code='7203'").fetchone()
     assert row == ("トヨタ自動車", "Prime", "輸送用機器")
 
 
@@ -279,9 +277,7 @@ def test_load_topix_inserts_topix_daily(conn, tmp_path):
     path = _gz(rows, tmp_path, "topix.csv.gz")
     count = load_topix(conn, path)
     assert count == 1
-    row = conn.execute(
-        "SELECT close FROM topix_daily WHERE date='2024-01-04'"
-    ).fetchone()
+    row = conn.execute("SELECT close FROM topix_daily WHERE date='2024-01-04'").fetchone()
     assert float(row[0]) == 2505.0
 
 

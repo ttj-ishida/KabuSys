@@ -54,9 +54,7 @@ def _insert_target(conn, code: str, qty: int = 100, price: float = 1500.0):
 
 
 class TestReadSignals:
-    def test_reads_signals_joined_with_portfolio_targets(
-        self, sqlite_conn, duckdb_conn
-    ):
+    def test_reads_signals_joined_with_portfolio_targets(self, sqlite_conn, duckdb_conn):
         _insert_signal(duckdb_conn, "1234")
         _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
         broker = MockBrokerClient(available_cash=5_000_000.0)
@@ -136,9 +134,7 @@ class TestProcessSignals:
         # pending 後に CB が CLOSED に戻っていること
         assert engine._risk_manager._cb_state == "CLOSED"
 
-    def test_process_signals_skipped_after_signal_send_end(
-        self, sqlite_conn, duckdb_conn
-    ):
+    def test_process_signals_skipped_after_signal_send_end(self, sqlite_conn, duckdb_conn):
         """signal_send_end を過ぎた時刻に run_session が呼ばれてもシグナル処理をスキップ"""
         _insert_signal(duckdb_conn, "1234")
         _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
@@ -156,9 +152,7 @@ class TestProcessSignals:
         # ← _process_signals を明示的に呼んだ場合との比較
         assert len(engine._repo.list_active()) == 0
 
-    def test_latency_ms_recorded_in_monitoring_db(
-        self, sqlite_conn, duckdb_conn, monitoring_conn
-    ):
+    def test_latency_ms_recorded_in_monitoring_db(self, sqlite_conn, duckdb_conn, monitoring_conn):
         """send_order() 後に monitoring_db.trade_logs.latency_ms が記録される"""
         _insert_signal(duckdb_conn, "1234")
         _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
@@ -174,9 +168,7 @@ class TestProcessSignals:
         assert row["latency_ms"] is not None
         assert row["latency_ms"] >= 0.0
 
-    def test_latency_ms_recorded_for_pending_order(
-        self, sqlite_conn, duckdb_conn, monitoring_conn
-    ):
+    def test_latency_ms_recorded_for_pending_order(self, sqlite_conn, duckdb_conn, monitoring_conn):
         """fill_mode=never (OrderSentPendingError) でも latency_ms が記録される"""
         _insert_signal(duckdb_conn, "1234")
         _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
@@ -308,9 +300,7 @@ class TestKillFlagPolling:
         repo = OrderRepository(sqlite_conn)
         assert repo.list_active() == []
 
-    def test_process_signals_proceeds_without_kill_flag(
-        self, sqlite_conn, duckdb_conn, tmp_path
-    ):
+    def test_process_signals_proceeds_without_kill_flag(self, sqlite_conn, duckdb_conn, tmp_path):
         """kill.flag なし → 通常処理（シグナルが発注される）"""
         flag_path = tmp_path / "kill.flag"  # 作成しない
 
@@ -325,9 +315,7 @@ class TestKillFlagPolling:
 
         assert not engine._stop_event.is_set()
 
-    def test_process_signals_detects_kill_flag_mid_loop(
-        self, sqlite_conn, duckdb_conn, tmp_path
-    ):
+    def test_process_signals_detects_kill_flag_mid_loop(self, sqlite_conn, duckdb_conn, tmp_path):
         """kill.flag がループ途中で出現 → kill_switch() 発動・残シグナルスキップ"""
         flag_path = tmp_path / "kill.flag"
 
@@ -449,9 +437,7 @@ class TestPositionEntriesOnFill:
         row = duckdb_conn.execute(
             "SELECT entry_date FROM position_entries WHERE code = '8888'"
         ).fetchone()
-        assert row is not None, (
-            "発注保留（pending）後も position_entries が挿入されるべき"
-        )
+        assert row is not None, "発注保留（pending）後も position_entries が挿入されるべき"
         assert row[0] == FILL_DATE, "entry_date は約定日（翌営業日）であるべき"
 
     def test_buy_signal_idempotent(self, sqlite_conn, duckdb_conn):
@@ -488,9 +474,7 @@ class TestPositionEntriesOnFill:
         assert row is not None
         assert row[0] == FILL_DATE, "sell_date は約定日（翌営業日）であるべき"
 
-    def test_sell_signal_pending_does_not_update_sell_date(
-        self, sqlite_conn, duckdb_conn
-    ):
+    def test_sell_signal_pending_does_not_update_sell_date(self, sqlite_conn, duckdb_conn):
         """SELL 発注保留（pending）では sell_date を書かない（ポジションはまだ保有中）。"""
         duckdb_conn.execute(
             "INSERT INTO position_entries (code, entry_date) VALUES ('5555', ?)",
@@ -545,9 +529,7 @@ class TestPositionEntriesOnFill:
         # 発注された注文の qty が 100 (= floor(250 * 0.5 / 100) * 100) であること
         orders = engine._repo.list_active()
         assert len(orders) == 1, "発注が1件あるべき"
-        assert orders[0].qty == 100, (
-            f"端数切り捨て後 qty=100 であるべき、実際={orders[0].qty}"
-        )
+        assert orders[0].qty == 100, f"端数切り捨て後 qty=100 であるべき、実際={orders[0].qty}"
 
     def test_size_multiplier_zero_skips_order(self, sqlite_conn, duckdb_conn):
         """size_multiplier 適用後 qty=0 の場合は発注をスキップする。"""

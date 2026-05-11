@@ -104,9 +104,7 @@ def test_system_monitor_stale_pid(mon_conn, mock_duckdb, tmp_path):
 
     # risk_logs に STALE_PID が記録されているか確認
     mon_conn.row_factory = sqlite3.Row
-    rows = mon_conn.execute(
-        "SELECT * FROM risk_logs WHERE event_type='STALE_PID'"
-    ).fetchall()
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='STALE_PID'").fetchall()
     assert len(rows) == 1
 
 
@@ -132,9 +130,7 @@ def test_system_monitor_invalid_pid_file(mon_conn, mock_duckdb, tmp_path):
     assert not pid_file.exists()
 
     mon_conn.row_factory = sqlite3.Row
-    rows = mon_conn.execute(
-        "SELECT * FROM risk_logs WHERE event_type='STALE_PID'"
-    ).fetchall()
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='STALE_PID'").fetchall()
     assert len(rows) == 1
 
 
@@ -186,9 +182,7 @@ def test_system_monitor_data_freshness_none(mon_conn, mock_duckdb, tmp_path):
     monitor = SystemMonitor(mon_conn, mock_duckdb, pid_file=pid_file)
 
     with (
-        patch(
-            "kabusys.monitoring.system_monitor.get_last_price_date", return_value=None
-        ),
+        patch("kabusys.monitoring.system_monitor.get_last_price_date", return_value=None),
         patch("psutil.cpu_percent", return_value=30.0),
         patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)),
         patch("psutil.disk_usage", return_value=MagicMock(percent=40.0)),
@@ -269,9 +263,7 @@ def test_trade_monitor_stale_order_detected(mon_conn):
     result = monitor.check_once(now=now)
 
     assert order.client_order_id in result.stale_orders
-    rows = mon_conn.execute(
-        "SELECT * FROM risk_logs WHERE event_type='STALE_ORDER'"
-    ).fetchall()
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='STALE_ORDER'").fetchall()
     assert len(rows) == 1
 
 
@@ -305,9 +297,7 @@ def test_trade_monitor_price_anomaly_detected(mon_conn):
     result = monitor.check_once()
 
     assert order.client_order_id in result.anomaly_fills
-    rows = mon_conn.execute(
-        "SELECT * FROM risk_logs WHERE event_type='PRICE_ANOMALY'"
-    ).fetchall()
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='PRICE_ANOMALY'").fetchall()
     assert len(rows) == 1
 
 
@@ -331,9 +321,7 @@ def test_trade_monitor_market_order_excluded(mon_conn):
 # ─── RiskMonitor ─────────────────────────────────────────────────────────────
 
 
-def _setup_dashboard(
-    conn: sqlite3.Connection, portfolio_value: float, cash: float = 0.0
-) -> None:
+def _setup_dashboard(conn: sqlite3.Connection, portfolio_value: float, cash: float = 0.0) -> None:
     """dashboard テーブルに1行セットアップ。"""
     db = MonitoringDB(conn)
     db.upsert_dashboard(
@@ -379,9 +367,7 @@ def test_risk_monitor_drawdown_alert(mon_conn):
     assert result.drawdown_pct == pytest.approx(0.15)
     assert result.drawdown_alert is True
 
-    rows = mon_conn.execute(
-        "SELECT * FROM risk_logs WHERE event_type='DRAWDOWN_ALERT'"
-    ).fetchall()
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='DRAWDOWN_ALERT'").fetchall()
     assert len(rows) == 1
 
 
@@ -415,9 +401,7 @@ def test_risk_monitor_position_limit_alert(mon_conn):
     assert result.position_count == 11
     assert result.position_limit_alert is True
 
-    rows = mon_conn.execute(
-        "SELECT * FROM risk_logs WHERE event_type='POSITION_LIMIT'"
-    ).fetchall()
+    rows = mon_conn.execute("SELECT * FROM risk_logs WHERE event_type='POSITION_LIMIT'").fetchall()
     assert len(rows) == 1
 
 
@@ -671,9 +655,7 @@ class TestDashboardPeakValue:
         # init_monitoring_db を再実行 → エラーなし
         init_monitoring_db(conn)
         # peak_value カラムが存在することを確認
-        cols = [
-            row[1] for row in conn.execute("PRAGMA table_info(dashboard)").fetchall()
-        ]
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(dashboard)").fetchall()]
         assert "peak_value" in cols
 
     def test_upsert_dashboard_sets_peak_value(self, mon_conn):
@@ -833,9 +815,7 @@ class TestMonitoringEngineAlerts:
         risk_mon.check_once.return_value.drawdown_alert = drawdown_alert
         risk_mon.check_once.return_value.position_limit_alert = position_limit_alert
         risk_mon.check_once.return_value.drawdown_pct = 0.15 if drawdown_alert else 0.0
-        risk_mon.check_once.return_value.position_count = (
-            11 if position_limit_alert else 0
-        )
+        risk_mon.check_once.return_value.position_count = 11 if position_limit_alert else 0
 
         alert_manager = MagicMock()
 

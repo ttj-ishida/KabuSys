@@ -67,9 +67,7 @@ def _load_manuals() -> dict[str, Path]:
 
 def _extract_headings(markdown_text: str) -> list[str]:
     return [
-        line.strip()
-        for line in markdown_text.splitlines()
-        if re.match(r"^#{1,3}\s+", line.strip())
+        line.strip() for line in markdown_text.splitlines() if re.match(r"^#{1,3}\s+", line.strip())
     ]
 
 
@@ -129,9 +127,7 @@ with nav_col2:
     )
 
 with nav_col3:
-    if current_index < len(manual_names) - 1 and st.button(
-        "Next →", use_container_width=True
-    ):
+    if current_index < len(manual_names) - 1 and st.button("Next →", use_container_width=True):
         st.session_state["webmanual_current"] = manual_names[current_index + 1]
         st.rerun()
 

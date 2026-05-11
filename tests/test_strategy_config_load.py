@@ -29,9 +29,7 @@ class TestLoadStrategyConfigMissingFile:
 
         result = _call_load(tmp_path, None)
         assert result["weights"] == _STRATEGY_CONFIG_DEFAULTS["weights"]
-        assert result["threshold"] == pytest.approx(
-            _STRATEGY_CONFIG_DEFAULTS["threshold"]
-        )
+        assert result["threshold"] == pytest.approx(_STRATEGY_CONFIG_DEFAULTS["threshold"])
 
     def test_returns_all_expected_keys(self, tmp_path):
         result = _call_load(tmp_path, None)
@@ -150,9 +148,7 @@ strategy:
 
         content = "strategy:\n  threshold: true\n"
         result = _call_load(tmp_path, content)
-        assert result["threshold"] == pytest.approx(
-            _STRATEGY_CONFIG_DEFAULTS["threshold"]
-        )
+        assert result["threshold"] == pytest.approx(_STRATEGY_CONFIG_DEFAULTS["threshold"])
 
     def test_no_strategy_section_returns_defaults(self, tmp_path):
         from kabusys.strategy.signal_generator import _STRATEGY_CONFIG_DEFAULTS
@@ -160,9 +156,7 @@ strategy:
         content = "value_score:\n  weights:\n    per: 0.5\n"
         result = _call_load(tmp_path, content)
         assert result["weights"] == _STRATEGY_CONFIG_DEFAULTS["weights"]
-        assert result["threshold"] == pytest.approx(
-            _STRATEGY_CONFIG_DEFAULTS["threshold"]
-        )
+        assert result["threshold"] == pytest.approx(_STRATEGY_CONFIG_DEFAULTS["threshold"])
 
 
 class TestLoadValueConfigFromStrategyYaml:
@@ -206,9 +200,7 @@ value_score:
             patch("kabusys.strategy.signal_generator._STRATEGY_CONFIG_PATH", target),
             patch(
                 "kabusys.strategy.signal_generator.Path",
-                side_effect=lambda *a: (
-                    fake_toml if "strategy.toml" in str(a) else Path(*a)
-                ),
+                side_effect=lambda *a: fake_toml if "strategy.toml" in str(a) else Path(*a),
             ),
         ):
             result = _load_value_config()

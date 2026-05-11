@@ -101,9 +101,7 @@ class TestBpsExtraction:
         ]
         saved = jq.save_financial_statements(conn, records)
         assert saved == 1
-        row = conn.execute(
-            "SELECT bps FROM raw_financials WHERE code = '72030'"
-        ).fetchone()
+        row = conn.execute("SELECT bps FROM raw_financials WHERE code = '72030'").fetchone()
         assert row is not None
         assert abs(float(row[0]) - 1500.0) < 0.01
         conn.close()
@@ -122,9 +120,7 @@ class TestBpsExtraction:
             }
         ]
         jq.save_financial_statements(conn, records)
-        row = conn.execute(
-            "SELECT bps FROM raw_financials WHERE code = '72031'"
-        ).fetchone()
+        row = conn.execute("SELECT bps FROM raw_financials WHERE code = '72031'").fetchone()
         assert row is not None
         assert row[0] is None
         conn.close()
@@ -188,9 +184,7 @@ class TestDividendsEtl:
         jq.save_dividends(conn, [record])
         record["DivRate"] = "60.0"  # 値を更新
         jq.save_dividends(conn, [record])
-        rows = conn.execute(
-            "SELECT div_rate FROM dividends WHERE code = '72030'"
-        ).fetchall()
+        rows = conn.execute("SELECT div_rate FROM dividends WHERE code = '72030'").fetchall()
         assert len(rows) == 1
         assert abs(float(rows[0][0]) - 60.0) < 0.01  # 更新後の値
         conn.close()
@@ -212,9 +206,7 @@ class TestDividendsEtl:
         with patch(
             "kabusys.data.pipeline.jq.fetch_dividends", return_value=fake_records
         ) as mock_fetch:
-            fetched, saved = run_dividends_etl(
-                conn, target_date=date(2024, 4, 1)
-            )
+            fetched, saved = run_dividends_etl(conn, target_date=date(2024, 4, 1))
         mock_fetch.assert_called_once_with(
             date_from=date(2017, 1, 1),  # _MIN_DATA_DATE (empty DB, no prior dividends)
             date_to=date(2024, 4, 1),
@@ -259,12 +251,8 @@ class TestCalcValuePbr:
         """PBR = close / bps が正しく計算されること。"""
         conn = init_schema(":memory:")
         d = date(2024, 5, 1)
-        _insert_prices(
-            conn, [(d, "8001", 1500.0, 1510.0, 1490.0, 1500.0, 1000, 1500000.0)]
-        )
-        _insert_financials_with_bps(
-            conn, [("8001", date(2024, 3, 31), "Q4", 100.0, 0.10, 1000.0)]
-        )
+        _insert_prices(conn, [(d, "8001", 1500.0, 1510.0, 1490.0, 1500.0, 1000, 1500000.0)])
+        _insert_financials_with_bps(conn, [("8001", date(2024, 3, 31), "Q4", 100.0, 0.10, 1000.0)])
         result = calc_value(conn, d)
         row = next(r for r in result if r["code"] == "8001")
         assert row["pbr"] is not None
@@ -275,12 +263,8 @@ class TestCalcValuePbr:
         """BPS が 0 の場合 pbr は None。"""
         conn = init_schema(":memory:")
         d = date(2024, 5, 2)
-        _insert_prices(
-            conn, [(d, "8002", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)]
-        )
-        _insert_financials_with_bps(
-            conn, [("8002", date(2024, 3, 31), "Q4", 50.0, 0.05, 0.0)]
-        )
+        _insert_prices(conn, [(d, "8002", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)])
+        _insert_financials_with_bps(conn, [("8002", date(2024, 3, 31), "Q4", 50.0, 0.05, 0.0)])
         result = calc_value(conn, d)
         row = next(r for r in result if r["code"] == "8002")
         assert row["pbr"] is None
@@ -292,9 +276,7 @@ class TestCalcValueDivYield:
         """直近12ヶ月の配当合計 / close × 100 が div_yield になること。"""
         conn = init_schema(":memory:")
         d = date(2024, 5, 1)
-        _insert_prices(
-            conn, [(d, "9001", 2000.0, 2010.0, 1990.0, 2000.0, 1000, 2000000.0)]
-        )
+        _insert_prices(conn, [(d, "9001", 2000.0, 2010.0, 1990.0, 2000.0, 1000, 2000000.0)])
         # 直近12ヶ月に2回配当（合計60円）
         _insert_dividends(
             conn,
@@ -329,9 +311,7 @@ class TestCalcValueDivYield:
         """配当レコードがない場合 div_yield は None。"""
         conn = init_schema(":memory:")
         d = date(2024, 5, 3)
-        _insert_prices(
-            conn, [(d, "9002", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)]
-        )
+        _insert_prices(conn, [(d, "9002", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)])
         result = calc_value(conn, d)
         row = next((r for r in result if r["code"] == "9002"), None)
         assert row is not None
@@ -342,9 +322,7 @@ class TestCalcValueDivYield:
         """13ヶ月前の配当は集計対象外になること。"""
         conn = init_schema(":memory:")
         d = date(2024, 5, 1)
-        _insert_prices(
-            conn, [(d, "9003", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)]
-        )
+        _insert_prices(conn, [(d, "9003", 1000.0, 1010.0, 990.0, 1000.0, 1000, 1000000.0)])
         # 13ヶ月前の配当（対象外）と直近12ヶ月内（対象）
         _insert_dividends(
             conn,
@@ -372,9 +350,7 @@ class TestCalcValueDivYield:
         result = calc_value(conn, d)
         row = next(r for r in result if r["code"] == "9003")
         assert row["div_yield"] is not None
-        assert (
-            abs(row["div_yield"] - 2.0) < 0.01
-        )  # 20 / 1000 * 100 = 2.0%（100円は除外）
+        assert abs(row["div_yield"] - 2.0) < 0.01  # 20 / 1000 * 100 = 2.0%（100円は除外）
         conn.close()
 
 
@@ -446,10 +422,7 @@ class TestValueScorePartial:
         """3指標すべて欠損のとき None を返すこと。"""
         cfg = _default_config()
         assert _compute_value_score({}, cfg) is None
-        assert (
-            _compute_value_score({"per": None, "pbr": None, "div_yield": None}, cfg)
-            is None
-        )
+        assert _compute_value_score({"per": None, "pbr": None, "div_yield": None}, cfg) is None
 
 
 class TestValueScoreConfigDriven:

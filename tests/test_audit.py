@@ -136,9 +136,7 @@ class TestInitAuditSchema:
     def test_indexes_created(self, audit_conn):
         indexes = {
             row[0]
-            for row in audit_conn.execute(
-                "SELECT index_name FROM duckdb_indexes()"
-            ).fetchall()
+            for row in audit_conn.execute("SELECT index_name FROM duckdb_indexes()").fetchall()
         }
         assert "idx_signal_events_date_code" in indexes
         assert "idx_order_requests_status" in indexes
@@ -424,12 +422,8 @@ class TestUUIDChainTraceability:
         """1 つの発注から複数の約定（部分約定等）が可能。"""
         sid = _insert_signal(audit_conn)
         oid = _insert_order(audit_conn, sid, requested_qty=100)
-        eid1 = _insert_execution(
-            audit_conn, oid, filled_qty=60, broker_execution_id=_uid()
-        )
-        eid2 = _insert_execution(
-            audit_conn, oid, filled_qty=40, broker_execution_id=_uid()
-        )
+        eid1 = _insert_execution(audit_conn, oid, filled_qty=60, broker_execution_id=_uid())
+        eid2 = _insert_execution(audit_conn, oid, filled_qty=40, broker_execution_id=_uid())
         rows = audit_conn.execute(
             "SELECT execution_id FROM executions WHERE order_request_id = ?", [oid]
         ).fetchall()

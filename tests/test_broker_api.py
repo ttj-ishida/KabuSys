@@ -219,9 +219,7 @@ def test_mock_sell_order_increases_cash():
         available_cash=0.0,
         initial_positions=initial,
     )
-    req = OrderRequest(
-        code="1234", side="sell", qty=50, price=600.0, order_type="limit"
-    )
+    req = OrderRequest(code="1234", side="sell", qty=50, price=600.0, order_type="limit")
     client.send_order(req)
 
     assert client.get_available_cash() == 50 * 600.0
@@ -337,9 +335,7 @@ def test_mock_get_order_history():
 def test_mock_sell_without_position_does_not_credit_cash():
     """ポジションのない銘柄の売注文は現金残高を変化させない。"""
     client = MockBrokerClient(fill_mode="instant", available_cash=500_000.0)
-    req = OrderRequest(
-        code="9999", side="sell", qty=10, price=1000.0, order_type="limit"
-    )
+    req = OrderRequest(code="9999", side="sell", qty=10, price=1000.0, order_type="limit")
     client.send_order(req)
     assert client.get_available_cash() == 500_000.0  # unchanged
 

@@ -81,9 +81,7 @@ with tab_yaml:
         if (Path("config") / f).exists():
             st.success(f"✅ {f}")
         else:
-            st.warning(
-                f"⚠️ {f}: 見つかりません（python scripts/generate_config.py で生成）"
-            )
+            st.warning(f"⚠️ {f}: 見つかりません（python scripts/generate_config.py で生成）")
     if result.errors or result.warnings:
         st.divider()
         for msg in result.errors:
@@ -109,9 +107,7 @@ with tab_db:
         elif required:
             st.error(f"❌ {label}: 見つかりません")
         else:
-            st.warning(
-                f"⚠️ {label}: 見つかりません（paper_trading 環境以外は不要な場合あり）"
-            )
+            st.warning(f"⚠️ {label}: 見つかりません（paper_trading 環境以外は不要な場合あり）")
 
 with tab_scheduler:
     st.subheader("Task Scheduler")
@@ -122,6 +118,4 @@ with tab_scheduler:
         else:
             st.error("❌ KabuSys_ExecutionStart: Ready ではありません（要確認）")
     except Exception as e:
-        st.warning(
-            f"Task Scheduler の確認に失敗しました（Windows 環境外では利用不可）: {e}"
-        )
+        st.warning(f"Task Scheduler の確認に失敗しました（Windows 環境外では利用不可）: {e}")

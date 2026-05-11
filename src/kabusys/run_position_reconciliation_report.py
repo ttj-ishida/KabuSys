@@ -70,9 +70,7 @@ def _run_once(settings: Settings, target_date: date, args: argparse.Namespace) -
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Position Reconciliation View を生成する"
-    )
+    parser = argparse.ArgumentParser(description="Position Reconciliation View を生成する")
     parser.add_argument(
         "--date",
         type=lambda s: date.fromisoformat(s),
@@ -86,9 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         help="artifacts/position_reconciliation/ に保存する",
     )
     parser.add_argument("--json", action="store_true", help="JSON 形式で出力する")
-    parser.add_argument(
-        "--watch", action="store_true", help="定期ポーリングモードで実行する"
-    )
+    parser.add_argument("--watch", action="store_true", help="定期ポーリングモードで実行する")
     parser.add_argument(
         "--interval",
         type=int,

@@ -90,9 +90,7 @@ class TestApplyButton:
                 "kabusys.monitoring.components.param_review.backup_config",
                 return_value=backup_path,
             ) as mock_backup:
-                with patch(
-                    "kabusys.monitoring.components.param_review.apply_params"
-                ) as mock_apply:
+                with patch("kabusys.monitoring.components.param_review.apply_params") as mock_apply:
                     mod.render_param_review(
                         suggested_params={"threshold": 0.65},
                         config_path=config_file,

@@ -52,9 +52,7 @@ def _insert_price(conn, code: str, d: date, close: float) -> None:
     )
 
 
-def _insert_prices_uniform(
-    conn, code: str, days: int, close: float, before_date: date
-) -> None:
+def _insert_prices_uniform(conn, code: str, days: int, close: float, before_date: date) -> None:
     """before_date の直前 days 日間を同一終値で挿入するヘルパー。
 
     挿入される日付は before_date - (days+1) から before_date - 2 までの days 日間。
@@ -88,8 +86,7 @@ def _make_macro_response(score: float) -> MagicMock:
 def test_market_regime_table_exists(conn):
     """init_schema() 後に market_regime テーブルが存在する。"""
     row = conn.execute(
-        "SELECT table_name FROM information_schema.tables "
-        "WHERE table_name = 'market_regime'"
+        "SELECT table_name FROM information_schema.tables WHERE table_name = 'market_regime'"
     ).fetchone()
     assert row is not None, "market_regime テーブルが存在しない"
 
