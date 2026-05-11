@@ -12,6 +12,7 @@ from kabusys.data.bootstrap.runner import (
     BootstrapResult,
     _local_files,
     _reset_bootstrap,
+    _truncate_data,
     _safe_filename,
     _safe_errmsg,
 )
@@ -347,7 +348,7 @@ def test_reset_bootstrap_raw_dir_not_exist(conn, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_local_files_returns_gz_files(tmp_path):
+def test_local_files_subdir_structure(tmp_path):
     ep_dir = tmp_path / "equities" / "bars" / "daily"
     ep_dir.mkdir(parents=True)
     (ep_dir / "file_a.csv.gz").write_bytes(b"")
@@ -360,6 +361,33 @@ def test_local_files_returns_gz_files(tmp_path):
     keys = {r["Key"] for r in result}
     assert "equities/bars/daily/file_a.csv.gz" in keys
     assert "equities/bars/daily/file_b.csv.gz" in keys
+
+
+def test_local_files_flat_structure(tmp_path):
+    ep_dir = tmp_path / "equities" / "bars" / "daily"  # サブディレクトリは存在しない
+    raw_dir = tmp_path
+    (raw_dir / "equities_bars_daily_202401.csv.gz").write_bytes(b"")
+    (raw_dir / "equities_bars_daily_20240115.csv.gz").write_bytes(b"")
+    (raw_dir / "equities_master_202401.csv.gz").write_bytes(b"")  # 別エンドポイントは無視
+
+    result = _local_files(ep_dir, "/equities/bars/daily", raw_dir)
+
+    assert len(result) == 2
+    keys = {r["Key"] for r in result}
+    assert "equities/bars/daily/equities_bars_daily_202401.csv.gz" in keys
+    assert "equities/bars/daily/equities_bars_daily_20240115.csv.gz" in keys
+
+
+def test_local_files_deduplicates_subdir_wins(tmp_path):
+    ep_dir = tmp_path / "equities" / "bars" / "daily"
+    ep_dir.mkdir(parents=True)
+    (ep_dir / "equities_bars_daily_202401.csv.gz").write_bytes(b"subdir")
+    (tmp_path / "equities_bars_daily_202401.csv.gz").write_bytes(b"flat")  # 重複
+
+    result = _local_files(ep_dir, "/equities/bars/daily", tmp_path)
+
+    assert len(result) == 1  # 重複排除
+    assert result[0]["Key"] == "equities/bars/daily/equities_bars_daily_202401.csv.gz"
 
 
 def test_local_files_empty_when_dir_missing(tmp_path):
@@ -423,3 +451,42 @@ def test_run_bootstrap_local_mode_empty_dir(conn, tmp_path):
     )
     assert result.total_files == 0
     assert result.loaded_files == 0
+
+
+def test_run_bootstrap_local_mode_flat_structure(conn, tmp_path):
+    """フラット構造（raw_dir 直下）のファイルをローカルモードで読み込む。"""
+    # フラット構造でファイルを配置
+    gz_path = tmp_path / "equities_bars_daily_202401.csv.gz"
+    gz_path.write_bytes(_gz_prices(tmp_path))
+
+    result = run_bootstrap(
+        conn=conn,
+        api_key="unused",
+        raw_dir=tmp_path,
+        endpoints=["/equities/bars/daily"],
+        local=True,
+    )
+
+    assert result.loaded_files == 1
+    assert result.failed_files == 0
+
+
+# ---------------------------------------------------------------------------
+# _truncate_data
+# ---------------------------------------------------------------------------
+
+
+def test_truncate_data_clears_all_tables(conn, tmp_path):
+    # データを事前投入
+    conn.execute(
+        "INSERT INTO bootstrap_load_history (file_key, endpoint, file_name, status) "
+        "VALUES ('k1', '/equities/bars/daily', 'f1.gz', 'loaded')"
+    )
+    conn.execute(
+        "INSERT INTO stocks (code, name, updated_at) VALUES ('7203', 'Toyota', now())"
+    )
+
+    _truncate_data(conn)
+
+    assert conn.execute("SELECT COUNT(*) FROM bootstrap_load_history").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0] == 0

@@ -89,6 +89,18 @@ def _safe_filename(file_key: str) -> str | None:
     return name
 
 
+_BOOTSTRAP_TABLES = [
+    "bootstrap_load_history",
+    "raw_prices",
+    "prices_daily",
+    "raw_financials",
+    "fundamentals",
+    "stocks",
+    "market_calendar",
+    "topix_daily",
+]
+
+
 def _reset_bootstrap(conn: duckdb.DuckDBPyConnection, raw_dir: Path) -> None:
     """bootstrap_load_history をクリアし、ダウンロード済みファイルを全て削除する。"""
     conn.execute("DELETE FROM bootstrap_load_history")
@@ -98,20 +110,49 @@ def _reset_bootstrap(conn: duckdb.DuckDBPyConnection, raw_dir: Path) -> None:
     logger.info("bootstrap を初期化しました")
 
 
-def _local_files(ep_dir: Path, endpoint: str) -> list[dict]:
-    """ローカルキャッシュディレクトリから処理対象ファイル一覧を構築する。
+def _truncate_data(conn: duckdb.DuckDBPyConnection) -> None:
+    """Bootstrap が管理するデータテーブルを全削除する（raw_dir のファイルは保持）。"""
+    for table in _BOOTSTRAP_TABLES:
+        conn.execute(f"DELETE FROM {table}")
+        logger.info("テーブルをクリア: %s", table)
+    logger.info("bootstrap データテーブルを全削除しました")
 
-    API を呼ばずに ep_dir 内の .gz ファイルを列挙し、
-    通常フローと同じ {"Key": "<endpoint-relative-path>/<filename>"} 形式で返す。
+
+def _endpoint_to_file_prefix(endpoint: str) -> str:
+    """エンドポイントパスをフラット構造のファイル名プレフィックスに変換する。
+
+    例: '/equities/bars/daily' → 'equities_bars_daily'
     """
-    if not ep_dir.exists():
-        return []
+    return endpoint.lstrip("/").replace("/", "_")
+
+
+def _local_files(ep_dir: Path, endpoint: str, raw_dir: Path | None = None) -> list[dict]:
+    """ローカルキャッシュから処理対象ファイル一覧を構築する。
+
+    以下の2つのディレクトリ構造に対応する:
+    - サブディレクトリ構造: ep_dir/<file>.gz  （runner がダウンロードした形式）
+    - フラット構造: raw_dir/<endpoint_prefix>_<date>.gz  （手動配置・一括DL形式）
+
+    両方に存在する場合はファイル名で重複排除し、サブディレクトリ側を優先する。
+    """
     prefix = endpoint.lstrip("/")
-    return [
-        {"Key": f"{prefix}/{f.name}"}
-        for f in sorted(ep_dir.iterdir())
-        if f.is_file() and f.name.endswith(".gz")
-    ]
+    seen: dict[str, str] = {}  # filename → Key
+
+    # サブディレクトリ構造
+    if ep_dir.exists():
+        for f in sorted(ep_dir.iterdir()):
+            if f.is_file() and f.name.endswith(".gz"):
+                seen[f.name] = f"{prefix}/{f.name}"
+
+    # フラット構造（raw_dir 直下にエンドポイントプレフィックスで始まるファイル）
+    if raw_dir is not None and raw_dir.exists():
+        ep_prefix = _endpoint_to_file_prefix(endpoint)
+        for f in sorted(raw_dir.iterdir()):
+            if f.is_file() and f.name.endswith(".gz") and f.name.startswith(ep_prefix):
+                if f.name not in seen:
+                    seen[f.name] = f"{prefix}/{f.name}"
+
+    return [{"Key": key} for key in seen.values()]
 
 
 def _loaded_keys(conn: duckdb.DuckDBPyConnection) -> set[str]:
@@ -174,7 +215,7 @@ def run_bootstrap(
         rows_ep = 0
 
         if local:
-            files = _local_files(ep_dir, endpoint)
+            files = _local_files(ep_dir, endpoint, raw_dir)
             logger.info("%s: %d ファイル検出（ローカル）", endpoint, len(files))
             print(f"[{endpoint}] {len(files)} ファイル検出（ローカル）", flush=True)
         else:
@@ -208,9 +249,14 @@ def run_bootstrap(
                 continue
 
             dest = ep_dir / file_name
+            # フラット構造のファイル（raw_dir 直下）にフォールバック
+            if not dest.exists() and local:
+                flat = raw_dir / file_name
+                if flat.exists():
+                    dest = flat
             if not dest.exists():
                 if local:
-                    logger.warning("ローカルファイルが見つかりません（スキップ）: %s", dest)
+                    logger.warning("ローカルファイルが見つかりません（スキップ）: %s", file_name)
                     result.failed_files += 1
                     continue
                 print(f"  [{idx}/{len(files)}] ダウンロード: {file_name}", flush=True)
@@ -297,6 +343,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="API を呼ばずローカルキャッシュのファイルのみを処理（オフライン投入）",
     )
+    parser.add_argument(
+        "--truncate",
+        action="store_true",
+        help="データテーブルを全削除してからインポート（raw_dir のファイルは保持）",
+    )
     args = parser.parse_args(argv)
 
     _logging.basicConfig(
@@ -324,6 +375,19 @@ def main(argv: list[str] | None = None) -> int:
                     return 0
             _reset_bootstrap(conn, raw_dir)
             print("初期化完了。最初から実行します。\n", flush=True)
+        elif args.truncate:
+            if not args.yes:
+                tables = ", ".join(_BOOTSTRAP_TABLES)
+                print(
+                    f"警告: 以下のテーブルを全削除します（raw_dir のファイルは保持）:\n  {tables}",
+                    flush=True,
+                )
+                answer = input("続行しますか？ [y/N]: ")
+                if answer.strip().lower() != "y":
+                    print("キャンセルしました。")
+                    return 0
+            _truncate_data(conn)
+            print("データテーブルを全削除しました。インポートを開始します。\n", flush=True)
         elif args.local:
             print(
                 f"ローカルモード: {raw_dir} 内のファイルのみを処理します（API 呼び出しなし）。\n",
