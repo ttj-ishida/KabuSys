@@ -1,7 +1,7 @@
 # Data Platform (データ・インフラ基盤)
 
 - 対象: 日本株自動売買基盤における全データパイプライン
-- 版数: v1.1 (Bootstrap / Bulk API 追記)
+- 版数: v1.2 (Bootstrap --local / --truncate / フラット構造対応を追記)
 
 ---
 
@@ -114,14 +114,27 @@ J-Quants Bulk API
   GET /v2/bulk/list?endpoint=<ep>  → ファイルキー一覧
   GET /v2/bulk/get?key=<key>       → presigned URL（有効期限5分）
       ↓ gzip CSV ダウンロード
-  data/bootstrap/raw/<endpoint>/   ← ローカルキャッシュ（再実行時スキップ）
+  data/bootstrap/raw/<endpoint>/   ← サブディレクトリ構造（runner がダウンロードした形式）
+  data/bootstrap/raw/              ← フラット構造も対応（手動配置・一括 DL 形式）
+                                     例: equities_bars_daily_202401.csv.gz
       ↓ parse & schema validation
-  raw_prices / raw_financials / stocks / market_calendar / dividends / topix_daily
+  raw_prices / raw_financials / stocks / market_calendar / topix_daily
       ↓ ETL（NOT NULL / 型検証 → ON CONFLICT DO UPDATE）
   prices_daily / fundamentals
       ↓ 処理結果記録
   bootstrap_load_history           ← ファイル単位の処理状態管理
 ```
+
+#### ファイル配置形式
+
+Bootstrap は以下2つのファイル配置形式に対応する。両方が存在する場合はファイル名で重複排除し、サブディレクトリ側を優先する。
+
+| 形式 | パス例 | 説明 |
+| ---- | ------ | ---- |
+| サブディレクトリ | `raw/equities/bars/daily/202401.csv.gz` | runner が自動ダウンロードする形式 |
+| フラット | `raw/equities_bars_daily_202401.csv.gz` | 手動配置・外部ツールでの一括 DL 形式 |
+
+> **重複日付の扱い**: 月次ファイルと日次ファイルが同じ日付のデータを含む場合でも `ON CONFLICT DO UPDATE` により DB 上の重複行は発生しない。後からロードされたデータが上書きされる。
 
 #### 取り込み対象エンドポイント（Standard プラン）
 
@@ -157,6 +170,15 @@ python -m kabusys.data.bootstrap --endpoint /equities/bars/daily
 # 初期化して最初から実行（履歴 + キャッシュを全削除、確認プロンプトあり）
 python -m kabusys.data.bootstrap --fresh
 python -m kabusys.data.bootstrap --fresh --yes   # 確認スキップ
+
+# ローカルファイルのみ処理（API を呼ばずオフライン投入）
+# raw_dir 内の .gz ファイルをサブディレクトリ・フラット両構造で検索して処理する
+python -m kabusys.data.bootstrap --local
+python -m kabusys.data.bootstrap --local --raw-dir /path/to/gz/files
+
+# データテーブルを全削除してからインポート（raw_dir のファイルは保持）
+# bootstrap_load_history 以外の全データテーブルを DELETE して最初から投入し直す
+python -m kabusys.data.bootstrap --truncate --yes
 
 # 詳細ログ出力
 python -m kabusys.data.bootstrap --verbose

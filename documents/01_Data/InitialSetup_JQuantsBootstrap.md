@@ -38,7 +38,9 @@ J-Quants Bulk API
   GET /v2/bulk/list?endpoint=<ep>  → ファイルキー一覧（Key / Size / LastModified）
   GET /v2/bulk/get?key=<Key>       → presigned URL（有効期限5分）
       ↓ gzip CSV ダウンロード
-  data/bootstrap/raw/<endpoint>/   ← ローカルキャッシュ（再実行時スキップ）
+  data/bootstrap/raw/<endpoint>/   ← サブディレクトリ構造（runner 自動ダウンロード形式）
+  data/bootstrap/raw/              ← フラット構造も対応（手動配置・一括 DL 形式）
+                                     例: equities_bars_daily_202401.csv.gz
       ↓ parse & schema validation
   raw_prices / raw_financials / stocks / market_calendar / topix_daily
       ↓ ETL（NOT NULL / 型検証 → ON CONFLICT DO UPDATE）
@@ -144,6 +146,44 @@ python -m kabusys.data.bootstrap --fresh --yes
 2. `data/bootstrap/raw/` 以下のダウンロード済みファイルを全削除
 3. 最初からダウンロード・投入を再実行
 
+### ローカルファイルのみ処理（オフライン投入）
+
+```powershell
+# API を呼ばず raw_dir 内の既存 .gz ファイルだけを処理する
+python -m kabusys.data.bootstrap --local
+
+# ファイルが別の場所にある場合はパスを指定
+python -m kabusys.data.bootstrap --local --raw-dir D:\jquants_bulk
+```
+
+`--local` は以下のファイル配置に対応します。
+
+| 構造 | 例 |
+|------|-----|
+| サブディレクトリ | `raw/equities/bars/daily/202401.csv.gz` |
+| フラット | `raw/equities_bars_daily_202401.csv.gz` |
+
+両方が存在する場合はファイル名で重複排除し、サブディレクトリ側を優先します。
+
+> ⚠️ `--local` 時にファイルが見つからないエントリは `failed` として記録されます。API からのダウンロードは行いません。
+
+### データを全削除してから再インポート
+
+```powershell
+# 確認プロンプトあり
+python -m kabusys.data.bootstrap --truncate
+
+# 確認スキップ
+python -m kabusys.data.bootstrap --truncate --yes
+```
+
+`--truncate` は以下を実行します。
+
+1. Bootstrap が管理する全データテーブル（`raw_prices`, `prices_daily`, `raw_financials`, `fundamentals`, `stocks`, `market_calendar`, `topix_daily`, `bootstrap_load_history`）を DELETE
+2. `data/bootstrap/raw/` のローカルファイルは**保持したまま**インポートを再実行
+
+`--fresh` との違い: ローカルキャッシュ（`.gz` ファイル）を削除しないため、再ダウンロードが不要です。
+
 ### 特定エンドポイントのみ処理
 
 ```powershell
@@ -178,6 +218,16 @@ python -m kabusys.data.bootstrap --endpoint /fins/summary
 
 ```powershell
 python -m kabusys.data.bootstrap --fresh --yes
+```
+
+### ローカルファイルから再インポートしたい場合（ダウンロード済み）
+
+```powershell
+# データだけ消してファイルはそのままで再インポート
+python -m kabusys.data.bootstrap --truncate --yes
+
+# API なしでローカルファイルのみ処理
+python -m kabusys.data.bootstrap --local
 ```
 
 ### `bootstrap_load_history` での状態確認

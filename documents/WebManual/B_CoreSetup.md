@@ -157,9 +157,17 @@ python -m kabusys.data.bootstrap --endpoint /equities/bars/daily
 # 最初からやり直す場合（履歴・ローカルキャッシュを全削除）
 python -m kabusys.data.bootstrap --fresh --yes
 
+# ローカルの .gz ファイルだけを処理する場合（API を呼ばずオフライン投入）
+python -m kabusys.data.bootstrap --local
+
+# データテーブルを全削除してから再インポートする場合（ローカルファイルは保持）
+python -m kabusys.data.bootstrap --truncate --yes
+
 # 詳細ログを表示する場合
 python -m kabusys.data.bootstrap --verbose
 ```
+
+> ℹ️ `--local` モードでは `data/bootstrap/raw/` 内の `.gz` ファイルを対象にします。サブディレクトリ形式（`raw/equities/bars/daily/*.gz`）とフラット形式（`raw/equities_bars_daily_*.gz`）の両方に対応しています。月次ファイルと日次ファイルが同じ日付を含む場合でも `ON CONFLICT DO UPDATE` により DB 上の重複行は発生しません。
 
 **取得対象エンドポイント（Standard プラン）:**
 

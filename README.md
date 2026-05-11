@@ -168,13 +168,20 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
    # 初期化して最初から実行する場合（履歴・キャッシュを全削除）
    python -m kabusys.data.bootstrap --fresh --yes
 
+   # ローカルの .gz ファイルだけを処理する場合（API を呼ばずオフライン投入）
+   python -m kabusys.data.bootstrap --local
+
+   # データテーブルを全削除してから再インポートする場合（ローカルファイルは保持）
+   python -m kabusys.data.bootstrap --truncate --yes
+
    # 詳細ログを表示する場合
    python -m kabusys.data.bootstrap --verbose
    ```
 
    取得対象エンドポイント（Standard プラン）: `/equities/bars/daily`, `/equities/master`, `/fins/summary`, `/markets/calendar`, `/indices/bars/daily/topix`
 
-   Bootstrap は中断しても続きから再実行できます（`bootstrap_load_history` でファイル単位に管理）。
+   Bootstrap は中断しても続きから再実行できます（`bootstrap_load_history` でファイル単位に管理）。  
+   `--local` モードはサブディレクトリ形式・フラット形式（`equities_bars_daily_*.csv.gz`）の両方に対応しています。
 
 8. 夜間バッチの初回手動実行（データ確認）
 
