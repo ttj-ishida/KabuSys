@@ -10,6 +10,7 @@ import pytest
 from kabusys.data.bootstrap.runner import (
     run_bootstrap,
     BootstrapResult,
+    _local_files,
     _reset_bootstrap,
     _safe_filename,
     _safe_errmsg,
@@ -339,3 +340,86 @@ def test_reset_bootstrap_raw_dir_not_exist(conn, tmp_path):
     raw_dir = tmp_path / "nonexistent"
     _reset_bootstrap(conn, raw_dir)  # 例外が出ないことを確認
     assert not raw_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# _local_files
+# ---------------------------------------------------------------------------
+
+
+def test_local_files_returns_gz_files(tmp_path):
+    ep_dir = tmp_path / "equities" / "bars" / "daily"
+    ep_dir.mkdir(parents=True)
+    (ep_dir / "file_a.csv.gz").write_bytes(b"")
+    (ep_dir / "file_b.csv.gz").write_bytes(b"")
+    (ep_dir / "readme.txt").write_bytes(b"")  # .gz 以外は無視
+
+    result = _local_files(ep_dir, "/equities/bars/daily")
+
+    assert len(result) == 2
+    keys = {r["Key"] for r in result}
+    assert "equities/bars/daily/file_a.csv.gz" in keys
+    assert "equities/bars/daily/file_b.csv.gz" in keys
+
+
+def test_local_files_empty_when_dir_missing(tmp_path):
+    ep_dir = tmp_path / "equities" / "bars" / "daily"
+    result = _local_files(ep_dir, "/equities/bars/daily")
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# run_bootstrap --local
+# ---------------------------------------------------------------------------
+
+
+def test_run_bootstrap_local_mode_loads_existing_files(conn, tmp_path):
+    ep_dir = tmp_path / "equities" / "bars" / "daily"
+    ep_dir.mkdir(parents=True)
+    gz_path = ep_dir / "prices_2024_01.csv.gz"
+    gz_path.write_bytes(_gz_prices(tmp_path))
+
+    result = run_bootstrap(
+        conn=conn,
+        api_key="unused",
+        raw_dir=tmp_path,
+        endpoints=["/equities/bars/daily"],
+        local=True,
+    )
+
+    assert result.loaded_files == 1
+    assert result.failed_files == 0
+    row = conn.execute(
+        "SELECT status FROM bootstrap_load_history "
+        "WHERE file_name='prices_2024_01.csv.gz'"
+    ).fetchone()
+    assert row[0] == "loaded"
+
+
+def test_run_bootstrap_local_mode_no_api_call(conn, tmp_path):
+    ep_dir = tmp_path / "equities" / "bars" / "daily"
+    ep_dir.mkdir(parents=True)
+    (ep_dir / "prices_2024_01.csv.gz").write_bytes(_gz_prices(tmp_path))
+
+    with patch("kabusys.data.bootstrap.runner.list_files") as mock_list:
+        run_bootstrap(
+            conn=conn,
+            api_key="unused",
+            raw_dir=tmp_path,
+            endpoints=["/equities/bars/daily"],
+            local=True,
+        )
+
+    mock_list.assert_not_called()
+
+
+def test_run_bootstrap_local_mode_empty_dir(conn, tmp_path):
+    result = run_bootstrap(
+        conn=conn,
+        api_key="unused",
+        raw_dir=tmp_path,
+        endpoints=["/equities/bars/daily"],
+        local=True,
+    )
+    assert result.total_files == 0
+    assert result.loaded_files == 0

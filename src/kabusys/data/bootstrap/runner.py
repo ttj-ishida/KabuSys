@@ -98,6 +98,22 @@ def _reset_bootstrap(conn: duckdb.DuckDBPyConnection, raw_dir: Path) -> None:
     logger.info("bootstrap を初期化しました")
 
 
+def _local_files(ep_dir: Path, endpoint: str) -> list[dict]:
+    """ローカルキャッシュディレクトリから処理対象ファイル一覧を構築する。
+
+    API を呼ばずに ep_dir 内の .gz ファイルを列挙し、
+    通常フローと同じ {"Key": "<endpoint-relative-path>/<filename>"} 形式で返す。
+    """
+    if not ep_dir.exists():
+        return []
+    prefix = endpoint.lstrip("/")
+    return [
+        {"Key": f"{prefix}/{f.name}"}
+        for f in sorted(ep_dir.iterdir())
+        if f.is_file() and f.name.endswith(".gz")
+    ]
+
+
 def _loaded_keys(conn: duckdb.DuckDBPyConnection) -> set[str]:
     rows = conn.execute(
         "SELECT file_key FROM bootstrap_load_history WHERE status = 'loaded'"
@@ -139,8 +155,12 @@ def run_bootstrap(
     raw_dir: Path = Path("data/bootstrap/raw"),
     dry_run: bool = False,
     endpoints: list[str] | None = None,
+    local: bool = False,
 ) -> BootstrapResult:
-    """全エンドポイントを順次処理する。1ファイル失敗でも継続。"""
+    """全エンドポイントを順次処理する。1ファイル失敗でも継続。
+
+    local=True のとき API を呼ばず raw_dir 内の既存ファイルのみを処理する。
+    """
     target_endpoints = endpoints if endpoints is not None else ENDPOINTS
     result = BootstrapResult()
     loaded_keys = _loaded_keys(conn)
@@ -153,16 +173,20 @@ def run_bootstrap(
         ep_dir = _endpoint_to_dir(endpoint, raw_dir)
         rows_ep = 0
 
-        print(f"[{endpoint}] ファイル一覧を取得中...", flush=True)
-        try:
-            files = list_files(endpoint, api_key)
-        except BulkApiError as exc:
-            logger.error("list_files 失敗 (%s): %s", endpoint, exc)
-            print(f"[{endpoint}] 失敗: {exc}", flush=True)
-            continue
-
-        logger.info("%s: %d ファイル検出", endpoint, len(files))
-        print(f"[{endpoint}] {len(files)} ファイル検出", flush=True)
+        if local:
+            files = _local_files(ep_dir, endpoint)
+            logger.info("%s: %d ファイル検出（ローカル）", endpoint, len(files))
+            print(f"[{endpoint}] {len(files)} ファイル検出（ローカル）", flush=True)
+        else:
+            print(f"[{endpoint}] ファイル一覧を取得中...", flush=True)
+            try:
+                files = list_files(endpoint, api_key)
+            except BulkApiError as exc:
+                logger.error("list_files 失敗 (%s): %s", endpoint, exc)
+                print(f"[{endpoint}] 失敗: {exc}", flush=True)
+                continue
+            logger.info("%s: %d ファイル検出", endpoint, len(files))
+            print(f"[{endpoint}] {len(files)} ファイル検出", flush=True)
 
         for idx, f in enumerate(files, 1):
             file_key = f.get("Key", "")
@@ -185,6 +209,10 @@ def run_bootstrap(
 
             dest = ep_dir / file_name
             if not dest.exists():
+                if local:
+                    logger.warning("ローカルファイルが見つかりません（スキップ）: %s", dest)
+                    result.failed_files += 1
+                    continue
                 print(f"  [{idx}/{len(files)}] ダウンロード: {file_name}", flush=True)
                 try:
                     presigned = get_presigned_url(file_key, api_key)
@@ -264,6 +292,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--yes", "-y", action="store_true", help="--fresh の確認プロンプトをスキップ"
     )
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="API を呼ばずローカルキャッシュのファイルのみを処理（オフライン投入）",
+    )
     args = parser.parse_args(argv)
 
     _logging.basicConfig(
@@ -291,6 +324,11 @@ def main(argv: list[str] | None = None) -> int:
                     return 0
             _reset_bootstrap(conn, raw_dir)
             print("初期化完了。最初から実行します。\n", flush=True)
+        elif args.local:
+            print(
+                f"ローカルモード: {raw_dir} 内のファイルのみを処理します（API 呼び出しなし）。\n",
+                flush=True,
+            )
         else:
             print("続きから実行します（ロード済みファイルはスキップ）。\n", flush=True)
 
@@ -300,6 +338,7 @@ def main(argv: list[str] | None = None) -> int:
             raw_dir=raw_dir,
             dry_run=args.dry_run,
             endpoints=endpoints,
+            local=args.local,
         )
         _print_summary(result, endpoints)
         return 1 if result.failed_files else 0
