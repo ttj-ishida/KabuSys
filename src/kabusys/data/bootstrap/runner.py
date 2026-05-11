@@ -143,15 +143,18 @@ def run_bootstrap(
         ep_dir = _endpoint_to_dir(endpoint, raw_dir)
         rows_ep = 0
 
+        print(f"[{endpoint}] ファイル一覧を取得中...", flush=True)
         try:
             files = list_files(endpoint, api_key)
         except BulkApiError as exc:
             logger.error("list_files 失敗 (%s): %s", endpoint, exc)
+            print(f"[{endpoint}] 失敗: {exc}", flush=True)
             continue
 
         logger.info("%s: %d ファイル検出", endpoint, len(files))
+        print(f"[{endpoint}] {len(files)} ファイル検出", flush=True)
 
-        for f in files:
+        for idx, f in enumerate(files, 1):
             file_key = f.get("Key", "")
             if not file_key:
                 logger.warning("file_key が空のエントリをスキップ: %s", f)
@@ -172,6 +175,7 @@ def run_bootstrap(
 
             dest = ep_dir / file_name
             if not dest.exists():
+                print(f"  [{idx}/{len(files)}] ダウンロード: {file_name}", flush=True)
                 try:
                     presigned = get_presigned_url(file_key, api_key)
                     download_file(presigned, dest)
@@ -188,11 +192,14 @@ def run_bootstrap(
                     result.failed_files += 1
                     continue
 
+            print(f"  [{idx}/{len(files)}] ロード中: {file_name}", flush=True)
             try:
                 n = loader(conn, dest)
                 rows_ep += n
                 _record(conn, file_key, endpoint, file_name, "loaded", row_count=n)
                 result.loaded_files += 1
+                logger.info("ロード完了 (%s): %d 件", file_name, n)
+                print(f"  [{idx}/{len(files)}] 完了: {file_name} ({n:,} 件)", flush=True)
             except Exception as exc:
                 logger.error("ロード失敗 (%s): %s", file_key, exc)
                 _record(
@@ -221,6 +228,8 @@ def _print_summary(result: BootstrapResult, endpoints: list[str]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import logging as _logging
+
     from kabusys.config import Settings
     from kabusys.data.schema import init_schema
 
@@ -234,7 +243,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--raw-dir", default="data/bootstrap/raw", help="ローカルキャッシュディレクトリ"
     )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="DEBUG レベルのログを出力"
+    )
     args = parser.parse_args(argv)
+
+    _logging.basicConfig(
+        level=_logging.DEBUG if args.verbose else _logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
     settings = Settings()
     api_key = settings.jquants_bulk_api_key
