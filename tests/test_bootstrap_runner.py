@@ -10,6 +10,7 @@ import pytest
 from kabusys.data.bootstrap.runner import (
     run_bootstrap,
     BootstrapResult,
+    _reset_bootstrap,
     _safe_filename,
     _safe_errmsg,
 )
@@ -311,3 +312,30 @@ def test_safe_errmsg_unwraps_cause_chain():
     assert "403" in msg
     assert "Forbidden" in msg
     assert "secret" not in msg
+
+
+# ---------------------------------------------------------------------------
+# _reset_bootstrap
+# ---------------------------------------------------------------------------
+
+
+def test_reset_bootstrap_clears_history_and_raw_dir(conn, tmp_path):
+    conn.execute(
+        "INSERT INTO bootstrap_load_history (file_key, endpoint, file_name, status, row_count) "
+        "VALUES ('k1.csv.gz', '/equities/bars/daily', 'k1.csv.gz', 'loaded', 10)"
+    )
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    (raw_dir / "some_file.csv.gz").write_bytes(b"data")
+
+    _reset_bootstrap(conn, raw_dir)
+
+    rows = conn.execute("SELECT COUNT(*) FROM bootstrap_load_history").fetchone()[0]
+    assert rows == 0
+    assert not raw_dir.exists()
+
+
+def test_reset_bootstrap_raw_dir_not_exist(conn, tmp_path):
+    raw_dir = tmp_path / "nonexistent"
+    _reset_bootstrap(conn, raw_dir)  # 例外が出ないことを確認
+    assert not raw_dir.exists()

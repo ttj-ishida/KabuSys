@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import sys
 import urllib.error
 from dataclasses import dataclass, field
@@ -86,6 +87,15 @@ def _safe_filename(file_key: str) -> str | None:
     if not name or name in (".", ".."):
         return None
     return name
+
+
+def _reset_bootstrap(conn: duckdb.DuckDBPyConnection, raw_dir: Path) -> None:
+    """bootstrap_load_history をクリアし、ダウンロード済みファイルを全て削除する。"""
+    conn.execute("DELETE FROM bootstrap_load_history")
+    if raw_dir.exists():
+        shutil.rmtree(raw_dir)
+        logger.info("raw_dir 削除: %s", raw_dir)
+    logger.info("bootstrap を初期化しました")
 
 
 def _loaded_keys(conn: duckdb.DuckDBPyConnection) -> set[str]:
@@ -246,6 +256,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--verbose", "-v", action="store_true", help="DEBUG レベルのログを出力"
     )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="履歴とキャッシュを削除して最初から実行（初期化モード）",
+    )
+    parser.add_argument(
+        "--yes", "-y", action="store_true", help="--fresh の確認プロンプトをスキップ"
+    )
     args = parser.parse_args(argv)
 
     _logging.basicConfig(
@@ -261,6 +279,21 @@ def main(argv: list[str] | None = None) -> int:
 
     conn = init_schema(settings.duckdb_path)
     try:
+        if args.fresh:
+            if not args.yes:
+                print(
+                    f"警告: bootstrap_load_history を全削除し {raw_dir} 以下のファイルを全て削除します。",
+                    flush=True,
+                )
+                answer = input("続行しますか？ [y/N]: ")
+                if answer.strip().lower() != "y":
+                    print("キャンセルしました。")
+                    return 0
+            _reset_bootstrap(conn, raw_dir)
+            print("初期化完了。最初から実行します。\n", flush=True)
+        else:
+            print("続きから実行します（ロード済みファイルはスキップ）。\n", flush=True)
+
         result = run_bootstrap(
             conn=conn,
             api_key=api_key,
