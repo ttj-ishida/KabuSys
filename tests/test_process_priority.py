@@ -1,10 +1,11 @@
 # tests/test_process_priority.py
 import logging
-import pytest
-import psutil
 from unittest.mock import MagicMock, patch
 
-from kabusys.utils.process_priority import set_process_priority, set_cpu_affinity
+import psutil
+import pytest
+
+from kabusys.utils.process_priority import set_cpu_affinity, set_process_priority
 
 
 class TestSetProcessPriority:

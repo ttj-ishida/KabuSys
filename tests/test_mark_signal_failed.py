@@ -197,7 +197,7 @@ def test_updates_on_user_yes(tmp_path, monkeypatch):
 
 def test_default_date_is_today_jst(tmp_path, monkeypatch):
     """--date 省略時は JST 当日が使われること。datetime をモックして環境依存を排除。"""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
 
     fixed_jst = datetime(2026, 4, 17, 10, 0, 0, tzinfo=timezone(timedelta(hours=9)))
     expected_date = fixed_jst.date()  # 2026-04-17

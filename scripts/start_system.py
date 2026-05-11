@@ -38,6 +38,7 @@ from utils import (
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 try:
     import duckdb as _duckdb
+
     from kabusys.config import Settings as _Settings
 
     _DRY_RUN_DEPS_AVAILABLE = True

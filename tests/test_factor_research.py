@@ -18,17 +18,16 @@ from kabusys.data.schema import init_schema
 from kabusys.data.stats import zscore_normalize
 from kabusys.research.factor_research import (
     calc_momentum,
-    calc_volatility,
-    calc_value,
-    calc_topix_relative,
     calc_quality,
+    calc_topix_relative,
+    calc_value,
+    calc_volatility,
 )
 from kabusys.research.feature_exploration import (
     calc_forward_returns,
     calc_ic,
     factor_summary,
 )
-
 
 # ---------------------------------------------------------------------------
 # フィクスチャ

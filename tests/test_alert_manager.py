@@ -9,7 +9,6 @@ import requests
 
 from kabusys.monitoring.alert_manager import AlertManager
 
-
 LINE_API_URL = "https://api.line.me/v2/bot/message/push"
 
 

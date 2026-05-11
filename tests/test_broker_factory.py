@@ -1,5 +1,6 @@
 # tests/test_broker_factory.py
 import pytest
+
 from kabusys.config import Settings
 from kabusys.execution.broker_factory import BrokerClientFactory
 from kabusys.execution.mock_client import MockBrokerClient
@@ -220,8 +221,8 @@ class TestBrokerClientFactoryInitialCash:
         broker.close()
 
     def test_sandbox_uses_port_18081(self, monkeypatch):
-        from kabusys.execution.kabu_client import KabuStationClient
         from kabusys.execution.broker_factory import _SANDBOX_BASE_URL
+        from kabusys.execution.kabu_client import KabuStationClient
 
         monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
         monkeypatch.setenv("KABU_USE_SANDBOX", "true")

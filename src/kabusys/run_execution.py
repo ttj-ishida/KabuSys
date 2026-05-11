@@ -29,12 +29,12 @@ from kabusys.execution.order_manager import OrderManager  # noqa: E402
 from kabusys.execution.order_repository import OrderRepository  # noqa: E402
 from kabusys.execution.reconciler import Reconciler  # noqa: E402
 from kabusys.execution.risk_manager import RiskConfig, RiskManager  # noqa: E402
+from kabusys.monitoring.monitoring_db import init_monitoring_db  # noqa: E402
 from kabusys.operations.execution_startup_report import (  # noqa: E402
     build_report,
     format_cli_summary,
     save_report,
 )
-from kabusys.monitoring.monitoring_db import init_monitoring_db  # noqa: E402
 from kabusys.operations.line_reports import format_morning_message  # noqa: E402
 from kabusys.operations.notifier import build_notifier  # noqa: E402
 from kabusys.utils.logging_setup import setup_logging  # noqa: E402

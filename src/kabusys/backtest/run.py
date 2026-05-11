@@ -172,8 +172,7 @@ def main() -> None:
         logger.error("--start must be before --end")
         sys.exit(1)
 
-    from kabusys.data.schema import init_schema
-    from kabusys.backtest.engine import run_backtest, BacktestScope
+    from kabusys.backtest.engine import BacktestScope, run_backtest
     from kabusys.backtest.report import (
         build_report,
         format_cli_summary,
@@ -181,6 +180,7 @@ def main() -> None:
         format_markdown,
         save_report,
     )
+    from kabusys.data.schema import init_schema
 
     conn = init_schema(args.db)
     try:

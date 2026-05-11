@@ -7,15 +7,14 @@ from datetime import date, datetime
 import duckdb
 import pytest
 
+from kabusys.data.disclosure_classifier import run_disclosure_classification
 from kabusys.data.tdnet_collector import (
     RawDisclosure,
     _extract_disclosure_id,
     _parse_tdnet_html,
-    save_raw_disclosures,
     run_tdnet_collection,
+    save_raw_disclosures,
 )
-from kabusys.data.disclosure_classifier import run_disclosure_classification
-
 
 # ---------------------------------------------------------------------------
 # フィクスチャ
@@ -250,8 +249,8 @@ _PIPELINE_HTML = """\
 
 def test_full_pipeline_collection_to_classification(monkeypatch):
     """収集 → 保存 → 分類の一連フローが正しく動くことを確認する。"""
-    from kabusys.data.schema import init_schema
     from kabusys.data import tdnet_collector
+    from kabusys.data.schema import init_schema
 
     conn = init_schema(":memory:")
 

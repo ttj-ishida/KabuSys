@@ -9,10 +9,10 @@ import duckdb
 import pytest
 
 from kabusys.data.bootstrap.loaders import (
-    load_prices,
-    load_master,
-    load_financials,
     load_calendar,
+    load_financials,
+    load_master,
+    load_prices,
     load_topix,
 )
 

@@ -1,10 +1,12 @@
 """Reconciler 単体テスト（Issue #32）"""
 
 import sqlite3
+
 import pytest
+
 from kabusys.execution.mock_client import MockBrokerClient
-from kabusys.execution.order_repository import OrderRepository, init_orders_db
 from kabusys.execution.order_manager import OrderManager
+from kabusys.execution.order_repository import OrderRepository, init_orders_db
 from kabusys.execution.reconciler import Reconciler, ReconcileResult
 
 
@@ -40,8 +42,9 @@ class TestReconcilerNoOp:
 class TestReconcileOrders:
     def test_broker_order_id_none_increments_no_status(self, repo):
         """broker_order_id=None の OrderSent は orders_no_status をインクリメント"""
-        from kabusys.execution.order_record import OrderRecord, OrderState
         from datetime import datetime, timezone
+
+        from kabusys.execution.order_record import OrderRecord, OrderState
 
         record = OrderRecord(
             client_order_id="test-sent-001",
@@ -68,8 +71,9 @@ class TestReconcileOrders:
 
     def test_broker_order_id_empty_string_increments_no_status(self, repo):
         """broker_order_id='' の OrderSent は orders_no_status をインクリメント（空文字ガード）"""
-        from kabusys.execution.order_record import OrderRecord, OrderState
         from datetime import datetime, timezone
+
+        from kabusys.execution.order_record import OrderRecord, OrderState
 
         record = OrderRecord(
             client_order_id="test-sent-empty",
@@ -93,9 +97,10 @@ class TestReconcileOrders:
 
     def test_broker_returns_open_transitions_to_accepted(self, repo):
         """broker → 'open' なら OrderAccepted に遷移し orders_synced=1"""
-        from kabusys.execution.order_record import OrderRecord, OrderState
-        from kabusys.execution.broker_api import OrderStatus
         from datetime import datetime, timezone
+
+        from kabusys.execution.broker_api import OrderStatus
+        from kabusys.execution.order_record import OrderRecord, OrderState
 
         record = OrderRecord(
             client_order_id="test-sent-002",
@@ -129,9 +134,10 @@ class TestReconcileOrders:
 
     def test_broker_returns_filled_transitions_to_filled(self, repo):
         """broker → 'filled' なら Filled に遷移し orders_synced=1"""
-        from kabusys.execution.order_record import OrderRecord, OrderState
-        from kabusys.execution.broker_api import OrderStatus
         from datetime import datetime, timezone
+
+        from kabusys.execution.broker_api import OrderStatus
+        from kabusys.execution.order_record import OrderRecord, OrderState
 
         record = OrderRecord(
             client_order_id="test-sent-003",
@@ -164,8 +170,9 @@ class TestReconcileOrders:
 
     def test_get_order_status_returns_none_increments_no_status(self, repo):
         """broker_order_id 設定済みだが get_order_status() が None → orders_no_status=1"""
-        from kabusys.execution.order_record import OrderRecord, OrderState
         from datetime import datetime, timezone
+
+        from kabusys.execution.order_record import OrderRecord, OrderState
 
         record = OrderRecord(
             client_order_id="test-sent-004",
@@ -190,9 +197,10 @@ class TestReconcileOrders:
 
     def test_sync_order_broker_api_error_skips_and_continues(self, repo):
         """sync_order が BrokerAPIError を raise → スキップして他の注文は続行"""
-        from kabusys.execution.order_record import OrderRecord, OrderState
-        from kabusys.execution.broker_api import OrderStatus, BrokerAPIError
         from datetime import datetime, timezone
+
+        from kabusys.execution.broker_api import BrokerAPIError, OrderStatus
+        from kabusys.execution.order_record import OrderRecord, OrderState
 
         # 2件の OrderSent を作成
         for i, cid in enumerate(["sent-err-001", "sent-ok-001"], start=1):
@@ -237,9 +245,10 @@ class TestReconcileOrders:
 
     def test_sync_order_unexpected_exception_skips_and_continues(self, repo):
         """sync_order が BrokerAPIError 以外の例外を raise → スキップして他の注文は続行"""
-        from kabusys.execution.order_record import OrderRecord, OrderState
-        from kabusys.execution.broker_api import OrderStatus
         from datetime import datetime, timezone
+
+        from kabusys.execution.broker_api import OrderStatus
+        from kabusys.execution.order_record import OrderRecord, OrderState
 
         for i, cid in enumerate(["sent-exc-001", "sent-exc-ok-001"], start=1):
             r = OrderRecord(
@@ -298,7 +307,8 @@ class TestReconcileOrders:
         OrdersDB が不安定な状態では list_active() も信頼できないため、
         誤差分アラートを避けるためにポジション照合をスキップする設計。
         """
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         from kabusys.execution.broker_api import Position
 
         # broker にポジションがあっても position_discrepancies は空のまま
@@ -320,8 +330,9 @@ class TestReconcilePositions:
         self, repo, code: str, side: str, qty: int, cid: str
     ) -> None:
         """Filled 状態の注文を DB に直接挿入するヘルパー。"""
-        from kabusys.execution.order_record import OrderRecord, OrderState
         from datetime import datetime, timezone
+
+        from kabusys.execution.order_record import OrderRecord, OrderState
 
         record = OrderRecord(
             client_order_id=cid,
@@ -393,6 +404,7 @@ class TestReconcilePositions:
     def test_get_positions_failure_skips_position_check(self, repo):
         """`get_positions()` が BrokerAPIError → position_discrepancies=[] で続行"""
         from unittest.mock import patch
+
         from kabusys.execution.broker_api import BrokerAPIError
 
         self._insert_filled_order(repo, "1234", "buy", 100, "pos-004")
@@ -408,6 +420,7 @@ class TestReconcilePositions:
     def test_list_active_exception_skips_position_check(self, repo):
         """`list_active()` が Exception → position_discrepancies=[] で続行、例外は伝播しない"""
         from unittest.mock import patch
+
         from kabusys.execution.broker_api import Position
 
         broker = MockBrokerClient(
@@ -420,10 +433,11 @@ class TestReconcilePositions:
 
     def test_unknown_side_is_skipped_with_warning(self, repo):
         """未知のsideを持つ Filled 注文はポジション集計からスキップされる"""
+        from datetime import datetime, timezone
         from unittest.mock import patch
+
         from kabusys.execution.broker_api import Position
         from kabusys.execution.order_record import OrderRecord, OrderState
-        from datetime import datetime, timezone
 
         # buy 100株 (DB) + 未知side "short" 50株 (モック); broker 100株 → local=100 → 差分なし
         self._insert_filled_order(repo, "1234", "buy", 100, "pos-unknown-buy")
@@ -457,6 +471,7 @@ class TestReconcilePositions:
     def test_broker_same_code_multiple_positions_are_summed(self, repo):
         """broker が同一コードで複数エントリを返した場合、合算される"""
         from unittest.mock import patch
+
         from kabusys.execution.broker_api import Position
 
         self._insert_filled_order(repo, "1234", "buy", 100, "pos-005")
@@ -513,10 +528,11 @@ class TestExecutionEngineIntegration:
         """reconciler.run() が run_session 内で WebSocket 起動より先に呼ばれる"""
         from datetime import date, time
         from unittest.mock import MagicMock
+
         from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine
         from kabusys.execution.order_manager import OrderManager
-        from kabusys.execution.risk_manager import RiskConfig, RiskManager
         from kabusys.execution.reconciler import Reconciler
+        from kabusys.execution.risk_manager import RiskConfig, RiskManager
 
         broker = MockBrokerClient(available_cash=5_000_000.0)
         repo = OrderRepository(sqlite_conn)
@@ -552,6 +568,7 @@ class TestExecutionEngineIntegration:
     ):
         """reconciler=None（デフォルト）でも run_session は正常動作する"""
         from datetime import date, time
+
         from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine
         from kabusys.execution.order_manager import OrderManager
         from kabusys.execution.risk_manager import RiskConfig, RiskManager

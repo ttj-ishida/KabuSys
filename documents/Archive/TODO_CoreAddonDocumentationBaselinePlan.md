@@ -1,5 +1,7 @@
 # Core Documentation Baseline Plan
 
+> **ステータス: 完了（2026-05-10）** — Issue #285 対応済み。Archive 移動済み。
+
 `Issue 5` として、`Core` 基準でのドキュメント導線を整理した記録。
 
 この文書の目的は、`Addon` 未導入ユーザが `documents/` と `WebManual` を読んだときに、

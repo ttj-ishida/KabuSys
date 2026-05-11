@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-
 from kabusys.monitoring.kill_switch import KillSwitch
+from kabusys.monitoring.risk_monitor import RiskCheckResult
 from kabusys.monitoring.system_monitor import SystemCheckResult
 from kabusys.monitoring.trade_monitor import TradeCheckResult
-from kabusys.monitoring.risk_monitor import RiskCheckResult
 
 
 def _make_sys(

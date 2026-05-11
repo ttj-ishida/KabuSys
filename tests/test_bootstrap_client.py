@@ -8,10 +8,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kabusys.data.bootstrap.bulk_client import (
-    list_files,
-    get_presigned_url,
-    download_file,
     BulkApiError,
+    download_file,
+    get_presigned_url,
+    list_files,
 )
 
 

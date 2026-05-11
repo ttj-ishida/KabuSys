@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import duckdb
 
-
 # ---------------------------------------------------------------------------
 # テストヘルパー
 # ---------------------------------------------------------------------------
@@ -92,11 +91,11 @@ import pytest  # noqa: E402
 
 from kabusys.operations.performance_collector import (  # noqa: E402
     DailyRow,
-    WeeklyRow,
     MonthlyRow,
+    WeeklyRow,
     collect_daily_rows,
-    collect_weekly_rows,
     collect_monthly_rows,
+    collect_weekly_rows,
 )
 
 
@@ -290,7 +289,6 @@ from kabusys.operations.performance_report import (  # noqa: E402
     format_markdown,  # noqa: F401
     save_report,  # noqa: F401
 )
-
 
 # ---------------------------------------------------------------------------
 # build_report
@@ -580,6 +578,7 @@ def test_save_report_monthly(tmp_path):
 def test_cli_returns_1_when_no_data(tmp_path, monkeypatch):
     """データなしのとき終了コード 1 を返す。"""
     import duckdb as _duckdb
+
     from kabusys.run_performance_report import main
 
     db_path = tmp_path / "test.duckdb"
@@ -610,6 +609,7 @@ def test_cli_returns_1_when_no_data(tmp_path, monkeypatch):
 def test_cli_returns_0_when_data_exists(tmp_path, monkeypatch):
     """データありのとき終了コード 0 を返す。"""
     import duckdb as _duckdb
+
     from kabusys.run_performance_report import main
 
     db_path = tmp_path / "test.duckdb"

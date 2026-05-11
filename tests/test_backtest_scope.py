@@ -9,9 +9,9 @@ from unittest.mock import patch
 
 import pytest
 
-from kabusys.data.schema import init_schema
 from kabusys.backtest.engine import BacktestResult, BacktestScope
 from kabusys.backtest.metrics import BacktestMetrics
+from kabusys.data.schema import init_schema
 
 
 def _make_metrics() -> BacktestMetrics:
@@ -194,6 +194,7 @@ class TestRunBacktestScope:
     def test_run_backtest_has_backtest_scope_param(self):
         """`run_backtest()` が `backtest_scope` 引数を持つ。"""
         import inspect
+
         from kabusys.backtest.engine import run_backtest
 
         sig = inspect.signature(run_backtest)
@@ -220,7 +221,7 @@ class TestRunBacktestScope:
 
     def test_run_backtest_manual_scope_sets_metadata(self):
         """`backtest_scope.mode='manual_codes'` → BacktestResult にスコープ情報が入る。"""
-        from kabusys.backtest.engine import run_backtest, BacktestScope
+        from kabusys.backtest.engine import BacktestScope, run_backtest
         from kabusys.data.schema import init_schema
 
         conn = init_schema(":memory:")
@@ -243,7 +244,7 @@ class TestRunBacktestScope:
 
     def test_run_backtest_scope_preserve_false_reason_string(self):
         """`preserve_universe_filters=False` → 除外理由が 'data not available' になる。"""
-        from kabusys.backtest.engine import run_backtest, BacktestScope
+        from kabusys.backtest.engine import BacktestScope, run_backtest
         from kabusys.data.schema import init_schema
 
         conn = init_schema(":memory:")
@@ -264,7 +265,7 @@ class TestRunBacktestScope:
 
     def test_run_backtest_deduplicates_codes(self):
         """重複コードが含まれる場合、排除結果に重複が発生しない。"""
-        from kabusys.backtest.engine import run_backtest, BacktestScope
+        from kabusys.backtest.engine import BacktestScope, run_backtest
         from kabusys.data.schema import init_schema
 
         conn = init_schema(":memory:")

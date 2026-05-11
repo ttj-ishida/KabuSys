@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from datetime import date, datetime as _real_datetime
+from datetime import date
+from datetime import datetime as _real_datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -183,6 +184,7 @@ class TestExecutionEnginePid:
     def _make_engine(self, tmp_path):
         """テスト用 ExecutionEngine を最小モックで構築する。"""
         from datetime import date, time
+
         from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine
 
         broker = MagicMock()

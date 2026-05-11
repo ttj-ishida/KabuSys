@@ -40,8 +40,8 @@ def main() -> None:
 
     from kabusys.config import Settings
     from kabusys.data.schema import init_schema
-    from kabusys.monitoring.monitoring_db import init_monitoring_db
     from kabusys.execution.order_repository import init_orders_db
+    from kabusys.monitoring.monitoring_db import init_monitoring_db
 
     settings = Settings()
 

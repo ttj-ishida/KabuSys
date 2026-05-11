@@ -11,8 +11,8 @@ from datetime import date
 
 import pytest
 
-from kabusys.data.schema import init_schema
 from kabusys.backtest.engine import run_backtest
+from kabusys.data.schema import init_schema
 from kabusys.strategy.signal_generator import generate_signals
 
 # 月曜日を target_date として使用（weekday-based fallbackで営業日と判定される）

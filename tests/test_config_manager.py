@@ -136,8 +136,9 @@ class TestListBackups:
         assert result == []
 
     def test_returns_paths_in_descending_order(self, config_file, backup_dir):
-        from kabusys.ai.config_manager import backup_config, list_backups
         import time
+
+        from kabusys.ai.config_manager import backup_config, list_backups
 
         p1 = backup_config(config_file, backup_dir)
         time.sleep(1.1)  # ファイル名のタイムスタンプが変わるのを待つ

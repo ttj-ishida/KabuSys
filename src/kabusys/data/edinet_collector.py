@@ -41,7 +41,11 @@ import duckdb
 from kabusys.data.tdnet_collector import RawDisclosure, save_raw_disclosures
 from kabusys.utils.http import (
     SSRFBlockRedirectHandler as _SSRFBlockRedirectHandler,
+)
+from kabusys.utils.http import (
     is_private_host as _is_private_host,
+)
+from kabusys.utils.http import (
     validate_url_scheme as _validate_url_scheme,
 )
 

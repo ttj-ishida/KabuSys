@@ -6,9 +6,11 @@ init_schema() の代わりに最小 DDL でテーブルを作成する共通フ�
 
 from __future__ import annotations
 
-import duckdb
 import sqlite3
+
+import duckdb
 import pytest
+
 from kabusys.execution.order_repository import init_orders_db
 from kabusys.monitoring.monitoring_db import init_monitoring_db
 

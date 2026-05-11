@@ -212,6 +212,7 @@ class TestMinHoldingDays:
     def test_score_drop_sell_suppressed_within_5_biz_days(self, conn):
         """保有 3営業日では score_drop SELL が抑制される。"""
         from datetime import timedelta
+
         from kabusys.strategy.signal_generator import generate_signals
 
         # 4営業日分のカレンダー登録
@@ -242,6 +243,7 @@ class TestMinHoldingDays:
     def test_score_drop_sell_allowed_after_5_biz_days(self, conn):
         """保有 5営業日後は score_drop SELL が許可される。"""
         from datetime import timedelta
+
         from kabusys.strategy.signal_generator import generate_signals
 
         base = date(2026, 4, 1)
@@ -268,6 +270,7 @@ class TestMinHoldingDays:
     def test_stop_loss_bypasses_min_holding(self, conn):
         """ストップロス到達は保有日数チェックをスキップして即 SELL する。"""
         from datetime import timedelta
+
         from kabusys.strategy.signal_generator import generate_signals
 
         base = date(2026, 4, 1)
@@ -319,6 +322,7 @@ class TestReentryRestriction:
     def test_buy_suppressed_within_5_biz_days_after_sell(self, conn):
         """SELL 後 3営業日は再 BUY が抑制される。"""
         from datetime import timedelta
+
         from kabusys.strategy.signal_generator import generate_signals
 
         base = date(2026, 4, 1)
@@ -348,6 +352,7 @@ class TestReentryRestriction:
     def test_buy_allowed_after_5_biz_days_cooldown(self, conn):
         """SELL 後 5営業日後は再 BUY が許可される。"""
         from datetime import timedelta
+
         from kabusys.strategy.signal_generator import generate_signals
 
         base = date(2026, 4, 1)
@@ -375,6 +380,7 @@ class TestReentryRestriction:
     def test_no_sell_date_allows_buy(self, conn):
         """sell_date が NULL（保有中）は再エントリー制限なし。"""
         from datetime import timedelta
+
         from kabusys.strategy.signal_generator import generate_signals
 
         base = date(2026, 4, 1)
@@ -416,6 +422,7 @@ class TestEarningsAvoidance:
 
     def test_buy_suppressed_when_earnings_next_day(self, conn):
         from datetime import timedelta
+
         from kabusys.strategy.signal_generator import generate_signals
 
         base = date(2026, 4, 1)
@@ -441,6 +448,7 @@ class TestEarningsAvoidance:
 
     def test_buy_allowed_when_no_upcoming_earnings(self, conn):
         from datetime import timedelta
+
         from kabusys.strategy.signal_generator import generate_signals
 
         base = date(2026, 4, 1)
@@ -465,6 +473,7 @@ class TestEarningsAvoidance:
 
     def test_sell_forced_when_earnings_next_day(self, conn):
         from datetime import timedelta
+
         from kabusys.strategy.signal_generator import generate_signals
 
         base = date(2026, 4, 1)
@@ -495,6 +504,7 @@ class TestMinHoldingDaysBearException:
 
     def test_score_drop_sell_allowed_in_bear_regime_within_5_days(self, conn):
         from datetime import timedelta
+
         from kabusys.core.interfaces import DatabaseRegimeProvider
         from kabusys.strategy.signal_generator import generate_signals
 
@@ -535,6 +545,7 @@ class TestEventSizeMultiplier:
 
     def test_size_multiplier_half_on_event_day(self, conn):
         from datetime import timedelta
+
         from kabusys.strategy.signal_generator import generate_signals
 
         base = date(2026, 4, 1)
@@ -563,6 +574,7 @@ class TestEventSizeMultiplier:
 
     def test_size_multiplier_one_when_no_event(self, conn):
         from datetime import timedelta
+
         from kabusys.strategy.signal_generator import generate_signals
 
         base = date(2026, 4, 1)

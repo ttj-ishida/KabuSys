@@ -10,11 +10,11 @@ import duckdb as _duckdb
 import pytest
 
 from kabusys.operations.market_close_collector import (
-    collect_market_close_data,
-    check_signal_pending,
-    check_signal_filled,
-    check_positions_updated,
     check_performance_recorded,
+    check_positions_updated,
+    check_signal_filled,
+    check_signal_pending,
+    collect_market_close_data,
     get_performance_row,
     get_prev_equity,
 )
@@ -28,7 +28,6 @@ from kabusys.operations.market_close_report import (
     format_markdown,
     save_report,
 )
-
 
 # ---------------------------------------------------------------------------
 # ヘルパー

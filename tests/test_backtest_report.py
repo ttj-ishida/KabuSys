@@ -5,9 +5,7 @@ from __future__ import annotations
 import json
 from datetime import date, timedelta
 
-
 from kabusys.backtest.simulator import DailySnapshot, TradeRecord
-
 
 # ---------------------------------------------------------------------------
 # ヘルパー
@@ -47,8 +45,8 @@ def _make_trade(
 
 def _make_result(history, trades):
     """BacktestResult 相当の軽量オブジェクトを返す。"""
-    from kabusys.backtest.metrics import calc_metrics
     from kabusys.backtest.engine import BacktestResult
+    from kabusys.backtest.metrics import calc_metrics
 
     metrics = calc_metrics(history, trades)
     return BacktestResult(history=history, trades=trades, metrics=metrics)
@@ -68,6 +66,7 @@ def test_sharpe_uses_population_variance():
     母分散 = Σ(r - mean)^2 / 2
     """
     import math
+
     from kabusys.backtest.metrics import _calc_sharpe
 
     history = _make_history([100.0, 110.0, 100.0])
@@ -183,7 +182,7 @@ def test_avg_holding_days_no_pairs():
 
 def test_build_report_returns_backtest_report():
     """build_report() が BacktestReport を返す。"""
-    from kabusys.backtest.report import build_report, BacktestReport
+    from kabusys.backtest.report import BacktestReport, build_report
 
     history = _make_history([1_000_000] * 200)
     trades = [
@@ -645,8 +644,9 @@ def test_sharpe_variance_zero_returns_zero():
 
 def test_sharpe_zero_prev_value_no_zerodivision():
     """前日ポートフォリオ値が 0 のスナップショットを含む場合にゼロ除算が発生しない。"""
-    from kabusys.backtest.metrics import _calc_sharpe
     from datetime import date
+
+    from kabusys.backtest.metrics import _calc_sharpe
 
     history = [
         DailySnapshot(
@@ -678,8 +678,9 @@ def test_max_drawdown_reverse_order_history():
 
 def test_save_report_equity_csv_is_date_sorted(tmp_path):
     """daily_equity.csv が日付昇順で出力される。"""
-    from kabusys.backtest.report import build_report, save_report
     import csv as csv_mod
+
+    from kabusys.backtest.report import build_report, save_report
 
     history = list(reversed(_make_history([1_000_000.0, 1_050_000.0, 1_100_000.0])))
     result = _make_result(history, [])
@@ -825,8 +826,9 @@ class TestBacktestReportScopeIntegration:
 
     def test_json_contains_scope_mode(self):
         """JSON に scope_mode が含まれる"""
-        from kabusys.backtest.report import build_report, format_json
         import json
+
+        from kabusys.backtest.report import build_report, format_json
 
         result = self._make_scoped_result()
         report = build_report(
@@ -837,9 +839,9 @@ class TestBacktestReportScopeIntegration:
 
     def test_low_universe_warning_for_non_manual_scope(self):
         """scope_mode が default_universe でも effective_universe_size < 3 のとき警告が出る"""
-        from kabusys.backtest.report import _generate_warnings
         from kabusys.backtest.engine import BacktestResult
         from kabusys.backtest.metrics import calc_metrics
+        from kabusys.backtest.report import _generate_warnings
 
         history = _make_history([1_000_000] * 400)
         trades = [_make_trade(pnl=500.0, day_offset=i) for i in range(15)]
@@ -856,9 +858,9 @@ class TestBacktestReportScopeIntegration:
 
     def test_excluded_codes_message_csv_format(self):
         """excluded_codes の警告メッセージがリスト表現ではなく CSV 形式で出力される"""
-        from kabusys.backtest.report import _generate_warnings
         from kabusys.backtest.engine import BacktestResult
         from kabusys.backtest.metrics import calc_metrics
+        from kabusys.backtest.report import _generate_warnings
 
         history = _make_history([1_000_000] * 400)
         trades = [_make_trade(pnl=500.0, day_offset=i) for i in range(15)]
@@ -879,9 +881,9 @@ class TestBacktestReportScopeIntegration:
 
     def test_cli_summary_always_shows_report_type(self):
         """portfolio_backtest モードでも CLI サマリに Report Type が常に表示される"""
-        from kabusys.backtest.report import build_report, format_cli_summary
         from kabusys.backtest.engine import BacktestResult
         from kabusys.backtest.metrics import calc_metrics
+        from kabusys.backtest.report import build_report, format_cli_summary
 
         history = _make_history([1_000_000] * 200)
         trades = [_make_trade(pnl=500.0, day_offset=i) for i in range(15)]

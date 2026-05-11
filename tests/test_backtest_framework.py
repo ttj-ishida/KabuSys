@@ -9,7 +9,6 @@ import pytest
 
 from kabusys.data.schema import init_schema
 
-
 # ---------------------------------------------------------------------------
 # フィクスチャ
 # ---------------------------------------------------------------------------
@@ -268,8 +267,9 @@ def _insert_calendar(conn, d, is_trading: bool = True) -> None:
 
 def test_build_backtest_conn_copies_prices(conn):
     """_build_backtest_conn → prices_daily が bt_conn にコピーされる。"""
-    from kabusys.backtest.engine import _build_backtest_conn
     from datetime import date
+
+    from kabusys.backtest.engine import _build_backtest_conn
 
     d = date(2024, 1, 5)
     _insert_price(conn, "1234", d, open_=1000.0, close=1010.0)
@@ -287,8 +287,9 @@ def test_build_backtest_conn_copies_prices(conn):
 
 def test_fetch_open_and_close_prices(conn):
     """_fetch_open_prices / _fetch_close_prices → 始値・終値を辞書で返す。"""
-    from kabusys.backtest.engine import _fetch_open_prices, _fetch_close_prices
     from datetime import date
+
+    from kabusys.backtest.engine import _fetch_close_prices, _fetch_open_prices
 
     d = date(2024, 1, 8)
     _insert_price(conn, "1234", d, open_=980.0, close=1020.0)
@@ -304,8 +305,9 @@ def test_fetch_open_and_close_prices(conn):
 
 def test_write_positions_idempotent(conn):
     """_write_positions → 同日に2回呼んでも1行のみ残る。"""
-    from kabusys.backtest.engine import _write_positions
     from datetime import date
+
+    from kabusys.backtest.engine import _write_positions
 
     d = date(2024, 1, 10)
     _write_positions(conn, d, {"1234": 100}, {"1234": 950.0})
@@ -319,8 +321,9 @@ def test_write_positions_idempotent(conn):
 
 def test_write_positions_values(conn):
     """_write_positions → position_size と avg_price が正しく書き込まれる。"""
-    from kabusys.backtest.engine import _write_positions
     from datetime import date
+
+    from kabusys.backtest.engine import _write_positions
 
     d = date(2024, 1, 11)
     _write_positions(
@@ -362,8 +365,9 @@ def _setup_minimal_backtest(conn):
 
 def test_run_backtest_returns_result(conn):
     """run_backtest が BacktestResult を返す（最低限の動作確認）。"""
-    from kabusys.backtest.engine import run_backtest, BacktestResult
     from datetime import date
+
+    from kabusys.backtest.engine import BacktestResult, run_backtest
 
     _setup_minimal_backtest(conn)
 
@@ -380,8 +384,9 @@ def test_run_backtest_returns_result(conn):
 
 def test_run_backtest_cash_decreases_on_buy(conn):
     """BUY 約定後に現金が減少している。"""
-    from kabusys.backtest.engine import run_backtest
     from datetime import date
+
+    from kabusys.backtest.engine import run_backtest
 
     _setup_minimal_backtest(conn)
     initial_cash = 10_000_000
@@ -403,8 +408,9 @@ def test_run_backtest_cash_decreases_on_buy(conn):
 
 def test_run_backtest_no_lookahead(conn):
     """end_date より後の価格データは結果に影響しない（Look-ahead 防止）。"""
-    from kabusys.backtest.engine import run_backtest
     from datetime import date
+
+    from kabusys.backtest.engine import run_backtest
 
     _setup_minimal_backtest(conn)
 
@@ -434,8 +440,9 @@ def test_run_backtest_no_lookahead(conn):
 
 def test_run_backtest_idempotent(conn):
     """同一パラメータで2回実行しても metrics が同一値になる。"""
-    from kabusys.backtest.engine import run_backtest
     from datetime import date
+
+    from kabusys.backtest.engine import run_backtest
 
     _setup_minimal_backtest(conn)
 
@@ -452,8 +459,9 @@ def test_run_backtest_idempotent(conn):
 
 def test_run_backtest_max_position_pct(conn):
     """max_position_pct=0.10 → 1銘柄への投資が portfolio_value の 10% 超にならない。"""
-    from kabusys.backtest.engine import run_backtest
     from datetime import date
+
+    from kabusys.backtest.engine import run_backtest
 
     _setup_minimal_backtest(conn)
     initial_cash = 10_000_000
@@ -479,8 +487,9 @@ def test_run_backtest_max_position_pct(conn):
 
 def test_fetch_regime_returns_bull_on_no_data(conn):
     """DatabaseRegimeProvider: market_regime にデータなし → 'bull' を返す。"""
-    from kabusys.core.interfaces import DatabaseRegimeProvider
     from datetime import date
+
+    from kabusys.core.interfaces import DatabaseRegimeProvider
 
     provider = DatabaseRegimeProvider(conn)
     result = provider.get_regime(date(2024, 1, 5))
@@ -489,8 +498,9 @@ def test_fetch_regime_returns_bull_on_no_data(conn):
 
 def test_fetch_regime_returns_correct_label(conn):
     """DatabaseRegimeProvider: market_regime にデータあり → regime_label を返す。"""
-    from kabusys.core.interfaces import DatabaseRegimeProvider
     from datetime import date
+
+    from kabusys.core.interfaces import DatabaseRegimeProvider
 
     d = date(2024, 1, 5)
     conn.execute(
@@ -528,8 +538,9 @@ def test_fetch_sector_map_returns_data(conn):
 
 def test_build_backtest_conn_copies_stocks(conn):
     """_build_backtest_conn → stocks テーブルが bt_conn にコピーされる。"""
-    from kabusys.backtest.engine import _build_backtest_conn
     from datetime import date
+
+    from kabusys.backtest.engine import _build_backtest_conn
 
     conn.execute(
         "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
@@ -546,8 +557,9 @@ def test_build_backtest_conn_copies_stocks(conn):
 
 def test_read_day_signals_includes_score(conn):
     """_read_day_signals → buy_signals に score フィールドが含まれる。"""
-    from kabusys.backtest.engine import _read_day_signals
     from datetime import date
+
+    from kabusys.backtest.engine import _read_day_signals
 
     d = date(2024, 1, 5)
     conn.execute(
@@ -562,8 +574,9 @@ def test_read_day_signals_includes_score(conn):
 
 def test_run_backtest_new_params_accepted(conn):
     """run_backtest が新パラメータ（allocation_method, max_positions 等）を受け付ける。"""
-    from kabusys.backtest.engine import run_backtest, BacktestResult
     from datetime import date
+
+    from kabusys.backtest.engine import BacktestResult, run_backtest
 
     _setup_minimal_backtest(conn)
 
@@ -581,8 +594,9 @@ def test_run_backtest_new_params_accepted(conn):
 
 def test_run_backtest_risk_based_method(conn):
     """run_backtest の allocation_method="risk_based" が動作する。"""
-    from kabusys.backtest.engine import run_backtest, BacktestResult
     from datetime import date
+
+    from kabusys.backtest.engine import BacktestResult, run_backtest
 
     _setup_minimal_backtest(conn)
 
@@ -601,6 +615,7 @@ def test_run_backtest_risk_based_method(conn):
 def test_run_backtest_default_max_position_pct_is_010(conn):
     """run_backtest のデフォルト max_position_pct は 0.10（Phase 5 設計書準拠）。"""
     import inspect
+
     from kabusys.backtest.engine import run_backtest
 
     sig = inspect.signature(run_backtest)
@@ -648,8 +663,9 @@ def test_execute_buy_partial_fill_when_insufficient_cash():
     → max_affordable = floor(95_000 / (1001 * 1.00055)) = floor(94.86) = 94 株
     → 94 株で約定
     """
-    from kabusys.backtest.simulator import PortfolioSimulator
     from datetime import date
+
+    from kabusys.backtest.simulator import PortfolioSimulator
 
     sim = PortfolioSimulator(initial_cash=95_000.0)
     sim._execute_buy(
@@ -669,8 +685,9 @@ def test_execute_buy_partial_fill_when_insufficient_cash():
 
 def test_execute_buy_full_skip_when_price_too_high():
     """_execute_buy: 1株も買えない場合は約定しない。"""
-    from kabusys.backtest.simulator import PortfolioSimulator
     from datetime import date
+
+    from kabusys.backtest.simulator import PortfolioSimulator
 
     sim = PortfolioSimulator(initial_cash=500.0)  # 1株1000円を買えない
     sim._execute_buy(
@@ -688,9 +705,11 @@ def test_execute_buy_full_skip_when_price_too_high():
 
 def test_run_backtest_invalid_allocation_method_raises(conn):
     """run_backtest に不正な allocation_method を渡すと ValueError が発生する。"""
-    from kabusys.backtest.engine import run_backtest
     from datetime import date
+
     import pytest
+
+    from kabusys.backtest.engine import run_backtest
 
     _setup_minimal_backtest(conn)
 
@@ -708,8 +727,9 @@ def test_run_backtest_available_cash_capped_by_max_utilization(conn):
 
     max_utilization=0.0 なら available_cash=0 → 発注株数がゼロになる。
     """
-    from kabusys.backtest.engine import run_backtest
     from datetime import date
+
+    from kabusys.backtest.engine import run_backtest
 
     _setup_minimal_backtest(conn)
 
@@ -732,8 +752,9 @@ def test_execute_buy_partial_fill_lot_size_rounded(conn):
     → max_affordable_raw = floor(150_000 / 1001) = 149
     → lot 丸め: (149 // 100) * 100 = 100 株で約定
     """
-    from kabusys.backtest.simulator import PortfolioSimulator
     from datetime import date
+
+    from kabusys.backtest.simulator import PortfolioSimulator
 
     sim = PortfolioSimulator(initial_cash=150_000.0)
     sim._execute_buy(
@@ -753,8 +774,9 @@ def test_execute_buy_partial_fill_lot_size_rounded(conn):
 
 def test_execute_buy_partial_fill_lot_size_default_no_rounding():
     """lot_size=1（デフォルト）では単元丸めせずに部分約定する（後方互換）。"""
-    from kabusys.backtest.simulator import PortfolioSimulator
     from datetime import date
+
+    from kabusys.backtest.simulator import PortfolioSimulator
 
     sim = PortfolioSimulator(initial_cash=95_000.0)
     sim._execute_buy(
@@ -789,8 +811,9 @@ def test_select_candidates_tiebreak_by_signal_rank():
 def test_execute_buy_non_lot_multiple_warns(caplog):
     """_execute_buy: shares が lot_size の倍数でない場合に WARNING ログを出す。"""
     import logging
-    from kabusys.backtest.simulator import PortfolioSimulator
     from datetime import date
+
+    from kabusys.backtest.simulator import PortfolioSimulator
 
     sim = PortfolioSimulator(initial_cash=1_000_000.0)
     with caplog.at_level(logging.WARNING, logger="kabusys.backtest.simulator"):
@@ -811,8 +834,9 @@ def test_execute_buy_non_lot_multiple_warns(caplog):
 def test_execute_buy_lot_multiple_no_warn(caplog):
     """_execute_buy: shares が lot_size の倍数のとき WARNING ログは出ない。"""
     import logging
-    from kabusys.backtest.simulator import PortfolioSimulator
     from datetime import date
+
+    from kabusys.backtest.simulator import PortfolioSimulator
 
     sim = PortfolioSimulator(initial_cash=1_000_000.0)
     with caplog.at_level(logging.WARNING, logger="kabusys.backtest.simulator"):
@@ -832,9 +856,11 @@ def test_execute_buy_lot_multiple_no_warn(caplog):
 
 def test_run_backtest_invalid_risk_pct_raises(conn):
     """risk_pct が範囲外なら ValueError を発生させる（risk_based 時のみ）。"""
-    from kabusys.backtest.engine import run_backtest
     from datetime import date
+
     import pytest
+
+    from kabusys.backtest.engine import run_backtest
 
     _setup_minimal_backtest(conn)
 
@@ -850,9 +876,11 @@ def test_run_backtest_invalid_risk_pct_raises(conn):
 
 def test_run_backtest_invalid_stop_loss_pct_raises(conn):
     """stop_loss_pct=0 は除算ゼロになるため ValueError を発生させる。"""
-    from kabusys.backtest.engine import run_backtest
     from datetime import date
+
     import pytest
+
+    from kabusys.backtest.engine import run_backtest
 
     _setup_minimal_backtest(conn)
 
@@ -867,9 +895,11 @@ def test_run_backtest_invalid_stop_loss_pct_raises(conn):
 
 def test_run_backtest_invalid_max_utilization_raises(conn):
     """max_utilization が範囲外なら ValueError を発生させる。"""
-    from kabusys.backtest.engine import run_backtest
     from datetime import date
+
     import pytest
+
+    from kabusys.backtest.engine import run_backtest
 
     _setup_minimal_backtest(conn)
 
@@ -884,8 +914,9 @@ def test_run_backtest_invalid_max_utilization_raises(conn):
 
 def test_run_backtest_cli_params(conn):
     """run_backtest が CLI から渡される新パラメータを正しく受け付ける。"""
-    from kabusys.backtest.engine import run_backtest, BacktestResult
     from datetime import date
+
+    from kabusys.backtest.engine import BacktestResult, run_backtest
 
     _setup_minimal_backtest(conn)
 

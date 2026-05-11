@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, timezone
 
-
 from kabusys.operations.night_batch_report import JobRunResult
 
 
@@ -66,7 +65,7 @@ def test_read_nonexistent_dir_returns_empty(tmp_path):
 
 
 def test_write_then_read_roundtrip(tmp_path):
-    from kabusys.operations.job_run_recorder import write_job_result, read_job_results
+    from kabusys.operations.job_run_recorder import read_job_results, write_job_result
 
     result = _make_result(status="failed")
     result.errors.append("something went wrong")
@@ -80,7 +79,7 @@ def test_write_then_read_roundtrip(tmp_path):
 
 
 def test_read_multiple_jobs(tmp_path):
-    from kabusys.operations.job_run_recorder import write_job_result, read_job_results
+    from kabusys.operations.job_run_recorder import read_job_results, write_job_result
 
     for job_name in [
         "data_update_job",
@@ -99,7 +98,7 @@ def test_read_multiple_jobs(tmp_path):
 
 
 def test_read_skips_malformed_json(tmp_path):
-    from kabusys.operations.job_run_recorder import write_job_result, read_job_results
+    from kabusys.operations.job_run_recorder import read_job_results, write_job_result
 
     write_job_result(_make_result(), base_dir=tmp_path, run_date=date(2026, 5, 7))
     bad = tmp_path / "2026-05-07" / "broken_job.json"
@@ -109,7 +108,7 @@ def test_read_skips_malformed_json(tmp_path):
 
 
 def test_write_overwrites_same_job(tmp_path):
-    from kabusys.operations.job_run_recorder import write_job_result, read_job_results
+    from kabusys.operations.job_run_recorder import read_job_results, write_job_result
 
     write_job_result(
         _make_result(status="failed"), base_dir=tmp_path, run_date=date(2026, 5, 7)

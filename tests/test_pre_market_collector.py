@@ -5,17 +5,15 @@ from __future__ import annotations
 from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
-
 from kabusys.operations.pre_market_collector import (
     PreMarketData,
     check_data_freshness,
-    check_signal_queue,
     check_position_count,
+    check_signal_queue,
     check_stop_flag,
     check_task_scheduler,
     collect,
 )
-
 
 # --- check_data_freshness ---
 

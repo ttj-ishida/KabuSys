@@ -30,8 +30,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 
 from kabusys.data.edinet_collector import (
-    EDINET_DOCUMENTS_URL,
     _TARGET_DOC_TYPES,
+    EDINET_DOCUMENTS_URL,
     fetch_edinet_disclosures,
     run_edinet_collection,
 )

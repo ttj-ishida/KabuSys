@@ -15,7 +15,6 @@ from kabusys.monitoring.risk_monitor import RiskMonitor
 from kabusys.monitoring.system_monitor import SystemMonitor
 from kabusys.monitoring.trade_monitor import TradeMonitor
 
-
 # ─── Fixtures ───────────────────────────────────────────────────────────────
 
 
@@ -468,8 +467,8 @@ def test_monitoring_engine_exception_does_not_stop_other_monitors():
 
 # ─── MonitoringEngine + KillSwitch / AlertManager ────────────────────────────
 
-from kabusys.monitoring.kill_switch import KillSwitch  # noqa: E402
 from kabusys.monitoring.alert_manager import AlertManager  # noqa: E402
+from kabusys.monitoring.kill_switch import KillSwitch  # noqa: E402
 
 
 def test_monitoring_engine_calls_kill_switch_when_all_results_available():

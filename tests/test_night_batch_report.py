@@ -8,8 +8,8 @@ from datetime import date, datetime, timedelta, timezone
 from kabusys.operations.night_batch_report import (
     MANDATORY_JOBS,
     JobRunResult,
-    NightBatchReport,
     NextDaySummary,
+    NightBatchReport,
     UpdateCounts,
     _determine_status,
     _generate_warnings,
@@ -463,6 +463,7 @@ def test_format_json_datetime_serialized_as_string():
 def test_format_json_date_serialized_as_string():
     """_to_serializable が date 型を ISO 文字列に変換する。"""
     from datetime import date as date_type
+
     from kabusys.operations.night_batch_report import _to_serializable
 
     d = date_type(2026, 4, 27)

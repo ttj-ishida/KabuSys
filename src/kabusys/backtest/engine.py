@@ -464,9 +464,9 @@ def run_backtest(
     _excluded_codes: list[str] = []
     _excluded_reasons: dict[str, str] = {}
 
+    from kabusys.config import Settings
     from kabusys.data.calendar_management import get_trading_days
     from kabusys.strategy.signal_generator import generate_signals
-    from kabusys.config import Settings
 
     _ai_enabled = Settings().enable_ai_sentiment
     bt_conn = _build_backtest_conn(conn, start_date, end_date, ai_enabled=_ai_enabled)

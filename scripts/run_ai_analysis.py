@@ -15,9 +15,9 @@ from pathlib import Path
 import duckdb
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from kabusys.config import Settings
 from kabusys.ai.news_nlp import score_news
 from kabusys.ai.regime_detector import score_regime
+from kabusys.config import Settings
 from kabusys.operations.job_run_recorder import write_job_result
 from kabusys.operations.night_batch_report import JobRunResult
 from kabusys.utils.logging_setup import setup_logging

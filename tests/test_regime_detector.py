@@ -12,7 +12,6 @@ import pytest
 
 from kabusys.data.schema import init_schema
 
-
 # ---------------------------------------------------------------------------
 # フィクスチャ
 # ---------------------------------------------------------------------------
@@ -185,8 +184,8 @@ _OUT_OF_WINDOW_DT = dt_class(2026, 3, 18, 12, 0, 0)  # ウィンドウ外
 
 def test_fetch_macro_news_keyword_match(conn):
     """マクロキーワードを含む記事のみが返される。"""
-    from kabusys.ai.regime_detector import _fetch_macro_news
     from kabusys.ai.news_nlp import calc_news_window
+    from kabusys.ai.regime_detector import _fetch_macro_news
 
     window_start, window_end = calc_news_window(TARGET_DATE)
     _insert_raw_news(conn, "n1", _MACRO_WINDOW_DT, "日銀が政策金利を引き上げ")
@@ -200,8 +199,8 @@ def test_fetch_macro_news_keyword_match(conn):
 
 def test_fetch_macro_news_no_match(conn):
     """マクロキーワードなし → 空リストを返す。"""
-    from kabusys.ai.regime_detector import _fetch_macro_news
     from kabusys.ai.news_nlp import calc_news_window
+    from kabusys.ai.regime_detector import _fetch_macro_news
 
     window_start, window_end = calc_news_window(TARGET_DATE)
     _insert_raw_news(conn, "n1", _MACRO_WINDOW_DT, "ソニーが新製品発表")
@@ -212,8 +211,8 @@ def test_fetch_macro_news_no_match(conn):
 
 def test_fetch_macro_news_out_of_window(conn):
     """ウィンドウ外の記事は含まれない。"""
-    from kabusys.ai.regime_detector import _fetch_macro_news
     from kabusys.ai.news_nlp import calc_news_window
+    from kabusys.ai.regime_detector import _fetch_macro_news
 
     window_start, window_end = calc_news_window(TARGET_DATE)
     _insert_raw_news(conn, "n1", _OUT_OF_WINDOW_DT, "FOMCが利上げを決定")  # 古すぎる
@@ -224,8 +223,8 @@ def test_fetch_macro_news_out_of_window(conn):
 
 def test_fetch_macro_news_limit(conn):
     """_MAX_MACRO_ARTICLES 件を超える場合は上限で切り捨てる。"""
-    from kabusys.ai.regime_detector import _fetch_macro_news, _MAX_MACRO_ARTICLES
     from kabusys.ai.news_nlp import calc_news_window
+    from kabusys.ai.regime_detector import _MAX_MACRO_ARTICLES, _fetch_macro_news
 
     window_start, window_end = calc_news_window(TARGET_DATE)
     for i in range(_MAX_MACRO_ARTICLES + 5):
@@ -266,8 +265,9 @@ def test_score_macro_no_titles():
 
 def test_score_macro_api_failure_fallback():
     """API 失敗（全リトライ消費）→ macro_sentiment=0.0 で継続。"""
-    from kabusys.ai.regime_detector import _score_macro
     from openai import APIConnectionError
+
+    from kabusys.ai.regime_detector import _score_macro
 
     mock_client = MagicMock()
     with patch(
@@ -418,8 +418,9 @@ def test_idempotent(conn):
 
 def test_api_failure(conn):
     """API 例外 → macro_sentiment=0.0 で処理継続、regime_label が確定する。"""
-    from kabusys.ai.regime_detector import score_regime
     from openai import APIConnectionError
+
+    from kabusys.ai.regime_detector import score_regime
 
     _insert_prices_uniform(conn, "1321", 200, 100.0, TARGET_DATE)
     _insert_raw_news(conn, "n1", _MACRO_WINDOW_DT, "FOMC が声明発表")

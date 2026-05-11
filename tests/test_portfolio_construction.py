@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from kabusys.data.schema import init_schema
 
 
@@ -71,6 +72,7 @@ def test_stocks_table_upsert(conn):
 def test_fetch_listed_info_field_mapping():
     """fetch_listed_info が J-Quants API レスポンスを stocks スキーマにマッピングする。"""
     from unittest.mock import patch
+
     from kabusys.data.jquants_client import fetch_listed_info
 
     mock_response = {
@@ -120,6 +122,7 @@ def test_fetch_listed_info_field_mapping():
 def test_fetch_listed_info_missing_fields_skipped():
     """Code が欠損するレコードはスキップされる。"""
     from unittest.mock import patch
+
     from kabusys.data.jquants_client import fetch_listed_info
 
     mock_response = {
@@ -606,8 +609,8 @@ def test_integration_neutral_regime_reduces_available_cash():
 def test_integration_sector_cap_then_size():
     """セクター上限フィルタ後に position_sizing が動作する。"""
     from kabusys.portfolio.portfolio_builder import (
-        select_candidates,
         calc_equal_weights,
+        select_candidates,
     )
     from kabusys.portfolio.position_sizing import calc_position_sizes
     from kabusys.portfolio.risk_adjustment import apply_sector_cap

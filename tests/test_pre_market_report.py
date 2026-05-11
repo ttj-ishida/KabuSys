@@ -8,10 +8,10 @@ from datetime import date
 import pytest
 
 from kabusys.operations.pre_market_report import (
-    PreMarketReport,
     STATUS_BLOCKED,
     STATUS_READY,
     STATUS_READY_WITH_WARNINGS,
+    PreMarketReport,
     _determine_status,
     _generate_warnings,
     build_report,

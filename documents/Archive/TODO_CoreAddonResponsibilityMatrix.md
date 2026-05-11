@@ -1,5 +1,7 @@
 # Core / Addon Responsibility Matrix
 
+> **ステータス: 完了（2026-05-10）** — Issue #283 対応済み。Archive 移動済み。
+
 - 目的: KabuSys の現行機能を `Core` / `Addon` / `Gray Zone` に分類し、別リポジトリ化の前提を固定する
 - スコープ: 2026-05-06 時点の現行コードベース
 - 前提: `Core` は単独で導入・paper・live 運用まで完結すること

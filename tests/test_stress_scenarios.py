@@ -26,7 +26,6 @@ from kabusys.monitoring.risk_monitor import RiskCheckResult
 from kabusys.monitoring.system_monitor import SystemCheckResult
 from kabusys.monitoring.trade_monitor import TradeCheckResult
 
-
 # ---------------------------------------------------------------------------
 # 共通フィクスチャ
 # ---------------------------------------------------------------------------

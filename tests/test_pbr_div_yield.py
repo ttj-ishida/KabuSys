@@ -1,17 +1,16 @@
 # tests/test_pbr_div_yield.py
-import tomllib
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
 import duckdb
+import tomllib
 
 from kabusys.data import jquants_client as jq
 from kabusys.data.pipeline import run_dividends_etl
 from kabusys.data.schema import init_schema
 from kabusys.research.factor_research import calc_value
 from kabusys.strategy.signal_generator import _compute_value_score, _load_value_config
-
 
 # ---------------------------------------------------------------------------
 # Task 1: スキーマ・設定ファイル

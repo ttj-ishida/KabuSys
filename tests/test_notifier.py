@@ -37,11 +37,11 @@ class TestLineNotifyEnabled:
         assert Settings().line_notify_enabled is False
 
 
-import requests  # noqa: E402
 from unittest.mock import MagicMock, patch  # noqa: E402
 
-from kabusys.operations.notifier import LineNotifier  # noqa: E402
+import requests  # noqa: E402
 
+from kabusys.operations.notifier import LineNotifier  # noqa: E402
 
 _LINE_API_URL = "https://api.line.me/v2/bot/message/push"
 

@@ -26,18 +26,18 @@ from __future__ import annotations
 
 import logging
 import math
-import tomllib
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import duckdb
+import tomllib
 
 if TYPE_CHECKING:
     from kabusys.backtest.engine import BacktestScope
 
-from kabusys.data.calendar_management import get_trading_days, next_trading_day
 from kabusys.core.interfaces import RegimeProvider, build_regime_provider
+from kabusys.data.calendar_management import get_trading_days, next_trading_day
 
 logger = logging.getLogger(__name__)
 

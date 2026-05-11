@@ -1,7 +1,7 @@
 import json
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 
 TOKEN = "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"
 REPO = "ttj-ishida/KabuSys"

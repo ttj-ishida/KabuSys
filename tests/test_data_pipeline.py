@@ -18,7 +18,6 @@ from kabusys.data import jquants_client as jquants
 from kabusys.data import quality
 from kabusys.data.pipeline import get_last_topix_date, run_topix_etl
 
-
 # ---------------------------------------------------------------------------
 # フィクスチャ
 # ---------------------------------------------------------------------------
@@ -476,8 +475,8 @@ class TestAdditionalCases:
 class TestEarningsCalendarPipeline:
     def test_save_earnings_calendar_idempotent(self):
         """save_earnings_calendar は重複実行で件数が増えない。"""
-        from kabusys.data.schema import init_schema
         from kabusys.data import jquants_client as jq
+        from kabusys.data.schema import init_schema
 
         conn = init_schema(":memory:")
         records = [
@@ -494,8 +493,8 @@ class TestEarningsCalendarPipeline:
 
     def test_save_earnings_calendar_skips_invalid_date(self):
         """不正な日付フォーマットはスキップされる。"""
-        from kabusys.data.schema import init_schema
         from kabusys.data import jquants_client as jq
+        from kabusys.data.schema import init_schema
 
         conn = init_schema(":memory:")
         records = [

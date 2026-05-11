@@ -17,13 +17,13 @@ from pathlib import Path
 
 import duckdb
 
+from kabusys.config import settings
 from kabusys.data.calendar_management import next_trading_day
 from kabusys.execution.broker_api import BrokerAPIProtocol, OrderSentPendingError
 
 # DuplicateOrderError は _process_signals() (Task 7) で使用
 from kabusys.execution.order_manager import DuplicateOrderError, OrderManager
 from kabusys.execution.order_repository import OrderRepository
-from kabusys.config import settings
 from kabusys.execution.reconciler import Reconciler
 from kabusys.execution.risk_manager import RiskManager, RiskRejectReason
 from kabusys.monitoring.monitoring_db import MonitoringDB

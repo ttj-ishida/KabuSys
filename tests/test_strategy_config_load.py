@@ -220,8 +220,8 @@ value_score:
     def test_value_score_invalid_weights_falls_back_to_defaults(self, tmp_path):
         """value_score.weights が不正（負値）→ デフォルトを使用。"""
         from kabusys.strategy.signal_generator import (
-            _load_value_config,
             _VALUE_CONFIG_DEFAULTS,
+            _load_value_config,
         )
 
         content = """
@@ -244,8 +244,8 @@ value_score:
     def test_value_score_invalid_normalization_falls_back_to_defaults(self, tmp_path):
         """value_score.normalization に 0 以下 → デフォルトを使用。"""
         from kabusys.strategy.signal_generator import (
-            _load_value_config,
             _VALUE_CONFIG_DEFAULTS,
+            _load_value_config,
         )
 
         content = """

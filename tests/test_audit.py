@@ -18,8 +18,7 @@ import duckdb
 import pytest
 from duckdb import ConstraintException
 
-from kabusys.data.audit import init_audit_schema, init_audit_db
-
+from kabusys.data.audit import init_audit_db, init_audit_schema
 
 # ---------------------------------------------------------------------------
 # フィクスチャ

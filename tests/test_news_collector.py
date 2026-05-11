@@ -4,8 +4,8 @@ news_collector モジュールのユニットテスト
 
 from __future__ import annotations
 
-from datetime import datetime
 import urllib.error
+from datetime import datetime
 
 import duckdb
 import pytest
@@ -368,6 +368,7 @@ def test_fetch_rss_gzip_decompressed_oversized_returns_empty(monkeypatch, caplog
     """gzip 解凍後のサイズが MAX_RESPONSE_BYTES を超える場合は空リストを返すこと。"""
     import gzip as _gzip
     import logging
+
     from kabusys.data.news_collector import MAX_RESPONSE_BYTES
 
     # 解凍後が MAX_RESPONSE_BYTES+1 バイトになるデータを gzip 圧縮

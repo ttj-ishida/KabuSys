@@ -8,15 +8,14 @@ import duckdb
 import pytest
 
 from kabusys.data.bootstrap.runner import (
-    run_bootstrap,
     BootstrapResult,
     _local_files,
     _reset_bootstrap,
-    _truncate_data,
-    _safe_filename,
     _safe_errmsg,
+    _safe_filename,
+    _truncate_data,
+    run_bootstrap,
 )
-
 
 # ---------------------------------------------------------------------------
 # テスト用 DB フィクスチャ（最小スキーマ）

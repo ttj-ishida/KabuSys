@@ -16,7 +16,6 @@ from kabusys.execution.order_repository import OrderRepository
 from kabusys.execution.risk_manager import RiskConfig, RiskManager
 from kabusys.monitoring.monitoring_db import MonitoringDB
 
-
 TARGET_DATE = date(2026, 3, 29)
 FILL_DATE = date(2026, 3, 30)  # next_trading_day(TARGET_DATE) — 月曜
 

@@ -20,7 +20,6 @@ import pytest
 
 from kabusys.data.schema import init_schema
 
-
 # ---------------------------------------------------------------------------
 # フィクスチャ
 # ---------------------------------------------------------------------------
@@ -350,6 +349,7 @@ def test_score_news_response_validation_unknown_code(conn):
 def test_calc_news_window_values():
     """target_date=2026-03-20 → (2026-03-19 06:00, 2026-03-19 23:30) を返す。"""
     from datetime import datetime
+
     from kabusys.ai.news_nlp import calc_news_window
 
     start, end = calc_news_window(TARGET_DATE)
@@ -359,7 +359,7 @@ def test_calc_news_window_values():
 
 def test_calc_news_window_boundary_inclusive_start(conn):
     """ウィンドウ開始時刻ちょうどの記事は対象に含まれる。"""
-    from kabusys.ai.news_nlp import score_news, calc_news_window
+    from kabusys.ai.news_nlp import calc_news_window, score_news
 
     window_start, _ = calc_news_window(TARGET_DATE)
     # window_start ちょうど（含む）
@@ -375,7 +375,7 @@ def test_calc_news_window_boundary_inclusive_start(conn):
 
 def test_calc_news_window_boundary_exclusive_end(conn):
     """ウィンドウ終了時刻ちょうどの記事は対象外（排他的上端）。"""
-    from kabusys.ai.news_nlp import score_news, calc_news_window
+    from kabusys.ai.news_nlp import calc_news_window, score_news
 
     _, window_end = calc_news_window(TARGET_DATE)
     # window_end ちょうど（含まない）
@@ -416,7 +416,7 @@ def test_score_news_code_as_integer(conn):
 
 def test_score_news_text_truncation(conn):
     """_MAX_CHARS_PER_STOCK を超える記事テキストはトリムされてプロンプトに含まれる。"""
-    from kabusys.ai.news_nlp import score_news, _MAX_CHARS_PER_STOCK
+    from kabusys.ai.news_nlp import _MAX_CHARS_PER_STOCK, score_news
 
     long_content = "あ" * (_MAX_CHARS_PER_STOCK + 500)
     _insert_article(conn, "art1", _WINDOW_DT, "長文記事", long_content)

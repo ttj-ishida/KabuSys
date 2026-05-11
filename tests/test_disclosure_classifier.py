@@ -8,8 +8,8 @@ import duckdb
 import pytest
 
 from kabusys.data.disclosure_classifier import (
-    classify_title,
     classify_disclosures,
+    classify_title,
     run_disclosure_classification,
 )
 

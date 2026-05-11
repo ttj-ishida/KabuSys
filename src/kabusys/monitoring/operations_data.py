@@ -15,7 +15,6 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-
 # ---------------------------------------------------------------------------
 # 1. load_premarket_data
 # ---------------------------------------------------------------------------

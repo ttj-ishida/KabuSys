@@ -1,5 +1,7 @@
 # Core Config Separation Plan
 
+> **ステータス: 完了（2026-05-10）** — Issue #284 対応済み。Archive 移動済み。
+
 `Issue 4` として、`Core` と `Addon` の設定項目分離方針を整理した記録。
 
 この文書の目的は、現行の `.env` / `Settings` / `validate_config` / `config_setup` に同居している設定を、

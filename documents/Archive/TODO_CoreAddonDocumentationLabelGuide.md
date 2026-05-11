@@ -1,5 +1,7 @@
 # Core Documentation Label Guide
 
+> **ステータス: 完了（2026-05-10）** — Issue #285 / #289 対応済み。Archive 移動済み。
+
 `Issue 5` の補助資料として、`Core` / `Addon` を区分表示するための見出し名と表示ラベルを固定する。
 
 目的は 1 つ。

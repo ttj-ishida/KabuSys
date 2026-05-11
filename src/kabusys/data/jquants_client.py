@@ -17,14 +17,13 @@ J-Quants API v2 から以下のデータを取得する。
 
 from __future__ import annotations
 
-import time
-import logging
-import urllib.request
-import urllib.parse
-import urllib.error
 import json
-from datetime import datetime, timezone
-from datetime import date
+import logging
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import date, datetime, timezone
 from typing import Any
 
 import duckdb

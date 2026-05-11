@@ -18,7 +18,7 @@ import logging
 import shutil
 import sqlite3
 import sys
-from datetime import datetime, time, timezone, timedelta
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 
 import duckdb

@@ -2,7 +2,9 @@
 """RiskManager 単体テスト"""
 
 import sqlite3
+
 import pytest
+
 from kabusys.execution.broker_api import Position
 from kabusys.execution.mock_client import MockBrokerClient
 from kabusys.execution.order_record import OrderState
@@ -44,8 +46,9 @@ class TestGate1CheckSignal:
 
     def test_fails_when_duplicate_active_order(self, repo):
         broker = MockBrokerClient(available_cash=5_000_000.0)
-        from kabusys.execution.order_record import OrderRecord
         from datetime import datetime, timezone
+
+        from kabusys.execution.order_record import OrderRecord
 
         active = OrderRecord(
             client_order_id="test-dup",

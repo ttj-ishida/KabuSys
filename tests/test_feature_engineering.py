@@ -12,7 +12,6 @@ import pytest
 from kabusys.data.schema import init_schema
 from kabusys.strategy.feature_engineering import build_features
 
-
 TARGET = date(2024, 3, 1)
 START = date(2023, 1, 1)
 
