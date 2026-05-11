@@ -1,14 +1,14 @@
-# 初回セットアップ手順: J-Quants CSV 一括取り込み
+# 初回セットアップ手順: J-Quants Bootstrap（一括データ投入）
 
 - 対象: KabuSys の初回環境構築を行うユーザー
-- 目的: J-Quants から大量データを CSV で取得し、KabuSys の初期データ基盤を構築する
-- 前提: 通常の日次差分更新ではなく、初回のみ行う bootstrap 作業である
+- 目的: J-Quants Bulk Download API から大量データを取得し、KabuSys の初期データ基盤を構築する
+- 前提: 通常の日次差分更新ではなく、初回のみ（または環境再構築時）に行う作業である
 
 ---
 
 ## 1. この作業で何をするか
 
-初回セットアップでは、J-Quants から過去の大量データを CSV で取得し、KabuSys に一括投入します。
+初回セットアップでは、J-Quants Bulk Download API から過去の株価・財務・銘柄マスタ・カレンダーを一括で DuckDB に投入します。
 
 この作業の目的は次の通りです。
 
@@ -16,471 +16,208 @@
 - 実運用開始前の基礎データを揃える
 - 通常運用の日次差分更新へ移行できる状態を作る
 
-この作業は、毎日の夜間バッチとは別です。  
-初回導入時、または環境を再構築するときに実施します。
+> ⚠️ Bulk Download API の利用には **J-Quants Standard プラン以上**が必要です。  
+> Free / Light プランでは HTTP 403 が返るため、この手順は実行できません。
 
 ---
 
-## 2. 事前に準備するもの
+## 2. 前提条件
 
-作業前に以下を準備してください。
+作業前に以下を確認してください。
 
-- J-Quants を利用できること
-- KabuSys の作業ディレクトリが用意されていること
-- データ保存先に十分な空き容量があること
-- DuckDB など、KabuSys が使用する DB ファイルの保存先が決まっていること
-
-最低限、以下のデータを対象にします。
-
-- 株価（日足 OHLCV）
-- 銘柄マスタ
-- 財務データ
-- JPX カレンダー
-
-### 補足
-
-現時点では、**通常運用用の差分更新コマンド** は存在しますが、**CSV bootstrap 専用コマンドは未実装** の可能性があります。
-
-存在確認できている既存コマンド:
-
-- `python scripts/generate_config.py`
-- `python scripts/run_data_update.py`
-- `python scripts/run_feature_gen.py`
-
-この手順書では、以下を分けて記載します。
-
-- 今すぐ実行可能な準備コマンド
-- bootstrap 実装後に使う想定コマンド
+- J-Quants Standard プラン以上を契約している
+- `.env` に `JQUANTS_BULK_API_KEY` が設定されている（`python -m kabusys.config_setup` で設定）
+- DuckDB のスキーマが初期化済みである（`python scripts/setup_db.py`）
 
 ---
 
-## 3. ディレクトリ構成
+## 3. Bootstrap の仕組み
 
-初回セットアップでは、CSV を以下のような場所に保存する想定です。
-
-```text
-data/bootstrap/raw/jquants/
-  prices/{取得日}/
-  listed_info/{取得日}/
-  financials/{取得日}/
-  calendar/{取得日}/
+```
+J-Quants Bulk API
+  GET /v2/bulk/list?endpoint=<ep>  → ファイルキー一覧（Key / Size / LastModified）
+  GET /v2/bulk/get?key=<Key>       → presigned URL（有効期限5分）
+      ↓ gzip CSV ダウンロード
+  data/bootstrap/raw/<endpoint>/   ← ローカルキャッシュ（再実行時スキップ）
+      ↓ parse & schema validation
+  raw_prices / raw_financials / stocks / market_calendar / topix_daily
+      ↓ ETL（NOT NULL / 型検証 → ON CONFLICT DO UPDATE）
+  prices_daily / fundamentals
+      ↓ 処理結果記録
+  bootstrap_load_history           ← ファイル単位の処理状態（pending / loaded / failed）
 ```
 
-例:
+### 取り込み対象エンドポイント
 
-```text
-data/bootstrap/raw/jquants/prices/2026-04-21/
-data/bootstrap/raw/jquants/listed_info/2026-04-21/
-data/bootstrap/raw/jquants/financials/2026-04-21/
-data/bootstrap/raw/jquants/calendar/2026-04-21/
-```
-
-ポイント:
-
-- データ種別ごとに分ける
-- 取得日ごとに分ける
-- 元 CSV はそのまま保持する
-
-### PowerShell での作成例
-
-プロジェクトルートで以下を実行します。
-
-```powershell
-New-Item -ItemType Directory -Force data\bootstrap\raw\jquants\prices\2026-04-21
-New-Item -ItemType Directory -Force data\bootstrap\raw\jquants\listed_info\2026-04-21
-New-Item -ItemType Directory -Force data\bootstrap\raw\jquants\financials\2026-04-21
-New-Item -ItemType Directory -Force data\bootstrap\raw\jquants\calendar\2026-04-21
-```
+| Bulk エンドポイント         | 保存先テーブル          | 備考                      |
+| --------------------------- | ----------------------- | ------------------------- |
+| `/equities/bars/daily`      | `raw_prices`, `prices_daily` | AdjFactor を raw に保存 |
+| `/equities/master`          | `stocks`                |                           |
+| `/fins/summary`             | `raw_financials`, `fundamentals` |                  |
+| `/markets/calendar`         | `market_calendar`       |                           |
+| `/indices/bars/daily/topix` | `topix_daily`           | regime_detector が参照    |
 
 ---
 
-## 4. 作業の全体フロー
+## 4. 実行手順
 
-初回セットアップは次の順で行います。
-
-1. J-Quants から CSV をダウンロードする
-2. CSV を所定ディレクトリに配置する
-3. bootstrap 取り込みを実行する
-4. 取込結果を確認する
-5. 通常の日次差分更新へ移行する
-
-### 推奨する実行順
+### Step 1: ドライランで件数確認
 
 ```powershell
-# 1. プロジェクトルートへ移動
-Set-Location C:\Users\tetsu\Projects\KabuSys
-
-# 2. config テンプレート生成（未作成時のみ）
-python scripts\generate_config.py
-
-# 3. Raw 配置用ディレクトリ作成
-New-Item -ItemType Directory -Force data\bootstrap\raw\jquants\prices\2026-04-21
-New-Item -ItemType Directory -Force data\bootstrap\raw\jquants\listed_info\2026-04-21
-New-Item -ItemType Directory -Force data\bootstrap\raw\jquants\financials\2026-04-21
-New-Item -ItemType Directory -Force data\bootstrap\raw\jquants\calendar\2026-04-21
-
-# 4. CSV を配置
-# 5. bootstrap 実行（実装後）
-# 6. 取込結果確認
+python -m kabusys.data.bootstrap --dry-run
 ```
 
----
+ダウンロードせずにファイル件数のみ確認します。
+API 接続が正常か、取得対象ファイル数が妥当かを事前に確認できます。
 
-## 5. Step 1: J-Quants から CSV をダウンロードする
-
-J-Quants から、初回投入に必要な CSV を取得します。
-
-対象:
-
-- 株価（日足）
-- 銘柄マスタ
-- 財務データ
-- カレンダー
-
-ダウンロード時の注意:
-
-- どのデータ種別か分かるファイル名にする
-- 取得日を記録する
-- 取得した CSV は編集しない
-- 可能ならダウンロード元情報も控える
-
-推奨:
-
-- 取得した CSV は、解凍後の元ファイルをそのまま保管する
-- 取得日をディレクトリ名に含める
-
-### ユーザー作業メモ
-
-J-Quants 側のダウンロード操作自体は Web 画面または提供手段に依存するため、本手順書では KabuSys 側の配置以降を対象とします。
-
----
-
-## 6. Step 2: CSV を所定ディレクトリに配置する
-
-ダウンロードした CSV を、データ種別ごとのディレクトリに配置します。
-
-配置例:
-
-```text
-data/bootstrap/raw/jquants/prices/2026-04-21/prices_daily.csv
-data/bootstrap/raw/jquants/listed_info/2026-04-21/listed_info.csv
-data/bootstrap/raw/jquants/financials/2026-04-21/financials.csv
-data/bootstrap/raw/jquants/calendar/2026-04-21/market_calendar.csv
-```
-
-確認ポイント:
-
-- 想定したデータ種別のディレクトリに入っているか
-- ファイルが壊れていないか
-- 文字コードや拡張子が想定通りか
-
-### PowerShell での配置例
-
-以下は `Downloads` にある CSV を移動する例です。
+### Step 2: 一括取得を実行
 
 ```powershell
-Move-Item -LiteralPath "$HOME\Downloads\prices_daily.csv" `
-  -Destination "data\bootstrap\raw\jquants\prices\2026-04-21\prices_daily.csv"
-
-Move-Item -LiteralPath "$HOME\Downloads\listed_info.csv" `
-  -Destination "data\bootstrap\raw\jquants\listed_info\2026-04-21\listed_info.csv"
-
-Move-Item -LiteralPath "$HOME\Downloads\financials.csv" `
-  -Destination "data\bootstrap\raw\jquants\financials\2026-04-21\financials.csv"
-
-Move-Item -LiteralPath "$HOME\Downloads\market_calendar.csv" `
-  -Destination "data\bootstrap\raw\jquants\calendar\2026-04-21\market_calendar.csv"
+python -m kabusys.data.bootstrap
 ```
 
-配置後に一覧確認します。
+実行中は以下のように進捗が表示されます。
 
-```powershell
-Get-ChildItem -Recurse data\bootstrap\raw\jquants
+```
+続きから実行します（ロード済みファイルはスキップ）。
+
+[/equities/bars/daily] ファイル一覧を取得中...
+[/equities/bars/daily] 42 ファイル検出
+  [1/42] ダウンロード: equities_bars_daily_2024_01.csv.gz
+  [1/42] ロード中: equities_bars_daily_2024_01.csv.gz
+  [1/42] 完了: equities_bars_daily_2024_01.csv.gz (12,345 件)
+  ...
+
+Bootstrap 完了サマリー
+  /equities/bars/daily         :    500,000 件
+  /equities/master             :      4,000 件
+  ...
 ```
 
----
+### Step 3: 取込結果を確認
 
-## 7. Step 3: bootstrap 取り込みを実行する
-
-CSV 配置後、bootstrap 取り込み処理を実行します。
-
-この処理では、以下が行われます。
-
-1. CSV の存在確認
-2. ヘッダ・必須列の検証
-3. Raw として保存または登録
-4. Processed テーブルへ整形投入
-5. 完了結果の記録
-
-実行イメージ:
-
-```text
-bootstrap 実行
-  -> CSV 検証
-  -> Raw 取込
-  -> Processed 変換
-  -> 完了記録
-```
-
-注意:
-
-- 初回は時間がかかる可能性があります
-- 途中で止まっても、冪等に再実行できる設計を前提とします
-- 同じ CSV を再投入しても重複しないことが理想です
-
-### 現時点の注意
-
-現時点では、CSV bootstrap 専用の実行スクリプトはリポジトリ上で確認できていません。  
-そのため、この手順は **実装予定コマンドを含む暫定版** です。
-
-### 想定コマンド案
-
-bootstrap 実装後は、以下のようなコマンドで実行する想定です。
-
-```powershell
-python scripts\run_jquants_csv_bootstrap.py `
-  --input-root data\bootstrap\raw\jquants `
-  --as-of 2026-04-21 `
-  --duckdb data\kabusys.duckdb
-```
-
-または、データ種別ごとに分割して実行できる形でもよいです。
-
-```powershell
-python scripts\run_jquants_csv_bootstrap.py `
-  --dataset prices `
-  --input-dir data\bootstrap\raw\jquants\prices\2026-04-21 `
-  --duckdb data\kabusys.duckdb
-
-python scripts\run_jquants_csv_bootstrap.py `
-  --dataset listed_info `
-  --input-dir data\bootstrap\raw\jquants\listed_info\2026-04-21 `
-  --duckdb data\kabusys.duckdb
-```
-
-### 既存コマンドとの関係
-
-以下のコマンドは **bootstrap の代替ではありません**。
-
-```powershell
-python scripts\run_data_update.py
-python scripts\run_feature_gen.py
-```
-
-- `run_data_update.py`
-  - 通常運用用の日次差分更新
-- `run_feature_gen.py`
-  - `prices_daily` 投入後に特徴量を生成する通常バッチ
-
-bootstrap 完了後に `run_feature_gen.py` を使う可能性はありますが、CSV 一括投入そのものは別コマンドに分離すべきです。
-
----
-
-## 8. Step 4: 取込結果を確認する
-
-bootstrap 完了後、ユーザーは以下を確認してください。
-
-### 8.1 取込成功の確認
-
-- 取り込み処理が正常終了している
-- 失敗ログが出ていない
-- データ種別ごとの件数が妥当である
-
-### 想定ログ確認コマンド
-
-bootstrap 実装後は、専用ログを確認する想定です。
-
-```powershell
-Get-Content logs\jquants_csv_bootstrap.log -Tail 100
-Select-String -Path logs\jquants_csv_bootstrap.log -Pattern "ERROR|CRITICAL|WARNING"
-```
-
-### 8.2 テーブル確認
-
-最低限、以下を確認します。
-
-- `prices_daily`
-- `stocks`
-- `financials` 系
-- `market_calendar`
-
-確認したい内容:
-
-- データが空ではない
-- 日付範囲が想定通り
-- 銘柄コードが正しく入っている
-- 明らかな欠損や重複がない
-
-### DuckDB での確認例
+DuckDB で取り込みデータを確認します。
 
 ```powershell
 duckdb data\kabusys.duckdb "SELECT MIN(date), MAX(date), COUNT(*) FROM prices_daily;"
 duckdb data\kabusys.duckdb "SELECT COUNT(*) FROM stocks;"
 duckdb data\kabusys.duckdb "SELECT COUNT(*) FROM fundamentals;"
 duckdb data\kabusys.duckdb "SELECT MIN(date), MAX(date), COUNT(*) FROM market_calendar;"
+duckdb data\kabusys.duckdb "SELECT MIN(date), MAX(date), COUNT(*) FROM topix_daily;"
 ```
 
-サンプル行確認:
+### Step 4: Core フローの動作確認
 
-```powershell
-duckdb data\kabusys.duckdb "SELECT * FROM prices_daily ORDER BY date DESC, code LIMIT 20;"
-duckdb data\kabusys.duckdb "SELECT * FROM stocks ORDER BY code LIMIT 20;"
-```
-
-### 8.3 バックテスト利用可否
-
-最低限、バックテストに必要な履歴長が確保されているかを確認します。
-
-例:
-
-- 過去数年分の日足が揃っている
-- 銘柄マスタが投入済み
-- カレンダーが揃っている
-
-### 特徴量生成まで進める場合
-
-`prices_daily` まで投入できた後に、特徴量生成を試す場合は既存コマンドを利用できます。
+Bootstrap 完了後、Core の処理フローが正しく動作するかを手動で確認します。
 
 ```powershell
 python scripts\run_feature_gen.py
-```
-
-確認例:
-
-```powershell
-duckdb data\kabusys.duckdb "SELECT MAX(date), COUNT(*) FROM features;"
+python scripts\run_strategy_signal.py
+python scripts\run_portfolio_construction.py
 ```
 
 ---
 
-## 9. Step 5: 通常運用へ移行する
+## 5. 実行モードとオプション
 
-初回 bootstrap が完了したら、通常運用では API ベースの日次差分更新へ移行します。
+### 続きから実行（デフォルト）
 
-ここで確認すること:
+```powershell
+python -m kabusys.data.bootstrap
+```
 
-- bootstrap の最終投入日
-- その翌日以降を差分更新対象にできること
-- 初回差分更新で重複が発生しないこと
+`bootstrap_load_history` でロード済みのファイルをスキップするため、中断後の再実行が安全に行えます。
 
-考え方:
+### 初期化して最初から実行
 
-- bootstrap は「土台作り」
-- 日次差分更新は「継続運用」
+```powershell
+# 確認プロンプトあり
+python -m kabusys.data.bootstrap --fresh
 
-この 2 つを混同しないでください。
+# 確認スキップ（自動化・スクリプト用）
+python -m kabusys.data.bootstrap --fresh --yes
+```
 
-### 通常差分更新の確認コマンド
+`--fresh` は以下を実行します。
 
-bootstrap 完了後、通常差分更新が動くかを確認する場合は既存の日次更新コマンドを使います。
+1. `bootstrap_load_history` テーブルを全削除
+2. `data/bootstrap/raw/` 以下のダウンロード済みファイルを全削除
+3. 最初からダウンロード・投入を再実行
+
+### 特定エンドポイントのみ処理
+
+```powershell
+python -m kabusys.data.bootstrap --endpoint /equities/bars/daily
+```
+
+### 詳細ログ表示
+
+```powershell
+python -m kabusys.data.bootstrap --verbose
+```
+
+DEBUG レベルのログが出力されます。
+
+---
+
+## 6. 失敗・再実行時の対応
+
+### 途中で中断した場合
+
+再度 `python -m kabusys.data.bootstrap` を実行するだけで、`loaded` 済みファイルをスキップして続きから再開できます。
+
+### 特定エンドポイントで失敗した場合
+
+```powershell
+python -m kabusys.data.bootstrap --endpoint /fins/summary
+```
+
+失敗したエンドポイントのみを再処理できます。
+
+### 全て最初からやり直す場合
+
+```powershell
+python -m kabusys.data.bootstrap --fresh --yes
+```
+
+### `bootstrap_load_history` での状態確認
+
+```powershell
+duckdb data\kabusys.duckdb "SELECT endpoint, status, COUNT(*) FROM bootstrap_load_history GROUP BY endpoint, status;"
+```
+
+---
+
+## 7. 通常運用への移行
+
+Bootstrap 完了後は、通常運用では API ベースの日次差分更新へ移行します。
 
 ```powershell
 python scripts\run_data_update.py
 ```
 
-その後、必要に応じて特徴量再生成を行います。
+- Bootstrap は「土台作り」（初回のみ）
+- 日次差分更新は「継続運用」（毎日自動実行）
 
-```powershell
-python scripts\run_feature_gen.py
-```
-
----
-
-## 10. 失敗したときの対応
-
-想定される失敗例:
-
-- CSV が壊れている
-- 列が足りない
-- 型が不正
-- 日付形式が異なる
-- ディスク容量不足
-- 処理途中で停止した
-
-基本対応:
-
-1. エラーログを確認する
-2. 失敗したデータ種別を特定する
-3. CSV 配置や内容を見直す
-4. 必要なら該当データ種別のみ再実行する
-
-重要:
-
-- 元 CSV を直接編集しない
-- 失敗時でも元ファイルは保持する
-- 再実行前に何がどこまで入ったかを確認する
-
-### 再実行の考え方
-
-bootstrap 実装後の想定コマンド:
-
-```powershell
-python scripts\run_jquants_csv_bootstrap.py `
-  --input-root data\bootstrap\raw\jquants `
-  --as-of 2026-04-21 `
-  --duckdb data\kabusys.duckdb `
-  --resume
-```
-
-または、失敗したデータ種別のみ再実行します。
-
-```powershell
-python scripts\run_jquants_csv_bootstrap.py `
-  --dataset financials `
-  --input-dir data\bootstrap\raw\jquants\financials\2026-04-21 `
-  --duckdb data\kabusys.duckdb
-```
+この2つを混同しないでください。
 
 ---
 
-## 11. ユーザー向けチェックリスト
+## 8. チェックリスト
 
-### 作業前
+### 実行前
 
-- `Set-Location C:\Users\tetsu\Projects\KabuSys` を実行した
-- `python scripts\generate_config.py` を実行した、または `config/` が既にある
-- J-Quants にアクセスできる
-- 空き容量が十分ある
-- 保存先ディレクトリを確認した
+- [ ] J-Quants Standard プラン以上を契約している
+- [ ] `python -m kabusys.validate_config` で `JQUANTS_BULK_API_KEY` が設定済みと表示される
+- [ ] `python scripts/setup_db.py` で DuckDB スキーマが初期化済み
+- [ ] `data/` ディレクトリに十分な空き容量がある
 
-### ダウンロード後
+### Bootstrap 完了後
 
-- 株価 CSV を取得した
-- 銘柄マスタ CSV を取得した
-- 財務 CSV を取得した
-- カレンダー CSV を取得した
-
-### 配置後
-
-- データ種別ごとの所定ディレクトリに配置した
-- ファイル名と取得日が分かる
-- `Get-ChildItem -Recurse data\bootstrap\raw\jquants` で配置確認した
-
-### 取り込み後
-
-- bootstrap が正常終了した
-- `prices_daily` にデータが入った
-- `stocks` にデータが入った
-- `financials` 系にデータが入った
-- `market_calendar` にデータが入った
-- 必要なら `python scripts\run_feature_gen.py` で特徴量生成を確認した
-
-### 移行前
-
-- bootstrap の最終日を確認した
-- 通常差分更新へ移行できる状態である
-
----
-
-## 12. まとめ
-
-初回セットアップでは、J-Quants の大量データを CSV で取得し、bootstrap として一括投入します。
-
-ポイントは次の通りです。
-
-- 初回取り込みは通常運用とは別処理と考える
-- CSV は Raw として保持する
-- 取り込み後は必ずテーブル内容を確認する
-- その後、通常の日次差分更新へ移行する
-
-この手順を守ることで、KabuSys のバックテストと実運用の土台となる初期データ基盤を安全に構築できます。
+- [ ] `python -m kabusys.data.bootstrap` が正常終了している
+- [ ] `prices_daily` に過去データが投入されている
+- [ ] `stocks` に銘柄マスタが投入されている
+- [ ] `fundamentals` に財務データが投入されている
+- [ ] `market_calendar` にカレンダーが投入されている
+- [ ] `topix_daily` に TOPIX データが投入されている
+- [ ] `python scripts\run_feature_gen.py` が正常完了する

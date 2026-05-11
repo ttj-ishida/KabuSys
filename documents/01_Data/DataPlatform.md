@@ -68,10 +68,14 @@
 
 #### J-Quants API 認証方式
 
-| API 種別         | エンドポイント        | 認証ヘッダー                    | 設定キー                  |
-| ---------------- | --------------------- | ------------------------------- | ------------------------- |
-| 通常 API (V1)    | `/v1/*`               | `Authorization: Bearer {token}` | `JQUANTS_REFRESH_TOKEN`   |
-| Bulk Download API | `/v2/bulk/*`         | `x-api-key: {key}`              | `JQUANTS_BULK_API_KEY`    |
+J-Quants API v2 では全エンドポイントで API キー認証を使用する（v1 のリフレッシュトークン／ID トークン方式は廃止）。
+
+| API 種別            | エンドポイント  | 認証ヘッダー       | 設定キー               |
+| ------------------- | --------------- | ------------------ | ---------------------- |
+| 通常 API (V2)       | `/v2/*`         | `x-api-key: {key}` | `JQUANTS_BULK_API_KEY` |
+| Bulk Download API   | `/v2/bulk/*`    | `x-api-key: {key}` | `JQUANTS_BULK_API_KEY` |
+
+> ⚠️ Bulk Download API の利用には **Standard プラン以上**が必要。Free/Light プランでは `/bulk/list` が HTTP 403 を返す。
 
 ### 3.2 内部生成データ (自システム)
 
@@ -119,7 +123,7 @@ J-Quants Bulk API
   bootstrap_load_history           ← ファイル単位の処理状態管理
 ```
 
-#### 取り込み対象エンドポイント（Phase 1）
+#### 取り込み対象エンドポイント（Standard プラン）
 
 | Bulk エンドポイント            | 保存先（Raw）     | 保存先（Processed）   | 備考                       |
 | ------------------------------ | ----------------- | --------------------- | -------------------------- |
@@ -127,8 +131,9 @@ J-Quants Bulk API
 | `/equities/master`             | —                 | `stocks`              | 最新日のみ取得             |
 | `/fins/summary`                | `raw_financials`  | `fundamentals`        | 既存スキーマに対応         |
 | `/markets/calendar`            | —                 | `market_calendar`     | 既存スキーマに対応         |
-| `/fins/dividend`               | —                 | `dividends`           | 配当利回り計算に使用（Issue #185）。差分 ETL は `run_dividends_etl()` |
-| `/indices/bars/daily/topix`    | —                 | `topix_daily`（新規） | regime_detector が参照     |
+| `/indices/bars/daily/topix`    | —                 | `topix_daily`         | regime_detector が参照     |
+
+> `/fins/dividend` 等 Premium 限定エンドポイントは Bootstrap 対象外。配当データは差分 ETL（`run_dividends_etl()`）で取得する。
 
 #### 冪等性・エラー方針
 
@@ -140,9 +145,24 @@ J-Quants Bulk API
 #### CLI
 
 ```bash
-python -m kabusys.data.bootstrap            # 全エンドポイント
-python -m kabusys.data.bootstrap --dry-run  # ダウンロードせず件数確認のみ
+# 続きから実行（デフォルト。bootstrap_load_history でロード済みファイルをスキップ）
+python -m kabusys.data.bootstrap
+
+# ドライラン（ダウンロードせず件数確認のみ）
+python -m kabusys.data.bootstrap --dry-run
+
+# 特定エンドポイントのみ処理
+python -m kabusys.data.bootstrap --endpoint /equities/bars/daily
+
+# 初期化して最初から実行（履歴 + キャッシュを全削除、確認プロンプトあり）
+python -m kabusys.data.bootstrap --fresh
+python -m kabusys.data.bootstrap --fresh --yes   # 確認スキップ
+
+# 詳細ログ出力
+python -m kabusys.data.bootstrap --verbose
 ```
+
+処理の進捗はリアルタイムで標準出力に表示される（ファイル単位のダウンロード/ロード状況）。
 
 ### 4.4 適時開示収集パイプライン（Issue #198 / #199）
 

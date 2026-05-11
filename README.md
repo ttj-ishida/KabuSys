@@ -70,7 +70,6 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
 主要な必須/重要な環境変数例（.env に設定）:
 
-- JQUANTS_REFRESH_TOKEN（必須）
 - JQUANTS_BULK_API_KEY（必須）
 - KABU_API_PASSWORD（必須）
 - KABUSYS_ENV（`development` / `paper_trading` / `live`、デフォルト `development`）
@@ -125,7 +124,7 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
    python -m kabusys.config_setup
    ```
 
-   必須項目: `JQUANTS_REFRESH_TOKEN`, `JQUANTS_BULK_API_KEY`, `KABU_API_PASSWORD`
+   必須項目: `JQUANTS_BULK_API_KEY`, `KABU_API_PASSWORD`
 
 5. 設定の検証
 
@@ -154,7 +153,7 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
 7. J-Quants Bootstrap（初期データ一括取得）
 
-   J-Quants Bulk Download API から過去の株価・財務・銘柄マスタ・カレンダーを DuckDB に投入します:
+   J-Quants Bulk Download API（**Standard プラン以上が必要**）から過去の株価・財務・銘柄マスタ・カレンダーを DuckDB に投入します:
 
    ```
    # まずドライランで取得件数を確認
@@ -165,9 +164,17 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
    # 特定エンドポイントのみ取得する場合
    python -m kabusys.data.bootstrap --endpoint /equities/bars/daily
+
+   # 初期化して最初から実行する場合（履歴・キャッシュを全削除）
+   python -m kabusys.data.bootstrap --fresh --yes
+
+   # 詳細ログを表示する場合
+   python -m kabusys.data.bootstrap --verbose
    ```
 
-   取得対象エンドポイント: `prices_daily`, `master`, `financials`, `market_calendar`, `dividend`, `topix`
+   取得対象エンドポイント（Standard プラン）: `/equities/bars/daily`, `/equities/master`, `/fins/summary`, `/markets/calendar`, `/indices/bars/daily/topix`
+
+   Bootstrap は中断しても続きから再実行できます（`bootstrap_load_history` でファイル単位に管理）。
 
 8. 夜間バッチの初回手動実行（データ確認）
 

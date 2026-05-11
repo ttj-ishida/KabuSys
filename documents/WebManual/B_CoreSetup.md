@@ -81,8 +81,10 @@ python -m kabusys.config_setup
 | 環境変数 | 説明 | 例 |
 |---|---|---|
 | `KABUSYS_ENV` | 実行モード | `paper_trading`（テスト）/ `live`（本番） |
-| `JQUANTS_REFRESH_TOKEN` | J-Quants の Refresh Token | `eyJ...` |
+| `JQUANTS_BULK_API_KEY` | J-Quants v2 API キー | `your_api_key` |
 | `KABU_API_PASSWORD` | kabuステーション API パスワード（本番用） | `your_api_password` |
+
+> ℹ️ J-Quants API v2 では、リフレッシュトークン／ID トークンは不要です。API キー（`JQUANTS_BULK_API_KEY`）のみで全エンドポイントを利用できます。
 
 **Core 任意設定:**（未設定でもデフォルト値で Core は動作します）
 
@@ -117,7 +119,7 @@ python -m kabusys.validate_config
 **正常な出力例:**
 ```
 [OK] KABUSYS_ENV = paper_trading
-[OK] JQUANTS_REFRESH_TOKEN: 設定済み
+[OK] JQUANTS_BULK_API_KEY: 設定済み
 [OK] risk_config.yaml: 読み込み成功
 ...
 すべての検証が完了しました。
@@ -139,18 +141,35 @@ python scripts/setup_db.py --paper
 
 KabuSys を初めて起動する前に、J-Quants Bulk Download API から過去の株価・財務・銘柄マスタ・カレンダーを DuckDB に取り込む必要があります。
 
+> ⚠️ Bulk Download API は **J-Quants Standard プラン以上**が必要です。Free/Light プランではこの手順を実行できません。
+
 ```powershell
 # まずドライランで取得件数を確認
 python -m kabusys.data.bootstrap --dry-run
 
 # 全エンドポイントを一括取得（初回は数分〜数十分かかります）
+# 途中で中断しても続きから再実行できます
 python -m kabusys.data.bootstrap
 
 # 特定エンドポイントのみ取得する場合
 python -m kabusys.data.bootstrap --endpoint /equities/bars/daily
+
+# 最初からやり直す場合（履歴・ローカルキャッシュを全削除）
+python -m kabusys.data.bootstrap --fresh --yes
+
+# 詳細ログを表示する場合
+python -m kabusys.data.bootstrap --verbose
 ```
 
-**取得対象エンドポイント:** `prices_daily`, `master`, `financials`, `market_calendar`, `dividend`, `topix`
+**取得対象エンドポイント（Standard プラン）:**
+
+| エンドポイント | 内容 |
+|---|---|
+| `/equities/bars/daily` | 日足株価（OHLCV） |
+| `/equities/master` | 銘柄マスタ |
+| `/fins/summary` | 財務サマリー |
+| `/markets/calendar` | 取引カレンダー |
+| `/indices/bars/daily/topix` | TOPIX 日足 |
 
 Bootstrap 後、Core の処理フローを一度手動実行してデータが正しく処理されるか確認します。
 
