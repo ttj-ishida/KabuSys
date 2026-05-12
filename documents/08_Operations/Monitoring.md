@@ -276,8 +276,9 @@ Select-String -Path logs\*.log -Pattern "END status=failed"
 
 仕組み:
 - `sys.stdout` / `sys.stderr` を `_TeeWriter` オブジェクトに置き換える（コンソール出力は従来通り維持）
-- `_TeeWriter` は改行単位で `kabusys.stdio.<app_name>.stdout` / `stderr` ロガーへ転送し、実行単位 FileHandler がファイルへ書き込む
-- `kabusys.stdio.*` ロガーは `propagate=False` のため root ロガーの StreamHandler を経由せず、コンソール二重出力は発生しない
+- `_TeeWriter` は `\n` / `\r\n` / `\r` を行区切りとして `kabusys.stdio.<app_name>.stdout` / `stderr` ロガーへ転送し、実行単位 FileHandler がファイルへ書き込む（プログレスバー等の CR 更新も都度ログ化される）
+- `kabusys.stdio.*` ロガーは `propagate=False` かつレベル固定（`DEBUG`）のため、`LOG_LEVEL=ERROR` 設定時でも print() 出力は確実に記録される
+- `kabusys.stdio.*` ロガーは root ロガーの StreamHandler を経由しないため、コンソール二重出力は発生しない
 
 ファイル内での見分け方:
 ```
