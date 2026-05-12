@@ -439,7 +439,7 @@ def calc_quality(
                    ROW_NUMBER() OVER (PARTITION BY code ORDER BY report_date DESC, fetched_at DESC) AS rn
             FROM raw_financials
             WHERE report_date <= ?
-              AND period_type LIKE 'FYResult%'
+              AND period_type = 'FY'
         ),
         latest_fy AS (SELECT * FROM fy_ranked WHERE rn = 1),
         prior_fy  AS (SELECT * FROM fy_ranked WHERE rn = 2)

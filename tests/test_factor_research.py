@@ -652,7 +652,7 @@ class TestCalcQuality:
                 (
                     "1001",
                     date(2024, 1, 1),
-                    "FYResultNotification",
+                    "FY",
                     1_000_000.0,
                     200_000.0,
                     150_000.0,
@@ -674,7 +674,7 @@ class TestCalcQuality:
                 (
                     "1001",
                     date(2023, 1, 1),
-                    "FYResultNotification",
+                    "FY",
                     1_000_000.0,
                     100_000.0,
                     80_000.0,
@@ -684,7 +684,7 @@ class TestCalcQuality:
                 (
                     "1001",
                     date(2024, 1, 1),
-                    "FYResultNotification",
+                    "FY",
                     1_200_000.0,
                     150_000.0,
                     120_000.0,
@@ -706,7 +706,7 @@ class TestCalcQuality:
                 (
                     "1001",
                     date(2024, 1, 1),
-                    "FYResultNotification",
+                    "FY",
                     1_000_000.0,
                     200_000.0,
                     150_000.0,
@@ -727,7 +727,7 @@ class TestCalcQuality:
                 (
                     "1001",
                     date(2024, 1, 1),
-                    "Q1ResultNotification",
+                    "1Q",
                     250_000.0,
                     50_000.0,
                     40_000.0,
@@ -746,7 +746,7 @@ class TestCalcQuality:
                 (
                     "1001",
                     date(2024, 4, 1),
-                    "FYResultNotification",
+                    "FY",
                     1_000_000.0,
                     200_000.0,
                     150_000.0,
@@ -765,7 +765,7 @@ class TestCalcQuality:
                 (
                     "1001",
                     date(2024, 1, 1),
-                    "FYResultNotification",
+                    "FY",
                     1_000_000.0,
                     200_000.0,
                     150_000.0,
@@ -793,7 +793,7 @@ class TestCalcQuality:
                 (
                     "1001",
                     date(2024, 1, 1),
-                    "FYResultNotification",
+                    "FY",
                     0.0,
                     50_000.0,
                     30_000.0,
@@ -813,7 +813,7 @@ class TestCalcQuality:
                 (
                     "1001",
                     date(2023, 1, 1),
-                    "FYResultNotification",
+                    "FY",
                     -100_000.0,
                     -10_000.0,
                     -20_000.0,
@@ -823,7 +823,7 @@ class TestCalcQuality:
                 (
                     "1001",
                     date(2024, 1, 1),
-                    "FYResultNotification",
+                    "FY",
                     -80_000.0,
                     -5_000.0,
                     -10_000.0,
