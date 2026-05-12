@@ -205,23 +205,25 @@ powershell -File scripts\setup_task_scheduler.ps1
 
 | 時刻 | 処理 | スクリプト |
 |---|---|---|
-| 15:30 | 市場データ更新 | `scripts/run_data_update.py` |
-| 16:00 | 特徴量計算 | `scripts/run_feature_gen.py` |
+| 17:30 | 市場データ更新 | `scripts/run_data_update.py` |
+| 18:30 | 特徴量計算 | `scripts/run_feature_gen.py` |
 | 20:00 | 売買シグナル生成 | `scripts/run_strategy_signal.py` |
 | 21:00 | ポートフォリオ構築 | `scripts/run_portfolio_construction.py` |
 | 21:15 | 夜間バッチ結果レポート | `scripts/run_night_batch_report.py` |
 | 08:30 | Execution Engine 起動 | `python -m kabusys.run_execution` |
 | 09:00 | Monitoring 起動 | `python -m kabusys.run_monitoring` |
 
+> ℹ️ **スケジュール設計の根拠**: J-Quants の日足データは東証引け（15:30）直後ではなく 16:30〜17:00 頃に公開されます。17:30 に data_update を実行することで当日データを確実に取得してから feature_gen（18:30）を起動できます。
+
 **Addon 有効時のみ動くジョブ一覧:**（未設定でも Core の売買フローには影響しません）
 
 | 時刻 | 処理 | Addon | スクリプト |
 |---|---|---|---|
-| 15:33 | Yahoo News RSS 収集 | News Addon（`ENABLE_YAHOONEWS=true`） | `scripts/run_yahoonews_collection.py` |
+| 17:33 | Yahoo News RSS 収集 | News Addon（`ENABLE_YAHOONEWS=true`） | `scripts/run_yahoonews_collection.py` |
 | 15:35 | TDnet 適時開示収集 | Disclosure Addon（`ENABLE_TDNET=true`） | `scripts/run_tdnet_collection.py` |
 | 15:40 | EDINET 法定開示収集 | Disclosure Addon（`ENABLE_EDINET=true`） | `scripts/run_edinet_collection.py` |
 | 17:00 | 開示イベント分類 | Disclosure Addon（`ENABLE_TDNET=true`） | `scripts/run_disclosure_classification.py` |
-| 18:00 | AI 分析 | AI Addon（`ENABLE_AI_SENTIMENT=true`） | `scripts/run_ai_analysis.py` |
+| 19:00 | AI 分析 | AI Addon（`ENABLE_AI_SENTIMENT=true`） | `scripts/run_ai_analysis.py` |
 
 > 詳細は `documents/10_Runtime/RuntimeJobSchedule.md` を参照してください。
 
@@ -352,7 +354,7 @@ ENABLE_YAHOONEWS=true
 
 | 時刻 | 処理 | 保存先 |
 |---|---|---|
-| 15:33 | Yahoo News RSS から当日ニュースを取得・保存 | `raw_news` |
+| 17:33 | Yahoo News RSS から当日ニュースを取得・保存 | `raw_news` |
 
 **注意:**
 - AI センチメントスコアリング（`raw_news` → `ai_scores`）は `ENABLE_AI_SENTIMENT=true` を別途設定する必要があります

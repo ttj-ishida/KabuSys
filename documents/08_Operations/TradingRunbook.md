@@ -15,9 +15,10 @@
 11:30  昼休み確認
 12:30  後場監視
 15:00  Market Close 確認
-15:30  data_update
-16:00  feature_gen
-18:00  ai_analysis
+17:30  data_update
+17:33  yahoo_news_collection（News Addon のみ）
+18:30  feature_gen
+19:00  ai_analysis（AI Addon のみ）
 20:00  strategy_signal
 21:00  portfolio_construction
 21:15  night_batch_report（自動生成）
@@ -166,15 +167,16 @@ python -m kabusys.run_performance_report --type daily --save
 
 ---
 
-## 7. 夜間バッチ（15:30-21:15）
+## 7. 夜間バッチ（17:30-21:15）
 
 ジョブ:
 
 | 時刻 | スクリプト |
 |---|---|
-| 15:30 | `run_data_update.py` |
-| 16:00 | `run_feature_gen.py` |
-| 18:00 | `run_ai_analysis.py` |
+| 17:30 | `run_data_update.py` |
+| 17:33 | `run_yahoonews_collection.py`（News Addon のみ） |
+| 18:30 | `run_feature_gen.py` |
+| 19:00 | `run_ai_analysis.py`（AI Addon のみ） |
 | 20:00 | `run_strategy_signal.py` |
 | 21:00 | `run_portfolio_construction.py` |
 | 21:15 | `run_night_batch_report.py`（自動レポート生成） |

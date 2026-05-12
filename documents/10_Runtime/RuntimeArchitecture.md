@@ -65,7 +65,7 @@ Windows PC 上では以下のプロセスが独立して稼働する。
 
 夜間処理時間
 
-    15:30 〜 08:30
+    17:30 〜 08:30
 
 ------------------------------------------------------------------------
 
@@ -161,9 +161,10 @@ monitoring_service は常時稼働する。
 
   時刻    タスク名                       実行スクリプト
   ------- ------------------------------ -----------------------------------------------
-  15:30   KabuSys_DataUpdate             scripts\run_data_update.py
-  16:00   KabuSys_FeatureGen             scripts\run_feature_gen.py
-  18:00   KabuSys_AiAnalysis             scripts\run_ai_analysis.py
+  17:30   KabuSys_DataUpdate             scripts\run_data_update.py
+  17:33   KabuSys_YahooNewsCollection    scripts\run_yahoonews_collection.py
+  18:30   KabuSys_FeatureGen             scripts\run_feature_gen.py
+  19:00   KabuSys_AiAnalysis             scripts\run_ai_analysis.py
   20:00   KabuSys_StrategySignal         scripts\run_strategy_signal.py
   21:00   KabuSys_PortfolioConstruction  scripts\run_portfolio_construction.py
   21:15   KabuSys_NightBatchReport       scripts\run_night_batch_report.py

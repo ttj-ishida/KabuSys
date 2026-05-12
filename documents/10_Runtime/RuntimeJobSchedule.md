@@ -10,9 +10,10 @@
 KabuSys は、夜間バッチで翌営業日のシグナルと発注キューを作り、翌朝に Execution / Monitoring を起動してザラ場を監視する構成です。
 
 ```text
-15:30  data_update
-16:00  feature_gen
-18:00  ai_analysis
+17:30  data_update
+17:33  yahoo_news_collection（News Addon — ENABLE_YAHOONEWS=true のみ）
+18:30  feature_gen
+19:00  ai_analysis（AI Addon — ENABLE_AI_SENTIMENT=true のみ）
 20:00  strategy_signal
 21:00  portfolio_construction
 21:15  night_batch_report（自動生成）
@@ -23,11 +24,13 @@ KabuSys は、夜間バッチで翌営業日のシグナルと発注キューを
 15:00  market_close_report
 ```
 
+> **スケジュール設計の根拠**: J-Quants の日足株価データ（`daily_quotes`）は東証引け（15:30）直後ではなく 16:30〜17:00 頃に公開される。15:30 に data_update を実行すると当日データを取得できず feature_gen が 0 件になる。17:30 に遅延することでデータ確実取得後に実行できる。
+
 ---
 
 ## 2. Night Batch
 
-### 2.1 data_update（15:30）
+### 2.1 data_update（17:30）
 
 役割:
 
@@ -42,7 +45,7 @@ KabuSys は、夜間バッチで翌営業日のシグナルと発注キューを
 - `raw_news`
 - `topix_daily`（Issue #257: `run_topix_etl()` が Step 5 として追加）
 
-### 2.2 feature_gen（16:00）
+### 2.2 feature_gen（18:30）
 
 役割:
 
@@ -57,7 +60,7 @@ KabuSys は、夜間バッチで翌営業日のシグナルと発注キューを
 
 - `features`
 
-### 2.3 ai_analysis（18:00）
+### 2.3 ai_analysis（19:00）
 
 役割:
 
@@ -228,9 +231,10 @@ python -m kabusys.run_performance_report --type daily --save
 
 | 時刻 | タスク名 | スクリプト |
 |---|---|---|
-| 15:30 | `KabuSys_DataUpdate` | `scripts\run_data_update.py` |
-| 16:00 | `KabuSys_FeatureGen` | `scripts\run_feature_gen.py` |
-| 18:00 | `KabuSys_AiAnalysis` | `scripts\run_ai_analysis.py` |
+| 17:30 | `KabuSys_DataUpdate` | `scripts\run_data_update.py` |
+| 17:33 | `KabuSys_YahooNewsCollection` | `scripts\run_yahoonews_collection.py`（News Addon） |
+| 18:30 | `KabuSys_FeatureGen` | `scripts\run_feature_gen.py` |
+| 19:00 | `KabuSys_AiAnalysis` | `scripts\run_ai_analysis.py`（AI Addon） |
 | 20:00 | `KabuSys_StrategySignal` | `scripts\run_strategy_signal.py` |
 | 21:00 | `KabuSys_PortfolioConstruction` | `scripts\run_portfolio_construction.py` |
 | 21:15 | `KabuSys_NightBatchReport` | `scripts\run_night_batch_report.py` |

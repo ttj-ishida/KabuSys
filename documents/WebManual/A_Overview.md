@@ -77,8 +77,8 @@ Addon 機能:（任意・後から追加可能。未設定でも Core は動作�
 
 ```text
 # Core 標準フロー
-15:30  data_update
-16:00  feature_gen
+17:30  data_update
+18:30  feature_gen
 20:00  strategy_signal
 21:00  portfolio_construction
 21:15  night_batch_report（自動）
@@ -88,7 +88,10 @@ Addon 機能:（任意・後から追加可能。未設定でも Core は動作�
 15:00  market_close_report（手動）
 
 # AI Addon（ENABLE_AI_SENTIMENT=true のときのみ）
-18:00  ai_analysis
+19:00  ai_analysis
+
+# News Addon（ENABLE_YAHOONEWS=true のときのみ）
+17:33  yahoo_news_collection
 ```
 
 運用判断は、個別ログだけでなく次のレポートで行う。

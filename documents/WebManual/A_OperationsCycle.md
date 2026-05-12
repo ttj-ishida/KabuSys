@@ -32,9 +32,10 @@ KabuSys は、**市場が閉まっている時間に翌営業日の売買準備�
 11:30-12:30  昼休み
 12:30-15:00  後場監視
 15:00  市場クローズ確認
-15:30  data_update バッチ（自動）
-16:00  feature_generation バッチ（自動）
-18:00  ai_analysis バッチ（自動）
+17:30  data_update バッチ（自動）
+17:33  yahoo_news_collection バッチ（自動・News Addon のみ）
+18:30  feature_generation バッチ（自動）
+19:00  ai_analysis バッチ（自動・AI Addon のみ）
 20:00  strategy_signal バッチ（自動）
 21:00  portfolio_construction バッチ（自動）
 21:15  night_batch_report 自動生成（KabuSys_NightBatchReport）
@@ -173,11 +174,13 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 
 この時間帯は、新規売買のためではなく、当日運用結果が正常に締められたかを確認する時間です。
 
-### 3.7 夜間バッチ（15:30-21:15）
+### 3.7 夜間バッチ（17:30-21:15）
 
 夜間バッチは、翌営業日のための準備時間です。
 
-#### 15:30 `data_update_job`
+> **スケジュール設計の根拠**: J-Quants の日足データは東証引け（15:30）直後ではなく 16:30〜17:00 頃に公開されるため、data_update を 17:30 に設定しています。
+
+#### 17:30 `data_update_job`
 
 システムが行うこと:
 
@@ -191,7 +194,7 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 - `raw_news`
 - `fundamentals`
 
-#### 16:00 `feature_generation_job`
+#### 18:30 `feature_generation_job`
 
 システムが行うこと:
 
@@ -203,7 +206,7 @@ streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitor
 
 - `features`
 
-#### 18:00 `ai_analysis_job`
+#### 19:00 `ai_analysis_job`
 
 システムが行うこと:
 

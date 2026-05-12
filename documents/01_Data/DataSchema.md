@@ -158,7 +158,7 @@ J-Quants から取得した生の財務データ。
   BookValuePerShare→bps（Issue #185 追加）
 取得元（Bulk API）: `/fins/summary`
   DiscDate→report_date, CurPerType→period_type, Sales→revenue, OP→operating_profit
-  NP→net_income, EPS→eps, Eq/TA→roe
+  NP→net_income, EPS→eps, NP/Eq→roe（ROE列は存在しないため純利益÷純資産で算出）
 
 ------------------------------------------------------------------------
 

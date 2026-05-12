@@ -105,7 +105,7 @@ div_yield_max = 3.0
   - `profit_growth_yoy` = `(net_income − prev_net_income) / |prev_net_income|`（前 FY 比）
   - 各指標を個別に Zスコア正規化（±3クリップ）してから平均
 - **実装**: `research/factor_research.py::calc_quality()`
-- **データ源**: `fundamentals` テーブル（`period_type LIKE 'FYResult%'` の最新 FY実績のみ使用）
+- **データ源**: `fundamentals` テーブル（`period_type = 'FY'` の最新通期実績のみ使用。J-Quants fins_summary の `CurPerType` 値に対応）
 - **傾向**: 財務の健全性が高く持続的に利益を伸ばしている企業を高評価。PER/PBR のバリューファクターを補完する
 
 ---
