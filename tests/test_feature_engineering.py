@@ -58,7 +58,7 @@ def _insert_financials(conn, code: str) -> None:
             (
                 code,
                 date(2023, 1, 1),
-                "FYResultNotification",
+                "FY",
                 1_000_000,
                 200_000,
                 150_000,
@@ -69,7 +69,7 @@ def _insert_financials(conn, code: str) -> None:
             (
                 code,
                 date(2024, 1, 1),
-                "FYResultNotification",
+                "FY",
                 1_200_000,
                 250_000,
                 180_000,
