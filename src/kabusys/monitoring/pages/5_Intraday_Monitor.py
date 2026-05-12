@@ -82,7 +82,7 @@ try:
     with tab_trade:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT event_type, message, logged_at FROM trade_logs ORDER BY logged_at DESC LIMIT 50"
+            "SELECT event_type, client_order_id, code, side, qty, price, filled_qty, state, logged_at FROM trade_logs ORDER BY logged_at DESC LIMIT 50"
         ).fetchall()
         if rows:
             st.dataframe([dict(r) for r in rows], use_container_width=True)
