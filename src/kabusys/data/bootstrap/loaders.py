@@ -197,10 +197,8 @@ def load_financials(
             TRY_CAST("OP" AS DOUBLE)          AS operating_profit,
             TRY_CAST("NP" AS DOUBLE)          AS net_income,
             TRY_CAST("EPS" AS DOUBLE)         AS eps,
-            CASE WHEN TRY_CAST("Eq" AS DOUBLE) IS NOT NULL
-                      AND TRY_CAST("Eq" AS DOUBLE) != 0
-                 THEN TRY_CAST("NP" AS DOUBLE) / TRY_CAST("Eq" AS DOUBLE)
-                 ELSE NULL END                AS roe
+            -- fins_summary CSV に ROE 列は存在しない。NP/Eq（純資産）から算出する。
+            TRY_CAST("NP" AS DOUBLE) / NULLIF(TRY_CAST("Eq" AS DOUBLE), 0) AS roe
         FROM read_csv('{path}', nullstr='', all_varchar=true)
         WHERE TRIM("Code") != ''
           AND TRY_CAST("DiscDate" AS DATE) IS NOT NULL
