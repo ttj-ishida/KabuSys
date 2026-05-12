@@ -391,6 +391,8 @@ python -m kabusys.run_monitoring
 python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
 ```
 
+> ⚠️ Streamlit はターミナルを占有します。レポートスクリプトなどを別途実行する場合は、**新しいターミナルウィンドウ**を開いて `.venv\Scripts\Activate.ps1` を有効化してから実行してください。
+
 | ページ | 主な確認内容 |
 |---|---|
 | **Home** | Kill Switch / Execution・Monitoring プロセス状態 / ドローダウン / 直近エラーイベント |

@@ -138,6 +138,8 @@ python -m kabusys.run_intraday_monitor --watch
 python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
 ```
 
+> ⚠️ Streamlit はターミナルを占有します。レポートスクリプトなどを別途実行する場合は、**新しいターミナルウィンドウ**を開いて `.venv\Scripts\Activate.ps1` を有効化してから実行してください。
+
 ダッシュボードは 10 ページ構成です。
 
 | ページ（サイドバー） | 主な確認内容 |
