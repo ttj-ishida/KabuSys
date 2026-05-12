@@ -174,8 +174,10 @@ def test_updates_cancelled_on_yes(tmp_path, monkeypatch):
     ):
         _run(["--date", "2026-05-12"])
 
-    sql_calls = [(str(c.args[0]), c.args[1] if len(c.args) > 1 else [])
-                 for c in conn_mock.execute.call_args_list]
+    sql_calls = [
+        (str(c.args[0]), c.args[1] if len(c.args) > 1 else [])
+        for c in conn_mock.execute.call_args_list
+    ]
     update_call = next(c for c in sql_calls if "UPDATE" in c[0])
     assert "cancelled" in update_call[0]
     assert "pending" in update_call[0]
