@@ -108,7 +108,7 @@ def calc_momentum(
             CASE WHEN ma200 > 0 AND cnt_200 >= {_MA_LONG_DAYS}
                  THEN (close - ma200) / ma200 END AS ma200_dev
         FROM base
-        WHERE date = ?
+        WHERE date = (SELECT MAX(date) FROM prices_daily WHERE date <= ?)
         ORDER BY code
         """,
         [start_date, target_date, target_date],
@@ -208,7 +208,7 @@ def calc_volatility(
             avg_turnover,
             CASE WHEN avg_volume > 0 THEN curr_volume / avg_volume END AS volume_ratio
         FROM agg
-        WHERE date = ?
+        WHERE date = (SELECT MAX(date) FROM prices_daily WHERE date <= ?)
         ORDER BY code
         """,
         [start_date, target_date, target_date],
@@ -263,7 +263,7 @@ def calc_value(
         price_on_date AS (
             SELECT code, close
             FROM prices_daily
-            WHERE date = ?
+            WHERE date = (SELECT MAX(date) FROM prices_daily WHERE date <= ?)
         ),
         annual_div AS (
             SELECT code, SUM(div_rate) AS annual_div

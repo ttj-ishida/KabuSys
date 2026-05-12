@@ -157,6 +157,16 @@ class TestCalcMomentum:
         result = calc_momentum(db, date(2024, 1, 5))
         assert result == []
 
+    def test_fallback_to_latest_available_date(self, db):
+        """target_date にデータがなくても最新日のデータを返す（当日未取得でも動作）。"""
+        from datetime import timedelta
+
+        target = self._make_price_series(db, "1005", 1000.0, 250)
+        # target+1 にはデータがない → フォールバックで target 日のデータが返る
+        result = calc_momentum(db, target + timedelta(days=1))
+        assert len(result) > 0
+        assert result[0]["code"] == "1005"
+
 
 # ---------------------------------------------------------------------------
 # calc_volatility
@@ -235,6 +245,22 @@ class TestCalcVolatility:
         assert "avg_turnover" in row
         assert "volume_ratio" in row
 
+    def test_fallback_to_latest_available_date(self, db):
+        """target_date にデータがなくても最新日のデータを返す（当日未取得でも動作）。"""
+        from datetime import timedelta
+
+        base = date(2024, 5, 1)
+        rows = [
+            (base + timedelta(days=i), "2004", 1000.0, 1020.0, 980.0, 1000.0, 1000, 1000000.0)
+            for i in range(30)
+        ]
+        _insert_prices(db, rows)
+        last = base + timedelta(days=29)
+        # last+1 にはデータがない → フォールバックで last 日のデータが返る
+        result = calc_volatility(db, last + timedelta(days=1))
+        assert len(result) > 0
+        assert result[0]["code"] == "2004"
+
 
 # ---------------------------------------------------------------------------
 # calc_value
@@ -278,6 +304,18 @@ class TestCalcValue:
         row = next((r for r in result if r["code"] == "3004"), None)
         assert row is not None
         assert row["per"] is None
+
+    def test_fallback_to_latest_available_date(self, db):
+        """target_date に価格データがなくても最新日のデータを返す（当日未取得でも動作）。"""
+        from datetime import timedelta
+
+        d = date(2024, 6, 1)
+        _insert_prices(db, [(d, "3005", 2000.0, 2010.0, 1990.0, 2000.0, 1000, 2000000.0)])
+        _insert_financials(db, [("3005", date(2024, 3, 31), "Q4", 1e9, 2e8, 1e8, 100.0, 0.10)])
+        # d+1 にはデータがない → フォールバックで d 日のデータが返る
+        result = calc_value(db, d + timedelta(days=1))
+        assert len(result) > 0
+        assert result[0]["code"] == "3005"
 
 
 # ---------------------------------------------------------------------------
