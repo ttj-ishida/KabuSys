@@ -190,9 +190,9 @@ def fetch_daily_quotes(
     if code:
         params["code"] = code
     if date_from:
-        params["dateFrom"] = date_from.strftime("%Y%m%d")
+        params["dateFrom"] = date_from.strftime("%Y-%m-%d")
     if date_to:
-        params["dateTo"] = date_to.strftime("%Y%m%d")
+        params["dateTo"] = date_to.strftime("%Y-%m-%d")
 
     result: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
@@ -228,9 +228,9 @@ def fetch_financial_statements(
     if code:
         params["code"] = code
     if date_from:
-        params["dateFrom"] = date_from.strftime("%Y%m%d")
+        params["dateFrom"] = date_from.strftime("%Y-%m-%d")
     if date_to:
-        params["dateTo"] = date_to.strftime("%Y%m%d")
+        params["dateTo"] = date_to.strftime("%Y-%m-%d")
 
     result: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
@@ -262,9 +262,9 @@ def fetch_earnings_calendar(
     """
     params: dict[str, str] = {}
     if date_from:
-        params["dateFrom"] = date_from.strftime("%Y%m%d")
+        params["dateFrom"] = date_from.strftime("%Y-%m-%d")
     if date_to:
-        params["dateTo"] = date_to.strftime("%Y%m%d")
+        params["dateTo"] = date_to.strftime("%Y-%m-%d")
     # 注: /equities/earnings-calendar は 30日以内の窓であればページネーションなしで全件返す。
     # 30日超の範囲を指定する場合は pagination_key ループを追加すること。
     data = _request("/equities/earnings-calendar", params=params)
@@ -293,7 +293,7 @@ def save_earnings_calendar(
         if not code or not date_str:
             continue
         try:
-            ann_date = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
+            ann_date = date.fromisoformat(date_str[:10])
         except (ValueError, IndexError):
             logger.warning("save_earnings_calendar: 不正な日付フォーマット '%s'—スキップ", date_str)
             continue
@@ -477,9 +477,9 @@ def fetch_dividends(
     if code:
         params["code"] = code
     if date_from:
-        params["dateFrom"] = date_from.strftime("%Y%m%d")
+        params["dateFrom"] = date_from.strftime("%Y-%m-%d")
     if date_to:
-        params["dateTo"] = date_to.strftime("%Y%m%d")
+        params["dateTo"] = date_to.strftime("%Y-%m-%d")
 
     result: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
@@ -619,9 +619,9 @@ def fetch_topix_daily(
     """
     params: dict[str, str] = {}
     if date_from:
-        params["dateFrom"] = date_from.strftime("%Y%m%d")
+        params["dateFrom"] = date_from.strftime("%Y-%m-%d")
     if date_to:
-        params["dateTo"] = date_to.strftime("%Y%m%d")
+        params["dateTo"] = date_to.strftime("%Y-%m-%d")
     data = _request("/indices/bars/daily/topix", params=params)
     records = data.get("data", [])
     logger.info("fetch_topix_daily: %d レコード取得", len(records))
@@ -649,7 +649,7 @@ def save_topix_daily(
         if not date_str:
             continue
         try:
-            d = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
+            d = date.fromisoformat(date_str[:10])
         except (ValueError, IndexError):
             logger.warning("save_topix_daily: 不正な日付 '%s' — スキップ", date_str)
             continue
@@ -709,7 +709,7 @@ def fetch_listed_info(
 
     params: dict[str, str] = {}
     if date_ is not None:
-        params["date"] = date_.strftime("%Y%m%d")
+        params["date"] = date_.strftime("%Y-%m-%d")
 
     data = _request("/equities/master", params=params if params else None)
     records = data.get("data", [])
