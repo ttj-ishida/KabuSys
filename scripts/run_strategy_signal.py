@@ -18,23 +18,26 @@ from kabusys.config import Settings
 from kabusys.operations.job_run_recorder import write_job_result
 from kabusys.operations.night_batch_report import JobRunResult
 from kabusys.strategy.signal_generator import generate_signals
-from kabusys.utils.logging_setup import setup_logging
+from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
 setup_logging(app_name="strategy_signal")
 logger = logging.getLogger(__name__)
 
 _JOB_NAME = "strategy_signal_job"
+_APP_NAME = "strategy_signal"
 
 
 def main() -> None:
     started_at = datetime.now(timezone.utc)
-    settings = Settings()
-    conn = duckdb.connect(str(settings.duckdb_path))
+    log_run_start(_APP_NAME)
+    conn = None
     _failed = False
     _errors: list[str] = []
     _updated_rows: dict[str, int] = {}
 
     try:
+        settings = Settings()
+        conn = duckdb.connect(str(settings.duckdb_path))
         target_date = date.today()
         n = generate_signals(conn, target_date)
         _updated_rows["signals"] = n
@@ -44,7 +47,8 @@ def main() -> None:
         _errors.append(str(exc))
         _failed = True
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
     finished_at = datetime.now(timezone.utc)
     try:
@@ -63,6 +67,7 @@ def main() -> None:
     except Exception:
         logger.warning("JobRunResult の書き出しに失敗しました", exc_info=True)
 
+    log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
     if _failed:
         sys.exit(1)
 

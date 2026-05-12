@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import duckdb
@@ -37,7 +37,7 @@ from kabusys.operations.execution_startup_report import (  # noqa: E402
 )
 from kabusys.operations.line_reports import format_morning_message  # noqa: E402
 from kabusys.operations.notifier import build_notifier  # noqa: E402
-from kabusys.utils.logging_setup import setup_logging  # noqa: E402
+from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging  # noqa: E402
 from kabusys.utils.process_priority import set_process_priority  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -228,8 +228,13 @@ def _pos_value(p: object) -> float:
     return float(p.qty) * float(price)  # type: ignore[attr-defined]
 
 
+_APP_NAME = "execution"
+
+
 def main() -> None:
-    setup_logging(app_name="execution")
+    setup_logging(app_name=_APP_NAME)
+    started_at = datetime.now(timezone.utc)
+    log_run_start(_APP_NAME)
     # 1. プロセス優先度を High に設定（最初に実行）
     set_process_priority("high")
 
@@ -332,6 +337,10 @@ def main() -> None:
                 break
             thread.join(timeout=1.0)
         thread.join(timeout=30.0)
+        log_run_end(_APP_NAME, status="success", started_at=started_at)
+    except Exception:
+        log_run_end(_APP_NAME, status="failed", started_at=started_at)
+        raise
     finally:
         sqlite_conn.close()
         duckdb_conn.close()

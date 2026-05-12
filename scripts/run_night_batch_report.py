@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import duckdb
@@ -28,10 +28,12 @@ from kabusys.operations.night_batch_report import (
     format_cli_summary,
     save_report,
 )
-from kabusys.utils.logging_setup import setup_logging
+from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
 setup_logging(app_name="night_batch_report")
 logger = logging.getLogger(__name__)
+
+_APP_NAME = "night_batch_report"
 
 
 # ---------------------------------------------------------------------------
@@ -167,55 +169,69 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    args = _parse_args()
-
-    if args.date:
-        try:
-            run_date = date.fromisoformat(args.date)
-        except ValueError:
-            logger.error("--date の形式が不正です: %s (YYYY-MM-DD が必要です)", args.date)
-            sys.exit(1)
-    else:
-        run_date = date.today()
-    logger.info("レポート生成開始: run_date=%s", run_date)
-
-    # --- JobRunResult 読み込み ---
-    job_runs_base = Path(args.job_runs_dir) if args.job_runs_dir else None
-    job_results = load_job_results_or_empty(run_date, base_dir=job_runs_base)
-    logger.info("JobRunResult 読み込み: %d 件", len(job_results))
-
-    # --- DB クエリ ---
-    db_path = args.db or str(Settings().duckdb_path)
-    target_date: date = run_date + timedelta(days=1)
-    conn = duckdb.connect(db_path)
+    args = _parse_args()  # argparse の --help / バリデーションエラーはマーカー出力前に終了
+    started_at = datetime.now(timezone.utc)
+    log_run_start(_APP_NAME)
+    conn = None
+    _failed = False
     try:
-        update_counts = collect_update_counts(conn, run_date)
-        next_day = collect_next_day_summary(conn, run_date)
-        try:
-            row = conn.execute(
-                "SELECT MIN(date) FROM prices_daily WHERE date > ?", [run_date]
-            ).fetchone()
-            if row and row[0]:
-                target_date = row[0]
-        except Exception:
-            logger.warning("翌営業日の取得に失敗しました。run_date+1 を使用します。", exc_info=True)
+        if args.date:
+            try:
+                run_date = date.fromisoformat(args.date)
+            except ValueError:
+                logger.error("--date の形式が不正です: %s (YYYY-MM-DD が必要です)", args.date)
+                _failed = True
+        else:
+            run_date = date.today()
+
+        if not _failed:
+            logger.info("レポート生成開始: run_date=%s", run_date)
+
+            # --- JobRunResult 読み込み ---
+            job_runs_base = Path(args.job_runs_dir) if args.job_runs_dir else None
+            job_results = load_job_results_or_empty(run_date, base_dir=job_runs_base)
+            logger.info("JobRunResult 読み込み: %d 件", len(job_results))
+
+            # --- DB クエリ ---
+            db_path = args.db or str(Settings().duckdb_path)
+            target_date: date = run_date + timedelta(days=1)
+            conn = duckdb.connect(db_path)
+            update_counts = collect_update_counts(conn, run_date)
+            next_day = collect_next_day_summary(conn, run_date)
+            try:
+                row = conn.execute(
+                    "SELECT MIN(date) FROM prices_daily WHERE date > ?", [run_date]
+                ).fetchone()
+                if row and row[0]:
+                    target_date = row[0]
+            except Exception:
+                logger.warning(
+                    "翌営業日の取得に失敗しました。run_date+1 を使用します。", exc_info=True
+                )
+
+            # --- レポート構築・保存 ---
+            report = build_report(
+                job_results,
+                update_counts,
+                next_day,
+                run_date=run_date,
+                target_date=target_date,
+            )
+
+            output_dir = Path(args.output_dir) if args.output_dir else Path("artifacts/reports")
+            saved_path = save_report(report, output_dir)
+            logger.info("レポート保存: %s", saved_path)
+
+            print(format_cli_summary(report))
+    except Exception:
+        logger.exception("night_batch_report バッチが失敗しました")
+        _failed = True
     finally:
-        conn.close()
-
-    # --- レポート構築・保存 ---
-    report = build_report(
-        job_results,
-        update_counts,
-        next_day,
-        run_date=run_date,
-        target_date=target_date,
-    )
-
-    output_dir = Path(args.output_dir) if args.output_dir else Path("artifacts/reports")
-    saved_path = save_report(report, output_dir)
-    logger.info("レポート保存: %s", saved_path)
-
-    print(format_cli_summary(report))
+        if conn is not None:
+            conn.close()
+        log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
+    if _failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -39,7 +39,7 @@ from kabusys.operations.performance_collector import (
 from kabusys.operations.performance_report import build_report
 from kabusys.portfolio.portfolio_builder import calc_score_weights, select_candidates
 from kabusys.portfolio.position_sizing import calc_position_sizes
-from kabusys.utils.logging_setup import setup_logging
+from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
 setup_logging(app_name="portfolio_construction")
 logger = logging.getLogger(__name__)
@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PORTFOLIO_VALUE = 10_000_000
 _MAX_UTILIZATION = 0.70
 _JOB_NAME = "portfolio_construction_job"
+_APP_NAME = "portfolio_construction"
 
 
 def _get_today_return(conn: duckdb.DuckDBPyConnection, target_date: date, env: str) -> float | None:
@@ -61,14 +62,16 @@ def _get_today_return(conn: duckdb.DuckDBPyConnection, target_date: date, env: s
 
 def main() -> None:
     started_at = datetime.now(timezone.utc)
-    settings = Settings()
-    conn = duckdb.connect(str(settings.duckdb_path))
+    log_run_start(_APP_NAME)
+    conn = None
     target_date = date.today()
     _failed = False
     _errors: list[str] = []
     _updated_rows: dict[str, int] = {}
 
     try:
+        settings = Settings()
+        conn = duckdb.connect(str(settings.duckdb_path))
         portfolio_value_str = os.environ.get("PORTFOLIO_VALUE", str(_DEFAULT_PORTFOLIO_VALUE))
         try:
             portfolio_value = float(portfolio_value_str)
@@ -244,7 +247,8 @@ def main() -> None:
         _errors.append(str(exc))
         _failed = True
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
     finished_at = datetime.now(timezone.utc)
     try:
@@ -263,6 +267,7 @@ def main() -> None:
     except Exception:
         logger.warning("JobRunResult の書き出しに失敗しました", exc_info=True)
 
+    log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
     if _failed:
         sys.exit(1)
 
