@@ -211,6 +211,99 @@ def test_date_and_code_filter(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# --delete-cancelled と --code は同時指定不可
+# ---------------------------------------------------------------------------
+
+
+def test_delete_cancelled_and_code_cannot_coexist(tmp_path):
+    duckdb_path = tmp_path / "kabusys.duckdb"
+    duckdb_path.write_bytes(b"fake")
+    settings_mock = MagicMock()
+    settings_mock.duckdb_path = duckdb_path
+    with patch("cancel_signal_queue.Settings", return_value=settings_mock):
+        with pytest.raises(SystemExit) as exc:
+            _run(["--delete-cancelled", "--code", "7203"])
+        assert exc.value.code == 2
+
+
+# ---------------------------------------------------------------------------
+# --delete-cancelled: 対象 0 件 → exit 0
+# ---------------------------------------------------------------------------
+
+
+def test_delete_cancelled_exits_zero_when_none(tmp_path):
+    duckdb_path = tmp_path / "kabusys.duckdb"
+    duckdb_path.write_bytes(b"fake")
+    settings_mock = MagicMock()
+    settings_mock.duckdb_path = duckdb_path
+    conn_mock = MagicMock()
+    conn_mock.execute.return_value.fetchone.return_value = (0,)
+    with (
+        patch("cancel_signal_queue.Settings", return_value=settings_mock),
+        patch("cancel_signal_queue.duckdb.connect", return_value=conn_mock),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            _run(["--delete-cancelled"])
+        assert exc.value.code == 0
+
+
+# ---------------------------------------------------------------------------
+# --delete-cancelled: ユーザーが "n" → DELETE 実行なし・exit 0
+# ---------------------------------------------------------------------------
+
+
+def test_delete_cancelled_on_user_no(tmp_path, monkeypatch):
+    duckdb_path = tmp_path / "kabusys.duckdb"
+    duckdb_path.write_bytes(b"fake")
+    settings_mock = MagicMock()
+    settings_mock.duckdb_path = duckdb_path
+    conn_mock = MagicMock()
+    conn_mock.execute.return_value.fetchone.return_value = (3,)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+    with (
+        patch("cancel_signal_queue.Settings", return_value=settings_mock),
+        patch("cancel_signal_queue.duckdb.connect", return_value=conn_mock),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            _run(["--delete-cancelled"])
+        assert exc.value.code == 0
+
+    sql_calls = [str(c.args[0]) for c in conn_mock.execute.call_args_list]
+    assert not any("DELETE" in s for s in sql_calls)
+
+
+# ---------------------------------------------------------------------------
+# --delete-cancelled: ユーザーが "y" → DELETE 実行される
+# ---------------------------------------------------------------------------
+
+
+def test_delete_cancelled_on_user_yes(tmp_path, monkeypatch):
+    duckdb_path = tmp_path / "kabusys.duckdb"
+    duckdb_path.write_bytes(b"fake")
+    settings_mock = MagicMock()
+    settings_mock.duckdb_path = duckdb_path
+
+    count_result = MagicMock()
+    count_result.fetchone.return_value = (3,)
+    delete_result = MagicMock()
+    delete_result.rowcount = 3
+    conn_mock = MagicMock()
+    conn_mock.execute.side_effect = [count_result, delete_result]
+
+    monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+    with (
+        patch("cancel_signal_queue.Settings", return_value=settings_mock),
+        patch("cancel_signal_queue.duckdb.connect", return_value=conn_mock),
+    ):
+        _run(["--delete-cancelled"])
+
+    sql_calls = [str(c.args[0]) for c in conn_mock.execute.call_args_list]
+    assert any("DELETE" in s and "cancelled" in s for s in sql_calls)
+    conn_mock.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # --all は日付条件なしで全 pending を対象にすること
 # ---------------------------------------------------------------------------
 
