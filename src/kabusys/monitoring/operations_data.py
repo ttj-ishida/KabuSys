@@ -399,13 +399,20 @@ def load_paper_verification_data(
     paper_sqlite_path: Path,
     from_dt: Optional[str] = None,
     to_dt: Optional[str] = None,
+    monitoring_sqlite_path: Optional[Path] = None,
 ) -> dict:
     """ペーパートレード検証データを SQLite から取得する。
 
+    run_monitoring.py は KABUSYS_ENV にかかわらず monitoring.db (sqlite_path) に
+    system_status を書き込む。そのため稼働率は monitoring_sqlite_path から読み、
+    約定率・レイテンシは paper_sqlite_path から読む。
+
     Args:
-        paper_sqlite_path: paper trading SQLite DB ファイルのパス
+        paper_sqlite_path: paper trading SQLite DB ファイルのパス（trade_logs / latency）
         from_dt: フィルタ開始日時文字列（ISO8601 形式、省略可）
         to_dt:   フィルタ終了日時文字列（ISO8601 形式、省略可）
+        monitoring_sqlite_path: 監視 DB ファイルのパス（system_status）。
+                                省略時は paper_sqlite_path を使う（後方互換）。
 
     Returns:
         DBが存在しない場合: {"available": False}
@@ -432,16 +439,23 @@ def load_paper_verification_data(
     if not paper_sqlite_path.exists():
         return {"available": False}
 
-    uri = paper_sqlite_path.resolve().as_uri() + "?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
+    stability_path = Path(monitoring_sqlite_path) if monitoring_sqlite_path else paper_sqlite_path
+
+    stability_uri = stability_path.resolve().as_uri() + "?mode=ro"
+    stability_conn = sqlite3.connect(stability_uri, uri=True)
     try:
         try:
-            stability = _paper_query_system_stability(conn, from_dt, to_dt)
+            stability = _paper_query_system_stability(stability_conn, from_dt, to_dt)
         except sqlite3.OperationalError:
             stability = {"total_polls": 0, "error_count": 0, "uptime_pct": None}
+    finally:
+        stability_conn.close()
 
+    paper_uri = paper_sqlite_path.resolve().as_uri() + "?mode=ro"
+    paper_conn = sqlite3.connect(paper_uri, uri=True)
+    try:
         try:
-            orders = _paper_query_order_stats(conn, from_dt, to_dt)
+            orders = _paper_query_order_stats(paper_conn, from_dt, to_dt)
         except sqlite3.OperationalError:
             orders = {
                 "created_count": 0,
@@ -452,11 +466,11 @@ def load_paper_verification_data(
             }
 
         try:
-            latency = _paper_query_latency(conn, from_dt, to_dt)
+            latency = _paper_query_latency(paper_conn, from_dt, to_dt)
         except sqlite3.OperationalError:
             latency = {"avg_ms": None, "max_ms": None, "p95_ms": None}
     finally:
-        conn.close()
+        paper_conn.close()
 
     uptime_pct = stability.get("uptime_pct")
     fill_rate_pct = orders.get("fill_rate_pct")

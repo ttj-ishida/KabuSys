@@ -98,7 +98,13 @@ try:
             to_dt = f"{to_date}T23:59:59.999999+00:00"
 
             paper_path = Path(str(settings.paper_sqlite_path))
-            data = load_paper_verification_data(paper_path, from_dt=from_dt, to_dt=to_dt)
+            monitoring_path = Path(str(settings.sqlite_path))
+            data = load_paper_verification_data(
+                paper_path,
+                from_dt=from_dt,
+                to_dt=to_dt,
+                monitoring_sqlite_path=monitoring_path,
+            )
 
             if not data.get("available"):
                 st.warning(
