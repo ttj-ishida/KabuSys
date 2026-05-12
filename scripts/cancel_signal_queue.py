@@ -85,7 +85,8 @@ def _run_delete_cancelled(conn: duckdb.DuckDBPyConnection) -> None:
         logger.info("ユーザーによりキャンセルされました。")
         sys.exit(0)
 
-    result = conn.execute("DELETE FROM signal_queue WHERE status = 'cancelled'")
+    result = conn.execute("DELETE FROM signal_queue WHERE status = ?", ["cancelled"])
+    conn.commit()
     logger.info("signal_queue から cancelled レコードを %d 件削除しました。", result.rowcount)
 
 

@@ -44,7 +44,7 @@ try:
         pending = df[df["status"] == "pending"] if not df.empty else df.iloc[0:0]
 
         # ステータスフィルター — 実データと既知ステータスのユニオンでオプションを構築
-        actual_statuses = sorted(df["status"].unique().tolist()) if not df.empty else []
+        actual_statuses = sorted(df["status"].dropna().unique().tolist()) if not df.empty else []
         all_options = sorted(set(_KNOWN_STATUSES) | set(actual_statuses))
         default_statuses = [s for s in all_options if s != "cancelled"]
         selected_statuses = st.multiselect(

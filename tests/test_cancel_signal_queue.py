@@ -298,8 +298,11 @@ def test_delete_cancelled_on_user_yes(tmp_path, monkeypatch):
     ):
         _run(["--delete-cancelled"])
 
-    sql_calls = [str(c.args[0]) for c in conn_mock.execute.call_args_list]
-    assert any("DELETE" in s and "cancelled" in s for s in sql_calls)
+    delete_call = next(c for c in conn_mock.execute.call_args_list if "DELETE" in str(c.args[0]))
+    assert "cancelled" in str(delete_call.args[0]) or "cancelled" in str(
+        delete_call.args[1] if len(delete_call.args) > 1 else []
+    )
+    conn_mock.commit.assert_called_once()
     conn_mock.close.assert_called_once()
 
 
