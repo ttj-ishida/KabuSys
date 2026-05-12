@@ -67,10 +67,10 @@ class _TeeWriter:
             self.write(line)
 
     def flush(self) -> None:
-        stripped = self._buf.strip()
-        if stripped:
+        buf, self._buf = self._buf, ""
+        stripped = buf.rstrip("\r")
+        if stripped.strip():
             self._logger_fn(stripped)
-            self._buf = ""
         self._orig.flush()
 
     @property
@@ -85,7 +85,13 @@ class _TeeWriter:
         return bool(getattr(self._orig, "isatty", lambda: False)())
 
     def fileno(self) -> int:
-        return self._orig.fileno()
+        fn = getattr(self._orig, "fileno", None)
+        if fn is None:
+            raise OSError("fileno not supported")
+        return fn()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._orig, name)
 
 
 def setup_logging(
@@ -242,7 +248,10 @@ def _install_stdio_tee(
     stderr_logger = logging.getLogger(f"kabusys.stdio.{app_name}.stderr")
 
     for lg in (stdout_logger, stderr_logger):
-        lg.setLevel(level)
+        # DEBUG に固定して stdio ロガー自身はレベルフィルタをかけない。
+        # NOTSET だと getEffectiveLevel() が親チェーンを辿り root の ERROR が適用されるため、
+        # LOG_LEVEL=ERROR 設定時に print() 出力が消えてしまう。
+        lg.setLevel(logging.DEBUG)
         lg.propagate = False
         for h in list(lg.handlers):
             h.close()
@@ -252,7 +261,7 @@ def _install_stdio_tee(
     # root ロガーの run_file_handler とは別オブジェクトで同一ファイルに追記する
     try:
         fh_out = logging.FileHandler(run_log_file, mode="a", encoding="utf-8")
-        fh_out.setLevel(level)
+        fh_out.setLevel(logging.DEBUG)
         fh_out.setFormatter(formatter)
         stdout_logger.addHandler(fh_out)
     except Exception as e:
@@ -261,16 +270,18 @@ def _install_stdio_tee(
 
     try:
         fh_err = logging.FileHandler(run_log_file, mode="a", encoding="utf-8")
-        fh_err.setLevel(logging.WARNING)
+        fh_err.setLevel(logging.DEBUG)
         fh_err.setFormatter(formatter)
         stderr_logger.addHandler(fh_err)
     except Exception as e:
         logger.warning("stderr キャプチャ用ハンドラの作成に失敗しました: %s", e)
 
+    # sys.stdout / sys.stderr を使用（sys.__stdout__ ではなく）:
+    # pytest capsys など他フレームワークのラッパーを保持するため
     if not isinstance(sys.stdout, _TeeWriter):
-        sys.stdout = _TeeWriter(sys.__stdout__, stdout_logger.info)
+        sys.stdout = _TeeWriter(sys.stdout, stdout_logger.info)
     if not isinstance(sys.stderr, _TeeWriter):
-        sys.stderr = _TeeWriter(sys.__stderr__, stderr_logger.warning)
+        sys.stderr = _TeeWriter(sys.stderr, stderr_logger.warning)
 
 
 def log_run_start(app_name: str) -> None:
