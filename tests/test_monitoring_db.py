@@ -14,7 +14,7 @@ def mdb(monitoring_conn):
 
 class TestInitMonitoringDb:
     def test_tables_created_idempotently(self, monitoring_conn):
-        """init_monitoring_db を2回呼んでもエラーなし、6テーブルが存在する"""
+        """init_monitoring_db を2回呼んでもエラーなし、7テーブルが存在する"""
         init_monitoring_db(monitoring_conn)  # 2回目の呼び出し
         tables = {
             row[0]

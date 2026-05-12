@@ -37,6 +37,7 @@ from kabusys.operations.execution_startup_report import (  # noqa: E402
 )
 from kabusys.operations.line_reports import format_morning_message  # noqa: E402
 from kabusys.operations.notifier import build_notifier  # noqa: E402
+from kabusys.operations.process_registry import register_process, update_process  # noqa: E402
 from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging  # noqa: E402
 from kabusys.utils.process_priority import set_process_priority  # noqa: E402
 
@@ -229,12 +230,19 @@ def _pos_value(p: object) -> float:
 
 
 _APP_NAME = "execution"
+_JOB_NAME = "execution_job"
 
 
 def main() -> None:
-    setup_logging(app_name=_APP_NAME, capture_stdio=True)
+    _run_log = setup_logging(app_name=_APP_NAME, capture_stdio=True)
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
+    run_id: int | None = None
+    _exec_status = "failed"
+    try:
+        run_id = register_process(_JOB_NAME, log_file=str(_run_log) if _run_log else None)
+    except Exception:
+        logger.warning("process_registry 登録に失敗しました", exc_info=True)
     # 1. プロセス優先度を High に設定（最初に実行）
     set_process_priority("high")
 
@@ -326,6 +334,7 @@ def main() -> None:
         # 停止フラグが既に立っている場合は起動せず終了
         if _STOP_FLAG.exists():
             logger.info("停止フラグを検知。エンジンを起動しません。")
+            _exec_status = "success"
             return
 
         thread = threading.Thread(target=engine.run_session, daemon=True)
@@ -338,10 +347,16 @@ def main() -> None:
             thread.join(timeout=1.0)
         thread.join(timeout=30.0)
         log_run_end(_APP_NAME, status="success", started_at=started_at)
+        _exec_status = "success"
     except Exception:
         log_run_end(_APP_NAME, status="failed", started_at=started_at)
         raise
     finally:
+        if run_id is not None:
+            try:
+                update_process(run_id, status=_exec_status)
+            except Exception:
+                logger.warning("process_registry 更新に失敗しました", exc_info=True)
         sqlite_conn.close()
         duckdb_conn.close()
 

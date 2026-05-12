@@ -16,17 +16,24 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
 from kabusys.data.edinet_collector import run_edinet_collection
+from kabusys.operations.process_registry import register_process, update_process
 from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
-setup_logging(app_name="edinet_collection", capture_stdio=True)
+_run_log = setup_logging(app_name="edinet_collection", capture_stdio=True)
 logger = logging.getLogger(__name__)
 
+_JOB_NAME = "edinet_collection_job"
 _APP_NAME = "edinet_collection"
 
 
 def main() -> None:
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
+    run_id: int | None = None
+    try:
+        run_id = register_process(_JOB_NAME, log_file=str(_run_log) if _run_log else None)
+    except Exception:
+        logger.warning("process_registry 登録に失敗しました", exc_info=True)
     conn = None
     _failed = False
     try:
@@ -50,6 +57,11 @@ def main() -> None:
     finally:
         if conn is not None:
             conn.close()
+        if run_id is not None:
+            try:
+                update_process(run_id, status="failed" if _failed else "success")
+            except Exception:
+                logger.warning("process_registry 更新に失敗しました", exc_info=True)
         log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
     if _failed:
         sys.exit(1)
