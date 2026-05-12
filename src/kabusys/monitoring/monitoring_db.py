@@ -395,14 +395,15 @@ class MonitoringDB:
         status: str,
         error_msg: str | None = None,
         finished_at: datetime | None = None,
-    ) -> None:
-        """process_runs のレコードを完了・失敗として更新する。"""
+    ) -> int:
+        """process_runs のレコードを完了・失敗として更新する。更新件数を返す。"""
         ts = finished_at.isoformat() if finished_at else self._now()
-        self._conn.execute(
+        cur = self._conn.execute(
             "UPDATE process_runs SET finished_at=?, status=?, error_msg=? WHERE id=?",
             (ts, status, error_msg, run_id),
         )
         self._conn.commit()
+        return cur.rowcount
 
     def list_recent_processes(self, hours: int = 24) -> list[dict]:
         """直近 hours 時間のプロセス一覧を返す（実行中含む）。
@@ -413,10 +414,12 @@ class MonitoringDB:
         rows = self._conn.execute(
             """
             SELECT * FROM process_runs
-            WHERE started_at >= ? OR finished_at IS NULL
-            ORDER BY started_at DESC
+            WHERE finished_at IS NULL
+               OR started_at >= ?
+               OR finished_at >= ?
+            ORDER BY COALESCE(finished_at, started_at) DESC
             """,
-            (cutoff,),
+            (cutoff, cutoff),
         ).fetchall()
         return [dict(row) for row in rows]
 

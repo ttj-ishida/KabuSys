@@ -9,7 +9,7 @@ from pathlib import Path
 import streamlit as st
 
 from kabusys.config import Settings
-from kabusys.monitoring.monitoring_db import MonitoringDB, init_monitoring_db
+from kabusys.monitoring.monitoring_db import MonitoringDB
 from kabusys.operations.process_registry import is_pid_alive
 
 st.set_page_config(page_title="Process Monitor", layout="wide", page_icon="🖥️")
@@ -31,7 +31,6 @@ except sqlite3.OperationalError:
     st.stop()
 
 try:
-    init_monitoring_db(conn)
     db = MonitoringDB(conn)
     rows = db.list_recent_processes(hours=hours)
 finally:

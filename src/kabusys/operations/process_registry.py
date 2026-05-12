@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import sqlite3
@@ -34,8 +35,10 @@ def is_pid_alive(pid: int) -> bool:
         try:
             os.kill(pid, 0)
             return True
-        except OSError:
-            return False
+        except PermissionError:
+            return True
+        except OSError as e:
+            return getattr(e, "errno", None) == errno.EPERM
 
 
 def register_process(job_name: str, log_file: str | None = None) -> int:
@@ -52,8 +55,9 @@ def register_process(job_name: str, log_file: str | None = None) -> int:
         run_id（process_runs テーブルの id）。
     """
     settings = Settings()
-    conn = sqlite3.connect(str(settings.sqlite_path))
+    conn = sqlite3.connect(str(settings.sqlite_path), timeout=30)
     try:
+        conn.execute("PRAGMA busy_timeout=30000")
         init_monitoring_db(conn)
         db = MonitoringDB(conn)
         db.prune_old_process_runs()
@@ -75,10 +79,13 @@ def update_process(
         error_msg: 失敗時のエラーメッセージ（省略可）。
     """
     settings = Settings()
-    conn = sqlite3.connect(str(settings.sqlite_path))
+    conn = sqlite3.connect(str(settings.sqlite_path), timeout=30)
     try:
+        conn.execute("PRAGMA busy_timeout=30000")
         db = MonitoringDB(conn)
-        db.finish_process(run_id=run_id, status=status, error_msg=error_msg)
+        cur = db.finish_process(run_id=run_id, status=status, error_msg=error_msg)
+        if cur == 0:
+            logger.warning("process_registry: run_id=%d が見つかりません", run_id)
     finally:
         conn.close()
 
@@ -93,8 +100,9 @@ def list_processes(hours: int = 24) -> list[dict]:
         process_runs レコードの dict リスト（started_at 降順）。
     """
     settings = Settings()
-    conn = sqlite3.connect(str(settings.sqlite_path))
+    conn = sqlite3.connect(str(settings.sqlite_path), timeout=30)
     try:
+        conn.execute("PRAGMA busy_timeout=30000")
         init_monitoring_db(conn)
         db = MonitoringDB(conn)
         return db.list_recent_processes(hours=hours)

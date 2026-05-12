@@ -133,6 +133,20 @@ class TestListRecentProcesses:
         ids = [r["id"] for r in rows]
         assert ids.index(id2) < ids.index(id1)
 
+    def test_includes_long_running_job_finished_within_window(self, mdb, monitoring_conn):
+        """開始が古くても直近で完了したジョブは含まれる（finished_at >= cutoff）"""
+        old_start = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+        recent_finish = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        monitoring_conn.execute(
+            "INSERT INTO process_runs (job_name, started_at, finished_at, status)"
+            " VALUES ('long_job', ?, ?, 'success')",
+            (old_start, recent_finish),
+        )
+        monitoring_conn.commit()
+        rows = mdb.list_recent_processes(hours=24)
+        names = [r["job_name"] for r in rows]
+        assert "long_job" in names
+
 
 class TestPruneOldProcessRuns:
     def test_deletes_old_completed(self, mdb, monitoring_conn):
@@ -279,3 +293,29 @@ class TestIsPidAlive:
         from kabusys.operations.process_registry import is_pid_alive
 
         assert is_pid_alive(999999999) is False
+
+    def test_eperm_treated_as_alive(self, monkeypatch):
+        """EPERM（権限不足だが存在するプロセス）は生存として扱う"""
+        import errno as errno_mod
+
+        from kabusys.operations.process_registry import is_pid_alive
+
+        def _raise_eperm(pid, sig):
+            raise OSError(errno_mod.EPERM, "Operation not permitted")
+
+        monkeypatch.setattr("kabusys.operations.process_registry.os.kill", _raise_eperm)
+        with monkeypatch.context() as m:
+            m.setitem(__import__("sys").modules, "psutil", None)
+            assert is_pid_alive(12345) is True
+
+    def test_permission_error_treated_as_alive(self, monkeypatch):
+        """PermissionError（Windows 等）も生存として扱う"""
+        from kabusys.operations.process_registry import is_pid_alive
+
+        def _raise_permission(pid, sig):
+            raise PermissionError("Access is denied")
+
+        monkeypatch.setattr("kabusys.operations.process_registry.os.kill", _raise_permission)
+        with monkeypatch.context() as m:
+            m.setitem(__import__("sys").modules, "psutil", None)
+            assert is_pid_alive(12345) is True
