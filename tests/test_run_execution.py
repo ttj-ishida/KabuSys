@@ -7,8 +7,18 @@ import yaml as yaml_mod
 
 import kabusys.run_execution as re_mod
 from kabusys.execution.broker_api import Position
+from kabusys.execution.reconciler import ReconcileResult
 from kabusys.execution.risk_manager import RiskConfig
 from kabusys.run_execution import main
+
+
+def _make_reconciler_mock() -> MagicMock:
+    """ReconcileResult を正しく返す Reconciler クラスモックを生成する。"""
+    mock_reconciler_cls = MagicMock()
+    mock_reconciler_instance = MagicMock()
+    mock_reconciler_instance.run.return_value = ReconcileResult()
+    mock_reconciler_cls.return_value = mock_reconciler_instance
+    return mock_reconciler_cls
 
 
 def _run_main(is_paper: bool = False):
@@ -28,7 +38,7 @@ def _run_main(is_paper: bool = False):
         patch("kabusys.run_execution.OrderRepository"),
         patch("kabusys.run_execution.OrderManager"),
         patch("kabusys.run_execution.RiskManager"),
-        patch("kabusys.run_execution.Reconciler"),
+        patch("kabusys.run_execution.Reconciler", _make_reconciler_mock()),
         patch("kabusys.run_execution.ExecutionEngine", return_value=mock_engine),
         patch("kabusys.run_execution._load_risk_config", return_value=MagicMock()),
     ):
@@ -86,7 +96,7 @@ class TestRunExecutionMain:
             patch("kabusys.run_execution.OrderRepository"),
             patch("kabusys.run_execution.OrderManager"),
             patch("kabusys.run_execution.RiskManager"),
-            patch("kabusys.run_execution.Reconciler"),
+            patch("kabusys.run_execution.Reconciler", _make_reconciler_mock()),
             patch("kabusys.run_execution.ExecutionEngine", return_value=mock_engine),
             patch("kabusys.run_execution._load_risk_config") as mock_load,
         ):
@@ -125,7 +135,7 @@ class TestRunExecutionMain:
             patch("kabusys.run_execution.OrderRepository"),
             patch("kabusys.run_execution.OrderManager"),
             patch("kabusys.run_execution.RiskManager"),
-            patch("kabusys.run_execution.Reconciler"),
+            patch("kabusys.run_execution.Reconciler", _make_reconciler_mock()),
             patch("kabusys.run_execution.ExecutionEngine", return_value=mock_engine),
             patch("kabusys.run_execution._load_risk_config") as mock_load,
         ):
@@ -165,7 +175,7 @@ class TestRunExecutionMain:
             patch("kabusys.run_execution.OrderRepository"),
             patch("kabusys.run_execution.OrderManager"),
             patch("kabusys.run_execution.RiskManager"),
-            patch("kabusys.run_execution.Reconciler"),
+            patch("kabusys.run_execution.Reconciler", _make_reconciler_mock()),
             patch("kabusys.run_execution.ExecutionEngine", return_value=mock_engine),
             patch("kabusys.run_execution._load_risk_config") as mock_load,
         ):
@@ -205,7 +215,7 @@ def test_run_execution_stops_on_flag(tmp_path):
         patch("kabusys.run_execution.OrderRepository"),
         patch("kabusys.run_execution.OrderManager"),
         patch("kabusys.run_execution.RiskManager"),
-        patch("kabusys.run_execution.Reconciler"),
+        patch("kabusys.run_execution.Reconciler", _make_reconciler_mock()),
         patch("kabusys.run_execution.ExecutionEngine", return_value=mock_engine),
     ):
         re_mod.main()
