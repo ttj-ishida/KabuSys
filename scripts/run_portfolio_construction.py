@@ -37,9 +37,9 @@ from kabusys.operations.performance_collector import (
     collect_weekly_rows,
 )
 from kabusys.operations.performance_report import build_report
+from kabusys.operations.process_registry import register_process, update_process
 from kabusys.portfolio.portfolio_builder import calc_score_weights, select_candidates
 from kabusys.portfolio.position_sizing import calc_position_sizes
-from kabusys.operations.process_registry import register_process, update_process
 from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
 _run_log = setup_logging(app_name="portfolio_construction", capture_stdio=True)

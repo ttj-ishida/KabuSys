@@ -5,11 +5,10 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
 
 import pytest
 
-from kabusys.monitoring.monitoring_db import MonitoringDB, init_monitoring_db
+from kabusys.monitoring.monitoring_db import MonitoringDB
 
 
 @pytest.fixture
@@ -169,7 +168,7 @@ class TestPruneOldProcessRuns:
         run_id = mdb.start_process("recent")
         mdb.finish_process(run_id, status="success")
         mdb.prune_old_process_runs(days=30)
-        count = monitoring_conn_execute = mdb._conn.execute(
+        count = mdb._conn.execute(
             "SELECT COUNT(*) FROM process_runs WHERE id = ?", (run_id,)
         ).fetchone()[0]
         assert count == 1
