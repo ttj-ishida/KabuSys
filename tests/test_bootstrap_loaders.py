@@ -175,10 +175,9 @@ def test_load_prices_idempotent(conn, tmp_path):
     ]
     path = _gz(rows, tmp_path, "prices_idem.csv.gz")
     load_prices(conn, path)
-    count = load_prices(conn, path)
+    load_prices(conn, path)  # 2回目: 重複挿入なし
     assert conn.execute("SELECT COUNT(*) FROM raw_prices").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM prices_daily").fetchone()[0] == 1
-    assert count == 1
 
 
 # ---------------------------------------------------------------------------

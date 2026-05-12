@@ -10,6 +10,8 @@ import pytest
 from kabusys.data.bootstrap.runner import (
     BootstrapResult,
     _local_files,
+    _parse_file_date,
+    _pre_delete_month,
     _reset_bootstrap,
     _safe_errmsg,
     _safe_filename,
@@ -478,6 +480,144 @@ def test_run_bootstrap_local_mode_flat_structure(conn, tmp_path):
 # ---------------------------------------------------------------------------
 # _truncate_data
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# _parse_file_date
+# ---------------------------------------------------------------------------
+
+
+def test_parse_file_date_monthly():
+    assert _parse_file_date("equities_bars_daily_202401.csv.gz") == ("monthly", 2024, 1)
+    assert _parse_file_date("fins_summary_202312.csv.gz") == ("monthly", 2023, 12)
+
+
+def test_parse_file_date_daily():
+    assert _parse_file_date("equities_bars_daily_20240115.csv.gz") == ("daily", 2024, 1)
+    assert _parse_file_date("equities_bars_daily_20231201.csv.gz") == ("daily", 2023, 12)
+
+
+def test_parse_file_date_daily_not_confused_with_monthly():
+    # YYYYMMDD ファイルは "monthly" と誤判定してはならない
+    result = _parse_file_date("equities_bars_daily_20240115.csv.gz")
+    assert result is not None
+    assert result[0] == "daily"
+
+
+def test_parse_file_date_unknown():
+    assert _parse_file_date("some_random_file.csv.gz") is None
+    assert _parse_file_date("equities_bars_daily.csv.gz") is None
+
+
+# ---------------------------------------------------------------------------
+# _pre_delete_month
+# ---------------------------------------------------------------------------
+
+
+def test_pre_delete_month_prices(conn):
+    # 2024-01 のデータを投入
+    conn.execute(
+        "INSERT INTO raw_prices (date, code, open, high, low, close, volume, fetched_at) "
+        "VALUES ('2024-01-10', '7203', 100, 110, 90, 105, 1000, current_timestamp)"
+    )
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume) "
+        "VALUES ('2024-01-10', '7203', 100, 110, 90, 105, 1000)"
+    )
+    # 2024-02 のデータも投入（削除されないことを確認）
+    conn.execute(
+        "INSERT INTO raw_prices (date, code, open, high, low, close, volume, fetched_at) "
+        "VALUES ('2024-02-01', '7203', 100, 110, 90, 105, 1000, current_timestamp)"
+    )
+
+    _pre_delete_month(conn, "/equities/bars/daily", 2024, 1)
+
+    assert (
+        conn.execute(
+            "SELECT COUNT(*) FROM raw_prices WHERE date BETWEEN '2024-01-01' AND '2024-01-31'"
+        ).fetchone()[0]
+        == 0
+    )
+    assert (
+        conn.execute(
+            "SELECT COUNT(*) FROM prices_daily WHERE date BETWEEN '2024-01-01' AND '2024-01-31'"
+        ).fetchone()[0]
+        == 0
+    )
+    assert (
+        conn.execute(
+            "SELECT COUNT(*) FROM raw_prices WHERE date BETWEEN '2024-02-01' AND '2024-02-28'"
+        ).fetchone()[0]
+        == 1
+    )
+
+
+def test_pre_delete_month_no_op_for_master(conn):
+    # /equities/master は _ENDPOINT_DATE_TABLES に含まれないため何もしない
+    conn.execute("INSERT INTO stocks (code, name, updated_at) VALUES ('7203', 'Toyota', now())")
+    _pre_delete_month(conn, "/equities/master", 2024, 1)
+    assert conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# run_bootstrap bulk mode (monthly pre-delete)
+# ---------------------------------------------------------------------------
+
+
+def test_run_bootstrap_monthly_file_triggers_pre_delete(conn, tmp_path):
+    """月次ファイル（YYYYMM）のロード時に対象月のデータが事前削除されることを確認。"""
+    ep_dir = tmp_path / "equities" / "bars" / "daily"
+    ep_dir.mkdir(parents=True)
+    gz_path = ep_dir / "equities_bars_daily_202401.csv.gz"
+    gz_path.write_bytes(_gz_prices(tmp_path))
+
+    # 2024-01 に既存データを投入（上書きされるべき）
+    conn.execute(
+        "INSERT INTO raw_prices (date, code, open, high, low, close, volume, fetched_at) "
+        "VALUES ('2024-01-05', '9999', 100, 110, 90, 105, 500, current_timestamp)"
+    )
+
+    result = run_bootstrap(
+        conn=conn,
+        api_key="unused",
+        raw_dir=tmp_path,
+        endpoints=["/equities/bars/daily"],
+        local=True,
+    )
+
+    assert result.loaded_files == 1
+    # 事前削除されたため 9999 は消え、CSV の 7203 のみ残る
+    codes = {r[0] for r in conn.execute("SELECT code FROM raw_prices").fetchall()}
+    assert "9999" not in codes
+    assert "7203" in codes
+
+
+def test_run_bootstrap_daily_file_no_pre_delete(conn, tmp_path):
+    """日次ファイル（YYYYMMDD）のロード時には事前削除しない（既存データ保持）。"""
+    ep_dir = tmp_path / "equities" / "bars" / "daily"
+    ep_dir.mkdir(parents=True)
+    gz_path = ep_dir / "equities_bars_daily_20240110.csv.gz"
+    gz_path.write_bytes(_gz_prices(tmp_path))
+
+    # 2024-01-15 の既存データ（削除されないはず）
+    conn.execute(
+        "INSERT INTO raw_prices (date, code, open, high, low, close, volume, fetched_at) "
+        "VALUES ('2024-01-15', '9999', 100, 110, 90, 105, 500, current_timestamp)"
+    )
+
+    result = run_bootstrap(
+        conn=conn,
+        api_key="unused",
+        raw_dir=tmp_path,
+        endpoints=["/equities/bars/daily"],
+        local=True,
+    )
+
+    assert result.loaded_files == 1
+    # 日次モードでは事前削除しないため 9999 は残る
+    codes = {r[0] for r in conn.execute("SELECT code FROM raw_prices").fetchall()}
+    assert "9999" in codes
+    assert "7203" in codes
 
 
 def test_truncate_data_clears_all_tables(conn, tmp_path):

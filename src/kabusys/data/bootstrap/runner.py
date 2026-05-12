@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import shutil
 import sys
 import urllib.error
+from calendar import monthrange
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -43,6 +45,14 @@ _LOADER_MAP = {
     "/fins/summary": load_financials,
     "/markets/calendar": load_calendar,
     "/indices/bars/daily/topix": load_topix,
+}
+
+# エンドポイントごとの日付カラムと管理テーブル（月次 DELETE に使用）
+_ENDPOINT_DATE_TABLES: dict[str, tuple[str, list[str]]] = {
+    "/equities/bars/daily": ("date", ["raw_prices", "prices_daily"]),
+    "/fins/summary": ("report_date", ["raw_financials", "fundamentals"]),
+    "/markets/calendar": ("date", ["market_calendar"]),
+    "/indices/bars/daily/topix": ("date", ["topix_daily"]),
 }
 
 
@@ -116,6 +126,41 @@ def _truncate_data(conn: duckdb.DuckDBPyConnection) -> None:
         conn.execute(f"DELETE FROM {table}")
         logger.info("テーブルをクリア: %s", table)
     logger.info("bootstrap データテーブルを全削除しました")
+
+
+def _parse_file_date(filename: str) -> tuple[str, int, int] | None:
+    """ファイル名から日付情報を抽出する。
+
+    Returns: ("monthly", year, month) or ("daily", year, month) or None
+    YYYYMMDD (8桁) を先に試みることで YYYYMM の誤検知を防ぐ。
+    """
+    m = re.search(r"_(\d{4})(\d{2})\d{2}\.csv\.gz$", filename)
+    if m:
+        return ("daily", int(m.group(1)), int(m.group(2)))
+    m = re.search(r"_(\d{4})(\d{2})\.csv\.gz$", filename)
+    if m:
+        return ("monthly", int(m.group(1)), int(m.group(2)))
+    return None
+
+
+def _pre_delete_month(
+    conn: duckdb.DuckDBPyConnection, endpoint: str, year: int, month: int
+) -> None:
+    """月次ファイルのロード前に対象月のデータを DELETE する。"""
+    date_col_tables = _ENDPOINT_DATE_TABLES.get(endpoint)
+    if date_col_tables is None:
+        return
+    date_col, tables = date_col_tables
+    last_day = monthrange(year, month)[1]
+    month_start = f"{year:04d}-{month:02d}-01"
+    month_end = f"{year:04d}-{month:02d}-{last_day:02d}"
+    for table in tables:
+        conn.execute(
+            f"DELETE FROM {table} WHERE {date_col} BETWEEN ? AND ?",
+            [month_start, month_end],
+        )
+        logger.debug("pre_delete: %s [%s..%s]", table, month_start, month_end)
+    logger.info("pre_delete 完了: %s %04d-%02d", endpoint, year, month)
 
 
 def _endpoint_to_file_prefix(endpoint: str) -> str:
@@ -276,9 +321,23 @@ def run_bootstrap(
                     result.failed_files += 1
                     continue
 
+            file_date = _parse_file_date(file_name)
+            bulk = (
+                file_date is not None
+                and file_date[0] == "monthly"
+                and endpoint in _ENDPOINT_DATE_TABLES
+            )
+            if bulk:
+                _, year, month = file_date
+                _pre_delete_month(conn, endpoint, year, month)
+                print(
+                    f"  [{idx}/{len(files)}] 月次削除完了: {year:04d}-{month:02d}",
+                    flush=True,
+                )
+
             print(f"  [{idx}/{len(files)}] ロード中: {file_name}", flush=True)
             try:
-                n = loader(conn, dest)
+                n = loader(conn, dest, bulk=bulk)
                 rows_ep += n
                 _record(conn, file_key, endpoint, file_name, "loaded", row_count=n)
                 result.loaded_files += 1

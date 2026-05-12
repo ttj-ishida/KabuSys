@@ -1,297 +1,317 @@
 from __future__ import annotations
 
-import csv
-import gzip
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import duckdb
 
 logger = logging.getLogger(__name__)
 
-_CHUNK = 10_000
+
+def _sql_path(csv_path: Path) -> str:
+    """Path を SQL 文字列リテラルとして安全に埋め込む（シングルクォートをエスケープ）。"""
+    return str(csv_path).replace("\\", "/").replace("'", "''")
 
 
-def _to_float(v: Any) -> float | None:
-    if v is None or str(v).strip() == "":
-        return None
-    try:
-        return float(v)
-    except (ValueError, TypeError):
-        return None
-
-
-def _to_int(v: Any) -> int | None:
-    if v is None or str(v).strip() == "":
-        return None
-    try:
-        return int(float(v))
-    except (ValueError, TypeError):
-        return None
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _iter_gz(csv_path: Path):
-    """gzip CSV を行ごとに dict で yield する。"""
-    with gzip.open(csv_path, "rt", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            yield row
-
-
-def load_prices(conn: duckdb.DuckDBPyConnection, csv_path: Path) -> int:
+def load_prices(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = False) -> int:
     """equities/bars/daily CSV → raw_prices & prices_daily
 
-    Bulk CSV カラム: Date, Code, O, H, L, C, Vo, Va, AdjFactor
-    （UL, LL, AdjO/H/L/C/Vo は保存しない）
+    DuckDB の read_csv() でネイティブ読み込みする。Python 側の CSV 解析を排除し
+    ベクトル化バッチ処理による高速化を実現する。
+
+    bulk=True: 月次ファイル用。呼び出し元が対象月を事前 DELETE 済みであること。
+               ON CONFLICT DO NOTHING でバルク INSERT する。
+    bulk=False: 日次ファイル用。ON CONFLICT DO UPDATE で差分 upsert する。
     """
-    loaded = 0
-    buf_raw: list[tuple] = []
-    buf_proc: list[tuple] = []
-    fetched_at = _now()
+    path = _sql_path(csv_path)
 
-    def _flush():
-        nonlocal loaded
-        if buf_raw:
-            conn.executemany(
-                "INSERT INTO raw_prices (date, code, open, high, low, close, volume, turnover, adj_factor, fetched_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT (date, code) DO UPDATE SET "
-                "open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close, "
-                "volume=EXCLUDED.volume, turnover=EXCLUDED.turnover, adj_factor=EXCLUDED.adj_factor, "
-                "fetched_at=EXCLUDED.fetched_at",
-                buf_raw,
-            )
-        if buf_proc:
-            conn.executemany(
-                "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT (date, code) DO UPDATE SET "
-                "open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close, "
-                "volume=EXCLUDED.volume, turnover=EXCLUDED.turnover",
-                buf_proc,
-            )
-        loaded += len(buf_proc)
-        buf_raw.clear()
-        buf_proc.clear()
+    conflict_raw = (
+        "ON CONFLICT (date, code) DO NOTHING"
+        if bulk
+        else (
+            "ON CONFLICT (date, code) DO UPDATE SET "
+            "open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close, "
+            "volume=EXCLUDED.volume, turnover=EXCLUDED.turnover, adj_factor=EXCLUDED.adj_factor, "
+            "fetched_at=EXCLUDED.fetched_at"
+        )
+    )
+    conflict_proc = (
+        "ON CONFLICT (date, code) DO NOTHING"
+        if bulk
+        else (
+            "ON CONFLICT (date, code) DO UPDATE SET "
+            "open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close, "
+            "volume=EXCLUDED.volume, turnover=EXCLUDED.turnover"
+        )
+    )
 
-    for row in _iter_gz(csv_path):
-        date = row.get("Date", "").strip()
-        code = row.get("Code", "").strip()
-        if not date or not code:
-            logger.warning("load_prices: PK 欠損行をスキップ: %s", row)
-            continue
+    if bulk:
+        conn.execute("BEGIN")
+    try:
+        conn.execute(f"""
+            INSERT INTO raw_prices
+                (date, code, open, high, low, close, volume, turnover, adj_factor, fetched_at)
+            SELECT
+                TRY_CAST("Date" AS DATE),
+                "Code",
+                TRY_CAST("O" AS DOUBLE),
+                TRY_CAST("H" AS DOUBLE),
+                TRY_CAST("L" AS DOUBLE),
+                TRY_CAST("C" AS DOUBLE),
+                TRY_CAST("Vo" AS BIGINT),
+                TRY_CAST("Va" AS DOUBLE),
+                TRY_CAST("AdjFactor" AS DOUBLE),
+                current_timestamp
+            FROM read_csv('{path}', nullstr='', all_varchar=true)
+            WHERE TRY_CAST("Date" AS DATE) IS NOT NULL
+              AND "Code" IS NOT NULL AND trim("Code") != ''
+            {conflict_raw}
+        """)
 
-        o = _to_float(row.get("O"))
-        h = _to_float(row.get("H"))
-        lo = _to_float(row.get("L"))
-        c = _to_float(row.get("C"))
-        vol = _to_int(row.get("Vo"))
-        va = _to_float(row.get("Va"))
-        adj = _to_float(row.get("AdjFactor"))
+        before = conn.execute("SELECT COUNT(*) FROM prices_daily").fetchone()[0]
+        conn.execute(f"""
+            INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover)
+            SELECT
+                TRY_CAST("Date" AS DATE),
+                "Code",
+                TRY_CAST("O" AS DOUBLE),
+                TRY_CAST("H" AS DOUBLE),
+                TRY_CAST("L" AS DOUBLE),
+                TRY_CAST("C" AS DOUBLE),
+                TRY_CAST("Vo" AS BIGINT),
+                TRY_CAST("Va" AS DOUBLE)
+            FROM read_csv('{path}', nullstr='', all_varchar=true)
+            WHERE TRY_CAST("Date" AS DATE) IS NOT NULL
+              AND "Code" IS NOT NULL AND trim("Code") != ''
+              AND TRY_CAST("O" AS DOUBLE) IS NOT NULL
+              AND TRY_CAST("H" AS DOUBLE) IS NOT NULL
+              AND TRY_CAST("L" AS DOUBLE) IS NOT NULL
+              AND TRY_CAST("C" AS DOUBLE) IS NOT NULL
+              AND TRY_CAST("Vo" AS BIGINT) IS NOT NULL
+              AND TRY_CAST("L" AS DOUBLE) <= TRY_CAST("H" AS DOUBLE)
+            {conflict_proc}
+        """)
+        loaded = conn.execute("SELECT COUNT(*) FROM prices_daily").fetchone()[0] - before
 
-        buf_raw.append((date, code, o, h, lo, c, vol, va, adj, fetched_at))
+        if bulk:
+            conn.execute("COMMIT")
+    except Exception:
+        if bulk:
+            conn.execute("ROLLBACK")
+        raise
 
-        # prices_daily: NOT NULL OHLCV 必須 / low <= high
-        if None in (o, h, lo, c, vol) or lo > h:  # type: ignore[operator]
-            if len(buf_raw) >= _CHUNK:
-                _flush()
-            continue
-
-        buf_proc.append((date, code, o, h, lo, c, vol, va))
-        if len(buf_raw) >= _CHUNK:
-            _flush()
-
-    _flush()
     logger.info("load_prices: %d 件ロード (%s)", loaded, csv_path.name)
     return loaded
 
 
-def load_master(conn: duckdb.DuckDBPyConnection, csv_path: Path) -> int:
+def load_master(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = False) -> int:
     """equities/master CSV → stocks
 
-    Bulk CSV カラム: Code, CoName, MktNm, S33Nm
+    bulk 引数は互換性のために受け付けるが無視する（master は常に upsert）。
     """
-    loaded = 0
-    buf: list[tuple] = []
+    path = _sql_path(csv_path)
 
-    def _flush():
-        nonlocal loaded
-        if buf:
-            conn.executemany(
-                "INSERT INTO stocks (code, name, market, sector, updated_at) "
-                "VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT (code) DO UPDATE SET "
-                "name=EXCLUDED.name, market=EXCLUDED.market, sector=EXCLUDED.sector, "
-                "updated_at=EXCLUDED.updated_at",
-                buf,
-            )
-            loaded += len(buf)
-            buf.clear()
+    before = conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
+    conn.execute(f"""
+        INSERT INTO stocks (code, name, market, sector, updated_at)
+        SELECT
+            "Code",
+            "CoName",
+            "MktNm",
+            "S33Nm",
+            current_timestamp
+        FROM read_csv('{path}', nullstr='', all_varchar=true)
+        WHERE "Code" IS NOT NULL AND trim("Code") != ''
+        ON CONFLICT (code) DO UPDATE SET
+            name=EXCLUDED.name, market=EXCLUDED.market, sector=EXCLUDED.sector,
+            updated_at=EXCLUDED.updated_at
+    """)
+    loaded = conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0] - before
 
-    now = _now()
-    for row in _iter_gz(csv_path):
-        code = row.get("Code", "").strip()
-        if not code:
-            logger.warning("load_master: code 欠損行をスキップ: %s", row)
-            continue
-        buf.append((code, row.get("CoName"), row.get("MktNm"), row.get("S33Nm"), now))
-        if len(buf) >= _CHUNK:
-            _flush()
-
-    _flush()
     logger.info("load_master: %d 件ロード (%s)", loaded, csv_path.name)
     return loaded
 
 
-def load_financials(conn: duckdb.DuckDBPyConnection, csv_path: Path) -> int:
+def load_financials(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = False) -> int:
     """fins/summary CSV → raw_financials & fundamentals
 
-    Bulk CSV カラム: Code, DiscDate, CurPerType, Sales, OP, NP, EPS, ROE
+    bulk=True: 月次ファイル用。呼び出し元が対象月を事前 DELETE 済みであること。
+    bulk=False: 日次ファイル用。ON CONFLICT DO UPDATE で差分 upsert する。
     """
-    loaded = 0
-    buf_raw: list[tuple] = []
-    buf_proc: list[tuple] = []
-    fetched_at = _now()
+    path = _sql_path(csv_path)
 
-    def _flush():
-        nonlocal loaded
-        if buf_raw:
-            conn.executemany(
-                "INSERT INTO raw_financials (code, report_date, period_type, revenue, "
-                "operating_profit, net_income, eps, roe, fetched_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT (code, report_date, period_type) DO UPDATE SET "
-                "revenue=EXCLUDED.revenue, operating_profit=EXCLUDED.operating_profit, "
-                "net_income=EXCLUDED.net_income, eps=EXCLUDED.eps, roe=EXCLUDED.roe, "
-                "fetched_at=EXCLUDED.fetched_at",
-                buf_raw,
-            )
-        if buf_proc:
-            conn.executemany(
-                "INSERT INTO fundamentals (code, report_date, period_type, revenue, "
-                "operating_profit, net_income, eps, roe) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT (code, report_date, period_type) DO UPDATE SET "
-                "revenue=EXCLUDED.revenue, operating_profit=EXCLUDED.operating_profit, "
-                "net_income=EXCLUDED.net_income, eps=EXCLUDED.eps, roe=EXCLUDED.roe",
-                buf_proc,
-            )
-        loaded += len(buf_proc)
-        buf_raw.clear()
-        buf_proc.clear()
+    conflict_raw = (
+        "ON CONFLICT (code, report_date, period_type) DO NOTHING"
+        if bulk
+        else (
+            "ON CONFLICT (code, report_date, period_type) DO UPDATE SET "
+            "revenue=EXCLUDED.revenue, operating_profit=EXCLUDED.operating_profit, "
+            "net_income=EXCLUDED.net_income, eps=EXCLUDED.eps, roe=EXCLUDED.roe, "
+            "fetched_at=EXCLUDED.fetched_at"
+        )
+    )
+    conflict_proc = (
+        "ON CONFLICT (code, report_date, period_type) DO NOTHING"
+        if bulk
+        else (
+            "ON CONFLICT (code, report_date, period_type) DO UPDATE SET "
+            "revenue=EXCLUDED.revenue, operating_profit=EXCLUDED.operating_profit, "
+            "net_income=EXCLUDED.net_income, eps=EXCLUDED.eps, roe=EXCLUDED.roe"
+        )
+    )
 
-    for row in _iter_gz(csv_path):
-        code = row.get("Code", "").strip()
-        report_date = row.get("DiscDate", "").strip()
-        period_type = row.get("CurPerType", "").strip()
-        if not code or not report_date or not period_type:
-            logger.warning("load_financials: PK 欠損行をスキップ: %s", row)
-            continue
+    if bulk:
+        conn.execute("BEGIN")
+    try:
+        conn.execute(f"""
+            INSERT INTO raw_financials
+                (code, report_date, period_type, revenue, operating_profit, net_income,
+                 eps, roe, fetched_at)
+            SELECT
+                "Code",
+                TRY_CAST("DiscDate" AS DATE),
+                "CurPerType",
+                TRY_CAST("Sales" AS DOUBLE),
+                TRY_CAST("OP" AS DOUBLE),
+                TRY_CAST("NP" AS DOUBLE),
+                TRY_CAST("EPS" AS DOUBLE),
+                TRY_CAST("ROE" AS DOUBLE),
+                current_timestamp
+            FROM read_csv('{path}', nullstr='', all_varchar=true)
+            WHERE "Code" IS NOT NULL AND trim("Code") != ''
+              AND TRY_CAST("DiscDate" AS DATE) IS NOT NULL
+              AND "CurPerType" IS NOT NULL AND trim("CurPerType") != ''
+            {conflict_raw}
+        """)
 
-        revenue = _to_float(row.get("Sales"))
-        op = _to_float(row.get("OP"))
-        np_ = _to_float(row.get("NP"))
-        eps = _to_float(row.get("EPS"))
-        roe = _to_float(row.get("ROE"))
+        before = conn.execute("SELECT COUNT(*) FROM fundamentals").fetchone()[0]
+        conn.execute(f"""
+            INSERT INTO fundamentals
+                (code, report_date, period_type, revenue, operating_profit, net_income, eps, roe)
+            SELECT
+                "Code",
+                TRY_CAST("DiscDate" AS DATE),
+                "CurPerType",
+                TRY_CAST("Sales" AS DOUBLE),
+                TRY_CAST("OP" AS DOUBLE),
+                TRY_CAST("NP" AS DOUBLE),
+                TRY_CAST("EPS" AS DOUBLE),
+                TRY_CAST("ROE" AS DOUBLE)
+            FROM read_csv('{path}', nullstr='', all_varchar=true)
+            WHERE "Code" IS NOT NULL AND trim("Code") != ''
+              AND TRY_CAST("DiscDate" AS DATE) IS NOT NULL
+              AND "CurPerType" IS NOT NULL AND trim("CurPerType") != ''
+            {conflict_proc}
+        """)
+        loaded = conn.execute("SELECT COUNT(*) FROM fundamentals").fetchone()[0] - before
 
-        buf_raw.append((code, report_date, period_type, revenue, op, np_, eps, roe, fetched_at))
-        buf_proc.append((code, report_date, period_type, revenue, op, np_, eps, roe))
+        if bulk:
+            conn.execute("COMMIT")
+    except Exception:
+        if bulk:
+            conn.execute("ROLLBACK")
+        raise
 
-        if len(buf_raw) >= _CHUNK:
-            _flush()
-
-    _flush()
     logger.info("load_financials: %d 件ロード (%s)", loaded, csv_path.name)
     return loaded
 
 
-def load_calendar(conn: duckdb.DuckDBPyConnection, csv_path: Path) -> int:
+def load_calendar(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = False) -> int:
     """markets/calendar CSV → market_calendar
 
-    Bulk CSV カラム: Date, HolDiv, HalfDiv, SQDiv, HolName
     HolDiv="1" → is_trading_day=False（休日）
+
+    bulk=True: 月次ファイル用。呼び出し元が対象月を事前 DELETE 済みであること。
+    bulk=False: 日次ファイル用。ON CONFLICT DO UPDATE で差分 upsert する。
     """
-    loaded = 0
-    buf: list[tuple] = []
+    path = _sql_path(csv_path)
 
-    def _flush():
-        nonlocal loaded
-        if buf:
-            conn.executemany(
-                "INSERT INTO market_calendar (date, is_trading_day, is_half_day, is_sq_day, holiday_name) "
-                "VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT (date) DO UPDATE SET "
-                "is_trading_day=EXCLUDED.is_trading_day, is_half_day=EXCLUDED.is_half_day, "
-                "is_sq_day=EXCLUDED.is_sq_day, holiday_name=EXCLUDED.holiday_name",
-                buf,
-            )
-            loaded += len(buf)
-            buf.clear()
+    conflict = (
+        "ON CONFLICT (date) DO NOTHING"
+        if bulk
+        else (
+            "ON CONFLICT (date) DO UPDATE SET "
+            "is_trading_day=EXCLUDED.is_trading_day, is_half_day=EXCLUDED.is_half_day, "
+            "is_sq_day=EXCLUDED.is_sq_day, holiday_name=EXCLUDED.holiday_name"
+        )
+    )
 
-    for row in _iter_gz(csv_path):
-        date = row.get("Date", "").strip()
-        if not date:
-            logger.warning("load_calendar: date 欠損行をスキップ: %s", row)
-            continue
-        is_trading = row.get("HolDiv", "0").strip() != "1"
-        is_half = row.get("HalfDiv", "0").strip() == "1"
-        is_sq = row.get("SQDiv", "0").strip() == "1"
-        holiday_name = row.get("HolName", "").strip() or None
-        buf.append((date, is_trading, is_half, is_sq, holiday_name))
-        if len(buf) >= _CHUNK:
-            _flush()
+    if bulk:
+        conn.execute("BEGIN")
+    try:
+        before = conn.execute("SELECT COUNT(*) FROM market_calendar").fetchone()[0]
+        conn.execute(f"""
+            INSERT INTO market_calendar
+                (date, is_trading_day, is_half_day, is_sq_day, holiday_name)
+            SELECT
+                TRY_CAST("Date" AS DATE),
+                coalesce("HolDiv", '0') != '1',
+                coalesce("HalfDiv", '0') = '1',
+                coalesce("SQDiv", '0') = '1',
+                CASE WHEN "HolName" IS NULL OR trim("HolName") = '' THEN NULL ELSE "HolName" END
+            FROM read_csv('{path}', nullstr='', all_varchar=true)
+            WHERE TRY_CAST("Date" AS DATE) IS NOT NULL
+            {conflict}
+        """)
+        loaded = conn.execute("SELECT COUNT(*) FROM market_calendar").fetchone()[0] - before
 
-    _flush()
+        if bulk:
+            conn.execute("COMMIT")
+    except Exception:
+        if bulk:
+            conn.execute("ROLLBACK")
+        raise
+
     logger.info("load_calendar: %d 件ロード (%s)", loaded, csv_path.name)
     return loaded
 
 
-def load_topix(conn: duckdb.DuckDBPyConnection, csv_path: Path) -> int:
+def load_topix(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = False) -> int:
     """indices/bars/daily/topix CSV → topix_daily
 
-    Bulk CSV カラム: Date, O, H, L, C
+    bulk=True: 月次ファイル用。呼び出し元が対象月を事前 DELETE 済みであること。
+    bulk=False: 日次ファイル用。ON CONFLICT DO UPDATE で差分 upsert する。
     """
-    loaded = 0
-    buf: list[tuple] = []
+    path = _sql_path(csv_path)
 
-    def _flush():
-        nonlocal loaded
-        if buf:
-            conn.executemany(
-                "INSERT INTO topix_daily (date, open, high, low, close) "
-                "VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT (date) DO UPDATE SET "
-                "open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close",
-                buf,
-            )
-            loaded += len(buf)
-            buf.clear()
+    conflict = (
+        "ON CONFLICT (date) DO NOTHING"
+        if bulk
+        else (
+            "ON CONFLICT (date) DO UPDATE SET "
+            "open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close"
+        )
+    )
 
-    for row in _iter_gz(csv_path):
-        date = row.get("Date", "").strip()
-        if not date:
-            logger.warning("load_topix: date 欠損行をスキップ: %s", row)
-            continue
-        o = _to_float(row.get("O"))
-        h = _to_float(row.get("H"))
-        lo = _to_float(row.get("L"))
-        c = _to_float(row.get("C"))
-        if None in (o, h, lo, c):
-            logger.warning("load_topix: OHLC 欠損行をスキップ: %s", row)
-            continue
-        if lo > h:  # type: ignore[operator]
-            logger.warning("load_topix: low > high の行をスキップ: %s", row)
-            continue
-        buf.append((date, o, h, lo, c))
-        if len(buf) >= _CHUNK:
-            _flush()
+    if bulk:
+        conn.execute("BEGIN")
+    try:
+        before = conn.execute("SELECT COUNT(*) FROM topix_daily").fetchone()[0]
+        conn.execute(f"""
+            INSERT INTO topix_daily (date, open, high, low, close)
+            SELECT
+                TRY_CAST("Date" AS DATE),
+                TRY_CAST("O" AS DOUBLE),
+                TRY_CAST("H" AS DOUBLE),
+                TRY_CAST("L" AS DOUBLE),
+                TRY_CAST("C" AS DOUBLE)
+            FROM read_csv('{path}', nullstr='', all_varchar=true)
+            WHERE TRY_CAST("Date" AS DATE) IS NOT NULL
+              AND TRY_CAST("O" AS DOUBLE) IS NOT NULL
+              AND TRY_CAST("H" AS DOUBLE) IS NOT NULL
+              AND TRY_CAST("L" AS DOUBLE) IS NOT NULL
+              AND TRY_CAST("C" AS DOUBLE) IS NOT NULL
+              AND TRY_CAST("L" AS DOUBLE) <= TRY_CAST("H" AS DOUBLE)
+            {conflict}
+        """)
+        loaded = conn.execute("SELECT COUNT(*) FROM topix_daily").fetchone()[0] - before
 
-    _flush()
+        if bulk:
+            conn.execute("COMMIT")
+    except Exception:
+        if bulk:
+            conn.execute("ROLLBACK")
+        raise
+
     logger.info("load_topix: %d 件ロード (%s)", loaded, csv_path.name)
     return loaded
