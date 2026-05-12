@@ -135,7 +135,7 @@ python -m kabusys.run_intraday_monitor --watch
 または Streamlit ダッシュボードを開いて常時監視する:
 
 ```cmd
-streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
+python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
 ```
 
 ダッシュボードは 10 ページ構成です。

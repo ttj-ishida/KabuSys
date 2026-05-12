@@ -105,7 +105,7 @@ Select-String -Path logs\*.log -Pattern "ERROR|CRITICAL"
 Streamlit を使う場合:
 
 ```cmd
-streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
+python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
 ```
 
 利用ページ:

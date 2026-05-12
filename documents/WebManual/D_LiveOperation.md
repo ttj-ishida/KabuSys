@@ -93,7 +93,7 @@ python -m kabusys.run_intraday_monitor --watch
 Streamlit:
 
 ```cmd
-streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
+python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
 ```
 
 **Core 標準導線 — 使うページ:**

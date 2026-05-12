@@ -41,7 +41,7 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 - ザラ場監視 CLI: `python -m kabusys.run_intraday_monitor`
   - 単発または監視モード（`--watch`）で実行状態 / リスク / システム指標を表示
 
-- Streamlit 監視ダッシュボード: `streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db`
+- Streamlit 監視ダッシュボード: `python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db`
   - 10ページ構成（Home / Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Signal Queue / Performance / Failure Recovery / WebManual / Strategy Lab）
   - Home: Kill Switch・Execution / Monitoring プロセス状態・エラーログ（SQLite）
   - Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Failure Recovery: 運用フロー確認ページ（SQLite `monitoring.db`、`operations_data.py` 経由）
@@ -388,7 +388,7 @@ python -m kabusys.run_monitoring
 `MonitoringEngine` とは独立して起動します。
 
 ```
-streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
+python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
 ```
 
 | ページ | 主な確認内容 |

@@ -435,7 +435,7 @@ Streamlit マルチページ構成で実装。ページファイルは `pages/` 
 **起動方法:**
 
 ```bash
-streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
+python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
 ```
 
 **ファイル構成:**
