@@ -59,11 +59,11 @@ function Register-KabuSysTask {
 }
 
 # Night batch jobs
-Register-KabuSysTask -TaskName "KabuSys_DataUpdate"            -Script "run_data_update.py"            -TriggerTime "15:30"
+Register-KabuSysTask -TaskName "KabuSys_DataUpdate"            -Script "run_data_update.py"            -TriggerTime "17:30"
 # オプション: ENABLE_YAHOONEWS=true のときのみ実際に収集が実行される（false の場合即スキップ）
-Register-KabuSysTask -TaskName "KabuSys_YahooNewsCollection"   -Script "run_yahoonews_collection.py"   -TriggerTime "15:33"
-Register-KabuSysTask -TaskName "KabuSys_FeatureGen"            -Script "run_feature_gen.py"            -TriggerTime "16:00"
-Register-KabuSysTask -TaskName "KabuSys_AiAnalysis"            -Script "run_ai_analysis.py"            -TriggerTime "18:00"
+Register-KabuSysTask -TaskName "KabuSys_YahooNewsCollection"   -Script "run_yahoonews_collection.py"   -TriggerTime "17:33"
+Register-KabuSysTask -TaskName "KabuSys_FeatureGen"            -Script "run_feature_gen.py"            -TriggerTime "18:30"
+Register-KabuSysTask -TaskName "KabuSys_AiAnalysis"            -Script "run_ai_analysis.py"            -TriggerTime "19:00"
 Register-KabuSysTask -TaskName "KabuSys_StrategySignal"        -Script "run_strategy_signal.py"        -TriggerTime "20:00"
 Register-KabuSysTask -TaskName "KabuSys_PortfolioConstruction" -Script "run_portfolio_construction.py" -TriggerTime "21:00"
 Register-KabuSysTask -TaskName "KabuSys_NightBatchReport"      -Script "run_night_batch_report.py"      -TriggerTime "21:15"
