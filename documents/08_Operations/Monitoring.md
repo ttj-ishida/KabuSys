@@ -203,7 +203,7 @@ Core コードは返り値の型を意識せず `.send(message)` を呼ぶだけ
 | Pre-Market | `pages/3_Pre_Market.py` | 朝の READY/BLOCKED 判定・データ鮮度・停止フラグ確認 |
 | Execution Startup | `pages/4_Execution_Startup.py` | 起動直後のリコンシリエーション差分・ポジション整合確認 |
 | Intraday Monitor | `pages/5_Intraday_Monitor.py` | ザラ場監視（自動更新）・Kill Switch 状態・注文エラー・ドローダウン |
-| Signal Queue | `pages/6_Signal_Queue.py` | 発注キュー・ポートフォリオ目標・シグナル（直近7日） |
+| Signal Queue | `pages/6_Signal_Queue.py` | 発注キュー・ポートフォリオ目標・シグナル（直近7日）。**参照専用**。キャンセル・削除操作は CLI コマンドを画面上に表示するため、ターミナルで実行する |
 | Performance | `pages/7_Performance.py` | エクイティカーブ・ポジション・取引履歴・Paper Verification |
 | Failure Recovery | `pages/8_Failure_Recovery.py` | 障害イベント集約・復旧ガイド |
 | WebManual | `pages/9_WebManual.py` | 運用マニュアル閲覧ビュー |
@@ -493,6 +493,26 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 - Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Failure Recovery: SQLite `monitoring.db`（`operations_data.py` 経由）
 - Performance > Paper Verification タブ: SQLite `paper_trading.db`（read-only URI モード）
 - Signal Queue / Performance（Paper Verification 以外）/ Strategy Lab: DuckDB `kabusys.duckdb`（`read_only=True`）
+
+**Signal Queue の操作について:**
+
+DuckDB は同一ファイルへの read-write / read-only 接続の混在を許可しないため、Streamlit ダッシュボードは `read_only=True` のみを使用する。`signal_queue` への書き込み（キャンセル・削除）は CLI で行う。
+
+```bash
+# pending シグナルを日付指定でキャンセル
+python scripts/cancel_signal_queue.py --date 2026-05-12
+
+# pending シグナルを全件キャンセル
+python scripts/cancel_signal_queue.py --all
+
+# 日付 + 銘柄コードで絞り込みキャンセル
+python scripts/cancel_signal_queue.py --date 2026-05-12 --code 7203
+
+# cancelled レコードを物理削除（監査ログ不要になった後の掃除用）
+python scripts/cancel_signal_queue.py --delete-cancelled
+```
+
+Streamlit の Signal Queue ページはこれらのコマンドを動的に生成して表示する。
 
 **依存ライブラリ:** `psutil`（SystemMonitor）、`streamlit`（ダッシュボード UI）— `requirements.txt` に追加すること。
 

@@ -57,6 +57,21 @@ python -m kabusys.run_position_reconciliation_report
 
 - `artifacts/pre_market/{date}/report.md`
 
+**signal_queue に不要な pending がある場合:**
+
+Streamlit の Signal Queue ページに表示される CLI コマンドをターミナルで実行する。
+
+```cmd
+# 特定日付の pending をキャンセル
+python scripts/cancel_signal_queue.py --date 2026-05-12
+
+# 銘柄コードで絞る場合
+python scripts/cancel_signal_queue.py --date 2026-05-12 --code 7203
+
+# 全 pending をキャンセル（慎重に）
+python scripts/cancel_signal_queue.py --all
+```
+
 ---
 
 ## 3. Execution 起動（08:30）
@@ -144,7 +159,7 @@ python scripts\start_system.py --dry-run
 
 確認項目:
 
-- `signal_queue` に未処理 `pending` がない
+- `signal_queue` に未処理 `pending` がない（残っている場合は下記でキャンセル）
 - `positions` が更新済み
 - `portfolio_performance` に当日分が記録済み
 
@@ -153,6 +168,18 @@ python scripts\start_system.py --dry-run
 ```cmd
 python -m kabusys.run_market_close_report --save
 python -m kabusys.run_performance_report --type daily --save
+```
+
+**当日 pending が残っている場合:**
+
+```cmd
+python scripts/cancel_signal_queue.py --date 2026-05-12
+```
+
+**cancelled レコードが蓄積している場合（定期掃除）:**
+
+```cmd
+python scripts/cancel_signal_queue.py --delete-cancelled
 ```
 
 判定:

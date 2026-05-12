@@ -46,7 +46,7 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
   - Home: Kill Switch・Execution / Monitoring プロセス状態・エラーログ（SQLite）
   - Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Failure Recovery: 運用フロー確認ページ（SQLite `monitoring.db`、`operations_data.py` 経由）
   - Performance > Paper Verification タブ: SQLite `paper_trading.db`（read-only）
-  - Signal Queue / Performance（Paper Verification 以外）/ Strategy Lab: DuckDB（`kabusys.duckdb`）を読み取り専用で参照
+  - Signal Queue / Performance（Paper Verification 以外）/ Strategy Lab: DuckDB（`kabusys.duckdb`）を読み取り専用で参照（Signal Queue は参照専用）
 
 - 各種レポート生成:
   - Pre-Market Report: `python -m kabusys.run_pre_market_report`（--save / --json）
@@ -55,6 +55,12 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
   - Signal Queue Confirmation View: `python -m kabusys.run_signal_queue_report`（--date / --save / --json）
   - Performance Report（daily/weekly/monthly）: `python -m kabusys.run_performance_report --type daily`（--env / --from / --to / --save）
   - Execution Startup Summary の生成は Execution 起動時にも実行される
+
+- Signal Queue 操作（書き込みは CLI のみ）:
+  - `python scripts/cancel_signal_queue.py --date 2026-05-12`（日付指定でキャンセル）
+  - `python scripts/cancel_signal_queue.py --date 2026-05-12 --code 7203`（銘柄コードで絞り込み）
+  - `python scripts/cancel_signal_queue.py --all`（全 pending をキャンセル）
+  - `python scripts/cancel_signal_queue.py --delete-cancelled`（cancelled レコードを物理削除）
 
 - 設定周り:
   - 対話式 .env 作成: `python -m kabusys.config_setup`
@@ -400,7 +406,7 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 | **Pre-Market** | 朝の READY/BLOCKED 判定 / データ鮮度 / 停止フラグ確認 |
 | **Execution Startup** | 起動直後のリコンシリエーション差分 / ポジション整合確認 |
 | **Intraday Monitor** | ザラ場監視（自動更新）/ Kill Switch 状態 / 注文エラー / ドローダウン |
-| **Signal Queue** | 翌営業日の発注キュー（pending 件数）/ ポートフォリオ目標 / 直近シグナル |
+| **Signal Queue** | 翌営業日の発注キュー（pending 件数）/ ポートフォリオ目標 / 直近シグナル。**参照専用**。キャンセル・削除は CLI コマンドを画面上に表示するため、ターミナルで実行する |
 | **Performance** | エクイティカーブ / 保有ポジション / 取引履歴 / Paper Verification |
 | **Failure Recovery** | 障害イベント集約 / 復旧ガイド |
 | **WebManual** | 運用マニュアル閲覧ビュー |
@@ -409,7 +415,7 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 - Home は SQLite `monitoring.db`（read-only）。
 - Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Failure Recovery は `operations_data.py` 経由で SQLite `monitoring.db`（read-only）。
 - Performance > Paper Verification タブは SQLite `paper_trading.db`（read-only URI モード）。
-- Signal Queue / Performance（Paper Verification 以外）/ Strategy Lab（AI Co-Pilot タブ以外）は DuckDB `kabusys.duckdb` を読み取り専用で参照します。
+- Signal Queue / Performance（Paper Verification 以外）/ Strategy Lab（AI Co-Pilot タブ以外）は DuckDB `kabusys.duckdb` を読み取り専用で参照します。Signal Queue の書き込み操作（キャンセル・削除）は `scripts/cancel_signal_queue.py` を使用します。
 - Strategy Lab > AI Co-Pilot タブ: DuckDB `kabusys.duckdb`（backtest_runs 参照）+ SQLite `monitoring.db`（ai_wizard_messages 読み書き）を使用します。`OPENAI_API_KEY` 必須（環境変数または `st.secrets`）。
 
 ---
@@ -586,7 +592,7 @@ touch data/stop_requested.flag
       - 3_Pre_Market.py            — 朝の READY/BLOCKED 判定・データ鮮度確認
       - 4_Execution_Startup.py     — 起動直後のリコンシリエーション差分確認
       - 5_Intraday_Monitor.py      — ザラ場監視（自動更新）・Kill Switch 確認
-      - 6_Signal_Queue.py          — 発注キュー・シグナル確認
+      - 6_Signal_Queue.py          — 発注キュー・シグナル確認（参照専用。キャンセル・削除は CLI コマンドを表示）
       - 7_Performance.py           — エクイティカーブ・ポジション・取引履歴・Paper Verification
       - 8_Failure_Recovery.py      — 障害イベント集約・復旧ガイド
       - 9_WebManual.py             — 運用マニュアル閲覧ビュー

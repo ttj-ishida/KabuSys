@@ -208,6 +208,23 @@ Windows の自動更新・電源障害・OS クラッシュなどで PC が予�
 
 ### 対応手順
 
+**軽症（特定日・銘柄の pending が誤っているだけ）:**
+
+```
+1. 対象を絞ってキャンセルする（Execution が停止していること）
+   python scripts\cancel_signal_queue.py --date 2026-05-12
+   python scripts\cancel_signal_queue.py --date 2026-05-12 --code 7203
+
+2. 夜間バッチを手動で再実行する（必要な場合のみ）
+   python scripts\run_strategy_signal.py
+   python scripts\run_portfolio_construction.py
+
+3. シグナルが生成されたことを確認する
+   python -m kabusys.run_signal_queue_report
+```
+
+**重症（全件リセットが必要な場合）:**
+
 ```
 1. Execution を停止する（起動中の場合）
    python scripts\stop_system.py
@@ -227,6 +244,14 @@ Windows の自動更新・電源障害・OS クラッシュなどで PC が予�
 5. Execution を再起動する
    python scripts\start_system.py --component execution
 ```
+
+**cancelled レコードが大量に蓄積している場合（定期掃除）:**
+
+```
+python scripts\cancel_signal_queue.py --delete-cancelled
+```
+
+> Streamlit の Signal Queue ページはこれらの CLI コマンドを動的に表示する（参照専用）。
 
 ---
 

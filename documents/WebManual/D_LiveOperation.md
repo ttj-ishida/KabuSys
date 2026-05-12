@@ -104,7 +104,7 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 - `Pre-Market`（READY/BLOCKED 判定・データ鮮度確認）
 - `Execution Startup`（起動直後のリコンシリエーション差分）
 - `Intraday Monitor`（ザラ場監視・自動更新・Kill Switch 状態）
-- `Signal Queue`（発注キュー・シグナル）
+- `Signal Queue`（発注キュー・シグナル）— **参照専用**。キャンセル・削除は画面上の CLI コマンドをターミナルで実行する
 - `Performance`（エクイティカーブ・ポジション・取引履歴・Paper Verification）
 - `Failure Recovery`（障害イベント集約・復旧ガイド）
 - `WebManual`
@@ -131,6 +131,18 @@ python -m kabusys.run_performance_report --type daily --save
 
 - `artifacts/market_close/{date}/report.md`
 - `artifacts/performance/live/daily/{date}/report.md`
+
+**pending が残っている場合:**
+
+```cmd
+python scripts\cancel_signal_queue.py --date <日付>
+```
+
+**cancelled レコードの定期掃除（任意）:**
+
+```cmd
+python scripts\cancel_signal_queue.py --delete-cancelled
+```
 
 ---
 
