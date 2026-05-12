@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -36,30 +37,49 @@ _BACKUP_COUNT = 30  # 日次ローテーション・30日分保持
 logger = logging.getLogger(__name__)
 
 
+_LINE_SEP_RE = __import__("re").compile(r"\r\n|\r|\n")
+
+
 class _TeeWriter:
     """sys.stdout / sys.stderr をオリジナルストリームとロガーの両方に出力する tee ライター。
 
     write() で受け取ったメッセージを:
       1. オリジナルストリームへ書き込む（コンソール出力を維持）
-      2. 改行区切りで logger_fn を呼び出してログファイルにも記録する
+      2. \\n / \\r\\n / \\r 区切りで logger_fn を呼び出してログファイルにも記録する
+         （プログレスバー等の CR 更新もバッファに溜まらず都度ログ化される）
 
-    部分行（改行なしの断片）はバッファリングし flush() 時に書き出す。
-    これにより print() / C拡張ライブラリの stdio 出力もログファイルに残せる。
+    部分行（区切り文字なしの断片）はバッファリングし flush() 時に書き出す。
+    logger_fn 内でハンドラ障害が起きた場合の再帰ループは再入防止フラグで防ぐ。
     """
 
     def __init__(self, orig_stream: Any, logger_fn: Callable[[str], None]) -> None:
         self._orig = orig_stream
         self._logger_fn = logger_fn
         self._buf = ""
+        self._local = threading.local()
+
+    def _safe_log(self, msg: str) -> None:
+        """再帰ループを防ぎつつ logger_fn を呼ぶ。
+
+        FileHandler の emit 失敗 → handleError が sys.stderr に書く → _TeeWriter.write
+        → stderr_logger.warning → 同じハンドラで再失敗、という無限再帰を防ぐ。
+        """
+        if getattr(self._local, "active", False):
+            return
+        self._local.active = True
+        try:
+            self._logger_fn(msg)
+        finally:
+            self._local.active = False
 
     def write(self, msg: str) -> int:
         n = self._orig.write(msg)
         self._buf += msg
-        while "\n" in self._buf:
-            line, self._buf = self._buf.split("\n", 1)
-            stripped = line.rstrip("\r")
-            if stripped:
-                self._logger_fn(stripped)
+        parts = _LINE_SEP_RE.split(self._buf)
+        for line in parts[:-1]:
+            if line.strip():
+                self._safe_log(line)
+        self._buf = parts[-1]
         return n if n is not None else len(msg)
 
     def writelines(self, lines: Any) -> None:
@@ -68,9 +88,9 @@ class _TeeWriter:
 
     def flush(self) -> None:
         buf, self._buf = self._buf, ""
-        stripped = buf.rstrip("\r")
+        stripped = buf.rstrip("\r\n")
         if stripped.strip():
-            self._logger_fn(stripped)
+            self._safe_log(stripped)
         self._orig.flush()
 
     @property
@@ -224,7 +244,7 @@ def setup_logging(
     )
 
     if capture_stdio and run_log_file is not None:
-        _install_stdio_tee(app_name, run_log_file, numeric_level, formatter)
+        _install_stdio_tee(app_name, run_log_file, formatter)
 
     return run_log_file
 
@@ -232,7 +252,6 @@ def setup_logging(
 def _install_stdio_tee(
     app_name: str,
     run_log_file: Path,
-    level: int,
     formatter: logging.Formatter,
 ) -> None:
     """sys.stdout / sys.stderr を _TeeWriter に置き換えて run_log_file にも出力する。

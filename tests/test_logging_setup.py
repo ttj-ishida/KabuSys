@@ -337,6 +337,35 @@ class TestTeeWriter:
         tee = _TeeWriter(orig, lambda x: None)
         assert tee.encoding == "utf-16"
 
+    def test_cr_treated_as_line_delimiter(self):
+        """`\\r` だけの行区切りでも logger_fn が呼ばれる（プログレスバー対応）。"""
+        logged = []
+        orig = type(
+            "S", (), {"write": lambda s, m: len(m), "flush": lambda s: None, "encoding": "utf-8"}
+        )()
+        tee = _TeeWriter(orig, logged.append)
+        tee.write("step1\rstep2\r")
+        assert "step1" in logged
+        assert "step2" in logged
+
+    def test_reentrancy_guard_prevents_recursion(self):
+        """logger_fn 内から再び write() を呼んでも再帰ループしない。"""
+        orig = type(
+            "S", (), {"write": lambda s, m: len(m), "flush": lambda s: None, "encoding": "utf-8"}
+        )()
+        call_count = []
+
+        def recursive_logger(msg):
+            call_count.append(msg)
+            # logger_fn 内から tee.write を呼ぶ（FileHandler 障害時の handleError 相当）
+            tee.write("inner\n")
+
+        tee = _TeeWriter(orig, recursive_logger)
+        tee.write("outer\n")
+        # recursive_logger は1回だけ呼ばれ、内部の tee.write は再入防止でスキップされる
+        assert len(call_count) == 1
+        assert call_count[0] == "outer"
+
 
 class TestCaptureStdio:
     """capture_stdio=True の統合テスト（Issue #309）"""
