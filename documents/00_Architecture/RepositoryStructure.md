@@ -56,7 +56,9 @@
     ├ system_config.yaml
     ├ trading_config.yaml
     ├ universe_config.yaml
-    └ risk_config.yaml
+    ├ risk_config.yaml
+    └ backups/                        ← strategy_config.yaml の自動バックアップ（AI Co-Pilot 適用時）
+        └ strategy_config_YYYYMMDD_HHMMSS.yaml
 
 内容:
 
@@ -64,6 +66,7 @@
 -   戦略パラメータ
 -   リスク制限
 -   ユニバース設定
+-   `backups/`: AI Co-Pilot がパラメータを適用する際に自動生成する strategy_config.yaml のバックアップ。ロールバック時にも参照する
 
 ------------------------------------------------------------------------
 
@@ -160,18 +163,20 @@
 
 ## ai/
 
-AI関連コード。
+AI関連コード。実際のコードは `src/kabusys/ai/` に配置される。
 
-    ai/
-    ├ news_sentiment.py
-    ├ regime_model.py
-    └ ai_features.py
+    src/kabusys/ai/
+    ├ news_nlp.py            ← ニュース NLP スコアリング（GPT-4o-mini 呼び出し）
+    ├ regime_detector.py     ← 市場レジーム判定（ETF/LLM ハイブリッド）
+    ├ backtest_summarizer.py ← DuckDB backtest_runs → system prompt 用 Markdown 生成
+    ├ param_extractor.py     ← AI 返答から JSON ブロック抽出・ホワイトリスト検証
+    └ config_manager.py      ← strategy_config.yaml バックアップ・適用・ロールバック
 
 用途:
 
--   ニュース解析
--   センチメント分析
+-   ニュース解析・センチメント分析
 -   市場レジーム判定
+-   AI Co-Pilot パラメータ提案・適用・ロールバック（Issue #233, #279）
 
 ------------------------------------------------------------------------
 
