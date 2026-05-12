@@ -12,8 +12,7 @@ from kabusys.monitoring.dashboard_data import (
     load_signals,
 )
 
-_ALL_STATUSES = ["pending", "processing", "filled", "cancelled", "error", "failed"]
-_DEFAULT_STATUSES = ["pending", "processing", "filled", "error", "failed"]  # cancelled を除外
+_KNOWN_STATUSES = ["pending", "processing", "filled", "cancelled", "error", "failed"]
 
 st.set_page_config(page_title="Signal Queue", layout="wide", page_icon="📋")
 st.title("📋 Signal Queue — 発注予定・シグナル確認")
@@ -38,21 +37,26 @@ try:
     with tab_queue:
         st.subheader("Signal Queue（全件）")
 
-        # ステータスフィルター
+        df = load_signal_queue(conn)
+        pending = df[df["status"] == "pending"] if not df.empty else df.iloc[0:0]
+
+        # ステータスフィルター — 実データと既知ステータスのユニオンでオプションを構築
+        actual_statuses = sorted(df["status"].unique().tolist()) if not df.empty else []
+        all_options = sorted(set(_KNOWN_STATUSES) | set(actual_statuses))
+        default_statuses = [s for s in all_options if s != "cancelled"]
         selected_statuses = st.multiselect(
             "表示するステータス",
-            options=_ALL_STATUSES,
-            default=_DEFAULT_STATUSES,
-            help="cancelled はデフォルトで非表示。チェックを入れると表示されます。",
+            options=all_options,
+            default=default_statuses,
+            help="cancelled はデフォルトで非表示。チェックを入れると表示されます。全解除すると0件表示になります。",
         )
 
-        df = load_signal_queue(conn)
         if df.empty:
             st.info("発注キューにシグナルはありません。")
         else:
-            pending = df[df["status"] == "pending"]
-            st.metric("pending 件数", len(pending))
-            filtered_df = df[df["status"].isin(selected_statuses)] if selected_statuses else df
+            st.metric("pending 件数（全体）", len(pending))
+            # 空リスト時は意図通り0件表示（falsy 判定を使わず常に isin を適用）
+            filtered_df = df[df["status"].isin(selected_statuses)]
             st.dataframe(filtered_df, use_container_width=True)
 
         # --- キャンセル操作 ---
@@ -152,13 +156,15 @@ try:
                 )
                 del_col, abort_col = st.columns(2)
                 with del_col:
-                    if st.button("確定して削除実行", type="primary"):
+                    if st.button(
+                        "確定して削除実行", type="primary", key="confirm_delete_cancelled"
+                    ):
                         try:
-                            deleted = conn.execute(
+                            cursor = conn.execute(
                                 "DELETE FROM signal_queue WHERE status = 'cancelled'"
-                                " RETURNING signal_id"
-                            ).fetchall()
-                            st.success(f"{len(deleted)} 件を削除しました。")
+                            )
+                            deleted_count = cursor.rowcount
+                            st.success(f"{deleted_count} 件を削除しました。")
                             st.session_state.pop("sq_delete_cancelled", None)
                             st.rerun()
                         except Exception as e:
