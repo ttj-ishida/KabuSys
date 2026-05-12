@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import duckdb
@@ -28,10 +28,12 @@ from kabusys.operations.night_batch_report import (
     format_cli_summary,
     save_report,
 )
-from kabusys.utils.logging_setup import setup_logging
+from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
 setup_logging(app_name="night_batch_report")
 logger = logging.getLogger(__name__)
+
+_APP_NAME = "night_batch_report"
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +169,8 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    started_at = datetime.now(timezone.utc)
+    log_run_start(_APP_NAME)
     args = _parse_args()
 
     if args.date:
@@ -216,6 +220,7 @@ def main() -> None:
     logger.info("レポート保存: %s", saved_path)
 
     print(format_cli_summary(report))
+    log_run_end(_APP_NAME, status="success", started_at=started_at)
 
 
 if __name__ == "__main__":

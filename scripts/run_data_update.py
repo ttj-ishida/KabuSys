@@ -21,16 +21,18 @@ from kabusys.data.breadth import calc_and_save_breadth
 from kabusys.data.pipeline import run_daily_etl
 from kabusys.operations.job_run_recorder import write_job_result
 from kabusys.operations.night_batch_report import JobRunResult
-from kabusys.utils.logging_setup import setup_logging
+from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
 setup_logging(app_name="data_update")
 logger = logging.getLogger(__name__)
 
 _JOB_NAME = "data_update_job"
+_APP_NAME = "data_update"
 
 
 def main() -> None:
     started_at = datetime.now(timezone.utc)
+    log_run_start(_APP_NAME)
     settings = Settings()
     conn = duckdb.connect(str(settings.duckdb_path))
     _failed = False
@@ -84,6 +86,11 @@ def main() -> None:
     except Exception:
         logger.warning("JobRunResult の書き出しに失敗しました", exc_info=True)
 
+    log_run_end(
+        _APP_NAME,
+        status="failed" if _failed else ("warning" if _has_warnings else "success"),
+        started_at=started_at,
+    )
     if _failed:
         sys.exit(1)
 

@@ -20,16 +20,18 @@ from kabusys.ai.regime_detector import score_regime
 from kabusys.config import Settings
 from kabusys.operations.job_run_recorder import write_job_result
 from kabusys.operations.night_batch_report import JobRunResult
-from kabusys.utils.logging_setup import setup_logging
+from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
 setup_logging(app_name="ai_analysis")
 logger = logging.getLogger(__name__)
 
 _JOB_NAME = "ai_analysis_job"
+_APP_NAME = "ai_analysis"
 
 
 def main() -> None:
     started_at = datetime.now(timezone.utc)
+    log_run_start(_APP_NAME)
     settings = Settings()
     conn = duckdb.connect(str(settings.duckdb_path))
     target_date = date.today()
@@ -77,6 +79,7 @@ def main() -> None:
     except Exception:
         logger.warning("JobRunResult の書き出しに失敗しました", exc_info=True)
 
+    log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
     if _failed:
         sys.exit(1)
 
