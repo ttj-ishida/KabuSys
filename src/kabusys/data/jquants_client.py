@@ -23,7 +23,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import duckdb
@@ -191,25 +191,45 @@ def fetch_daily_quotes(
 
     Returns:
         株価レコードのリスト。
-    """
-    params: dict[str, str] = {}
-    if code:
-        params["code"] = code
-    if date_from:
-        params["dateFrom"] = date_from.strftime("%Y-%m-%d")
-    if date_to:
-        params["dateTo"] = date_to.strftime("%Y-%m-%d")
 
+    Note:
+        J-Quants API は ``code`` 未指定時に ``date`` または ``code`` のどちらかを必須とする。
+        ``code`` 未指定の場合は ``date`` パラメータで 1 日ずつ呼び出す。
+    """
     result: list[dict[str, Any]] = []
-    seen_keys: set[str] = set()
-    while True:
-        data = _request("/equities/bars/daily", params=params)
-        result.extend(data.get("data", []))
-        pagination_key = data.get("pagination_key")
-        if not pagination_key or pagination_key in seen_keys:
-            break
-        seen_keys.add(pagination_key)
-        params["pagination_key"] = pagination_key
+
+    if code:
+        # 銘柄コード指定: dateFrom/dateTo で範囲取得
+        params: dict[str, str] = {"code": code}
+        if date_from:
+            params["dateFrom"] = date_from.strftime("%Y-%m-%d")
+        if date_to:
+            params["dateTo"] = date_to.strftime("%Y-%m-%d")
+        seen_keys: set[str] = set()
+        while True:
+            data = _request("/equities/bars/daily", params=params)
+            result.extend(data.get("data", []))
+            pagination_key = data.get("pagination_key")
+            if not pagination_key or pagination_key in seen_keys:
+                break
+            seen_keys.add(pagination_key)
+            params["pagination_key"] = pagination_key
+    else:
+        # 全銘柄: API が date か code を必須とするため日付ごとに呼び出す
+        d = date_from or date_to or date.today()
+        end = date_to or d
+        while d <= end:
+            day_params: dict[str, str] = {"date": d.strftime("%Y-%m-%d")}
+            seen_keys = set()
+            while True:
+                data = _request("/equities/bars/daily", params=day_params)
+                result.extend(data.get("data", []))
+                pagination_key = data.get("pagination_key")
+                if not pagination_key or pagination_key in seen_keys:
+                    break
+                seen_keys.add(pagination_key)
+                day_params["pagination_key"] = pagination_key
+            d += timedelta(days=1)
 
     logger.info("fetch_daily_quotes: %d レコード取得", len(result))
     return result
@@ -229,25 +249,45 @@ def fetch_financial_statements(
 
     Returns:
         財務レコードのリスト。
-    """
-    params: dict[str, str] = {}
-    if code:
-        params["code"] = code
-    if date_from:
-        params["dateFrom"] = date_from.strftime("%Y-%m-%d")
-    if date_to:
-        params["dateTo"] = date_to.strftime("%Y-%m-%d")
 
+    Note:
+        J-Quants API は ``code`` 未指定時に ``date`` または ``code`` のどちらかを必須とする。
+        ``code`` 未指定の場合は ``date`` パラメータで 1 日ずつ呼び出す。
+    """
     result: list[dict[str, Any]] = []
-    seen_keys: set[str] = set()
-    while True:
-        data = _request("/fins/summary", params=params)
-        result.extend(data.get("data", []))
-        pagination_key = data.get("pagination_key")
-        if not pagination_key or pagination_key in seen_keys:
-            break
-        seen_keys.add(pagination_key)
-        params["pagination_key"] = pagination_key
+
+    if code:
+        # 銘柄コード指定: dateFrom/dateTo で範囲取得
+        params: dict[str, str] = {"code": code}
+        if date_from:
+            params["dateFrom"] = date_from.strftime("%Y-%m-%d")
+        if date_to:
+            params["dateTo"] = date_to.strftime("%Y-%m-%d")
+        seen_keys: set[str] = set()
+        while True:
+            data = _request("/fins/summary", params=params)
+            result.extend(data.get("data", []))
+            pagination_key = data.get("pagination_key")
+            if not pagination_key or pagination_key in seen_keys:
+                break
+            seen_keys.add(pagination_key)
+            params["pagination_key"] = pagination_key
+    else:
+        # 全銘柄: API が date か code を必須とするため日付ごとに呼び出す
+        d = date_from or date_to or date.today()
+        end = date_to or d
+        while d <= end:
+            day_params: dict[str, str] = {"date": d.strftime("%Y-%m-%d")}
+            seen_keys = set()
+            while True:
+                data = _request("/fins/summary", params=day_params)
+                result.extend(data.get("data", []))
+                pagination_key = data.get("pagination_key")
+                if not pagination_key or pagination_key in seen_keys:
+                    break
+                seen_keys.add(pagination_key)
+                day_params["pagination_key"] = pagination_key
+            d += timedelta(days=1)
 
     logger.info("fetch_financial_statements: %d レコード取得", len(result))
     return result
