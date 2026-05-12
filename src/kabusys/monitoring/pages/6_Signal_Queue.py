@@ -1,4 +1,4 @@
-"""pages/2_Signal_Queue.py — 翌営業日の発注予定・シグナル確認ビュー。"""
+"""pages/6_Signal_Queue.py — 翌営業日の発注予定・シグナル確認ビュー。"""
 
 from __future__ import annotations
 
@@ -41,6 +41,82 @@ try:
             pending = df[df["status"] == "pending"]
             st.metric("pending 件数", len(pending))
             st.dataframe(df, use_container_width=True)
+
+        # --- キャンセル操作 ---
+        st.divider()
+        st.subheader("Pending シグナルのキャンセル")
+
+        if df.empty or pending.empty:
+            st.info("キャンセル可能な pending シグナルはありません。")
+        else:
+            pending_ids = pending["signal_id"].tolist()
+
+            # 個別選択キャンセル
+            selected = st.multiselect(
+                "キャンセルするシグナルを選択（signal_id）",
+                options=pending_ids,
+                help="pending ステータスのシグナルのみ表示されます",
+            )
+
+            col_sel, col_all = st.columns(2)
+
+            with col_sel:
+                if st.button(
+                    f"選択した {len(selected)} 件をキャンセル",
+                    disabled=len(selected) == 0,
+                    type="primary",
+                ):
+                    st.session_state["sq_cancel_targets"] = selected
+                    st.session_state["sq_cancel_mode"] = "selected"
+
+            with col_all:
+                if st.button(
+                    f"全 pending（{len(pending_ids)} 件）をキャンセル",
+                    type="secondary",
+                ):
+                    st.session_state["sq_cancel_targets"] = pending_ids
+                    st.session_state["sq_cancel_mode"] = "all"
+
+            # 確認ダイアログ
+            if "sq_cancel_targets" in st.session_state:
+                targets = st.session_state["sq_cancel_targets"]
+                mode_label = (
+                    f"選択した {len(targets)} 件"
+                    if st.session_state.get("sq_cancel_mode") == "selected"
+                    else f"全 pending {len(targets)} 件"
+                )
+                st.warning(f"{mode_label} を `cancelled` に変更します。この操作は元に戻せません。")
+                confirm_col, abort_col = st.columns(2)
+                with confirm_col:
+                    if st.button("確定してキャンセル実行", type="primary"):
+                        try:
+                            placeholders = ", ".join(["?" for _ in targets])
+                            with duckdb.connect(str(settings.duckdb_path)) as write_conn:
+                                updated = write_conn.execute(
+                                    f"UPDATE signal_queue SET status = 'cancelled'"
+                                    f" WHERE signal_id IN ({placeholders})"
+                                    f" AND status = 'pending'"
+                                    f" RETURNING signal_id",
+                                    targets,
+                                ).fetchall()
+                            updated_ids = {row[0] for row in updated}
+                            count = len(updated_ids)
+                            st.success(f"{count} 件を cancelled に変更しました。")
+                            skipped = len(targets) - count
+                            if skipped > 0:
+                                st.warning(
+                                    f"{skipped} 件は既に pending ではなかったためスキップされました。"
+                                )
+                            del st.session_state["sq_cancel_targets"]
+                            del st.session_state["sq_cancel_mode"]
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"キャンセル処理に失敗しました: {e}")
+                with abort_col:
+                    if st.button("戻る"):
+                        del st.session_state["sq_cancel_targets"]
+                        del st.session_state["sq_cancel_mode"]
+                        st.rerun()
 
     with tab_targets:
         st.subheader("ポートフォリオ目標（最新日）")
