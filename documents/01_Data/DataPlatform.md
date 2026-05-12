@@ -102,8 +102,18 @@ Data Fetch -> [ Raw Layer ] -> Data Cleaning -> [ Processed Layer ] -> Feature G
 
 ### 4.2 主要ジョブ（日次差分更新）
 
+日次差分更新で使用する J-Quants エンドポイントと制約：
+
+| ETL ジョブ | エンドポイント | 備考 |
+| --- | --- | --- |
+| `run_prices_etl()` | `/equities/bars/daily` | `date` or `code` 必須。全銘柄時は `date=YYYY-MM-DD` で1日ずつ取得 |
+| `run_financials_etl()` | `/fins/summary` | 同上。Bulk と同一エンドポイント |
+| `run_dividends_etl()` | `/fins/dividend` | Standard プランでは HTTP 403。Premium 以上が必要 |
+| `run_topix_etl()` | `/indices/bars/daily/topix` | 当日分取得済みの場合はスキップ |
+| `calendar_update_job` | `/markets/calendar` | 祝日・SQ日など |
+
 - `calendar_update_job`: J-Quants等からJPXカレンダー情報（祝日・SQ日など）を取得し、`market_calendar` テーブルを更新する夜間バッチ処理。
-- `run_topix_etl()`: J-Quants `/indices/topix` エンドポイントから TOPIX 日足（OHLC）を差分取得し、`topix_daily` テーブルへ UPSERT する。`run_daily_etl()` の Step 5 として実行される（Issue #257）。当日分取得済みの場合はバックフィルも含めてスキップ。TOPIX は JPX 公式指数のため過去日付の訂正配信はほぼ発生しない。
+- `run_topix_etl()`: J-Quants `/indices/bars/daily/topix` エンドポイントから TOPIX 日足（OHLC）を差分取得し、`topix_daily` テーブルへ UPSERT する。`run_daily_etl()` の Step 5 として実行される（Issue #257）。当日分取得済みの場合はバックフィルも含めてスキップ。TOPIX は JPX 公式指数のため過去日付の訂正配信はほぼ発生しない。
 
 ### 4.3 Bootstrap フロー（初回一括投入）
 
@@ -146,7 +156,7 @@ Bootstrap は以下2つのファイル配置形式に対応する。両方が存
 | `/markets/calendar`            | —                 | `market_calendar`     | 既存スキーマに対応         |
 | `/indices/bars/daily/topix`    | —                 | `topix_daily`         | regime_detector が参照     |
 
-> `/fins/dividend` 等 Premium 限定エンドポイントは Bootstrap 対象外。配当データは差分 ETL（`run_dividends_etl()`）で取得する。
+> ⚠️ `/fins/dividend` は **Standard プランでも HTTP 403**（Premium プラン以上が必要）。Bootstrap 対象外であり、`run_dividends_etl()` もスキップされる。配当データは初回 Bootstrap CSV 投入分のみ利用可能。
 
 #### 冪等性・エラー方針
 

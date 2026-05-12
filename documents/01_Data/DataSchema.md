@@ -58,7 +58,10 @@ J-Quants から取得した生の日足株価データ。差分 API・Bulk API �
   fetched_at   timestamp 取込日時
 
 主キー: `(date, code)`
-取得元: J-Quants `/prices/daily_quotes`（差分 API）/ Bulk `/equities/bars/daily`
+取得元: J-Quants `/equities/bars/daily`（差分 API・Bulk 共通）
+
+> **API 仕様**: `date` または `code` パラメータが必須。全銘柄取得時は `date=YYYY-MM-DD` で
+> 1日ずつ呼び出す。パラメータの日付形式は `YYYY-MM-DD`。
 
 Bulk CSV カラムマッピング:
   Date → date, Code → code, O → open, H → high, L → low, C → close
@@ -154,11 +157,14 @@ J-Quants から取得した生の財務データ。
   fetched_at         timestamp 取込日時
 
 主キー: `(code, report_date, period_type)`
-取得元（差分 API）: J-Quants `/fins/statements`
-  BookValuePerShare→bps（Issue #185 追加）
-取得元（Bulk API）: `/fins/summary`
-  DiscDate→report_date, CurPerType→period_type, Sales→revenue, OP→operating_profit
-  NP→net_income, EPS→eps, NP/Eq→roe（ROE列は存在しないため純利益÷純資産で算出）
+取得元: J-Quants `/fins/summary`（差分 API・Bulk 共通）
+  Code→code, DiscDate→report_date, CurPerType→period_type
+  Sales→revenue, OP→operating_profit, NP→net_income, EPS→eps
+  NP/Eq→roe（ROE列は存在しないため純利益÷純資産で算出）
+  bps=NULL（/fins/summary に BPS 列なし）
+
+> **API 仕様**: `date` または `code` パラメータが必須。全銘柄取得時は `date=YYYY-MM-DD` で
+> 1日ずつ呼び出す。パラメータの日付形式は `YYYY-MM-DD`。
 
 ------------------------------------------------------------------------
 
@@ -200,6 +206,10 @@ J-Quants から取得した生の財務データ。
 主キー: `(code, pub_date, ref_no)`
 取得元（初回）: Bulk API `/fins/dividend` CSV（bootstrap）
 取得元（差分）: `/fins/dividend` 差分 API（`run_dividends_etl()`）※ Issue #185 追加
+
+> ⚠️ **プラン制限**: `/fins/dividend` は Standard プランでは利用不可（HTTP 403）。
+> Premium プラン以上が必要。Standard プランでは `run_dividends_etl()` はスキップされ、
+> `dividends` テーブルは Bootstrap CSV から投入済みのデータのみ保持する。
 
 配当利回りの計算: `(直近12ヶ月の div_rate 合計 / close) × 100`（ex_date ベース集計）
 
@@ -576,10 +586,11 @@ Executionの処理フロー:
 ## 日次差分更新フロー（通常運用）
 
     J-Quants 差分 API（15:30）
-      /prices/daily_quotes  → raw_prices → prices_daily
-      /fins/statements      → raw_financials → fundamentals
+      /equities/bars/daily  → raw_prices → prices_daily  ※date 指定で1日ずつ取得
+      /fins/summary         → raw_financials → fundamentals  ※同上
       /listed/info          →              stocks
       /market/trading_calendar →           market_calendar
+    ※ /fins/dividend は Standard プランでは HTTP 403（Premium 以上が必要）
     ↓
     TDnet 適時開示（15:35）→ raw_disclosures（source='tdnet'）
     EDINET API（15:40）    → raw_disclosures（source='edinet'）
