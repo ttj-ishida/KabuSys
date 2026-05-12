@@ -113,8 +113,14 @@ python -m kabusys.run_intraday_monitor --watch
 ```
 
 ```powershell
-Get-Content logs\execution.log -Tail 50
+# 直近50行をリアルタイム表示（集約ファイル）
+Get-Content logs\execution.log -Tail 50 -Wait
+
+# 全ログからエラーを検索
 Select-String -Path logs\*.log -Pattern "ERROR|CRITICAL"
+
+# 今回の実行単位ログを特定して確認（PID で絞り込む場合）
+Get-ChildItem logs\execution_*.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 ```
 
 Streamlit を使う場合:
@@ -140,6 +146,16 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 2. PID / stop flag / DB 状態確認
 3. 必要なら Kill Switch
 4. 再起動前に reconciliation
+
+**ログ確認コマンド:**
+
+```powershell
+# 集約ファイルから直近エラーを確認
+Select-String -Path logs\*.log -Pattern "ERROR|CRITICAL"
+
+# 失敗したバッチの実行単位ログを特定（最新ファイルから確認）
+Get-ChildItem logs\data_update_*.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content
+```
 
 停止:
 

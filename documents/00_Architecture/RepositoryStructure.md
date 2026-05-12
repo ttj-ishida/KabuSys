@@ -288,11 +288,21 @@ AI関連コード。
 
 ログ保存。
 
+`setup_logging` が生成する 2 種類のファイルを app_name ごとにフラット配置する。
+
     logs/
-    ├ execution/
-    ├ strategy/
-    ├ monitoring/
-    └ system/
+    ├ data_update.log                            ← 全実行集約（日次ローテーション・30日保持）
+    ├ data_update_20260512_173000_5678.log        ← 実行単位（UTC + PID）
+    ├ feature_gen.log
+    ├ feature_gen_20260512_183000_9012.log
+    ├ strategy_signal.log
+    ├ strategy_signal_20260512_200000_3456.log
+    ├ execution.log
+    ├ execution_20260512_083000_1234.log
+    └ …（各 app_name ごとに同様の構成）
+
+- 集約ファイル（`<app_name>.log`）: 日次ローテーション・30日保持。`tail -f` による監視や全期間検索に使用する。
+- 実行単位ファイル（`<app_name>_YYYYMMDD_HHMMSS_<PID>.log`）: UTC タイムスタンプ + PID でファイル名を一意化し、並行起動時の衝突を防ぐ。バッチ失敗時のログ特定に使用する。
 
 ------------------------------------------------------------------------
 

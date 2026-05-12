@@ -268,6 +268,19 @@ python scripts\cancel_signal_queue.py --delete-cancelled
 Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object TaskName, LastRunTime, LastTaskResult
 ```
 
+### 失敗したジョブのログを確認する
+
+各バッチスクリプトは起動ごとに `logs/<app_name>_YYYYMMDD_HHMMSS_<PID>.log` を生成します。  
+Task Scheduler で失敗した実行は、最新の実行単位ログファイルで原因を確認できます。
+
+```powershell
+# 失敗したジョブの実行単位ログを特定する（例: data_update）
+Get-ChildItem logs\data_update_*.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content
+
+# 全集約ログから ERROR / CRITICAL を横断検索する
+Select-String -Path logs\*.log -Pattern "ERROR|CRITICAL"
+```
+
 ### 手動再実行（依存関係の順番どおりに実行）
 
 ```cmd
