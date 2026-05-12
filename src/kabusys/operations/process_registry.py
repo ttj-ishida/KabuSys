@@ -18,6 +18,7 @@ import errno
 import logging
 import os
 import sqlite3
+from pathlib import Path
 
 from kabusys.config import Settings
 from kabusys.monitoring.monitoring_db import MonitoringDB, init_monitoring_db
@@ -93,17 +94,21 @@ def update_process(
 def list_processes(hours: int = 24) -> list[dict]:
     """直近 hours 時間のプロセス一覧を返す（実行中含む）。
 
+    DB ファイルが存在しない場合は空リストを返す。
+    読み取り専用操作のため init_monitoring_db は呼ばない。
+
     Args:
         hours: 取得範囲（時間）。デフォルト 24 時間。
 
     Returns:
-        process_runs レコードの dict リスト（started_at 降順）。
+        process_runs レコードの dict リスト（COALESCE(finished_at, started_at) 降順）。
     """
     settings = Settings()
+    if not Path(str(settings.sqlite_path)).exists():
+        return []
     conn = sqlite3.connect(str(settings.sqlite_path), timeout=30)
     try:
         conn.execute("PRAGMA busy_timeout=30000")
-        init_monitoring_db(conn)
         db = MonitoringDB(conn)
         return db.list_recent_processes(hours=hours)
     finally:
