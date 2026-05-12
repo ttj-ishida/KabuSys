@@ -386,3 +386,27 @@ class TestCaptureStdio:
         orig = sys.stdout
         setup_logging(app_name="test", log_dir=tmp_path)
         assert sys.stdout is orig
+
+    def test_high_log_level_still_captures_print(self, tmp_path):
+        """LOG_LEVEL=ERROR 設定時も print() 出力は実行単位ログに記録される。"""
+        run_log = setup_logging(
+            app_name="test", log_dir=tmp_path, level="ERROR", capture_stdio=True
+        )
+        assert run_log is not None
+        print("captured despite error level")
+        sys.stdout.flush()
+        content = run_log.read_text(encoding="utf-8")
+        assert "captured despite error level" in content
+
+    def test_flush_clears_whitespace_only_buffer(self):
+        """flush() で空白のみのバッファを呼び出してもバッファがクリアされ logger_fn を呼ばない。"""
+        logged = []
+        orig = type(
+            "S", (), {"write": lambda s, m: len(m), "flush": lambda s: None, "encoding": "utf-8"}
+        )()
+        tee = _TeeWriter(orig, logged.append)
+        tee.write("   ")  # whitespace only, no newline
+        tee.flush()
+        assert logged == []
+        # バッファがクリアされていること
+        assert tee._buf == ""
