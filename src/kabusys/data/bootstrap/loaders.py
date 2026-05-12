@@ -197,7 +197,10 @@ def load_financials(
             TRY_CAST("OP" AS DOUBLE)          AS operating_profit,
             TRY_CAST("NP" AS DOUBLE)          AS net_income,
             TRY_CAST("EPS" AS DOUBLE)         AS eps,
-            TRY_CAST("ROE" AS DOUBLE)         AS roe
+            CASE WHEN TRY_CAST("Eq" AS DOUBLE) IS NOT NULL
+                      AND TRY_CAST("Eq" AS DOUBLE) != 0
+                 THEN TRY_CAST("NP" AS DOUBLE) / TRY_CAST("Eq" AS DOUBLE)
+                 ELSE NULL END                AS roe
         FROM read_csv('{path}', nullstr='', all_varchar=true)
         WHERE TRIM("Code") != ''
           AND TRY_CAST("DiscDate" AS DATE) IS NOT NULL

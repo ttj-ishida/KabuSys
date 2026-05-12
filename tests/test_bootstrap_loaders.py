@@ -207,6 +207,7 @@ def test_load_master_inserts_stocks(conn, tmp_path):
 
 
 def test_load_financials_inserts_raw_and_processed(conn, tmp_path):
+    # J-Quants fins_summary CSV に ROE 列は存在しない。ROE は NP/Eq から計算する。
     rows = [
         {
             "Code": "7203",
@@ -215,8 +216,8 @@ def test_load_financials_inserts_raw_and_processed(conn, tmp_path):
             "Sales": "10000000",
             "OP": "1000000",
             "NP": "800000",
+            "Eq": "4000000",
             "EPS": "120.5",
-            "ROE": "0.12",
         }
     ]
     path = _gz(rows, tmp_path, "fins.csv.gz")
@@ -224,6 +225,9 @@ def test_load_financials_inserts_raw_and_processed(conn, tmp_path):
     assert count == 1
     assert conn.execute("SELECT COUNT(*) FROM raw_financials").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM fundamentals").fetchone()[0] == 1
+    roe = conn.execute("SELECT roe FROM fundamentals WHERE code='7203'").fetchone()[0]
+    assert roe is not None
+    assert abs(float(roe) - 800000 / 4000000) < 1e-9
 
 
 # ---------------------------------------------------------------------------
