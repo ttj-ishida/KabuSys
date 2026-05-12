@@ -18,7 +18,7 @@ from kabusys.config import Settings
 from kabusys.data.disclosure_classifier import run_disclosure_classification
 from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
-setup_logging(app_name="disclosure_classification", capture_stdio=True)
+setup_logging(app_name="disclosure_classification")
 logger = logging.getLogger(__name__)
 
 _APP_NAME = "disclosure_classification"

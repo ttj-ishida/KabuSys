@@ -20,7 +20,7 @@ from kabusys.operations.night_batch_report import JobRunResult
 from kabusys.strategy.feature_engineering import build_features
 from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
-setup_logging(app_name="feature_gen", capture_stdio=True)
+setup_logging(app_name="feature_gen")
 logger = logging.getLogger(__name__)
 
 _JOB_NAME = "feature_generation_job"

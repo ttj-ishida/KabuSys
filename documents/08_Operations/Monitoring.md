@@ -269,23 +269,6 @@ Get-ChildItem logs\data_update_*.log | Sort-Object LastWriteTime -Desc | Select-
 Select-String -Path logs\*.log -Pattern "END status=failed"
 ```
 
-**stdio キャプチャ（capture_stdio=True）:**
-
-夜間バッチスクリプト（`scripts/run_*.py`）と `run_execution.py` は `capture_stdio=True` で起動する。
-これにより `print()` / C拡張ライブラリ（DuckDB の WARNING など）の stdout / stderr 出力も実行単位ログファイルに記録される。
-
-仕組み:
-- `sys.stdout` / `sys.stderr` を `_TeeWriter` オブジェクトに置き換える（コンソール出力は従来通り維持）
-- `_TeeWriter` は改行単位で `kabusys.stdio.<app_name>.stdout` / `stderr` ロガーへ転送し、実行単位 FileHandler がファイルへ書き込む
-- `kabusys.stdio.*` ロガーは `propagate=False` のため root ロガーの StreamHandler を経由せず、コンソール二重出力は発生しない
-
-ファイル内での見分け方:
-```
-2026-05-12T17:30:01 INFO     kabusys.data.prices_daily: ...   ← 通常の logging 出力
-2026-05-12T17:30:02 INFO     kabusys.stdio.data_update.stdout: ...   ← print() の出力
-2026-05-12T17:30:03 WARNING  kabusys.stdio.data_update.stderr: ...   ← stderr への出力
-```
-
 **保存期間:**
 - 集約ファイル（`<app_name>.log`）: 30日（`TimedRotatingFileHandler` による自動ローテーション）
 - 実行単位ファイル（`<app_name>_*.log`）: 手動管理。蓄積量に注意すること

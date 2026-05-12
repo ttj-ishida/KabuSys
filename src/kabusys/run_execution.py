@@ -232,7 +232,7 @@ _APP_NAME = "execution"
 
 
 def main() -> None:
-    setup_logging(app_name=_APP_NAME, capture_stdio=True)
+    setup_logging(app_name=_APP_NAME)
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
     # 1. プロセス優先度を High に設定（最初に実行）
