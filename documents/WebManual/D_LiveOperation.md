@@ -11,7 +11,12 @@
 - `python -m kabusys.validate_config`
 - kabuステーション API 接続確認
 - `config/risk_config.yaml` の再確認
-- Task Scheduler の `KabuSys_*` が `Ready`
+- Task Scheduler の Core ジョブ（`KabuSys_DataUpdate` / `KabuSys_FeatureGen` など）が `Ready`
+- Addon を有効にしている場合は、対応する Addon ジョブも登録・`Ready` であること
+  - `ENABLE_YAHOONEWS=true` → `KabuSys_YahooNewsCollection`
+  - `ENABLE_AI_SENTIMENT=true` → `KabuSys_AiAnalysis`
+  - `ENABLE_TDNET=true` → `KabuSys_TdnetCollection`
+  - `.env` の Addon フラグを変更した後は `powershell -File scripts\setup_task_scheduler.ps1` を再実行すること
 
 ---
 
@@ -139,6 +144,16 @@ Task Scheduler 結果確認:
 
 ```powershell
 Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object TaskName, LastRunTime, LastTaskResult
+```
+
+Task Scheduler の保守（登録・削除）:
+
+```powershell
+# 登録（Core 常時 / Addon は .env フラグ依存）
+powershell -File scripts\setup_task_scheduler.ps1
+
+# KabuSys_* タスクをすべて削除
+powershell -File scripts\remove_task_scheduler.ps1
 ```
 
 確認項目:
