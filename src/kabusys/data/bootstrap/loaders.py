@@ -13,15 +13,21 @@ def _sql_path(csv_path: Path) -> str:
     return str(csv_path).replace("\\", "/").replace("'", "''")
 
 
-def load_prices(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = False) -> int:
+def load_prices(
+    conn: duckdb.DuckDBPyConnection,
+    csv_path: Path,
+    bulk: bool = False,
+    outer_tx: bool = False,
+) -> int:
     """equities/bars/daily CSV → raw_prices & prices_daily
 
     DuckDB の read_csv() でネイティブ読み込みする。Python 側の CSV 解析を排除し
     ベクトル化バッチ処理による高速化を実現する。
 
-    bulk=True: 月次ファイル用。呼び出し元が対象月を事前 DELETE 済みであること。
-               ON CONFLICT DO NOTHING でバルク INSERT する。
+    bulk=True : 月次ファイル用。呼び出し元が対象月を事前 DELETE 済みであること。
+                ON CONFLICT DO NOTHING でバルク INSERT する。
     bulk=False: 日次ファイル用。ON CONFLICT DO UPDATE で差分 upsert する。
+    outer_tx  : True のとき BEGIN/COMMIT/ROLLBACK を行わない（呼び出し元がトランザクションを管理）。
     """
     path = _sql_path(csv_path)
 
@@ -45,7 +51,7 @@ def load_prices(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = Fa
         )
     )
 
-    if bulk:
+    if not outer_tx:
         conn.execute("BEGIN")
     try:
         conn.execute(f"""
@@ -53,7 +59,7 @@ def load_prices(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = Fa
                 (date, code, open, high, low, close, volume, turnover, adj_factor, fetched_at)
             SELECT
                 TRY_CAST("Date" AS DATE),
-                "Code",
+                TRIM("Code"),
                 TRY_CAST("O" AS DOUBLE),
                 TRY_CAST("H" AS DOUBLE),
                 TRY_CAST("L" AS DOUBLE),
@@ -64,7 +70,7 @@ def load_prices(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = Fa
                 current_timestamp
             FROM read_csv('{path}', nullstr='', all_varchar=true)
             WHERE TRY_CAST("Date" AS DATE) IS NOT NULL
-              AND "Code" IS NOT NULL AND trim("Code") != ''
+              AND TRIM("Code") != ''
             {conflict_raw}
         """)
 
@@ -73,7 +79,7 @@ def load_prices(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = Fa
             INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover)
             SELECT
                 TRY_CAST("Date" AS DATE),
-                "Code",
+                TRIM("Code"),
                 TRY_CAST("O" AS DOUBLE),
                 TRY_CAST("H" AS DOUBLE),
                 TRY_CAST("L" AS DOUBLE),
@@ -82,7 +88,7 @@ def load_prices(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = Fa
                 TRY_CAST("Va" AS DOUBLE)
             FROM read_csv('{path}', nullstr='', all_varchar=true)
             WHERE TRY_CAST("Date" AS DATE) IS NOT NULL
-              AND "Code" IS NOT NULL AND trim("Code") != ''
+              AND TRIM("Code") != ''
               AND TRY_CAST("O" AS DOUBLE) IS NOT NULL
               AND TRY_CAST("H" AS DOUBLE) IS NOT NULL
               AND TRY_CAST("L" AS DOUBLE) IS NOT NULL
@@ -93,10 +99,10 @@ def load_prices(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = Fa
         """)
         loaded = conn.execute("SELECT COUNT(*) FROM prices_daily").fetchone()[0] - before
 
-        if bulk:
+        if not outer_tx:
             conn.execute("COMMIT")
     except Exception:
-        if bulk:
+        if not outer_tx:
             conn.execute("ROLLBACK")
         raise
 
@@ -104,39 +110,61 @@ def load_prices(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = Fa
     return loaded
 
 
-def load_master(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = False) -> int:
+def load_master(
+    conn: duckdb.DuckDBPyConnection,
+    csv_path: Path,
+    bulk: bool = False,
+    outer_tx: bool = False,
+) -> int:
     """equities/master CSV → stocks
 
     bulk 引数は互換性のために受け付けるが無視する（master は常に upsert）。
+    outer_tx: True のとき BEGIN/COMMIT/ROLLBACK を行わない。
     """
     path = _sql_path(csv_path)
 
-    before = conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
-    conn.execute(f"""
-        INSERT INTO stocks (code, name, market, sector, updated_at)
-        SELECT
-            "Code",
-            "CoName",
-            "MktNm",
-            "S33Nm",
-            current_timestamp
-        FROM read_csv('{path}', nullstr='', all_varchar=true)
-        WHERE "Code" IS NOT NULL AND trim("Code") != ''
-        ON CONFLICT (code) DO UPDATE SET
-            name=EXCLUDED.name, market=EXCLUDED.market, sector=EXCLUDED.sector,
-            updated_at=EXCLUDED.updated_at
-    """)
-    loaded = conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0] - before
+    if not outer_tx:
+        conn.execute("BEGIN")
+    try:
+        before = conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
+        conn.execute(f"""
+            INSERT INTO stocks (code, name, market, sector, updated_at)
+            SELECT
+                TRIM("Code"),
+                "CoName",
+                "MktNm",
+                "S33Nm",
+                current_timestamp
+            FROM read_csv('{path}', nullstr='', all_varchar=true)
+            WHERE TRIM("Code") != ''
+            ON CONFLICT (code) DO UPDATE SET
+                name=EXCLUDED.name, market=EXCLUDED.market, sector=EXCLUDED.sector,
+                updated_at=EXCLUDED.updated_at
+        """)
+        loaded = conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0] - before
+
+        if not outer_tx:
+            conn.execute("COMMIT")
+    except Exception:
+        if not outer_tx:
+            conn.execute("ROLLBACK")
+        raise
 
     logger.info("load_master: %d 件ロード (%s)", loaded, csv_path.name)
     return loaded
 
 
-def load_financials(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = False) -> int:
+def load_financials(
+    conn: duckdb.DuckDBPyConnection,
+    csv_path: Path,
+    bulk: bool = False,
+    outer_tx: bool = False,
+) -> int:
     """fins/summary CSV → raw_financials & fundamentals
 
-    bulk=True: 月次ファイル用。呼び出し元が対象月を事前 DELETE 済みであること。
+    bulk=True : 月次ファイル用。呼び出し元が対象月を事前 DELETE 済みであること。
     bulk=False: 日次ファイル用。ON CONFLICT DO UPDATE で差分 upsert する。
+    outer_tx  : True のとき BEGIN/COMMIT/ROLLBACK を行わない。
     """
     path = _sql_path(csv_path)
 
@@ -160,7 +188,7 @@ def load_financials(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool 
         )
     )
 
-    if bulk:
+    if not outer_tx:
         conn.execute("BEGIN")
     try:
         conn.execute(f"""
@@ -168,9 +196,9 @@ def load_financials(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool 
                 (code, report_date, period_type, revenue, operating_profit, net_income,
                  eps, roe, fetched_at)
             SELECT
-                "Code",
+                TRIM("Code"),
                 TRY_CAST("DiscDate" AS DATE),
-                "CurPerType",
+                TRIM("CurPerType"),
                 TRY_CAST("Sales" AS DOUBLE),
                 TRY_CAST("OP" AS DOUBLE),
                 TRY_CAST("NP" AS DOUBLE),
@@ -178,9 +206,9 @@ def load_financials(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool 
                 TRY_CAST("ROE" AS DOUBLE),
                 current_timestamp
             FROM read_csv('{path}', nullstr='', all_varchar=true)
-            WHERE "Code" IS NOT NULL AND trim("Code") != ''
+            WHERE TRIM("Code") != ''
               AND TRY_CAST("DiscDate" AS DATE) IS NOT NULL
-              AND "CurPerType" IS NOT NULL AND trim("CurPerType") != ''
+              AND TRIM("CurPerType") != ''
             {conflict_raw}
         """)
 
@@ -189,26 +217,26 @@ def load_financials(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool 
             INSERT INTO fundamentals
                 (code, report_date, period_type, revenue, operating_profit, net_income, eps, roe)
             SELECT
-                "Code",
+                TRIM("Code"),
                 TRY_CAST("DiscDate" AS DATE),
-                "CurPerType",
+                TRIM("CurPerType"),
                 TRY_CAST("Sales" AS DOUBLE),
                 TRY_CAST("OP" AS DOUBLE),
                 TRY_CAST("NP" AS DOUBLE),
                 TRY_CAST("EPS" AS DOUBLE),
                 TRY_CAST("ROE" AS DOUBLE)
             FROM read_csv('{path}', nullstr='', all_varchar=true)
-            WHERE "Code" IS NOT NULL AND trim("Code") != ''
+            WHERE TRIM("Code") != ''
               AND TRY_CAST("DiscDate" AS DATE) IS NOT NULL
-              AND "CurPerType" IS NOT NULL AND trim("CurPerType") != ''
+              AND TRIM("CurPerType") != ''
             {conflict_proc}
         """)
         loaded = conn.execute("SELECT COUNT(*) FROM fundamentals").fetchone()[0] - before
 
-        if bulk:
+        if not outer_tx:
             conn.execute("COMMIT")
     except Exception:
-        if bulk:
+        if not outer_tx:
             conn.execute("ROLLBACK")
         raise
 
@@ -216,13 +244,19 @@ def load_financials(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool 
     return loaded
 
 
-def load_calendar(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = False) -> int:
+def load_calendar(
+    conn: duckdb.DuckDBPyConnection,
+    csv_path: Path,
+    bulk: bool = False,
+    outer_tx: bool = False,
+) -> int:
     """markets/calendar CSV → market_calendar
 
     HolDiv="1" → is_trading_day=False（休日）
 
-    bulk=True: 月次ファイル用。呼び出し元が対象月を事前 DELETE 済みであること。
+    bulk=True : 月次ファイル用。呼び出し元が対象月を事前 DELETE 済みであること。
     bulk=False: 日次ファイル用。ON CONFLICT DO UPDATE で差分 upsert する。
+    outer_tx  : True のとき BEGIN/COMMIT/ROLLBACK を行わない。
     """
     path = _sql_path(csv_path)
 
@@ -236,7 +270,7 @@ def load_calendar(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = 
         )
     )
 
-    if bulk:
+    if not outer_tx:
         conn.execute("BEGIN")
     try:
         before = conn.execute("SELECT COUNT(*) FROM market_calendar").fetchone()[0]
@@ -255,10 +289,10 @@ def load_calendar(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = 
         """)
         loaded = conn.execute("SELECT COUNT(*) FROM market_calendar").fetchone()[0] - before
 
-        if bulk:
+        if not outer_tx:
             conn.execute("COMMIT")
     except Exception:
-        if bulk:
+        if not outer_tx:
             conn.execute("ROLLBACK")
         raise
 
@@ -266,11 +300,17 @@ def load_calendar(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = 
     return loaded
 
 
-def load_topix(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = False) -> int:
+def load_topix(
+    conn: duckdb.DuckDBPyConnection,
+    csv_path: Path,
+    bulk: bool = False,
+    outer_tx: bool = False,
+) -> int:
     """indices/bars/daily/topix CSV → topix_daily
 
-    bulk=True: 月次ファイル用。呼び出し元が対象月を事前 DELETE 済みであること。
+    bulk=True : 月次ファイル用。呼び出し元が対象月を事前 DELETE 済みであること。
     bulk=False: 日次ファイル用。ON CONFLICT DO UPDATE で差分 upsert する。
+    outer_tx  : True のとき BEGIN/COMMIT/ROLLBACK を行わない。
     """
     path = _sql_path(csv_path)
 
@@ -283,7 +323,7 @@ def load_topix(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = Fal
         )
     )
 
-    if bulk:
+    if not outer_tx:
         conn.execute("BEGIN")
     try:
         before = conn.execute("SELECT COUNT(*) FROM topix_daily").fetchone()[0]
@@ -306,10 +346,10 @@ def load_topix(conn: duckdb.DuckDBPyConnection, csv_path: Path, bulk: bool = Fal
         """)
         loaded = conn.execute("SELECT COUNT(*) FROM topix_daily").fetchone()[0] - before
 
-        if bulk:
+        if not outer_tx:
             conn.execute("COMMIT")
     except Exception:
-        if bulk:
+        if not outer_tx:
             conn.execute("ROLLBACK")
         raise
 

@@ -327,17 +327,26 @@ def run_bootstrap(
                 and file_date[0] == "monthly"
                 and endpoint in _ENDPOINT_DATE_TABLES
             )
-            if bulk:
-                _, year, month = file_date
-                _pre_delete_month(conn, endpoint, year, month)
-                print(
-                    f"  [{idx}/{len(files)}] 月次削除完了: {year:04d}-{month:02d}",
-                    flush=True,
-                )
 
             print(f"  [{idx}/{len(files)}] ロード中: {file_name}", flush=True)
             try:
-                n = loader(conn, dest, bulk=bulk)
+                if bulk:
+                    # pre-delete と INSERT を同一トランザクションで実行
+                    _, year, month = file_date
+                    conn.execute("BEGIN")
+                    try:
+                        _pre_delete_month(conn, endpoint, year, month)
+                        n = loader(conn, dest, bulk=True, outer_tx=True)
+                        conn.execute("COMMIT")
+                    except Exception:
+                        conn.execute("ROLLBACK")
+                        raise
+                    print(
+                        f"  [{idx}/{len(files)}] 月次({year:04d}-{month:02d}) 削除→挿入完了",
+                        flush=True,
+                    )
+                else:
+                    n = loader(conn, dest, bulk=False)
                 rows_ep += n
                 _record(conn, file_key, endpoint, file_name, "loaded", row_count=n)
                 result.loaded_files += 1

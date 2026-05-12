@@ -76,7 +76,7 @@ except APIConnectionError as exc:
     print(f"警告: OpenAI API への接続に失敗しました（スキップ）: {exc}")
     sys.exit(0)
 except APIStatusError as exc:
-    print(f"警告: OpenAI API がエラーを返しました（スキップ）: {exc.status_code} {exc.message}")
+    print(f"警告: OpenAI API がエラーを返しました（スキップ）: {exc.status_code} {str(exc)}")
     sys.exit(0)
 
 review = response.choices[0].message.content
