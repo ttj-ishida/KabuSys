@@ -192,9 +192,9 @@ Core コードは返り値の型を意識せず `.send(message)` を呼ぶだけ
 
 監視ダッシュボードを用意する。
 
-**Phase 1 実装（Issue #231 / Issue #260）:** Streamlit マルチページ構成（Core 9 + Addon 1 = 10ページ）
+**Phase 1 実装（Issue #231 / Issue #260 / Issue #310）:** Streamlit マルチページ構成（Core 10 + Addon 1 = 11ページ）
 
-**Core 標準ページ（9ページ）:**
+**Core 標準ページ（10ページ）:**
 
 | ページ | ファイル | 表示内容 |
 |---|---|---|
@@ -207,6 +207,7 @@ Core コードは返り値の型を意識せず `.send(message)` を呼ぶだけ
 | Performance | `pages/7_Performance.py` | エクイティカーブ・ポジション・取引履歴・Paper Verification |
 | Failure Recovery | `pages/8_Failure_Recovery.py` | 障害イベント集約・復旧ガイド |
 | WebManual | `pages/9_WebManual.py` | 運用マニュアル閲覧ビュー |
+| Process Monitor | `pages/11_Process_Monitor.py` | バッチジョブの実行状況・孤立プロセス（クラッシュ検知）・直近の完了ジョブ一覧（Issue #310） |
 
 **Addon ページ:**（未設定でも Core は動作します）
 
@@ -326,11 +327,11 @@ Windows 1台での稼働を前提とし、オーバーヘッドの少ない構�
 
 | 種類 | ツール / 技術 | 用途・保存先 |
 |----|----|----|
-| データベース | SQLite | `monitoring.db` (テーブル: `system_status`, `trade_logs`, `positions`, `risk_logs`, `dashboard`, `ai_wizard_messages`) |
-| ダッシュボード | Streamlit | Core 標準 9ページ（Home / Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Signal Queue / Performance / Failure Recovery / WebManual）+ Addon ページ（Strategy Lab）|
+| データベース | SQLite | `monitoring.db` (テーブル: `system_status`, `trade_logs`, `positions`, `risk_logs`, `dashboard`, `ai_wizard_messages`, `process_runs`) |
+| ダッシュボード | Streamlit | Core 標準 10ページ（Home / Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Signal Queue / Performance / Failure Recovery / WebManual / Process Monitor）+ Addon ページ（Strategy Lab）|
 | アラート | LINE | LINE Messaging API 経由での異常通知（Notification Addon — 任意） |
 
-### SQLite テーブル設計（Phase 7 実装、Issue #233 で拡張）
+### SQLite テーブル設計（Phase 7 実装、Issue #233 / Issue #310 で拡張）
 
 `src/kabusys/monitoring/monitoring_db.py` に `init_monitoring_db(conn)` + `MonitoringDB(conn)` として実装する。
 接続管理は呼び出し側（監視エンジン等）が担当し、`MonitoringDB` は `conn` を受け取るのみ。
@@ -343,6 +344,7 @@ Windows 1台での稼働を前提とし、オーバーヘッドの少ない構�
 | `risk_logs` | 追記（イベント駆動） | DD超過・ポジション上限等のリスクイベント |
 | `dashboard` | 1行 upsert（id=1固定） | Streamlit向け最新集計値 |
 | `ai_wizard_messages` | 追記（ユーザー入力・AI応答） | AI Co-Pilot チャット履歴（セッション別） |
+| `process_runs` | 追記（バッチ起動時）+ 更新（完了時） | バッチジョブ実行履歴（Issue #310） |
 
 `ai_wizard_messages` スキーマ:
 
@@ -374,6 +376,11 @@ MonitoringDB(conn)
   .save_wizard_message(session_id, role, content) -> None
   .load_wizard_messages(session_id) -> list[dict]   # ORDER BY id ASC
   .clear_wizard_messages(session_id) -> None
+  # バッチジョブ実行管理（Issue #310）
+  .start_process(job_name, pid=None, log_file=None, started_at=None) -> int   # run_id を返す
+  .finish_process(run_id, status, error_msg=None, finished_at=None) -> int    # 更新件数を返す
+  .list_recent_processes(hours=24) -> list[dict]   # 実行中は常に含む
+  .prune_old_process_runs(days=30) -> int          # 削除件数を返す
 ```
 
 ### SystemMonitor API（Phase 7 実装、Issue #37）
@@ -504,6 +511,7 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 | `pages/8_Failure_Recovery.py` | 障害イベント集約・復旧ガイド |
 | `pages/9_WebManual.py` | 運用マニュアル閲覧ビュー |
 | `pages/10_Strategy_Lab.py` | 市場レジーム・AI スコア・シグナル推移・🤖 AI Co-Pilot チャット（パラメータ提案・適用・バックテスト再実行・比較） |
+| `pages/11_Process_Monitor.py` | バッチジョブ実行状況（実行中・孤立・完了）一覧（Issue #310） |
 
 **ページ別表示内容:**
 
@@ -533,6 +541,7 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 | Strategy Lab | AI スコア | 最新日の ai_score ランキング | DuckDB `ai_scores` |
 | Strategy Lab | シグナル推移 | 日別 buy/sell 件数集計 | DuckDB `signals` |
 | Strategy Lab | 🤖 AI Co-Pilot | 最新バックテスト結果を system prompt に注入した GPT-4o ストリーミングチャット。AIが JSON ブロックでパラメータを提案 → レビューパネルで確認・適用（`strategy_config.yaml` 更新＋バックアップ）→ バックテスト再実行 → 実行前後の CAGR/Sharpe/MaxDD/WinRate を比較表示。ロールバック機能あり。チャット履歴は SQLite `ai_wizard_messages` に永続化 | DuckDB `backtest_runs` + SQLite `ai_wizard_messages` + ファイルシステム `strategy_config.yaml` |
+| Process Monitor | 実行中 / 孤立 / 完了 | 実行中バッチジョブの PID・開始時刻・経過時間。孤立プロセス（`finished_at IS NULL` かつ PID 死亡）をクラッシュとして警告表示。直近 N 時間の完了ジョブ一覧とステータス（✅/⚠️/❌） | SQLite `process_runs` |
 
 **データソース分離:**
 
@@ -564,6 +573,62 @@ Streamlit の Signal Queue ページはこれらのコマンドを動的に生�
 **依存ライブラリ:** `psutil`（SystemMonitor）、`streamlit`（ダッシュボード UI）— `requirements.txt` に追加すること。
 
 > **注:** `cpu_threshold_pct` / `memory_threshold_pct` / `disk_threshold_pct` は、現フェーズでは収集・記録のみを行い、`SystemMonitor` 内では使用しない。将来の LINE アラート実装（Issue #196）で閾値判定に利用する予定。
+
+---
+
+### process_registry — バッチジョブ実行管理（Issue #310）
+
+`src/kabusys/operations/process_registry.py` に実装。全バッチスクリプトが `register_process` / `update_process` を呼び出し、実行履歴を `monitoring.db` の `process_runs` テーブルに記録する。
+
+**API:**
+
+```python
+from kabusys.operations.process_registry import register_process, update_process, list_processes, is_pid_alive
+
+run_id = register_process("data_update_job", log_file="logs/data_update_20260512_170000_1234.log")
+# → process_runs に status="running" レコードを挿入。古いレコード（30日超）を自動 prune。
+
+update_process(run_id, status="success")          # 正常終了
+update_process(run_id, status="warning")          # 警告あり完了
+update_process(run_id, status="failed", error_msg="DuckDB connect failed")  # 失敗
+
+rows = list_processes(hours=24)   # 直近 24 時間の実行一覧（実行中含む）
+is_pid_alive(pid)                 # PID 生存確認（psutil 優先、なければ os.kill シグナル）
+```
+
+**バッチスクリプト統合パターン:**
+
+```python
+_run_log = setup_logging(app_name="data_update", capture_stdio=True)  # モジュールトップで
+
+def main():
+    run_id: int | None = None
+    try:
+        run_id = register_process(_JOB_NAME, log_file=str(_run_log) if _run_log else None)
+    except Exception:
+        logger.warning("process_registry 登録に失敗しました", exc_info=True)
+    try:
+        ...  # メイン処理
+    finally:
+        if run_id is not None:
+            try:
+                update_process(run_id, status="failed" if _failed else "success")
+            except Exception:
+                logger.warning("process_registry 更新に失敗しました", exc_info=True)
+```
+
+`register_process` の失敗はメイン処理を止めない（try/except で囲む）。`update_process` は `write_job_result` の直後か `finally` ブロックで呼ぶ。
+
+**孤立プロセス検知:**
+
+`process_runs` に `finished_at IS NULL` で残るレコードのうち、記録された PID がすでに死亡しているものを「孤立プロセス（クラッシュ）」として `Process Monitor` ページがハイライト表示する。
+
+**CLI:**
+
+```bash
+python -m kabusys.run_process_monitor           # 直近 24 時間
+python -m kabusys.run_process_monitor --hours 48
+```
 
 ---
 

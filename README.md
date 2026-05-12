@@ -42,9 +42,10 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
   - 単発または監視モード（`--watch`）で実行状態 / リスク / システム指標を表示
 
 - Streamlit 監視ダッシュボード: `python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db`
-  - 10ページ構成（Home / Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Signal Queue / Performance / Failure Recovery / WebManual / Strategy Lab）
+  - 11ページ構成（Home / Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Signal Queue / Performance / Failure Recovery / WebManual / Process Monitor / Strategy Lab）
   - Home: Kill Switch・Execution / Monitoring プロセス状態・エラーログ（SQLite）
   - Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Failure Recovery: 運用フロー確認ページ（SQLite `monitoring.db`、`operations_data.py` 経由）
+  - Process Monitor: バッチジョブ実行状況・孤立プロセス検知（SQLite `process_runs`）
   - Performance > Paper Verification タブ: SQLite `paper_trading.db`（read-only）
   - Signal Queue / Performance（Paper Verification 以外）/ Strategy Lab: DuckDB（`kabusys.duckdb`）を読み取り専用で参照（Signal Queue は参照専用）
 
@@ -54,6 +55,7 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
   - Position Reconciliation Report: `python -m kabusys.run_position_reconciliation_report`（--date / --save / --json / --watch）
   - Signal Queue Confirmation View: `python -m kabusys.run_signal_queue_report`（--date / --save / --json）
   - Performance Report（daily/weekly/monthly）: `python -m kabusys.run_performance_report --type daily`（--env / --from / --to / --save）
+  - Process Monitor（バッチジョブ実行状況）: `python -m kabusys.run_process_monitor`（--hours）
   - Execution Startup Summary の生成は Execution 起動時にも実行される
 
 - Signal Queue 操作（書き込みは CLI のみ）:
