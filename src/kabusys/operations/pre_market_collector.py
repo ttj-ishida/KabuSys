@@ -134,8 +134,8 @@ def collect(
     today = today or date.today()
     return PreMarketData(
         data_freshness_ok=check_data_freshness(duckdb_conn, today),
-        signal_queue_pending=check_signal_queue(sqlite_conn, today),
-        position_count=check_position_count(sqlite_conn),
+        signal_queue_pending=check_signal_queue(duckdb_conn, today),
+        position_count=check_position_count(duckdb_conn),
         stop_flag_exists=check_stop_flag(stop_flag_path),
         task_scheduler_ready=check_task_scheduler(task_name),
     )

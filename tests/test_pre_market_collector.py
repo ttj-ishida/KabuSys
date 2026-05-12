@@ -168,10 +168,14 @@ def test_task_scheduler_ready_japanese_locale():
 
 def test_collect_returns_pre_market_data(tmp_path):
     mock_duckdb = MagicMock()
-    mock_duckdb.execute.return_value.fetchone.return_value = (date(2026, 4, 25),)
+    # check_data_freshness / check_signal_queue / check_position_count の順に呼ばれる
+    mock_duckdb.execute.return_value.fetchone.side_effect = [
+        (date(2026, 4, 25),),  # check_data_freshness: MAX(date) from prices_daily
+        (5,),                   # check_signal_queue: COUNT(*) from signal_queue
+        (0,),                   # check_position_count: COUNT(*) from positions
+    ]
 
     mock_sqlite = MagicMock()
-    mock_sqlite.execute.return_value.fetchone.return_value = (5,)
 
     stop_flag = tmp_path / "stop_requested.flag"
 
