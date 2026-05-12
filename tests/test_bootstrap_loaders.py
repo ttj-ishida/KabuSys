@@ -231,8 +231,18 @@ def test_load_financials_inserts_raw_and_processed(conn, tmp_path):
 
 
 def test_load_financials_roe_null_when_eq_zero(conn, tmp_path):
-    rows = [{"Code": "7203", "DiscDate": "2024-01-10", "CurPerType": "FY",
-             "Sales": "1", "OP": "1", "NP": "100000", "Eq": "0", "EPS": "1"}]
+    rows = [
+        {
+            "Code": "7203",
+            "DiscDate": "2024-01-10",
+            "CurPerType": "FY",
+            "Sales": "1",
+            "OP": "1",
+            "NP": "100000",
+            "Eq": "0",
+            "EPS": "1",
+        }
+    ]
     path = _gz(rows, tmp_path, "fins_eq0.csv.gz")
     load_financials(conn, path)
     roe = conn.execute("SELECT roe FROM fundamentals WHERE code='7203'").fetchone()[0]
@@ -240,8 +250,18 @@ def test_load_financials_roe_null_when_eq_zero(conn, tmp_path):
 
 
 def test_load_financials_roe_null_when_eq_missing(conn, tmp_path):
-    rows = [{"Code": "7203", "DiscDate": "2024-01-10", "CurPerType": "FY",
-             "Sales": "1", "OP": "1", "NP": "100000", "Eq": "", "EPS": "1"}]
+    rows = [
+        {
+            "Code": "7203",
+            "DiscDate": "2024-01-10",
+            "CurPerType": "FY",
+            "Sales": "1",
+            "OP": "1",
+            "NP": "100000",
+            "Eq": "",
+            "EPS": "1",
+        }
+    ]
     path = _gz(rows, tmp_path, "fins_eq_empty.csv.gz")
     load_financials(conn, path)
     roe = conn.execute("SELECT roe FROM fundamentals WHERE code='7203'").fetchone()[0]
@@ -285,7 +305,8 @@ def test_load_calendar_holdiv_only_new_format(conn, tmp_path):
     def get(date):
         return conn.execute(
             "SELECT is_trading_day, is_half_day, is_sq_day, holiday_name "
-            "FROM market_calendar WHERE date=?", [date]
+            "FROM market_calendar WHERE date=?",
+            [date],
         ).fetchone()
 
     r = get("2024-01-01")
@@ -293,7 +314,7 @@ def test_load_calendar_holdiv_only_new_format(conn, tmp_path):
     r = get("2024-01-04")
     assert r[0] is True and r[1] is False  # 通常取引日
     r = get("2024-01-05")
-    assert r[0] is True and r[1] is True   # 半日取引日
+    assert r[0] is True and r[1] is True  # 半日取引日
     r = get("2024-01-06")
     assert r[0] is False and r[1] is False  # 振替休日
 

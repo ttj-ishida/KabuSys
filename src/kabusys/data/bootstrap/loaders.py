@@ -276,7 +276,7 @@ def load_calendar(
 
     sq_expr = "coalesce(\"SQDiv\", '0') = '1'" if "SQDiv" in csv_cols else "false"
     name_expr = (
-        "CASE WHEN \"HolName\" IS NULL OR trim(\"HolName\") = '' THEN NULL ELSE \"HolName\" END"
+        'CASE WHEN "HolName" IS NULL OR trim("HolName") = \'\' THEN NULL ELSE "HolName" END'
         if "HolName" in csv_cols
         else "CAST(NULL AS VARCHAR)"
     )
