@@ -1,6 +1,6 @@
 """Signal Queue Confirmation View レポート生成モジュール。
 
-翌営業日の発注予定シグナルを DuckDB の signals / portfolio_targets テーブルから読み取り、
+実行キュー（signal_queue テーブル）から status='pending' のレコードを読み取り、
 READY / EMPTY ステータスと銘柄一覧を出力する。
 DB 参照は collect_signals() のみ。それ以外の関数はすべて純粋関数。
 """
@@ -25,24 +25,24 @@ class SignalQueueReport:
     total_count: int  # シグナル総数
     buy_count: int  # BUY シグナル数
     sell_count: int  # SELL シグナル数
-    signals: list[dict]  # [{code, side, target_size, target_weight, signal_rank}]
+    signals: list[dict]  # [{code, side, target_size, target_weight, signal_rank}] target_weight/signal_rank は常に None
     warnings: list[str]
 
 
 def collect_signals(conn, target_date: date) -> list[dict]:
-    """DuckDB から対象日のシグナルを取得する。
+    """DuckDB の signal_queue から対象日の pending レコードを取得する。
 
-    signals LEFT JOIN portfolio_targets で target_size / target_weight を付与し、
-    signal_rank 昇順・side 昇順でソートして返す。
+    signal_queue は portfolio_construction が生成する実行キュー。
+    inject_dummy_signal などで直接注入したシグナルもここに現れる。
+    target_weight / signal_rank は signal_queue に存在しないため常に None。
     """
     rows = conn.execute(
         """
-        SELECT s.code, s.side, pt.target_size, pt.target_weight, s.signal_rank
-        FROM signals s
-        LEFT JOIN portfolio_targets pt
-               ON s.date = pt.date AND s.code = pt.code
-        WHERE s.date = ?
-        ORDER BY s.signal_rank ASC NULLS LAST, s.side
+        SELECT sq.code, sq.side, sq.size, NULL AS target_weight, NULL AS signal_rank
+        FROM signal_queue sq
+        WHERE sq.date = ?
+          AND sq.status = 'pending'
+        ORDER BY sq.code, sq.side
         """,
         [target_date],
     ).fetchall()

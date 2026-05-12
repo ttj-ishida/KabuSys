@@ -30,43 +30,34 @@ TARGET_DATE = date(2026, 4, 28)
 
 @pytest.fixture()
 def db():
-    """signals + portfolio_targets テーブルを持つインメモリ DuckDB 接続。"""
+    """signal_queue テーブルを持つインメモリ DuckDB 接続。"""
     conn = duckdb.connect(":memory:")
     conn.execute("""
-        CREATE TABLE signals (
-            date DATE NOT NULL,
-            code VARCHAR NOT NULL,
-            side VARCHAR NOT NULL,
-            score DOUBLE,
-            signal_rank INTEGER,
-            size_multiplier DOUBLE NOT NULL DEFAULT 1.0,
-            PRIMARY KEY (date, code, side)
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE portfolio_targets (
-            date DATE NOT NULL,
-            code VARCHAR NOT NULL,
-            target_weight DOUBLE,
-            target_size BIGINT,
-            PRIMARY KEY (date, code)
+        CREATE TABLE signal_queue (
+            signal_id   VARCHAR     NOT NULL PRIMARY KEY,
+            date        DATE        NOT NULL,
+            code        VARCHAR     NOT NULL,
+            side        VARCHAR     NOT NULL CHECK (side IN ('buy', 'sell')),
+            size        BIGINT      NOT NULL CHECK (size > 0),
+            order_type  VARCHAR     NOT NULL CHECK (order_type IN ('market', 'limit', 'stop')),
+            price       DECIMAL(18,4),
+            status      VARCHAR     NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending','processing','filled','cancelled','error','failed')),
+            created_at  TIMESTAMP   NOT NULL DEFAULT current_timestamp,
+            processed_at TIMESTAMP
         )
     """)
     yield conn
     conn.close()
 
 
-def _sig(conn, d, code, side, rank=None, score=None):
+def _sig(conn, d, code, side, size=100, status="pending"):
+    signal_id = f"TEST_{d}_{code}_{side}"
     conn.execute(
-        "INSERT INTO signals (date, code, side, signal_rank, score) VALUES (?, ?, ?, ?, ?)",
-        [d, code, side, rank, score],
-    )
-
-
-def _tgt(conn, d, code, size=None, weight=None):
-    conn.execute(
-        "INSERT INTO portfolio_targets (date, code, target_size, target_weight) VALUES (?, ?, ?, ?)",
-        [d, code, size, weight],
+        """INSERT INTO signal_queue
+               (signal_id, date, code, side, size, order_type, status)
+           VALUES (?, ?, ?, ?, ?, 'market', ?)""",
+        [signal_id, d, code, side, size, status],
     )
 
 
@@ -80,27 +71,27 @@ def test_collect_signals_empty(db):
 
 
 def test_collect_signals_buy_and_sell(db):
-    _sig(db, TARGET_DATE, "7203", "buy", rank=1)
-    _sig(db, TARGET_DATE, "9984", "sell", rank=2)
-    _tgt(db, TARGET_DATE, "7203", size=100, weight=0.05)
-    _tgt(db, TARGET_DATE, "9984", size=50, weight=0.03)
+    _sig(db, TARGET_DATE, "7203", "buy", size=100)
+    _sig(db, TARGET_DATE, "9984", "sell", size=50)
 
     result = collect_signals(db, TARGET_DATE)
     assert len(result) == 2
+    # code 昇順で返る
     assert result[0]["code"] == "7203"
     assert result[0]["side"] == "buy"
     assert result[0]["target_size"] == 100
-    assert result[0]["target_weight"] == pytest.approx(0.05)
-    assert result[0]["signal_rank"] == 1
+    assert result[0]["target_weight"] is None   # signal_queue には存在しない
+    assert result[0]["signal_rank"] is None     # signal_queue には存在しない
 
 
-def test_collect_signals_left_join_missing_target(db):
-    """portfolio_targets にない銘柄でも取得できる（LEFT JOIN）。"""
-    _sig(db, TARGET_DATE, "1234", "buy", rank=1)
+def test_collect_signals_only_pending(db):
+    """status='pending' のみ取得され、filled/cancelled は除外される。"""
+    _sig(db, TARGET_DATE, "7203", "buy", status="pending")
+    _sig(db, TARGET_DATE, "9984", "buy", status="filled")
+    _sig(db, TARGET_DATE, "1111", "buy", status="cancelled")
     result = collect_signals(db, TARGET_DATE)
     assert len(result) == 1
-    assert result[0]["target_size"] is None
-    assert result[0]["target_weight"] is None
+    assert result[0]["code"] == "7203"
 
 
 def test_collect_signals_filters_by_date(db):
@@ -109,13 +100,13 @@ def test_collect_signals_filters_by_date(db):
     assert collect_signals(db, TARGET_DATE) == []
 
 
-def test_collect_signals_sorted_by_rank(db):
-    """signal_rank 昇順で返される。"""
-    _sig(db, TARGET_DATE, "9999", "buy", rank=3)
-    _sig(db, TARGET_DATE, "1111", "buy", rank=1)
-    _sig(db, TARGET_DATE, "5555", "buy", rank=2)
+def test_collect_signals_sorted_by_code(db):
+    """code 昇順・side 昇順で返される。"""
+    _sig(db, TARGET_DATE, "9999", "buy")
+    _sig(db, TARGET_DATE, "1111", "buy")
+    _sig(db, TARGET_DATE, "5555", "buy")
     result = collect_signals(db, TARGET_DATE)
-    assert [r["signal_rank"] for r in result] == [1, 2, 3]
+    assert [r["code"] for r in result] == ["1111", "5555", "9999"]
 
 
 # ---------------------------------------------------------------------------
