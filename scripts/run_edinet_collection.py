@@ -27,31 +27,32 @@ _APP_NAME = "edinet_collection"
 def main() -> None:
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
-    settings = Settings()
-    if not settings.enable_edinet:
-        logger.info("EDINET 収集はオプション機能です（ENABLE_EDINET=false）。スキップします。")
-        log_run_end(_APP_NAME, status="success", started_at=started_at)
-        return
-    if not settings.edinet_api_key:
-        logger.error(
-            "ENABLE_EDINET=true ですが EDINET_API_KEY が未設定です。"
-            ".env に EDINET_API_KEY を設定してください。"
-        )
-        log_run_end(_APP_NAME, status="failed", started_at=started_at)
-        sys.exit(1)
-    conn = duckdb.connect(str(settings.duckdb_path))
+    conn = None
     _failed = False
     try:
+        settings = Settings()
+        if not settings.enable_edinet:
+            logger.info("EDINET 収集はオプション機能です（ENABLE_EDINET=false）。スキップします。")
+            return
+        if not settings.edinet_api_key:
+            logger.error(
+                "ENABLE_EDINET=true ですが EDINET_API_KEY が未設定です。"
+                ".env に EDINET_API_KEY を設定してください。"
+            )
+            _failed = True
+            return
+        conn = duckdb.connect(str(settings.duckdb_path))
         saved = run_edinet_collection(conn, api_key=settings.edinet_api_key)
         logger.info("edinet_collection 完了: saved=%d", saved)
     except Exception:
         logger.exception("edinet_collection バッチが失敗しました")
         _failed = True
     finally:
-        conn.close()
-    log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
-    if _failed:
-        sys.exit(1)
+        if conn is not None:
+            conn.close()
+        log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
+        if _failed:
+            sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -63,14 +63,15 @@ def _get_today_return(conn: duckdb.DuckDBPyConnection, target_date: date, env: s
 def main() -> None:
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
-    settings = Settings()
-    conn = duckdb.connect(str(settings.duckdb_path))
+    conn = None
     target_date = date.today()
     _failed = False
     _errors: list[str] = []
     _updated_rows: dict[str, int] = {}
 
     try:
+        settings = Settings()
+        conn = duckdb.connect(str(settings.duckdb_path))
         portfolio_value_str = os.environ.get("PORTFOLIO_VALUE", str(_DEFAULT_PORTFOLIO_VALUE))
         try:
             portfolio_value = float(portfolio_value_str)
@@ -246,7 +247,8 @@ def main() -> None:
         _errors.append(str(exc))
         _failed = True
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
     finished_at = datetime.now(timezone.utc)
     try:

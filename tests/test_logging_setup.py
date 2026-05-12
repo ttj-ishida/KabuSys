@@ -32,12 +32,19 @@ class TestSetupLogging:
         assert (tmp_path / "test_app.log").exists()
 
     def test_creates_run_log_file(self, tmp_path):
-        """setup_logging() で実行単位ログファイル（YYYYMMDD_HHMMSS サフィックス）が作成される。"""
+        """setup_logging() で実行単位ログファイル（YYYYMMDD_HHMMSS_PID サフィックス）が作成される。"""
+        import os
+        import re
+
         run_log = setup_logging(app_name="test_app", log_dir=tmp_path)
         assert run_log is not None
         assert run_log.exists()
         assert run_log.name.startswith("test_app_")
         assert run_log.suffix == ".log"
+        assert re.search(r"_\d{8}_\d{6}_\d+\.log$", run_log.name), (
+            "ファイル名に YYYYMMDD_HHMMSS_PID が含まれること"
+        )
+        assert str(os.getpid()) in run_log.name
 
     def test_returns_run_log_path(self, tmp_path):
         """setup_logging() は実行単位ログファイルのパスを返す。"""
@@ -233,6 +240,13 @@ class TestLogRunBoundaries:
     def test_log_run_end_includes_duration(self, caplog):
         """log_run_end() のメッセージに duration が含まれる。"""
         started = datetime.now(timezone.utc)
+        with caplog.at_level(logging.INFO, logger=self._LOGGER):
+            log_run_end("my_job", status="success", started_at=started)
+        assert any("duration=" in r.message for r in caplog.records)
+
+    def test_log_run_end_accepts_naive_datetime(self, caplog):
+        """log_run_end() に naive datetime を渡しても TypeError にならない。"""
+        started = datetime.now()  # naive (tzinfo=None)
         with caplog.at_level(logging.INFO, logger=self._LOGGER):
             log_run_end("my_job", status="success", started_at=started)
         assert any("duration=" in r.message for r in caplog.records)

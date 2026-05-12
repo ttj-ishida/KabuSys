@@ -41,16 +41,15 @@ def _fetch_known_codes(conn: duckdb.DuckDBPyConnection) -> list[str]:
 def main() -> None:
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
-    settings = Settings()
-    if not settings.enable_yahoonews:
-        logger.info(
-            "Yahoo News 収集はオプション機能です（ENABLE_YAHOONEWS=false）。スキップします。"
-        )
-        log_run_end(_APP_NAME, status="success", started_at=started_at)
-        return
     conn = None
     _failed = False
     try:
+        settings = Settings()
+        if not settings.enable_yahoonews:
+            logger.info(
+                "Yahoo News 収集はオプション機能です（ENABLE_YAHOONEWS=false）。スキップします。"
+            )
+            return
         conn = duckdb.connect(str(settings.duckdb_path))
         known_codes = _fetch_known_codes(conn)
         saved = run_news_collection(
@@ -64,7 +63,7 @@ def main() -> None:
     finally:
         if conn is not None:
             conn.close()
-    log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
+        log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
     if _failed:
         sys.exit(1)
 

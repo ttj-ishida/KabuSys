@@ -30,13 +30,14 @@ _APP_NAME = "strategy_signal"
 def main() -> None:
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
-    settings = Settings()
-    conn = duckdb.connect(str(settings.duckdb_path))
+    conn = None
     _failed = False
     _errors: list[str] = []
     _updated_rows: dict[str, int] = {}
 
     try:
+        settings = Settings()
+        conn = duckdb.connect(str(settings.duckdb_path))
         target_date = date.today()
         n = generate_signals(conn, target_date)
         _updated_rows["signals"] = n
@@ -46,7 +47,8 @@ def main() -> None:
         _errors.append(str(exc))
         _failed = True
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
     finished_at = datetime.now(timezone.utc)
     try:

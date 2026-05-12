@@ -27,22 +27,23 @@ _APP_NAME = "tdnet_collection"
 def main() -> None:
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
-    settings = Settings()
-    if not settings.enable_tdnet:
-        logger.info("TDnet 収集はオプション機能です（ENABLE_TDNET=false）。スキップします。")
-        log_run_end(_APP_NAME, status="success", started_at=started_at)
-        return
-    conn = duckdb.connect(str(settings.duckdb_path))
+    conn = None
     _failed = False
     try:
+        settings = Settings()
+        if not settings.enable_tdnet:
+            logger.info("TDnet 収集はオプション機能です（ENABLE_TDNET=false）。スキップします。")
+            return
+        conn = duckdb.connect(str(settings.duckdb_path))
         saved = run_tdnet_collection(conn)
         logger.info("tdnet_collection 完了: saved=%d", saved)
     except Exception:
         logger.exception("tdnet_collection バッチが失敗しました")
         _failed = True
     finally:
-        conn.close()
-    log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
+        if conn is not None:
+            conn.close()
+        log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
     if _failed:
         sys.exit(1)
 

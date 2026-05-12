@@ -138,8 +138,9 @@ def setup_logging(
 
         # FileHandler（実行単位ログファイル）
         # 実行ごとに独立したファイルを生成し、特定の実行ログを追跡しやすくする。
-        run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_log_file = resolved_dir / f"{app_name}_{run_ts}.log"
+        # UTC + PID でファイル名を一意化し、同一秒の並行起動での衝突を防ぐ。
+        run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        run_log_file = resolved_dir / f"{app_name}_{run_ts}_{os.getpid()}.log"
         try:
             run_file_handler = logging.FileHandler(run_log_file, encoding="utf-8")
             run_file_handler.setLevel(numeric_level)
@@ -153,10 +154,10 @@ def setup_logging(
             run_log_file = None
 
     logger.debug(
-        "ロギングを設定しました: level=%s, log_file=%s_%s.log",
+        "ロギングを設定しました: level=%s, rotating=%s, run_log=%s",
         logging.getLevelName(numeric_level),
-        app_name,
-        datetime.now().strftime("%Y%m%d_%H%M%S"),
+        resolved_dir / f"{app_name}.log" if _dir_ok else None,
+        run_log_file,
     )
 
     return run_log_file
@@ -179,6 +180,8 @@ def log_run_end(app_name: str, status: str, started_at: datetime) -> None:
         status:     終了ステータス（``"success"`` / ``"warning"`` / ``"failed"``）。
         started_at: 実行開始時刻（``datetime.now(timezone.utc)``）。
     """
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
     duration = (datetime.now(timezone.utc) - started_at).total_seconds()
     logging.getLogger(__name__).info(
         "===== %s END status=%s duration=%.1fs =====", app_name, status, duration

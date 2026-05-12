@@ -33,14 +33,16 @@ _APP_NAME = "data_update"
 def main() -> None:
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
-    settings = Settings()
-    conn = duckdb.connect(str(settings.duckdb_path))
+    conn = None
     _failed = False
     _has_warnings = False
     _errors: list[str] = []
     _updated_rows: dict[str, int] = {}
 
     try:
+        settings = Settings()
+        conn = duckdb.connect(str(settings.duckdb_path))
+
         result = run_daily_etl(conn)
         _updated_rows["prices_daily"] = result.prices_saved
         _updated_rows["fundamentals"] = result.financials_saved
@@ -67,7 +69,8 @@ def main() -> None:
         _errors.append(str(exc))
         _failed = True
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
     finished_at = datetime.now(timezone.utc)
     try:

@@ -32,15 +32,17 @@ _APP_NAME = "ai_analysis"
 def main() -> None:
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
-    settings = Settings()
-    conn = duckdb.connect(str(settings.duckdb_path))
-    target_date = date.today()
-    api_key = getattr(settings, "openai_api_key", None)
+    conn = None
     _failed = False
     _errors: list[str] = []
     _updated_rows: dict[str, int] = {}
 
     try:
+        settings = Settings()
+        conn = duckdb.connect(str(settings.duckdb_path))
+        target_date = date.today()
+        api_key = getattr(settings, "openai_api_key", None)
+
         try:
             n_news = score_news(conn, target_date, api_key=api_key)
             _updated_rows["ai_scores"] = n_news
@@ -59,8 +61,13 @@ def main() -> None:
                 logger.exception("score_regime が失敗しました")
                 _errors.append(f"score_regime: {exc}")
                 _failed = True
+    except Exception as exc:
+        logger.exception("ai_analysis バッチが失敗しました")
+        _errors.append(str(exc))
+        _failed = True
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
     finished_at = datetime.now(timezone.utc)
     try:
