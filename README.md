@@ -206,10 +206,16 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
 10. Windows タスクスケジューラへの登録（本番運用時）
 
-    夜間バッチの自動実行を設定します:
+    夜間バッチの自動実行を設定します。Core ジョブは常時登録、Addon ジョブは `.env` フラグが `true` のときのみ登録されます:
 
     ```
     powershell -ExecutionPolicy Bypass -File scripts/setup_task_scheduler.ps1
+    ```
+
+    登録済みタスクをすべて削除する場合:
+
+    ```
+    powershell -ExecutionPolicy Bypass -File scripts/remove_task_scheduler.ps1
     ```
 
 注意:
@@ -233,10 +239,10 @@ KabuSys は**日足スイング戦略**専用の設計です。夜間バッチ�
 ```
 15:30  市場クローズ
   ↓
-夜間バッチ（15:30〜21:00）
-  ├─ 15:30  データ更新   scripts/run_data_update.py
-  ├─ 16:00  特徴量生成   scripts/run_feature_gen.py
-  ├─ 18:00  AI 分析      scripts/run_ai_analysis.py
+夜間バッチ（17:30〜21:15）
+  ├─ 17:30  データ更新   scripts/run_data_update.py
+  ├─ 18:30  特徴量生成   scripts/run_feature_gen.py
+  ├─ 19:00  AI 分析      scripts/run_ai_analysis.py  ← AI Addon 有効時のみ
   ├─ 20:00  シグナル生成 scripts/run_strategy_signal.py
   ├─ 21:00  ポートフォリオ構築 scripts/run_portfolio_construction.py
   └─ 21:15  バッチ結果レポート scripts/run_night_batch_report.py
@@ -259,7 +265,7 @@ KabuSys は**日足スイング戦略**専用の設計です。夜間バッチ�
 
 夜間バッチは Windows タスクスケジューラで自動実行します（`scripts/setup_task_scheduler.ps1` 参照）。手動実行も可能です。
 
-**データ更新**（15:30 実行）
+**データ更新**（17:30 実行）
 
 ```
 python scripts/run_data_update.py
@@ -268,7 +274,7 @@ python scripts/run_data_update.py
 J-Quants から当日の株価・財務・銘柄マスタを取得し `prices_daily` 等を更新します。  
 ニュース記事（Yahoo RSS）も収集します。翌日のすべての処理はこのデータを起点とします。
 
-**特徴量生成**（16:00 実行）
+**特徴量生成**（18:30 実行）
 
 ```
 python scripts/run_feature_gen.py

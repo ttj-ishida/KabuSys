@@ -120,7 +120,7 @@ if ($EnableAiSentiment) {
 }
 
 if ($EnableTdnet) {
-    Register-KabuSysTask -TaskName "KabuSys_TdnetCollection" -Script "run_tdnet_collection.py" -TriggerTime "17:35"
+    Register-KabuSysTask -TaskName "KabuSys_TdnetCollection" -Script "run_tdnet_collection.py" -TriggerTime "15:35"
 } else {
     Write-Host "  [SKIPPED] KabuSys_TdnetCollection (ENABLE_TDNET != true)"
 }

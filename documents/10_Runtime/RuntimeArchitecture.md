@@ -157,19 +157,32 @@ monitoring_service は常時稼働する。
 
 # 8. スケジューラ
 
-ジョブ管理には Windows Task Scheduler を使用する。登録スクリプト: `scripts/setup_task_scheduler.ps1`
+ジョブ管理には Windows Task Scheduler を使用する。
+
+  スクリプト                              用途
+  --------------------------------------- -----------------------------------------------
+  scripts\setup_task_scheduler.ps1        登録（Core 常時 / Addon は .env フラグ依存）
+  scripts\remove_task_scheduler.ps1       KabuSys_* タスクを一括削除
+
+Core ジョブ（常時登録）:
 
   時刻    タスク名                       実行スクリプト
   ------- ------------------------------ -----------------------------------------------
   17:30   KabuSys_DataUpdate             scripts\run_data_update.py
-  17:33   KabuSys_YahooNewsCollection    scripts\run_yahoonews_collection.py
   18:30   KabuSys_FeatureGen             scripts\run_feature_gen.py
-  19:00   KabuSys_AiAnalysis             scripts\run_ai_analysis.py
   20:00   KabuSys_StrategySignal         scripts\run_strategy_signal.py
   21:00   KabuSys_PortfolioConstruction  scripts\run_portfolio_construction.py
   21:15   KabuSys_NightBatchReport       scripts\run_night_batch_report.py
   08:30   KabuSys_ExecutionStart         scripts\start_system.py --component execution
   09:00   KabuSys_MonitoringStart        scripts\start_system.py --component monitoring
+
+Addon ジョブ（.env フラグが true のときのみ登録）:
+
+  時刻    タスク名                       実行スクリプト                          条件
+  ------- ------------------------------ --------------------------------------- -----------------------
+  15:35   KabuSys_TdnetCollection        scripts\run_tdnet_collection.py         ENABLE_TDNET=true
+  17:33   KabuSys_YahooNewsCollection    scripts\run_yahoonews_collection.py     ENABLE_YAHOONEWS=true
+  19:00   KabuSys_AiAnalysis             scripts\run_ai_analysis.py              ENABLE_AI_SENTIMENT=true
 
 詳細: `documents/10_Runtime/RuntimeJobSchedule.md`（セクション7）
 

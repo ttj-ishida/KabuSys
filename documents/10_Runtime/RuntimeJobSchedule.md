@@ -223,23 +223,30 @@ python -m kabusys.run_performance_report --type daily --save
 
 ## 7. Task Scheduler
 
-登録スクリプト:
+スクリプト:
 
-- `scripts/setup_task_scheduler.ps1`
+- `scripts/setup_task_scheduler.ps1` — 登録（Core は常時、Addon は `.env` フラグが `true` のときのみ）
+- `scripts/remove_task_scheduler.ps1` — `KabuSys_*` タスクを一括削除
 
-標準ジョブ:
+**Core ジョブ（常時登録）:**
 
 | 時刻 | タスク名 | スクリプト |
 |---|---|---|
 | 17:30 | `KabuSys_DataUpdate` | `scripts\run_data_update.py` |
-| 17:33 | `KabuSys_YahooNewsCollection` | `scripts\run_yahoonews_collection.py`（News Addon） |
 | 18:30 | `KabuSys_FeatureGen` | `scripts\run_feature_gen.py` |
-| 19:00 | `KabuSys_AiAnalysis` | `scripts\run_ai_analysis.py`（AI Addon） |
 | 20:00 | `KabuSys_StrategySignal` | `scripts\run_strategy_signal.py` |
 | 21:00 | `KabuSys_PortfolioConstruction` | `scripts\run_portfolio_construction.py` |
 | 21:15 | `KabuSys_NightBatchReport` | `scripts\run_night_batch_report.py` |
 | 08:30 | `KabuSys_ExecutionStart` | `scripts\start_system.py --component execution` |
 | 09:00 | `KabuSys_MonitoringStart` | `scripts\start_system.py --component monitoring` |
+
+**Addon ジョブ（`.env` フラグが `true` のときのみ登録）:**
+
+| 時刻 | タスク名 | スクリプト | 条件 |
+|---|---|---|---|
+| 15:35 | `KabuSys_TdnetCollection` | `scripts\run_tdnet_collection.py` | `ENABLE_TDNET=true` |
+| 17:33 | `KabuSys_YahooNewsCollection` | `scripts\run_yahoonews_collection.py` | `ENABLE_YAHOONEWS=true` |
+| 19:00 | `KabuSys_AiAnalysis` | `scripts\run_ai_analysis.py` | `ENABLE_AI_SENTIMENT=true` |
 
 ---
 

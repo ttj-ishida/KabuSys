@@ -198,10 +198,14 @@ Windows タスクスケジューラに登録することで、毎日自動で動
 
 ```powershell
 # Task Scheduler への自動登録
+# Core ジョブは常時登録。Addon ジョブは .env フラグが true のときのみ登録される。
 powershell -File scripts\setup_task_scheduler.ps1
+
+# 登録済みタスクをすべて削除したい場合
+powershell -File scripts\remove_task_scheduler.ps1
 ```
 
-**Core 標準ジョブ一覧:**
+**Core 標準ジョブ一覧（常時登録）:**
 
 | 時刻 | 処理 | スクリプト |
 |---|---|---|
@@ -215,15 +219,17 @@ powershell -File scripts\setup_task_scheduler.ps1
 
 > ℹ️ **スケジュール設計の根拠**: J-Quants の日足データは東証引け（15:30）直後ではなく 16:30〜17:00 頃に公開されます。17:30 に data_update を実行することで当日データを確実に取得してから feature_gen（18:30）を起動できます。
 
-**Addon 有効時のみ動くジョブ一覧:**（未設定でも Core の売買フローには影響しません）
+**Addon 有効時のみ動くジョブ一覧:**（`.env` フラグが `true` のときのみ登録。未設定でも Core の売買フローには影響しません）
 
-| 時刻 | 処理 | Addon | スクリプト |
-|---|---|---|---|
-| 17:33 | Yahoo News RSS 収集 | News Addon（`ENABLE_YAHOONEWS=true`） | `scripts/run_yahoonews_collection.py` |
-| 15:35 | TDnet 適時開示収集 | Disclosure Addon（`ENABLE_TDNET=true`） | `scripts/run_tdnet_collection.py` |
-| 15:40 | EDINET 法定開示収集 | Disclosure Addon（`ENABLE_EDINET=true`） | `scripts/run_edinet_collection.py` |
-| 17:00 | 開示イベント分類 | Disclosure Addon（`ENABLE_TDNET=true`） | `scripts/run_disclosure_classification.py` |
-| 19:00 | AI 分析 | AI Addon（`ENABLE_AI_SENTIMENT=true`） | `scripts/run_ai_analysis.py` |
+| 時刻 | 処理 | Addon | スクリプト | 条件 |
+|---|---|---|---|---|
+| 15:35 | TDnet 適時開示収集 | Disclosure Addon | `scripts/run_tdnet_collection.py` | `ENABLE_TDNET=true` |
+| 15:40 | EDINET 法定開示収集 | Disclosure Addon | `scripts/run_edinet_collection.py` | `ENABLE_EDINET=true` |
+| 17:00 | 開示イベント分類 | Disclosure Addon | `scripts/run_disclosure_classification.py` | `ENABLE_TDNET=true` |
+| 17:33 | Yahoo News RSS 収集 | News Addon | `scripts/run_yahoonews_collection.py` | `ENABLE_YAHOONEWS=true` |
+| 19:00 | AI 分析 | AI Addon | `scripts/run_ai_analysis.py` | `ENABLE_AI_SENTIMENT=true` |
+
+> Addon ジョブの登録状況は `setup_task_scheduler.ps1` 実行時のコンソール出力（`[REGISTERED]` / `[SKIPPED]`）で確認できます。
 
 > 詳細は `documents/10_Runtime/RuntimeJobSchedule.md` を参照してください。
 

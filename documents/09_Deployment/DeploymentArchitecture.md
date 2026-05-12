@@ -303,6 +303,8 @@ powershell -File scripts\setup_task_scheduler.ps1
 
   スクリプト                        用途
   --------------------------------- -------------------------------------------------
+  scripts\setup_task_scheduler.ps1  Task Scheduler 登録（Core 常時 / Addon は .env 依存）
+  scripts\remove_task_scheduler.ps1 KabuSys_* タスクを一括削除
   scripts\rebuild_features.py       特徴量を手動再計算（データ確認付き）
   scripts\reset_signals.py          signal_queue をクリア（取引時間外のみ）
   scripts\mark_signal_failed.py     指定シグナルを status='failed' に手動更新
