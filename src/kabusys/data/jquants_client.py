@@ -144,6 +144,12 @@ def _request(
                     )
                     time.sleep(wait)
                 continue
+            # 4xx で再試行しないエラーはレスポンスボディをログに残して再 raise
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                body = "(body読み取り失敗)"
+            logger.error("HTTP %d on %s — response: %s", status, path, body)
             raise
         except (urllib.error.URLError, OSError) as e:
             last_exc = e
