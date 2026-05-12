@@ -181,45 +181,48 @@ def main() -> None:
             except ValueError:
                 logger.error("--date の形式が不正です: %s (YYYY-MM-DD が必要です)", args.date)
                 _failed = True
-                return
         else:
             run_date = date.today()
-        logger.info("レポート生成開始: run_date=%s", run_date)
 
-        # --- JobRunResult 読み込み ---
-        job_runs_base = Path(args.job_runs_dir) if args.job_runs_dir else None
-        job_results = load_job_results_or_empty(run_date, base_dir=job_runs_base)
-        logger.info("JobRunResult 読み込み: %d 件", len(job_results))
+        if not _failed:
+            logger.info("レポート生成開始: run_date=%s", run_date)
 
-        # --- DB クエリ ---
-        db_path = args.db or str(Settings().duckdb_path)
-        target_date: date = run_date + timedelta(days=1)
-        conn = duckdb.connect(db_path)
-        update_counts = collect_update_counts(conn, run_date)
-        next_day = collect_next_day_summary(conn, run_date)
-        try:
-            row = conn.execute(
-                "SELECT MIN(date) FROM prices_daily WHERE date > ?", [run_date]
-            ).fetchone()
-            if row and row[0]:
-                target_date = row[0]
-        except Exception:
-            logger.warning("翌営業日の取得に失敗しました。run_date+1 を使用します。", exc_info=True)
+            # --- JobRunResult 読み込み ---
+            job_runs_base = Path(args.job_runs_dir) if args.job_runs_dir else None
+            job_results = load_job_results_or_empty(run_date, base_dir=job_runs_base)
+            logger.info("JobRunResult 読み込み: %d 件", len(job_results))
 
-        # --- レポート構築・保存 ---
-        report = build_report(
-            job_results,
-            update_counts,
-            next_day,
-            run_date=run_date,
-            target_date=target_date,
-        )
+            # --- DB クエリ ---
+            db_path = args.db or str(Settings().duckdb_path)
+            target_date: date = run_date + timedelta(days=1)
+            conn = duckdb.connect(db_path)
+            update_counts = collect_update_counts(conn, run_date)
+            next_day = collect_next_day_summary(conn, run_date)
+            try:
+                row = conn.execute(
+                    "SELECT MIN(date) FROM prices_daily WHERE date > ?", [run_date]
+                ).fetchone()
+                if row and row[0]:
+                    target_date = row[0]
+            except Exception:
+                logger.warning(
+                    "翌営業日の取得に失敗しました。run_date+1 を使用します。", exc_info=True
+                )
 
-        output_dir = Path(args.output_dir) if args.output_dir else Path("artifacts/reports")
-        saved_path = save_report(report, output_dir)
-        logger.info("レポート保存: %s", saved_path)
+            # --- レポート構築・保存 ---
+            report = build_report(
+                job_results,
+                update_counts,
+                next_day,
+                run_date=run_date,
+                target_date=target_date,
+            )
 
-        print(format_cli_summary(report))
+            output_dir = Path(args.output_dir) if args.output_dir else Path("artifacts/reports")
+            saved_path = save_report(report, output_dir)
+            logger.info("レポート保存: %s", saved_path)
+
+            print(format_cli_summary(report))
     except Exception:
         logger.exception("night_batch_report バッチが失敗しました")
         _failed = True
@@ -227,8 +230,8 @@ def main() -> None:
         if conn is not None:
             conn.close()
         log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
-        if _failed:
-            sys.exit(1)
+    if _failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

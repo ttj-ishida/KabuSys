@@ -40,10 +40,10 @@ def main() -> None:
                 ".env に EDINET_API_KEY を設定してください。"
             )
             _failed = True
-            return
-        conn = duckdb.connect(str(settings.duckdb_path))
-        saved = run_edinet_collection(conn, api_key=settings.edinet_api_key)
-        logger.info("edinet_collection 完了: saved=%d", saved)
+        else:
+            conn = duckdb.connect(str(settings.duckdb_path))
+            saved = run_edinet_collection(conn, api_key=settings.edinet_api_key)
+            logger.info("edinet_collection 完了: saved=%d", saved)
     except Exception:
         logger.exception("edinet_collection バッチが失敗しました")
         _failed = True
@@ -51,8 +51,8 @@ def main() -> None:
         if conn is not None:
             conn.close()
         log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
-        if _failed:
-            sys.exit(1)
+    if _failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
