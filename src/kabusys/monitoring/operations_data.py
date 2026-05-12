@@ -465,19 +465,16 @@ def load_paper_verification_data(
     total_polls = stability.get("total_polls", 0)
     created_count = orders.get("created_count", 0)
 
-    # Pass/Fail 判定 — スペック準拠: bare "PASS" / "FAIL" のみを返す
-    # None はしきい値未達として扱う
-    all_pass = (
-        uptime_pct is not None
-        and uptime_pct >= THRESHOLD_UPTIME_PCT
-        and fill_rate_pct is not None
-        and fill_rate_pct >= THRESHOLD_FILL_RATE_PCT
-        and send_rate_pct is not None
-        and send_rate_pct >= THRESHOLD_SEND_RATE_PCT
-        and p95_latency_ms is not None
-        and p95_latency_ms <= THRESHOLD_P95_LATENCY_MS
-    )
-    pass_fail = "PASS" if all_pass else "FAIL"
+    # Pass/Fail 判定 — paper_verification_report.py の CLI ロジックと同一基準
+    failures: list[bool] = [
+        uptime_pct is None,
+        uptime_pct is not None and uptime_pct < THRESHOLD_UPTIME_PCT,
+        created_count == 0,
+        fill_rate_pct is not None and fill_rate_pct < THRESHOLD_FILL_RATE_PCT,
+        send_rate_pct is not None and send_rate_pct < THRESHOLD_SEND_RATE_PCT,
+        p95_latency_ms is not None and p95_latency_ms > THRESHOLD_P95_LATENCY_MS,
+    ]
+    pass_fail = "PASS" if not any(failures) else "FAIL"
 
     return {
         "available": True,
