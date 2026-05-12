@@ -8,7 +8,7 @@ FileHandler（実行単位のログファイル）をルートロガーに設定
 使い方:
     from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
-    setup_logging(app_name="execution")
+    setup_logging(app_name="execution", capture_stdio=True)
 
     def main() -> None:
         started_at = datetime.now(timezone.utc)
@@ -22,9 +22,11 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
+from typing import Any, Callable
 
 _LOG_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 _DATE_FORMAT = "%Y-%m-%dT%H:%M:%S"
@@ -35,10 +37,88 @@ _BACKUP_COUNT = 30  # 日次ローテーション・30日分保持
 logger = logging.getLogger(__name__)
 
 
+_LINE_SEP_RE = __import__("re").compile(r"\r\n|\r|\n")
+
+
+class _TeeWriter:
+    """sys.stdout / sys.stderr をオリジナルストリームとロガーの両方に出力する tee ライター。
+
+    write() で受け取ったメッセージを:
+      1. オリジナルストリームへ書き込む（コンソール出力を維持）
+      2. \\n / \\r\\n / \\r 区切りで logger_fn を呼び出してログファイルにも記録する
+         （プログレスバー等の CR 更新もバッファに溜まらず都度ログ化される）
+
+    部分行（区切り文字なしの断片）はバッファリングし flush() 時に書き出す。
+    logger_fn 内でハンドラ障害が起きた場合の再帰ループは再入防止フラグで防ぐ。
+    """
+
+    def __init__(self, orig_stream: Any, logger_fn: Callable[[str], None]) -> None:
+        self._orig = orig_stream
+        self._logger_fn = logger_fn
+        self._buf = ""
+        self._local = threading.local()
+
+    def _safe_log(self, msg: str) -> None:
+        """再帰ループを防ぎつつ logger_fn を呼ぶ。
+
+        FileHandler の emit 失敗 → handleError が sys.stderr に書く → _TeeWriter.write
+        → stderr_logger.warning → 同じハンドラで再失敗、という無限再帰を防ぐ。
+        """
+        if getattr(self._local, "active", False):
+            return
+        self._local.active = True
+        try:
+            self._logger_fn(msg)
+        finally:
+            self._local.active = False
+
+    def write(self, msg: str) -> int:
+        n = self._orig.write(msg)
+        self._buf += msg
+        parts = _LINE_SEP_RE.split(self._buf)
+        for line in parts[:-1]:
+            if line.strip():
+                self._safe_log(line)
+        self._buf = parts[-1]
+        return n if n is not None else len(msg)
+
+    def writelines(self, lines: Any) -> None:
+        for line in lines:
+            self.write(line)
+
+    def flush(self) -> None:
+        buf, self._buf = self._buf, ""
+        stripped = buf.rstrip("\r\n")
+        if stripped.strip():
+            self._safe_log(stripped)
+        self._orig.flush()
+
+    @property
+    def encoding(self) -> str:
+        return getattr(self._orig, "encoding", "utf-8")
+
+    @property
+    def errors(self) -> str:
+        return getattr(self._orig, "errors", "replace")
+
+    def isatty(self) -> bool:
+        return bool(getattr(self._orig, "isatty", lambda: False)())
+
+    def fileno(self) -> int:
+        fn = getattr(self._orig, "fileno", None)
+        if fn is None:
+            raise OSError("fileno not supported")
+        return fn()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._orig, name)
+
+
 def setup_logging(
     app_name: str = "kabusys",
     log_dir: Path | None = None,
     level: str | int | None = None,
+    capture_stdio: bool = False,
 ) -> Path | None:
     """ロギングを設定する。
 
@@ -60,10 +140,13 @@ def setup_logging(
       3. デフォルト ``"logs/"``
 
     Args:
-        app_name: ログファイル名のプレフィックス（例: ``"execution"`` → ``logs/execution.log``）。
-        log_dir:  ログファイルの保存ディレクトリ。None の場合は上記解決順を使用。
-        level:    ログレベル文字列（"DEBUG"/"INFO"/"WARNING"/"ERROR"/"CRITICAL"）または
-                  整数値（例: ``logging.DEBUG``）。None の場合は上記解決順を使用。
+        app_name:      ログファイル名のプレフィックス（例: ``"execution"`` → ``logs/execution.log``）。
+        log_dir:       ログファイルの保存ディレクトリ。None の場合は上記解決順を使用。
+        level:         ログレベル文字列（"DEBUG"/"INFO"/"WARNING"/"ERROR"/"CRITICAL"）または
+                       整数値（例: ``logging.DEBUG``）。None の場合は上記解決順を使用。
+        capture_stdio: True の場合、sys.stdout / sys.stderr を ``_TeeWriter`` で置き換え、
+                       print() や C拡張ライブラリの出力も実行単位ログファイルに記録する。
+                       コンソール出力は従来通り維持（tee 動作）。
 
     Returns:
         実行単位ログファイルのパス（``<app_name>_YYYYMMDD_HHMMSS.log``）。
@@ -160,7 +243,64 @@ def setup_logging(
         run_log_file,
     )
 
+    if capture_stdio and run_log_file is not None:
+        _install_stdio_tee(app_name, run_log_file, formatter)
+
     return run_log_file
+
+
+def _install_stdio_tee(
+    app_name: str,
+    run_log_file: Path,
+    formatter: logging.Formatter,
+) -> None:
+    """sys.stdout / sys.stderr を _TeeWriter に置き換えて run_log_file にも出力する。
+
+    stdout / stderr それぞれに専用の FileHandler（append mode）を作成して
+    ``kabusys.stdio.<app_name>.stdout`` / ``kabusys.stdio.<app_name>.stderr``
+    ロガーに登録する。これらのロガーは propagate=False のため
+    root ロガーの StreamHandler には流れず、コンソール二重出力が発生しない。
+
+    既に _TeeWriter に置き換え済みの場合はスキップする（二重ネスト防止）。
+    """
+    stdout_logger = logging.getLogger(f"kabusys.stdio.{app_name}.stdout")
+    stderr_logger = logging.getLogger(f"kabusys.stdio.{app_name}.stderr")
+
+    for lg in (stdout_logger, stderr_logger):
+        # DEBUG に固定して stdio ロガー自身はレベルフィルタをかけない。
+        # NOTSET だと getEffectiveLevel() が親チェーンを辿り root の ERROR が適用されるため、
+        # LOG_LEVEL=ERROR 設定時に print() 出力が消えてしまう。
+        lg.setLevel(logging.DEBUG)
+        lg.propagate = False
+        for h in list(lg.handlers):
+            h.close()
+            lg.removeHandler(h)
+
+    # 実行単位ログファイルへの専用 FileHandler（append）
+    # root ロガーの run_file_handler とは別オブジェクトで同一ファイルに追記する
+    try:
+        fh_out = logging.FileHandler(run_log_file, mode="a", encoding="utf-8")
+        fh_out.setLevel(logging.DEBUG)
+        fh_out.setFormatter(formatter)
+        stdout_logger.addHandler(fh_out)
+    except Exception as e:
+        logger.warning("stdout キャプチャ用ハンドラの作成に失敗しました: %s", e)
+        return
+
+    try:
+        fh_err = logging.FileHandler(run_log_file, mode="a", encoding="utf-8")
+        fh_err.setLevel(logging.DEBUG)
+        fh_err.setFormatter(formatter)
+        stderr_logger.addHandler(fh_err)
+    except Exception as e:
+        logger.warning("stderr キャプチャ用ハンドラの作成に失敗しました: %s", e)
+
+    # sys.stdout / sys.stderr を使用（sys.__stdout__ ではなく）:
+    # pytest capsys など他フレームワークのラッパーを保持するため
+    if not isinstance(sys.stdout, _TeeWriter):
+        sys.stdout = _TeeWriter(sys.stdout, stdout_logger.info)
+    if not isinstance(sys.stderr, _TeeWriter):
+        sys.stderr = _TeeWriter(sys.stderr, stderr_logger.warning)
 
 
 def log_run_start(app_name: str) -> None:

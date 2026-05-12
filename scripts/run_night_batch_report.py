@@ -30,7 +30,7 @@ from kabusys.operations.night_batch_report import (
 )
 from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
-setup_logging(app_name="night_batch_report")
+setup_logging(app_name="night_batch_report", capture_stdio=True)
 logger = logging.getLogger(__name__)
 
 _APP_NAME = "night_batch_report"
