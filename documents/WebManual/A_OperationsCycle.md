@@ -140,7 +140,7 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 
 > ⚠️ Streamlit はターミナルを占有します。レポートスクリプトなどを別途実行する場合は、**新しいターミナルウィンドウ**を開いて `.venv\Scripts\Activate.ps1` を有効化してから実行してください。
 
-ダッシュボードは 10 ページ構成です。
+ダッシュボードは 11 ページ構成です。
 
 | ページ（サイドバー） | 主な確認内容 |
 |---|---|
@@ -153,6 +153,7 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 | **Performance** | エクイティカーブ / 保有ポジション / 取引履歴 / Paper Verification |
 | **Failure Recovery** | 障害イベント集約 / 復旧ガイド |
 | **WebManual** | 運用マニュアル閲覧ビュー |
+| **Process Monitor** | バッチジョブ実行状況 / 孤立プロセス（クラッシュ検知）/ 直近の完了ジョブ一覧 |
 | **Strategy Lab** | 市場レジームスコア / AI スコアランキング / シグナル推移 |
 
 確認項目:

@@ -255,6 +255,13 @@ python -m kabusys.run_performance_report --type daily --save
 - `market_breadth` は data update / breadth 計算で日次更新される
 - バックテストでは `prices_daily` から再計算して `breadth_stop` を評価する
 - Streamlit ダッシュボードから `WebManual` を参照できる
+- 全 Core バッチスクリプト（`run_data_update`, `run_feature_gen`, `run_strategy_signal`, `run_portfolio_construction`, `run_night_batch_report`, `run_execution`）および Addon スクリプトは `process_registry` と統合されており、実行履歴を `monitoring.db` の `process_runs` テーブルに記録する（Issue #310）
+- バッチジョブ実行状況は Streamlit `Process Monitor` ページまたは CLI で確認できる:
+
+```bash
+python -m kabusys.run_process_monitor           # 直近 24 時間
+python -m kabusys.run_process_monitor --hours 48
+```
 
 ---
 
