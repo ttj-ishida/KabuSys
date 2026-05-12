@@ -463,25 +463,30 @@ def save_financial_statements(
     fetched_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     rows = [
         (
-            str(r.get("LocalCode", "") or ""),
-            r.get("DisclosedDate"),
-            r.get("TypeOfDocument", ""),
-            _to_float(r.get("NetSales")),
-            _to_float(r.get("OperatingProfit")),
-            _to_float(r.get("Profit")),
-            _to_float(r.get("EarningsPerShare")),
-            _to_float(r.get("ROE")),
-            _to_float(r.get("BookValuePerShare")),
+            str(r.get("Code", "") or ""),
+            r.get("DiscDate"),
+            r.get("CurPerType", ""),
+            _to_float(r.get("Sales")),
+            _to_float(r.get("OP")),
+            _to_float(r.get("NP")),
+            _to_float(r.get("EPS")),
+            _to_float(r.get("NP")) / _to_float(r.get("Eq"))
+            if _to_float(r.get("NP")) is not None and _to_float(r.get("Eq"))
+            else None,
+            None,  # bps: /fins/summary に BPS 列なし
             fetched_at,
         )
         for r in records
-        if r.get("LocalCode")
-        and r.get("DisclosedDate")
-        and r.get("TypeOfDocument")  # PK 欠損行はスキップ
+        if r.get("Code")
+        and r.get("DiscDate")
+        and r.get("CurPerType")  # PK 欠損行はスキップ
     ]
     skipped = len(records) - len(rows)
     if skipped:
         logger.warning("save_financial_statements: %d 件を PK 欠損によりスキップ", skipped)
+
+    if not rows:
+        return 0
 
     conn.executemany(
         """
