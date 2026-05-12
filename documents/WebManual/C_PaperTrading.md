@@ -96,25 +96,73 @@ PAPER_TRADING_INITIAL_CASH=10000000
 通常、ペーパートレードでは夜間バッチが生成したシグナルを使います。
 しかし特定の銘柄について「買い・売りが正しく処理されるか」をピンポイントでテストしたい場合は、ダミーシグナルを注入する CLI ツールを使います（Issue #229 で実装済み）。
 
-### 使用方法
+### 日付の仕組み（必ず確認）
 
-**1. ダミーシグナルを注入する**
+`inject_dummy_signal` と `run_signal_queue_report` はそれぞれ異なるデフォルト日付を使います。
+
+| コマンド | `--date` 省略時のデフォルト |
+|---|---|
+| `inject_dummy_signal` | **翌営業日**（夜間バッチ後の注入を想定） |
+| `run_signal_queue_report` | **今日**（`date.today()`） |
+
+このため、`inject_dummy_signal` を `--date` 省略で実行した直後に `run_signal_queue_report` を実行すると、日付がずれて **EMPTY** になります。
+
+### 使用パターン
+
+**パターン A: 翌朝の動作確認（本来の用途）**
+
+夜間（または夕方）に注入し、翌朝レポートで確認します。
 
 ```bash
-# 銘柄 7203（トヨタ）を 100 株 BUY するシグナルを注入
+# 夜間：翌営業日向けシグナルを注入（--date 省略でよい）
 python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100
 
-# 日付を指定して注入
-python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100 --date 2026-05-06
+# 翌朝：date.today() が翌営業日に変わったタイミングでレポート実行
+python -m kabusys.run_signal_queue_report
+```
+
+**パターン B: 当日すぐに確認したい場合**
+
+注入とレポートで同じ日付を明示します。
+
+```bash
+# 今日の日付でシグナルを注入
+python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100 --date 2026-05-12
+
+# 同じ日付でレポート（省略時 date.today() と一致するのでそのままでも可）
+python -m kabusys.run_signal_queue_report
+
+# または注入した日付を明示して確認
+python -m kabusys.run_signal_queue_report --date 2026-05-12
+```
+
+**パターン C: 注入後すぐに翌営業日のシグナルを確認したい場合**
+
+```bash
+# 翌営業日で注入（--date 省略）
+python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100
+
+# レポートに翌営業日を明示して確認
+python -m kabusys.run_signal_queue_report --date 2026-05-13
+```
+
+### コマンド一覧
+
+```bash
+# BUY シグナルを注入
+python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100
 
 # SELL シグナルを注入（保有銘柄の売りテスト）
 python -m kabusys.tools.inject_dummy_signal --code 7203 --side SELL --qty 100
-```
 
-**2. 注入されたことを Signal Queue レポートで確認する**
+# 日付を指定して注入
+python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100 --date 2026-05-12
 
-```bash
-python -m kabusys.run_signal_queue_report
+# 既存シグナルを上書き
+python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --force
+
+# 注入した日付を指定してレポート確認
+python -m kabusys.run_signal_queue_report --date 2026-05-13
 ```
 
 `pending` 状態でシグナルが表示されれば注入成功です。
