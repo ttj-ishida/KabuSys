@@ -254,21 +254,10 @@ def test_load_financials_roe_null_when_eq_missing(conn, tmp_path):
 
 
 def test_load_calendar_inserts_market_calendar(conn, tmp_path):
+    # 旧形式: HalfDiv/SQDiv/HolName を持つフル列構成
     rows = [
-        {
-            "Date": "2024-01-04",
-            "HolDiv": "0",
-            "HalfDiv": "0",
-            "SQDiv": "0",
-            "HolName": "",
-        },
-        {
-            "Date": "2024-01-08",
-            "HolDiv": "1",
-            "HalfDiv": "0",
-            "SQDiv": "0",
-            "HolName": "成人の日",
-        },
+        {"Date": "2024-01-04", "HolDiv": "0", "HalfDiv": "0", "SQDiv": "0", "HolName": ""},
+        {"Date": "2024-01-08", "HolDiv": "1", "HalfDiv": "0", "SQDiv": "0", "HolName": "成人の日"},
     ]
     path = _gz(rows, tmp_path, "cal.csv.gz")
     count = load_calendar(conn, path)
@@ -278,6 +267,35 @@ def test_load_calendar_inserts_market_calendar(conn, tmp_path):
     ).fetchone()
     assert row[0] is False
     assert row[1] == "成人の日"
+
+
+def test_load_calendar_holdiv_only_new_format(conn, tmp_path):
+    # 新形式: Date + HolDiv のみ（J-Quants 実データ形式）
+    # HolDiv: 0=休日, 1=通常取引日, 2=半日取引日, 3=振替休日
+    rows = [
+        {"Date": "2024-01-01", "HolDiv": "0"},
+        {"Date": "2024-01-04", "HolDiv": "1"},
+        {"Date": "2024-01-05", "HolDiv": "2"},
+        {"Date": "2024-01-06", "HolDiv": "3"},
+    ]
+    path = _gz(rows, tmp_path, "cal_new.csv.gz")
+    count = load_calendar(conn, path)
+    assert count == 4
+
+    def get(date):
+        return conn.execute(
+            "SELECT is_trading_day, is_half_day, is_sq_day, holiday_name "
+            "FROM market_calendar WHERE date=?", [date]
+        ).fetchone()
+
+    r = get("2024-01-01")
+    assert r[0] is False and r[1] is False and r[2] is False and r[3] is None  # 休日
+    r = get("2024-01-04")
+    assert r[0] is True and r[1] is False  # 通常取引日
+    r = get("2024-01-05")
+    assert r[0] is True and r[1] is True   # 半日取引日
+    r = get("2024-01-06")
+    assert r[0] is False and r[1] is False  # 振替休日
 
 
 # ---------------------------------------------------------------------------
