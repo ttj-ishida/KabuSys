@@ -1,5 +1,5 @@
 # tests/test_logging_setup.py
-"""logging_setup モジュールのユニットテスト（Issue #55 / #308）"""
+"""logging_setup モジュールのユニットテスト（Issue #55 / #308 / #309）"""
 
 from __future__ import annotations
 
@@ -11,18 +11,31 @@ from unittest.mock import patch
 
 import pytest
 
-from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
+from kabusys.utils.logging_setup import _TeeWriter, log_run_end, log_run_start, setup_logging
 
 
 @pytest.fixture(autouse=True)
 def reset_root_logger():
     """各テスト後にルートロガーのハンドラとレベルをリセットしてテスト間の独立性を保つ。"""
+    orig_stdout = sys.stdout
+    orig_stderr = sys.stderr
     yield
+    # capture_stdio テストが sys.stdout/stderr を置き換えた場合に復元する
+    sys.stdout = orig_stdout
+    sys.stderr = orig_stderr
+    # ルートロガーをリセット
     root = logging.getLogger()
     for h in list(root.handlers):
         h.close()
         root.removeHandler(h)
     root.setLevel(logging.WARNING)
+    # stdio キャプチャ用ロガーをリセット
+    for name in list(logging.Logger.manager.loggerDict.keys()):
+        if "kabusys.stdio" in name:
+            lg = logging.getLogger(name)
+            for h in list(lg.handlers):
+                h.close()
+                lg.removeHandler(h)
 
 
 class TestSetupLogging:
@@ -250,3 +263,150 @@ class TestLogRunBoundaries:
         with caplog.at_level(logging.INFO, logger=self._LOGGER):
             log_run_end("my_job", status="success", started_at=started)
         assert any("duration=" in r.message for r in caplog.records)
+
+
+class TestTeeWriter:
+    """_TeeWriter の単体テスト（Issue #309）"""
+
+    def test_write_forwards_to_orig_stream(self):
+        """write() はオリジナルストリームへ書き込む。"""
+        calls = []
+
+        class FakeStream:
+            encoding = "utf-8"
+
+            def write(self, msg):
+                calls.append(msg)
+                return len(msg)
+
+            def flush(self):
+                pass
+
+        logged = []
+        tee = _TeeWriter(FakeStream(), logged.append)
+        tee.write("hello\n")
+        assert "hello\n" in calls
+
+    def test_write_calls_logger_fn_on_newline(self):
+        """改行区切りで logger_fn が呼ばれる。"""
+        logged = []
+        orig = type(
+            "S", (), {"write": lambda s, m: len(m), "flush": lambda s: None, "encoding": "utf-8"}
+        )()
+        tee = _TeeWriter(orig, logged.append)
+        tee.write("line1\nline2\n")
+        assert "line1" in logged
+        assert "line2" in logged
+
+    def test_write_buffers_partial_lines(self):
+        """改行なしの書き込みはバッファリングされ logger_fn を呼ばない。"""
+        logged = []
+        orig = type(
+            "S", (), {"write": lambda s, m: len(m), "flush": lambda s: None, "encoding": "utf-8"}
+        )()
+        tee = _TeeWriter(orig, logged.append)
+        tee.write("partial")
+        assert logged == []
+
+    def test_flush_drains_buffer(self):
+        """flush() がバッファ内の残行を logger_fn に流す。"""
+        logged = []
+        orig = type(
+            "S", (), {"write": lambda s, m: len(m), "flush": lambda s: None, "encoding": "utf-8"}
+        )()
+        tee = _TeeWriter(orig, logged.append)
+        tee.write("partial")
+        tee.flush()
+        assert "partial" in logged
+
+    def test_write_skips_empty_lines(self):
+        """空行（改行のみ）では logger_fn を呼ばない。"""
+        logged = []
+        orig = type(
+            "S", (), {"write": lambda s, m: len(m), "flush": lambda s: None, "encoding": "utf-8"}
+        )()
+        tee = _TeeWriter(orig, logged.append)
+        tee.write("\n")
+        assert logged == []
+
+    def test_encoding_attribute(self):
+        """encoding 属性がオリジナルストリームの値を返す。"""
+        orig = type(
+            "S", (), {"encoding": "utf-16", "write": lambda s, m: len(m), "flush": lambda s: None}
+        )()
+        tee = _TeeWriter(orig, lambda x: None)
+        assert tee.encoding == "utf-16"
+
+
+class TestCaptureStdio:
+    """capture_stdio=True の統合テスト（Issue #309）"""
+
+    def test_stdout_replaced_with_tee_writer(self, tmp_path):
+        """capture_stdio=True で sys.stdout が _TeeWriter に置き換えられる。"""
+        setup_logging(app_name="test", log_dir=tmp_path, capture_stdio=True)
+        assert isinstance(sys.stdout, _TeeWriter)
+
+    def test_stderr_replaced_with_tee_writer(self, tmp_path):
+        """capture_stdio=True で sys.stderr が _TeeWriter に置き換えられる。"""
+        setup_logging(app_name="test", log_dir=tmp_path, capture_stdio=True)
+        assert isinstance(sys.stderr, _TeeWriter)
+
+    def test_stdout_unchanged_when_capture_false(self, tmp_path):
+        """capture_stdio=False（デフォルト）では sys.stdout は変わらない。"""
+        orig = sys.stdout
+        setup_logging(app_name="test", log_dir=tmp_path)
+        assert sys.stdout is orig
+
+    def test_print_captured_to_run_log(self, tmp_path):
+        """capture_stdio=True でのprint()出力が実行単位ログファイルに記録される。"""
+        run_log = setup_logging(app_name="test", log_dir=tmp_path, capture_stdio=True)
+        assert run_log is not None
+        print("hello from print")
+        sys.stdout.flush()
+        content = run_log.read_text(encoding="utf-8")
+        assert "hello from print" in content
+
+    def test_stderr_captured_to_run_log(self, tmp_path):
+        """capture_stdio=True での sys.stderr 出力が実行単位ログファイルに記録される。"""
+        run_log = setup_logging(app_name="test", log_dir=tmp_path, capture_stdio=True)
+        assert run_log is not None
+        sys.stderr.write("err output\n")
+        sys.stderr.flush()
+        content = run_log.read_text(encoding="utf-8")
+        assert "err output" in content
+
+    def test_second_setup_call_no_nested_tee(self, tmp_path):
+        """2回目の setup_logging でも TeeWriter の二重ネストにならない。"""
+        setup_logging(app_name="test", log_dir=tmp_path, capture_stdio=True)
+        setup_logging(app_name="test", log_dir=tmp_path, capture_stdio=True)
+        assert not isinstance(sys.stdout._orig, _TeeWriter)  # type: ignore[union-attr]
+
+    def test_capture_stdio_false_by_default(self, tmp_path):
+        """capture_stdio 引数のデフォルトは False。"""
+        orig = sys.stdout
+        setup_logging(app_name="test", log_dir=tmp_path)
+        assert sys.stdout is orig
+
+    def test_high_log_level_still_captures_print(self, tmp_path):
+        """LOG_LEVEL=ERROR 設定時も print() 出力は実行単位ログに記録される。"""
+        run_log = setup_logging(
+            app_name="test", log_dir=tmp_path, level="ERROR", capture_stdio=True
+        )
+        assert run_log is not None
+        print("captured despite error level")
+        sys.stdout.flush()
+        content = run_log.read_text(encoding="utf-8")
+        assert "captured despite error level" in content
+
+    def test_flush_clears_whitespace_only_buffer(self):
+        """flush() で空白のみのバッファを呼び出してもバッファがクリアされ logger_fn を呼ばない。"""
+        logged = []
+        orig = type(
+            "S", (), {"write": lambda s, m: len(m), "flush": lambda s: None, "encoding": "utf-8"}
+        )()
+        tee = _TeeWriter(orig, logged.append)
+        tee.write("   ")  # whitespace only, no newline
+        tee.flush()
+        assert logged == []
+        # バッファがクリアされていること
+        assert tee._buf == ""
