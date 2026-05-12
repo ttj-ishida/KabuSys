@@ -80,8 +80,8 @@ def test_collect_signals_buy_and_sell(db):
     assert result[0]["code"] == "7203"
     assert result[0]["side"] == "buy"
     assert result[0]["target_size"] == 100
-    assert result[0]["target_weight"] is None   # signal_queue には存在しない
-    assert result[0]["signal_rank"] is None     # signal_queue には存在しない
+    assert result[0]["target_weight"] is None  # signal_queue には存在しない
+    assert result[0]["signal_rank"] is None  # signal_queue には存在しない
 
 
 def test_collect_signals_only_pending(db):

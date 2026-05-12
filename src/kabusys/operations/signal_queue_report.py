@@ -25,7 +25,9 @@ class SignalQueueReport:
     total_count: int  # シグナル総数
     buy_count: int  # BUY シグナル数
     sell_count: int  # SELL シグナル数
-    signals: list[dict]  # [{code, side, target_size, target_weight, signal_rank}] target_weight/signal_rank は常に None
+    signals: list[
+        dict
+    ]  # [{code, side, target_size, target_weight, signal_rank}] target_weight/signal_rank は常に None
     warnings: list[str]
 
 
