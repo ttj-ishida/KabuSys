@@ -592,12 +592,14 @@ touch data/stop_requested.flag
       - 3_Pre_Market.py            — 朝の READY/BLOCKED 判定・データ鮮度確認
       - 4_Execution_Startup.py     — 起動直後のリコンシリエーション差分確認
       - 5_Intraday_Monitor.py      — ザラ場監視（自動更新）・Kill Switch 確認
-      - 6_Signal_Queue.py          — 発注キュー・シグナル確認（参照専用。キャンセル・削除は CLI コマンドを表示）
+      - 6_Signal_Queue.py          — 発注キュー・シグナル確認（参照専用。ステータスフィルター付き、デフォルト: cancelled 除外。キャンセル・削除は CLI コマンドを表示）
       - 7_Performance.py           — エクイティカーブ・ポジション・取引履歴・Paper Verification
       - 8_Failure_Recovery.py      — 障害イベント集約・復旧ガイド
       - 9_WebManual.py             — 運用マニュアル閲覧ビュー
       - 10_Strategy_Lab.py         — 市場レジーム・AI スコア・シグナル推移・AI Co-Pilot
   - ai/
+    - news_nlp.py                — ニュース NLP スコアリング（GPT-4o-mini 呼び出し）
+    - regime_detector.py         — 市場レジーム判定（ETF/LLM ハイブリッド）
     - backtest_summarizer.py     — DuckDB backtest_runs 最新結果 → system prompt 用 Markdown 生成
     - param_extractor.py         — AI 返答の JSON ブロック抽出・ホワイトリスト検証（許可キー 12種 + weights 5因子）
     - config_manager.py          — strategy_config.yaml へのパラメータ適用・バックアップ・ロールバック
@@ -608,6 +610,7 @@ touch data/stop_requested.flag
     - process_priority.py
 - config/
   - risk_config.yaml（等の YAML 設定ファイル）
+  - backups/（AI Co-Pilot がパラメータ適用時に自動生成する strategy_config.yaml のバックアップ）
 - data/
   - monitoring.db（デフォルト）
   - kabusys.duckdb（デフォルト: data/kabusys.duckdb）

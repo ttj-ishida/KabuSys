@@ -203,7 +203,7 @@ Core コードは返り値の型を意識せず `.send(message)` を呼ぶだけ
 | Pre-Market | `pages/3_Pre_Market.py` | 朝の READY/BLOCKED 判定・データ鮮度・停止フラグ確認 |
 | Execution Startup | `pages/4_Execution_Startup.py` | 起動直後のリコンシリエーション差分・ポジション整合確認 |
 | Intraday Monitor | `pages/5_Intraday_Monitor.py` | ザラ場監視（自動更新）・Kill Switch 状態・注文エラー・ドローダウン |
-| Signal Queue | `pages/6_Signal_Queue.py` | 発注キュー・ポートフォリオ目標・シグナル（直近7日）。**参照専用**。キャンセル・削除操作は CLI コマンドを画面上に表示するため、ターミナルで実行する |
+| Signal Queue | `pages/6_Signal_Queue.py` | 発注キュー・ポートフォリオ目標・シグナル（直近7日）。**参照専用**。ステータスフィルター（multiselect）で表示を絞り込める（デフォルト: `cancelled` を除外）。キャンセル・削除操作は CLI コマンドを画面上に表示するため、ターミナルで実行する |
 | Performance | `pages/7_Performance.py` | エクイティカーブ・ポジション・取引履歴・Paper Verification |
 | Failure Recovery | `pages/8_Failure_Recovery.py` | 障害イベント集約・復旧ガイド |
 | WebManual | `pages/9_WebManual.py` | 運用マニュアル閲覧ビュー |
@@ -481,7 +481,7 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 | `pages/3_Pre_Market.py` | 朝の READY/BLOCKED 判定・データ鮮度・停止フラグ確認 |
 | `pages/4_Execution_Startup.py` | 起動直後のリコンシリエーション差分・ポジション整合確認 |
 | `pages/5_Intraday_Monitor.py` | ザラ場監視（自動更新）・Kill Switch 状態・注文エラー・ドローダウン |
-| `pages/6_Signal_Queue.py` | 発注キュー・ポートフォリオ目標・シグナル確認 |
+| `pages/6_Signal_Queue.py` | 発注キュー・ポートフォリオ目標・シグナル確認。ステータスフィルター（デフォルト: `cancelled` 除外） |
 | `pages/7_Performance.py` | エクイティカーブ・ポジション・取引履歴・Paper Verification |
 | `pages/8_Failure_Recovery.py` | 障害イベント集約・復旧ガイド |
 | `pages/9_WebManual.py` | 運用マニュアル閲覧ビュー |
