@@ -22,7 +22,7 @@ with st.sidebar:
         st.rerun()
 
 try:
-    conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
+    conn = duckdb.connect(str(settings.duckdb_path))
 except Exception as e:
     st.error(f"DuckDB 接続失敗: {e}")
     st.stop()
@@ -91,14 +91,13 @@ try:
                     if st.button("確定してキャンセル実行", type="primary"):
                         try:
                             placeholders = ", ".join(["?" for _ in targets])
-                            with duckdb.connect(str(settings.duckdb_path)) as write_conn:
-                                updated = write_conn.execute(
-                                    f"UPDATE signal_queue SET status = 'cancelled'"
-                                    f" WHERE signal_id IN ({placeholders})"
-                                    f" AND status = 'pending'"
-                                    f" RETURNING signal_id",
-                                    targets,
-                                ).fetchall()
+                            updated = conn.execute(
+                                f"UPDATE signal_queue SET status = 'cancelled'"
+                                f" WHERE signal_id IN ({placeholders})"
+                                f" AND status = 'pending'"
+                                f" RETURNING signal_id",
+                                targets,
+                            ).fetchall()
                             updated_ids = {row[0] for row in updated}
                             count = len(updated_ids)
                             st.success(f"{count} 件を cancelled に変更しました。")
