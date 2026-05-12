@@ -5,10 +5,12 @@
     python scripts/cancel_signal_queue.py --date 2026-05-12
     python scripts/cancel_signal_queue.py --date 2026-05-12 --code 7203
     python scripts/cancel_signal_queue.py --all
+    python scripts/cancel_signal_queue.py --delete-cancelled
 
 用途:
     誤ったシグナルが signal_queue に入った場合に手動でキャンセルする。
     pending のみ対象（processing / filled は変更しない）。
+    --delete-cancelled は cancelled レコードを物理削除する（監査ログ不要になった後の掃除用）。
 """
 
 from __future__ import annotations
@@ -67,6 +69,27 @@ def _print_records(records: list[dict]) -> None:
     print()
 
 
+def _run_delete_cancelled(conn: duckdb.DuckDBPyConnection) -> None:
+    """status='cancelled' のレコードを物理削除する。"""
+    count = conn.execute("SELECT COUNT(*) FROM signal_queue WHERE status = 'cancelled'").fetchone()[
+        0
+    ]
+
+    if count == 0:
+        logger.info("削除対象の cancelled レコードが見つかりませんでした。")
+        sys.exit(0)
+
+    print(f"cancelled レコードが {count} 件あります。完全削除します。")
+    answer = input("続行しますか？ [y/N]: ").strip().lower()
+    if answer != "y":
+        logger.info("ユーザーによりキャンセルされました。")
+        sys.exit(0)
+
+    result = conn.execute("DELETE FROM signal_queue WHERE status = ?", ["cancelled"])
+    conn.commit()
+    logger.info("signal_queue から cancelled レコードを %d 件削除しました。", result.rowcount)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="signal_queue の pending シグナルを status='cancelled' に変更する"
@@ -81,6 +104,11 @@ def main() -> None:
         action="store_true",
         help="pending の全件をキャンセル（日付を問わない）",
     )
+    group.add_argument(
+        "--delete-cancelled",
+        action="store_true",
+        help="status='cancelled' のレコードを物理削除する",
+    )
     parser.add_argument(
         "--code",
         default=None,
@@ -90,6 +118,8 @@ def main() -> None:
 
     if args.all and args.code:
         parser.error("--all と --code は同時に指定できません")
+    if args.delete_cancelled and args.code:
+        parser.error("--delete-cancelled と --code は同時に指定できません")
 
     target_date: date | None = None
     if args.date:
@@ -106,6 +136,10 @@ def main() -> None:
 
     conn = duckdb.connect(str(settings.duckdb_path))
     try:
+        if args.delete_cancelled:
+            _run_delete_cancelled(conn)
+            return
+
         targets = _fetch_targets(conn, target_date, args.code)
 
         if not targets:

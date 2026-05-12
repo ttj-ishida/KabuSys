@@ -1,4 +1,4 @@
-"""pages/6_Signal_Queue.py — 翌営業日の発注予定・シグナル確認ビュー。"""
+"""pages/6_Signal_Queue.py — 翌営業日の発注予定・シグナル確認ビュー（参照専用）。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from kabusys.monitoring.dashboard_data import (
     load_signals,
 )
 
+_KNOWN_STATUSES = ["pending", "processing", "filled", "cancelled", "error", "failed"]
+
 st.set_page_config(page_title="Signal Queue", layout="wide", page_icon="📋")
 st.title("📋 Signal Queue — 発注予定・シグナル確認")
 
@@ -21,8 +23,11 @@ with st.sidebar:
     if st.button("🔄 Refresh"):
         st.rerun()
 
+# ---------------------------------------------------------------------------
+# 表示フェーズ（read_only=True — CLI の書き込みをブロックしない）
+# ---------------------------------------------------------------------------
 try:
-    conn = duckdb.connect(str(settings.duckdb_path))
+    conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
 except Exception as e:
     st.error(f"DuckDB 接続失敗: {e}")
     st.stop()
@@ -34,88 +39,73 @@ try:
 
     with tab_queue:
         st.subheader("Signal Queue（全件）")
+
         df = load_signal_queue(conn)
+        pending = df[df["status"] == "pending"] if not df.empty else df.iloc[0:0]
+
+        # ステータスフィルター — 実データと既知ステータスのユニオンでオプションを構築
+        actual_statuses = sorted(df["status"].dropna().unique().tolist()) if not df.empty else []
+        all_options = sorted(set(_KNOWN_STATUSES) | set(actual_statuses))
+        default_statuses = [s for s in all_options if s != "cancelled"]
+        selected_statuses = st.multiselect(
+            "表示するステータス",
+            options=all_options,
+            default=default_statuses,
+            help="cancelled はデフォルトで非表示。チェックを入れると表示されます。全解除すると0件表示になります。",
+        )
+
         if df.empty:
             st.info("発注キューにシグナルはありません。")
         else:
-            pending = df[df["status"] == "pending"]
-            st.metric("pending 件数", len(pending))
-            st.dataframe(df, use_container_width=True)
+            st.metric("pending 件数（全体）", len(pending))
+            filtered_df = df[df["status"].isin(selected_statuses)]
+            st.dataframe(filtered_df, use_container_width=True)
 
-        # --- キャンセル操作 ---
+        # --- キャンセル操作（CLIコマンド案内）---
         st.divider()
         st.subheader("Pending シグナルのキャンセル")
+        st.info(
+            "このページは参照専用です。ステータス変更は **CLI** で実行してください。"
+            "以下のコマンドをターミナルにコピーして実行します。"
+        )
 
         if df.empty or pending.empty:
-            st.info("キャンセル可能な pending シグナルはありません。")
+            st.caption("キャンセル可能な pending シグナルはありません。")
         else:
-            pending_ids = pending["signal_id"].tolist()
+            pending_dates = sorted(pending["date"].astype(str).unique().tolist())
 
-            # 個別選択キャンセル
-            selected = st.multiselect(
-                "キャンセルするシグナルを選択（signal_id）",
-                options=pending_ids,
-                help="pending ステータスのシグナルのみ表示されます",
+            for d in pending_dates:
+                n = len(pending[pending["date"].astype(str) == d])
+                st.caption(f"**{d}（{n} 件）をキャンセル:**")
+                st.code(
+                    f"python scripts/cancel_signal_queue.py --date {d}",
+                    language="bash",
+                )
+
+            st.caption("**全 pending をキャンセル（日付問わず）:**")
+            st.code("python scripts/cancel_signal_queue.py --all", language="bash")
+
+            st.caption("**銘柄コードで絞り込む場合**（`--date` と組み合わせ）:")
+            st.code(
+                f"python scripts/cancel_signal_queue.py --date {pending_dates[0]} --code <銘柄コード>",
+                language="bash",
             )
 
-            col_sel, col_all = st.columns(2)
+        # --- cancelled 物理削除（CLIコマンド案内）---
+        st.divider()
+        st.subheader("Cancelled レコードの削除")
+        st.info("このページは参照専用です。レコードの削除は **CLI** で実行してください。")
 
-            with col_sel:
-                if st.button(
-                    f"選択した {len(selected)} 件をキャンセル",
-                    disabled=len(selected) == 0,
-                    type="primary",
-                ):
-                    st.session_state["sq_cancel_targets"] = selected
-                    st.session_state["sq_cancel_mode"] = "selected"
+        cancelled_count = len(df[df["status"] == "cancelled"]) if not df.empty else 0
 
-            with col_all:
-                if st.button(
-                    f"全 pending（{len(pending_ids)} 件）をキャンセル",
-                    type="secondary",
-                ):
-                    st.session_state["sq_cancel_targets"] = pending_ids
-                    st.session_state["sq_cancel_mode"] = "all"
-
-            # 確認ダイアログ
-            if "sq_cancel_targets" in st.session_state:
-                targets = st.session_state["sq_cancel_targets"]
-                mode_label = (
-                    f"選択した {len(targets)} 件"
-                    if st.session_state.get("sq_cancel_mode") == "selected"
-                    else f"全 pending {len(targets)} 件"
-                )
-                st.warning(f"{mode_label} を `cancelled` に変更します。この操作は元に戻せません。")
-                confirm_col, abort_col = st.columns(2)
-                with confirm_col:
-                    if st.button("確定してキャンセル実行", type="primary"):
-                        try:
-                            placeholders = ", ".join(["?" for _ in targets])
-                            updated = conn.execute(
-                                f"UPDATE signal_queue SET status = 'cancelled'"
-                                f" WHERE signal_id IN ({placeholders})"
-                                f" AND status = 'pending'"
-                                f" RETURNING signal_id",
-                                targets,
-                            ).fetchall()
-                            updated_ids = {row[0] for row in updated}
-                            count = len(updated_ids)
-                            st.success(f"{count} 件を cancelled に変更しました。")
-                            skipped = len(targets) - count
-                            if skipped > 0:
-                                st.warning(
-                                    f"{skipped} 件は既に pending ではなかったためスキップされました。"
-                                )
-                            del st.session_state["sq_cancel_targets"]
-                            del st.session_state["sq_cancel_mode"]
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"キャンセル処理に失敗しました: {e}")
-                with abort_col:
-                    if st.button("戻る"):
-                        del st.session_state["sq_cancel_targets"]
-                        del st.session_state["sq_cancel_mode"]
-                        st.rerun()
+        if cancelled_count == 0:
+            st.caption("削除可能な cancelled レコードはありません。")
+        else:
+            st.caption(f"cancelled レコード: {cancelled_count} 件")
+            st.code(
+                "python scripts/cancel_signal_queue.py --delete-cancelled",
+                language="bash",
+            )
 
     with tab_targets:
         st.subheader("ポートフォリオ目標（最新日）")
