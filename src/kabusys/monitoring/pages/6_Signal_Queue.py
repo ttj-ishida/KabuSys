@@ -23,11 +23,55 @@ with st.sidebar:
     if st.button("🔄 Refresh"):
         st.rerun()
 
+# ---------------------------------------------------------------------------
+# 書き込みフェーズ（ページ先頭で瞬時に処理し接続を閉じる）
+# read_only 接続を開く前に完結させることで CLI との接続競合を防ぐ。
+# ---------------------------------------------------------------------------
+_write_result: dict | None = None
+
+if "sq_write_op" in st.session_state:
+    op = st.session_state.pop("sq_write_op")
+    try:
+        with duckdb.connect(str(settings.duckdb_path)) as wc:
+            if op["type"] == "cancel":
+                ids = op["ids"]
+                placeholders = ", ".join(["?" for _ in ids])
+                rows = wc.execute(
+                    f"UPDATE signal_queue SET status = 'cancelled'"
+                    f" WHERE signal_id IN ({placeholders}) AND status = 'pending'"
+                    f" RETURNING signal_id",
+                    ids,
+                ).fetchall()
+                updated = len(rows)
+                skipped = len(ids) - updated
+                _write_result = {"type": "cancel", "updated": updated, "skipped": skipped}
+            elif op["type"] == "delete_cancelled":
+                cursor = wc.execute("DELETE FROM signal_queue WHERE status = 'cancelled'")
+                _write_result = {"type": "delete_cancelled", "deleted": cursor.rowcount}
+    except Exception as e:
+        _write_result = {"type": "error", "msg": str(e)}
+
+# ---------------------------------------------------------------------------
+# 表示フェーズ（read_only=True — CLI の書き込みをブロックしない）
+# ---------------------------------------------------------------------------
 try:
-    conn = duckdb.connect(str(settings.duckdb_path))
+    conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
 except Exception as e:
     st.error(f"DuckDB 接続失敗: {e}")
     st.stop()
+
+# 書き込み結果をここで表示（接続確立後に描画）
+if _write_result:
+    if _write_result["type"] == "cancel":
+        st.success(f"{_write_result['updated']} 件を cancelled に変更しました。")
+        if _write_result["skipped"] > 0:
+            st.warning(
+                f"{_write_result['skipped']} 件は既に pending ではなかったためスキップされました。"
+            )
+    elif _write_result["type"] == "delete_cancelled":
+        st.success(f"{_write_result['deleted']} 件を削除しました。")
+    elif _write_result["type"] == "error":
+        st.error(f"処理に失敗しました: {_write_result['msg']}")
 
 try:
     tab_queue, tab_targets, tab_signals = st.tabs(
@@ -55,7 +99,6 @@ try:
             st.info("発注キューにシグナルはありません。")
         else:
             st.metric("pending 件数（全体）", len(pending))
-            # 空リスト時は意図通り0件表示（falsy 判定を使わず常に isin を適用）
             filtered_df = df[df["status"].isin(selected_statuses)]
             st.dataframe(filtered_df, use_container_width=True)
 
@@ -104,28 +147,13 @@ try:
                 confirm_col, abort_col = st.columns(2)
                 with confirm_col:
                     if st.button("確定してキャンセル実行", type="primary"):
-                        try:
-                            placeholders = ", ".join(["?" for _ in targets])
-                            updated = conn.execute(
-                                f"UPDATE signal_queue SET status = 'cancelled'"
-                                f" WHERE signal_id IN ({placeholders})"
-                                f" AND status = 'pending'"
-                                f" RETURNING signal_id",
-                                targets,
-                            ).fetchall()
-                            updated_ids = {row[0] for row in updated}
-                            count = len(updated_ids)
-                            st.success(f"{count} 件を cancelled に変更しました。")
-                            skipped = len(targets) - count
-                            if skipped > 0:
-                                st.warning(
-                                    f"{skipped} 件は既に pending ではなかったためスキップされました。"
-                                )
-                            del st.session_state["sq_cancel_targets"]
-                            del st.session_state["sq_cancel_mode"]
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"キャンセル処理に失敗しました: {e}")
+                        st.session_state["sq_write_op"] = {
+                            "type": "cancel",
+                            "ids": targets,
+                        }
+                        del st.session_state["sq_cancel_targets"]
+                        del st.session_state["sq_cancel_mode"]
+                        st.rerun()
                 with abort_col:
                     if st.button("戻る"):
                         del st.session_state["sq_cancel_targets"]
@@ -136,17 +164,13 @@ try:
         st.divider()
         st.subheader("Cancelled レコードの削除")
 
-        cancelled_df = df[df["status"] == "cancelled"] if not df.empty else df
-        cancelled_count = len(cancelled_df)
+        cancelled_count = len(df[df["status"] == "cancelled"]) if not df.empty else 0
 
         if cancelled_count == 0:
             st.info("削除可能な cancelled レコードはありません。")
         else:
             st.caption(f"cancelled レコード: {cancelled_count} 件")
-            if st.button(
-                f"cancelled {cancelled_count} 件を完全削除",
-                type="secondary",
-            ):
+            if st.button(f"cancelled {cancelled_count} 件を完全削除", type="secondary"):
                 st.session_state["sq_delete_cancelled"] = True
 
             if st.session_state.get("sq_delete_cancelled"):
@@ -159,16 +183,9 @@ try:
                     if st.button(
                         "確定して削除実行", type="primary", key="confirm_delete_cancelled"
                     ):
-                        try:
-                            cursor = conn.execute(
-                                "DELETE FROM signal_queue WHERE status = 'cancelled'"
-                            )
-                            deleted_count = cursor.rowcount
-                            st.success(f"{deleted_count} 件を削除しました。")
-                            st.session_state.pop("sq_delete_cancelled", None)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"削除処理に失敗しました: {e}")
+                        st.session_state["sq_write_op"] = {"type": "delete_cancelled"}
+                        st.session_state.pop("sq_delete_cancelled", None)
+                        st.rerun()
                 with abort_col:
                     if st.button("戻る", key="abort_delete"):
                         st.session_state.pop("sq_delete_cancelled", None)
