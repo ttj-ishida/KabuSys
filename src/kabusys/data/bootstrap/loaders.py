@@ -246,13 +246,45 @@ def load_calendar(
 ) -> int:
     """markets/calendar CSV → market_calendar
 
-    HolDiv="1" → is_trading_day=False（休日）
+    J-Quants の HolDiv エンコーディング:
+      0=休日, 1=通常取引日, 2=半日取引日（大発会・大納会等）, 3=振替休日
+    HalfDiv/SQDiv/HolName 列が存在する場合はそちらを優先する。
 
     bulk=True : 月次ファイル用。呼び出し元が対象月を事前 DELETE 済みであること。
     bulk=False: 日次ファイル用。ON CONFLICT DO UPDATE で差分 upsert する。
     outer_tx  : True のとき BEGIN/COMMIT/ROLLBACK を行わない。
     """
     path = _sql_path(csv_path)
+
+    # CSV 列名を DuckDB で取得（Python gzip/csv を使わず済ませる）
+    csv_cols = {
+        col[0]
+        for col in conn.execute(
+            f"SELECT * FROM read_csv('{path}', nullstr='', all_varchar=true) LIMIT 0"
+        ).description
+    }
+
+    if "HolDiv" not in csv_cols:
+        raise ValueError(f'markets/calendar CSV missing required "HolDiv" column: {csv_path}')
+
+    # オプション列ごとに SQL 式を切り替える
+    if "HalfDiv" in csv_cols:
+        # 旧形式: 別列で半日フラグを持つ
+        logger.debug("load_calendar: using legacy format (HalfDiv present) for %s", csv_path)
+        trading_expr = "coalesce(\"HolDiv\", '0') != '1'"
+        half_expr = "coalesce(\"HalfDiv\", '0') = '1'"
+    else:
+        # 新形式: HolDiv の値で判定（1=通常取引日, 2=半日取引日）
+        logger.debug("load_calendar: using modern format (HolDiv only) for %s", csv_path)
+        trading_expr = "\"HolDiv\" IN ('1', '2')"
+        half_expr = "\"HolDiv\" = '2'"
+
+    sq_expr = "coalesce(\"SQDiv\", '0') = '1'" if "SQDiv" in csv_cols else "false"
+    name_expr = (
+        'CASE WHEN "HolName" IS NULL OR trim("HolName") = \'\' THEN NULL ELSE "HolName" END'
+        if "HolName" in csv_cols
+        else "CAST(NULL AS VARCHAR)"
+    )
 
     conflict = (
         "ON CONFLICT (date) DO NOTHING"
@@ -268,11 +300,10 @@ def load_calendar(
         CREATE OR REPLACE TEMP TABLE {_TMP} AS
         SELECT
             TRY_CAST("Date" AS DATE) AS date,
-            coalesce("HolDiv", '0') != '1'  AS is_trading_day,
-            coalesce("HalfDiv", '0') = '1'  AS is_half_day,
-            coalesce("SQDiv", '0') = '1'    AS is_sq_day,
-            CASE WHEN "HolName" IS NULL OR trim("HolName") = '' THEN NULL ELSE "HolName" END
-                AS holiday_name
+            {trading_expr}  AS is_trading_day,
+            {half_expr}     AS is_half_day,
+            {sq_expr}       AS is_sq_day,
+            {name_expr}     AS holiday_name
         FROM read_csv('{path}', nullstr='', all_varchar=true)
         WHERE TRY_CAST("Date" AS DATE) IS NOT NULL
     """)
