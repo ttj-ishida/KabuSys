@@ -634,4 +634,7 @@ touch data/stop_requested.flag
 - Paper Trading:
   - Paper 環境でも動作検証ができるように mock ブローカーと別 DB が用意されています。`PAPER_FILL_MODE` の値は `instant`/`partial`/`never`/`reject` のいずれかに設定してください。
 - ロギング:
-  - 各スクリプトには `setup_logging` を呼ぶ仕組みがあります。`LOG_LEVEL` を `.env` で調整してください。
+  - 各スクリプトは `setup_logging` により 3 種類のハンドラを設定します: stdout（コンソール）、`logs/<app_name>.log`（日次ローテーション・30日保持）、`logs/<app_name>_YYYYMMDD_HHMMSS_<PID>.log`（実行単位ファイル）。
+  - 実行単位ファイルは UTC タイムスタンプ + PID でファイル名を一意化するため、並行起動時もファイルが衝突しません。バッチ失敗後の原因調査に使用してください。
+  - 各バッチスクリプトは START / END マーカー（`===== <app> START (PID=xxxx) =====` / `===== <app> END status=success/failed duration=Xs =====`）を出力します。Settings 初期化失敗時でも END マーカーが確実に出力されます。
+  - `LOG_LEVEL` を `.env` で調整できます（`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`）。`LOG_DIR` でログディレクトリの場所を変更できます（デフォルト: `logs/`）。

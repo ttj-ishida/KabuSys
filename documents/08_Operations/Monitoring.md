@@ -227,9 +227,24 @@ Phase 2: Grafana
 
 各プロセス・スクリプトは `kabusys.utils.logging_setup.setup_logging` で統一されたロギングを設定する。
 
-**出力先:**
-- stdout（コンソール）: Task Scheduler 等でリダイレクト可能
-- ファイル: `logs/<app_name>.log`（日次ローテーション・30日保持）
+**ハンドラ構成（3系統）:**
+
+| ハンドラ | 出力先 | 用途 |
+|---|---|---|
+| StreamHandler | stdout | コンソール出力。Task Scheduler 等でリダイレクト可能 |
+| TimedRotatingFileHandler | `logs/<app_name>.log` | 全実行ログを集約。日次ローテーション・30日保持。`tail -f` での監視に適する |
+| FileHandler | `logs/<app_name>_YYYYMMDD_HHMMSS_<PID>.log` | 実行単位ログ。起動ごとに独立したファイルを生成。UTC タイムスタンプ + PID でファイル名を一意化し、並行起動時の衝突を防ぐ |
+
+**START / END マーカー:**
+
+各スクリプトは `log_run_start` / `log_run_end` により実行の開始・終了をログに記録する。
+
+```
+2026-05-12T09:00:00 INFO     kabusys.utils.logging_setup: ===== execution START (PID=1234) =====
+2026-05-12T09:00:05 INFO     kabusys.utils.logging_setup: ===== execution END status=success duration=5.2s =====
+```
+
+`status` は `success` / `warning` / `failed` の 3 値をとる。END マーカーは `Settings()` / `duckdb.connect()` を含む初期化失敗時でも確実に出力される（全スクリプトが `try/except/finally` で `log_run_end` を保護している）。
 
 **フォーマット:** `%(asctime)s %(levelname)-8s %(name)s: %(message)s`
 
@@ -242,7 +257,21 @@ Phase 2: Grafana
 - 発注ログ（`logs/strategy_signal.log`, `logs/portfolio_construction.log`）
 - エラーログ（各ファイル内に ERROR / CRITICAL レベルで記録）
 
-**保存期間:** 30日（`TimedRotatingFileHandler` による自動ローテーション）
+**実行単位ログの活用:**
+
+特定の実行のログのみ確認したい場合は実行単位ファイルを直接参照する（集約ファイルに複数回分が混在しないため原因特定が容易）。
+
+```powershell
+# 最新の data_update 実行単位ログを確認
+Get-ChildItem logs\data_update_*.log | Sort-Object LastWriteTime -Desc | Select-Object -First 1 | Get-Content
+
+# 失敗したバッチの END マーカーを探す
+Select-String -Path logs\*.log -Pattern "END status=failed"
+```
+
+**保存期間:**
+- 集約ファイル（`<app_name>.log`）: 30日（`TimedRotatingFileHandler` による自動ローテーション）
+- 実行単位ファイル（`<app_name>_*.log`）: 手動管理。蓄積量に注意すること
 
 **ログレベル設定:** 環境変数 `LOG_LEVEL`（デフォルト: `INFO`）  
 **ログディレクトリ設定:** 環境変数 `LOG_DIR`（Task Scheduler 起動時は絶対パスを推奨）
