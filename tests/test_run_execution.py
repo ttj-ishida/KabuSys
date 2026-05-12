@@ -52,11 +52,13 @@ class TestRunExecutionMain:
 
     def test_paper_mode_uses_paper_sqlite_path(self):
         _, mock_sqlite, _, settings = _run_main(is_paper=True)
-        mock_sqlite.assert_called_once_with(str(settings.paper_sqlite_path))
+        paths_called = [c.args[0] for c in mock_sqlite.call_args_list if c.args]
+        assert str(settings.paper_sqlite_path) in paths_called
 
     def test_dev_mode_uses_sqlite_path(self):
         _, mock_sqlite, _, settings = _run_main(is_paper=False)
-        mock_sqlite.assert_called_once_with(str(settings.sqlite_path))
+        paths_called = [c.args[0] for c in mock_sqlite.call_args_list if c.args]
+        assert str(settings.sqlite_path) in paths_called
 
     def test_calls_run_session(self):
         _, _, mock_engine, _ = _run_main()

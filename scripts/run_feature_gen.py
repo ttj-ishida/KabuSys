@@ -17,10 +17,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
 from kabusys.operations.job_run_recorder import write_job_result
 from kabusys.operations.night_batch_report import JobRunResult
+from kabusys.operations.process_registry import register_process, update_process
 from kabusys.strategy.feature_engineering import build_features
 from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
-setup_logging(app_name="feature_gen", capture_stdio=True)
+_run_log = setup_logging(app_name="feature_gen", capture_stdio=True)
 logger = logging.getLogger(__name__)
 
 _JOB_NAME = "feature_generation_job"
@@ -30,6 +31,11 @@ _APP_NAME = "feature_gen"
 def main() -> None:
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
+    run_id: int | None = None
+    try:
+        run_id = register_process(_JOB_NAME, log_file=str(_run_log) if _run_log else None)
+    except Exception:
+        logger.warning("process_registry 登録に失敗しました", exc_info=True)
     conn = None
     _failed = False
     _errors: list[str] = []
@@ -66,6 +72,12 @@ def main() -> None:
         )
     except Exception:
         logger.warning("JobRunResult の書き出しに失敗しました", exc_info=True)
+
+    if run_id is not None:
+        try:
+            update_process(run_id, status="failed" if _failed else "success")
+        except Exception:
+            logger.warning("process_registry 更新に失敗しました", exc_info=True)
 
     log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
     if _failed:

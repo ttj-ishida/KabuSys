@@ -37,11 +37,12 @@ from kabusys.operations.performance_collector import (
     collect_weekly_rows,
 )
 from kabusys.operations.performance_report import build_report
+from kabusys.operations.process_registry import register_process, update_process
 from kabusys.portfolio.portfolio_builder import calc_score_weights, select_candidates
 from kabusys.portfolio.position_sizing import calc_position_sizes
 from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
-setup_logging(app_name="portfolio_construction", capture_stdio=True)
+_run_log = setup_logging(app_name="portfolio_construction", capture_stdio=True)
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PORTFOLIO_VALUE = 10_000_000
@@ -63,6 +64,11 @@ def _get_today_return(conn: duckdb.DuckDBPyConnection, target_date: date, env: s
 def main() -> None:
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
+    run_id: int | None = None
+    try:
+        run_id = register_process(_JOB_NAME, log_file=str(_run_log) if _run_log else None)
+    except Exception:
+        logger.warning("process_registry 登録に失敗しました", exc_info=True)
     conn = None
     target_date = date.today()
     _failed = False
@@ -266,6 +272,12 @@ def main() -> None:
         )
     except Exception:
         logger.warning("JobRunResult の書き出しに失敗しました", exc_info=True)
+
+    if run_id is not None:
+        try:
+            update_process(run_id, status="failed" if _failed else "success")
+        except Exception:
+            logger.warning("process_registry 更新に失敗しました", exc_info=True)
 
     log_run_end(_APP_NAME, status="failed" if _failed else "success", started_at=started_at)
     if _failed:

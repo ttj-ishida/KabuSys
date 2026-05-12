@@ -11,7 +11,10 @@ from datetime import datetime, timedelta, timezone
 
 
 def init_monitoring_db(conn: sqlite3.Connection) -> None:
-    """6テーブル + インデックスを作成する（冪等）。"""
+    """7テーブル + インデックスを作成する（冪等）。"""
+    # WAL モード: 複数プロセスからの同時書き込みに対して行レベルロックを使う
+    # PRAGMA はトランザクション外で実行する必要があるため executescript の前に置く
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS system_status (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,6 +92,21 @@ def init_monitoring_db(conn: sqlite3.Connection) -> None:
         -- id は挿入順を保証するため ORDER BY id ASC で利用する
         CREATE INDEX IF NOT EXISTS idx_wizard_messages_session
             ON ai_wizard_messages (session_id, id);
+
+        CREATE TABLE IF NOT EXISTS process_runs (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_name    TEXT    NOT NULL,
+            pid         INTEGER,
+            started_at  TEXT    NOT NULL,
+            finished_at TEXT,
+            status      TEXT    NOT NULL DEFAULT 'running',
+            log_file    TEXT,
+            error_msg   TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_process_runs_started_at
+            ON process_runs (started_at);
+        CREATE INDEX IF NOT EXISTS idx_process_runs_status
+            ON process_runs (status);
     """)
     conn.commit()
 
@@ -347,3 +365,74 @@ class MonitoringDB:
             (session_id,),
         )
         self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # process_runs — プロセス実行管理
+    # ------------------------------------------------------------------
+
+    def start_process(
+        self,
+        job_name: str,
+        pid: int | None = None,
+        log_file: str | None = None,
+        started_at: datetime | None = None,
+    ) -> int:
+        """process_runs にプロセス開始を記録して run_id を返す。"""
+        ts = started_at.isoformat() if started_at else self._now()
+        cursor = self._conn.execute(
+            """
+            INSERT INTO process_runs (job_name, pid, started_at, status, log_file)
+            VALUES (?, ?, ?, 'running', ?)
+            """,
+            (job_name, pid, ts, log_file),
+        )
+        self._conn.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def finish_process(
+        self,
+        run_id: int,
+        status: str,
+        error_msg: str | None = None,
+        finished_at: datetime | None = None,
+    ) -> int:
+        """process_runs のレコードを完了・失敗として更新する。更新件数を返す。"""
+        ts = finished_at.isoformat() if finished_at else self._now()
+        cur = self._conn.execute(
+            "UPDATE process_runs SET finished_at=?, status=?, error_msg=? WHERE id=?",
+            (ts, status, error_msg, run_id),
+        )
+        self._conn.commit()
+        return cur.rowcount
+
+    def list_recent_processes(self, hours: int = 24) -> list[dict]:
+        """直近 hours 時間のプロセス一覧を返す（実行中含む）。
+
+        実行中（finished_at IS NULL）のレコードは hours に関わらず常に含む。
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        rows = self._conn.execute(
+            """
+            SELECT * FROM process_runs
+            WHERE finished_at IS NULL
+               OR started_at >= ?
+               OR finished_at >= ?
+            ORDER BY COALESCE(finished_at, started_at) DESC
+            """,
+            (cutoff, cutoff),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def prune_old_process_runs(self, days: int = 30) -> int:
+        """days 日以上前の完了済みレコードを削除する。実行中レコードは削除しない。
+
+        Returns:
+            削除件数
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        cursor = self._conn.execute(
+            "DELETE FROM process_runs WHERE started_at < ? AND finished_at IS NOT NULL",
+            (cutoff,),
+        )
+        self._conn.commit()
+        return cursor.rowcount
