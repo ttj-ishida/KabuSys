@@ -41,7 +41,7 @@ from kabusys.portfolio.portfolio_builder import calc_score_weights, select_candi
 from kabusys.portfolio.position_sizing import calc_position_sizes
 from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
-setup_logging(app_name="portfolio_construction")
+setup_logging(app_name="portfolio_construction", capture_stdio=True)
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PORTFOLIO_VALUE = 10_000_000
