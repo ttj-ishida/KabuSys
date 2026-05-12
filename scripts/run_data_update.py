@@ -1,7 +1,9 @@
 # scripts/run_data_update.py
 """Night batch: 日次市場データ更新 (data_update_job)。
 
-Task Scheduler から 15:30 に起動される。
+Task Scheduler から 17:30 に起動される。
+J-Quants の日足データは 16:30〜17:00 頃に公開されるため、
+17:30 に実行することで当日データを確実に取得できる。
 """
 
 from __future__ import annotations
