@@ -278,15 +278,31 @@ def test_load_calendar_inserts_market_calendar(conn, tmp_path):
     rows = [
         {"Date": "2024-01-04", "HolDiv": "0", "HalfDiv": "0", "SQDiv": "0", "HolName": ""},
         {"Date": "2024-01-08", "HolDiv": "1", "HalfDiv": "0", "SQDiv": "0", "HolName": "成人の日"},
+        {"Date": "2024-01-09", "HolDiv": "0", "HalfDiv": "1", "SQDiv": "0", "HolName": ""},
     ]
     path = _gz(rows, tmp_path, "cal.csv.gz")
     count = load_calendar(conn, path)
-    assert count == 2
-    row = conn.execute(
-        "SELECT is_trading_day, holiday_name FROM market_calendar WHERE date='2024-01-08'"
+    assert count == 3
+
+    # 通常取引日 (HolDiv=0 = 旧形式で is_trading_day=True)
+    r = conn.execute(
+        "SELECT is_trading_day, is_half_day, is_sq_day, holiday_name "
+        "FROM market_calendar WHERE date='2024-01-04'"
     ).fetchone()
-    assert row[0] is False
-    assert row[1] == "成人の日"
+    assert r[0] is True and r[1] is False and r[2] is False and r[3] is None
+
+    # 休日 (HolDiv=1 = 旧形式で is_trading_day=False)
+    r = conn.execute(
+        "SELECT is_trading_day, is_half_day, is_sq_day, holiday_name "
+        "FROM market_calendar WHERE date='2024-01-08'"
+    ).fetchone()
+    assert r[0] is False and r[1] is False and r[2] is False and r[3] == "成人の日"
+
+    # 半日取引日 (HalfDiv=1)
+    r = conn.execute(
+        "SELECT is_trading_day, is_half_day FROM market_calendar WHERE date='2024-01-09'"
+    ).fetchone()
+    assert r[0] is True and r[1] is True
 
 
 def test_load_calendar_holdiv_only_new_format(conn, tmp_path):

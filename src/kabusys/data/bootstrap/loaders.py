@@ -264,13 +264,18 @@ def load_calendar(
         ).description
     }
 
+    if "HolDiv" not in csv_cols:
+        raise ValueError(f'markets/calendar CSV missing required "HolDiv" column: {csv_path}')
+
     # オプション列ごとに SQL 式を切り替える
     if "HalfDiv" in csv_cols:
         # 旧形式: 別列で半日フラグを持つ
+        logger.debug("load_calendar: using legacy format (HalfDiv present) for %s", csv_path)
         trading_expr = "coalesce(\"HolDiv\", '0') != '1'"
         half_expr = "coalesce(\"HalfDiv\", '0') = '1'"
     else:
         # 新形式: HolDiv の値で判定（1=通常取引日, 2=半日取引日）
+        logger.debug("load_calendar: using modern format (HolDiv only) for %s", csv_path)
         trading_expr = "\"HolDiv\" IN ('1', '2')"
         half_expr = "\"HolDiv\" = '2'"
 
