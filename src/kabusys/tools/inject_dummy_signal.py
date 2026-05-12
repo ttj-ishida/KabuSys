@@ -144,7 +144,12 @@ def main() -> None:
     parser.add_argument(
         "--date",
         default=None,
-        help="対象日 YYYY-MM-DD（省略時: 翌営業日）",
+        help=(
+            "対象日 YYYY-MM-DD（省略時: 翌営業日）。"
+            "注入後すぐに run_signal_queue_report で確認する場合は"
+            " --date に同じ日付を指定すること"
+            "（レポートのデフォルトは date.today()）。"
+        ),
     )
     parser.add_argument(
         "--force",
