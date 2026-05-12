@@ -66,23 +66,23 @@ try:
                     disabled=len(selected) == 0,
                     type="primary",
                 ):
-                    st.session_state["cancel_targets"] = selected
-                    st.session_state["cancel_mode"] = "selected"
+                    st.session_state["sq_cancel_targets"] = selected
+                    st.session_state["sq_cancel_mode"] = "selected"
 
             with col_all:
                 if st.button(
                     f"全 pending（{len(pending_ids)} 件）をキャンセル",
                     type="secondary",
                 ):
-                    st.session_state["cancel_targets"] = pending_ids
-                    st.session_state["cancel_mode"] = "all"
+                    st.session_state["sq_cancel_targets"] = pending_ids
+                    st.session_state["sq_cancel_mode"] = "all"
 
             # 確認ダイアログ
-            if "cancel_targets" in st.session_state:
-                targets = st.session_state["cancel_targets"]
+            if "sq_cancel_targets" in st.session_state:
+                targets = st.session_state["sq_cancel_targets"]
                 mode_label = (
                     f"選択した {len(targets)} 件"
-                    if st.session_state.get("cancel_mode") == "selected"
+                    if st.session_state.get("sq_cancel_mode") == "selected"
                     else f"全 pending {len(targets)} 件"
                 )
                 st.warning(f"{mode_label} を `cancelled` に変更します。この操作は元に戻せません。")
@@ -90,27 +90,32 @@ try:
                 with confirm_col:
                     if st.button("確定してキャンセル実行", type="primary"):
                         try:
-                            write_conn = duckdb.connect(str(settings.duckdb_path))
                             placeholders = ", ".join(["?" for _ in targets])
-                            updated = write_conn.execute(
-                                f"UPDATE signal_queue SET status = 'cancelled'"
-                                f" WHERE signal_id IN ({placeholders})"
-                                f" AND status = 'pending'"
-                                f" RETURNING signal_id",
-                                targets,
-                            ).fetchall()
-                            write_conn.close()
-                            count = len(updated)
+                            with duckdb.connect(str(settings.duckdb_path)) as write_conn:
+                                updated = write_conn.execute(
+                                    f"UPDATE signal_queue SET status = 'cancelled'"
+                                    f" WHERE signal_id IN ({placeholders})"
+                                    f" AND status = 'pending'"
+                                    f" RETURNING signal_id",
+                                    targets,
+                                ).fetchall()
+                            updated_ids = {row[0] for row in updated}
+                            count = len(updated_ids)
                             st.success(f"{count} 件を cancelled に変更しました。")
-                            del st.session_state["cancel_targets"]
-                            del st.session_state["cancel_mode"]
+                            skipped = len(targets) - count
+                            if skipped > 0:
+                                st.warning(
+                                    f"{skipped} 件は既に pending ではなかったためスキップされました。"
+                                )
+                            del st.session_state["sq_cancel_targets"]
+                            del st.session_state["sq_cancel_mode"]
                             st.rerun()
                         except Exception as e:
                             st.error(f"キャンセル処理に失敗しました: {e}")
                 with abort_col:
                     if st.button("戻る"):
-                        del st.session_state["cancel_targets"]
-                        del st.session_state["cancel_mode"]
+                        del st.session_state["sq_cancel_targets"]
+                        del st.session_state["sq_cancel_mode"]
                         st.rerun()
 
     with tab_targets:
