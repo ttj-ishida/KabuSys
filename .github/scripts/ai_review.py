@@ -1,7 +1,8 @@
 import os
+import sys
 
 import requests
-from openai import OpenAI
+from openai import APIConnectionError, APIStatusError, OpenAI
 
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"].strip())
 model = os.environ.get("OPENAI_MODEL", "gpt-4o")
@@ -19,7 +20,7 @@ with open("diff.txt") as f:
 
 if not diff.strip():
     print("差分がありません。レビューをスキップします。")
-    exit(0)
+    sys.exit(0)
 
 # PRの詳細（タイトル・本文）を取得
 pr_url = f"https://api.github.com/repos/{repo}/pulls/{pr}"
@@ -63,13 +64,20 @@ prompt = f"""
 {diff}
 """
 
-response = client.chat.completions.create(
-    model=model,
-    messages=[
-        {"role": "system", "content": "You are a senior software engineer."},
-        {"role": "user", "content": prompt},
-    ],
-)
+try:
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": "You are a senior software engineer."},
+            {"role": "user", "content": prompt},
+        ],
+    )
+except APIConnectionError as exc:
+    print(f"警告: OpenAI API への接続に失敗しました（スキップ）: {exc}")
+    sys.exit(0)
+except APIStatusError as exc:
+    print(f"警告: OpenAI API がエラーを返しました（スキップ）: {exc.status_code} {str(exc)}")
+    sys.exit(0)
 
 review = response.choices[0].message.content
 
@@ -85,4 +93,4 @@ if resp.status_code == 201:
     print("AIレビューコメントをPRに投稿しました。")
 else:
     print(f"コメント投稿に失敗しました: {resp.status_code} {resp.text}")
-    exit(1)
+    sys.exit(1)
