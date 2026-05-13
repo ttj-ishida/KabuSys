@@ -49,3 +49,7 @@ regime:
   topix_drawdown_threshold: -0.15
   # 地合い悪化時の size_multiplier（0 < x ≤ 1）
   topix_size_multiplier_bear: 0.5
+
+portfolio:
+  # 最大保有銘柄数（select_candidates() に渡される上限値、1 以上の整数）
+  max_positions: 10

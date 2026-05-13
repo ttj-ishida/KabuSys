@@ -38,7 +38,11 @@ from kabusys.operations.performance_collector import (
 )
 from kabusys.operations.performance_report import build_report
 from kabusys.operations.process_registry import register_process, update_process
-from kabusys.portfolio.portfolio_builder import calc_score_weights, select_candidates
+from kabusys.portfolio.portfolio_builder import (
+    calc_score_weights,
+    load_portfolio_config,
+    select_candidates,
+)
 from kabusys.portfolio.position_sizing import calc_position_sizes
 from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
@@ -98,11 +102,15 @@ def main() -> None:
         rows = cur.fetchall()
         buy_signals = [dict(zip([d[0] for d in cur.description], row)) for row in rows]
 
+        portfolio_cfg = load_portfolio_config()
+        max_positions = portfolio_cfg["max_positions"]
+        logger.info("max_positions: %d", max_positions)
+
         if not buy_signals:
             logger.info("本日の BUY シグナルが 0 件です。signal_queue を更新しません。")
             _updated_rows["signal_queue"] = 0
         else:
-            candidates = select_candidates(buy_signals)
+            candidates = select_candidates(buy_signals, max_positions=max_positions)
             if not candidates:
                 logger.info("銘柄選定結果が 0 件です。signal_queue を更新しません。")
                 _updated_rows["signal_queue"] = 0
