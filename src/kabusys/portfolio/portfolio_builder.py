@@ -15,14 +15,14 @@ _PORTFOLIO_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "strat
 _DEFAULT_MAX_POSITIONS = 10
 
 
-def load_portfolio_config() -> dict:
+def load_portfolio_config() -> dict[str, int]:
     """config/strategy_config.yaml の portfolio セクションから設定を読み込む。
 
     ファイル不在・読み込み失敗・不正値はデフォルト値にフォールバック。
     """
     import yaml
 
-    result: dict = {"max_positions": _DEFAULT_MAX_POSITIONS}
+    result: dict[str, int] = {"max_positions": _DEFAULT_MAX_POSITIONS}
     if not _PORTFOLIO_CONFIG_PATH.exists():
         logger.warning(
             "strategy_config.yaml が見つからないため、max_positions はデフォルト %d を使用します",
@@ -40,12 +40,19 @@ def load_portfolio_config() -> dict:
         )
         return result
     if not isinstance(data, dict):
+        logger.debug(
+            "strategy_config.yaml のルートが dict でないため、max_positions はデフォルト値を使用します"
+        )
         return result
     p = data.get("portfolio")
     if not isinstance(p, dict):
+        logger.debug(
+            "portfolio セクションが存在しないか dict でないため、max_positions はデフォルト値を使用します"
+        )
         return result
     v = p.get("max_positions")
     if v is None:
+        logger.debug("portfolio.max_positions が未設定のため、デフォルト値を使用します")
         return result
     if (
         isinstance(v, bool)

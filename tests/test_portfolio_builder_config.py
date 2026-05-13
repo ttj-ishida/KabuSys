@@ -128,3 +128,13 @@ class TestLoadPortfolioConfig:
         monkeypatch.setattr(portfolio_builder, "_PORTFOLIO_CONFIG_PATH", cfg_file)
         result = portfolio_builder.load_portfolio_config()
         assert result["max_positions"] == 10
+
+    def test_falls_back_when_yaml_root_is_not_dict(self, tmp_path, monkeypatch):
+        """YAML ルートが dict でない場合（例: リスト）はデフォルト 10 にフォールバックする。"""
+        from kabusys.portfolio import portfolio_builder
+
+        cfg_file = tmp_path / "strategy_config.yaml"
+        cfg_file.write_text("- item1\n- item2\n", encoding="utf-8")
+        monkeypatch.setattr(portfolio_builder, "_PORTFOLIO_CONFIG_PATH", cfg_file)
+        result = portfolio_builder.load_portfolio_config()
+        assert result["max_positions"] == 10
