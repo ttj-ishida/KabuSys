@@ -98,6 +98,7 @@ Register-KabuSysTask -TaskName "KabuSys_FeatureGen"            -Script "run_feat
 Register-KabuSysTask -TaskName "KabuSys_StrategySignal"        -Script "run_strategy_signal.py"        -TriggerTime "20:00"
 Register-KabuSysTask -TaskName "KabuSys_PortfolioConstruction" -Script "run_portfolio_construction.py" -TriggerTime "21:00"
 Register-KabuSysTask -TaskName "KabuSys_NightBatchReport"      -Script "run_night_batch_report.py"     -TriggerTime "21:15"
+Register-KabuSysTask -TaskName "KabuSys_PreMarketReport"       -Script "run_pre_market_report.py"      -TriggerTime "08:00"
 Register-KabuSysTask -TaskName "KabuSys_ExecutionStart"        -Script "start_system.py" -Arguments "--component execution"  -TriggerTime "08:30"
 Register-KabuSysTask -TaskName "KabuSys_MonitoringStart"       -Script "start_system.py" -Arguments "--component monitoring" -TriggerTime "09:00"
 
