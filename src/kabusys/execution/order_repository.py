@@ -25,6 +25,8 @@ _TERMINAL_STATES = frozenset(
 def init_position_entries_db(conn: sqlite3.Connection) -> None:
     """position_entries テーブルとインデックスを作成する（冪等）。"""
     conn.executescript("""
+        PRAGMA journal_mode=WAL;
+        PRAGMA busy_timeout=30000;
         CREATE TABLE IF NOT EXISTS position_entries (
             code        TEXT NOT NULL,
             entry_date  TEXT NOT NULL,

@@ -454,7 +454,7 @@ class TestPositionEntriesOnFill:
         rows = sqlite_conn.execute(
             "SELECT entry_date FROM position_entries WHERE code = '7777'"
         ).fetchall()
-        assert len(rows) == 1, "ON CONFLICT DO NOTHING により重複挿入されないこと"
+        assert len(rows) == 1, "INSERT OR IGNORE により重複挿入されないこと"
 
     def test_sell_signal_updates_sell_date(self, sqlite_conn, duckdb_conn):
         """SELL 発注成功 → position_entries（SQLite）の sell_date が更新される。"""

@@ -254,7 +254,7 @@ def main() -> None:
 
     # 2. DB 接続 — paper_trading は専用 DB で本番と分離
     sqlite_path = settings.paper_sqlite_path if settings.is_paper else settings.sqlite_path
-    sqlite_conn = sqlite3.connect(str(sqlite_path))
+    sqlite_conn = sqlite3.connect(str(sqlite_path), timeout=30.0)
     init_monitoring_db(sqlite_conn)  # 監視テーブルが存在することを保証（冪等）
     init_position_entries_db(sqlite_conn)  # position_entries テーブルが存在することを保証（冪等）
     duckdb_conn = duckdb.connect(str(settings.duckdb_path), read_only=True)

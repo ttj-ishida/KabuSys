@@ -181,19 +181,20 @@ class ExecutionEngine:
             # fill_date: 発注当日の翌営業日（バックテストと整合させるため）
             # BUY pending も記録する（発注確約済みとして扱う。キャンセル時はリコンシリエーションで回収）
             # SELL pending は記録しない（保有中のポジションのクローズ確定前のため）
+            # NOTE: _process_signals はメインスレッドからのみ呼び出される。
+            #       sqlite_conn は check_same_thread=True（デフォルト）のため他スレッドからアクセス不可。
             if _order_sent and self._sqlite_conn is not None:
                 try:
                     fill_date = next_trading_day(self._duckdb_conn, self._config.target_date)
                     if side == "buy":
                         self._sqlite_conn.execute(
-                            """
-                            INSERT OR IGNORE INTO position_entries (code, entry_date)
-                            VALUES (?, ?)
-                            """,
+                            # INSERT OR IGNORE: 同一 (code, entry_date) の重複エントリーは無視する
+                            "INSERT OR IGNORE INTO position_entries (code, entry_date) VALUES (?, ?)",
                             [code, str(fill_date)],
                         )
                         self._sqlite_conn.commit()
                     elif side == "sell" and not _order_pending:
+                        # 1銘柄1エントリー設計のため sell_date IS NULL のエントリーは常に1件以下
                         self._sqlite_conn.execute(
                             "UPDATE position_entries SET sell_date = ? "
                             "WHERE code = ? AND sell_date IS NULL",

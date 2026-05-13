@@ -47,7 +47,7 @@ def main() -> None:
     try:
         settings = Settings()
         conn = duckdb.connect(str(settings.duckdb_path))
-        sqlite_conn = sqlite3.connect(str(settings.sqlite_path))
+        sqlite_conn = sqlite3.connect(str(settings.sqlite_path), timeout=30.0)
         init_position_entries_db(sqlite_conn)
         target_date = date.today()
         n = generate_signals(conn, target_date, sqlite_conn=sqlite_conn)
