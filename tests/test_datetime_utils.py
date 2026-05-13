@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from kabusys.utils.datetime_utils import to_jst_str
 
 
