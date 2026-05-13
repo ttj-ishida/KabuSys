@@ -18,6 +18,40 @@ def _fmt_yen(value: float | None) -> str:
     return f"{value:,.0f} 円"
 
 
+def format_signal_queue_message(
+    *,
+    status: str,
+    buy_count: int,
+    sell_count: int,
+    signals: list[dict],
+    report_date: str,
+    max_signals: int = 10,
+) -> str:
+    """Signal Queue Report 完了時の LINE 通知メッセージを生成する。
+
+    status は "READY" / "EMPTY" のいずれか。
+    銘柄一覧は max_signals 件まで表示し、超過分は「他 N 件」と省略する。
+    """
+    lines = [
+        f"【KabuSys Signal Queue】{report_date}",
+        f"ステータス: {status}",
+        f"BUY: {buy_count} 件 / SELL: {sell_count} 件",
+    ]
+    if signals:
+        shown = signals[:max_signals]
+        truncated = len(signals) > max_signals
+        header = f"銘柄一覧（上位 {max_signals} 件）:" if truncated else "銘柄一覧:"
+        lines.append(header)
+        for s in shown:
+            side = s["side"].upper()
+            size = s.get("target_size")
+            size_str = f" {size}株" if size is not None else ""
+            lines.append(f"  {s['code']} {side}{size_str}")
+        if truncated:
+            lines.append(f"  … 他 {len(signals) - max_signals} 件")
+    return "\n".join(lines)
+
+
 def format_pre_market_message(
     *,
     status: str,
