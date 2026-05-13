@@ -184,7 +184,7 @@ python -m kabusys.run_signal_queue_report --date 2026-05-13
 | 08:02 | `signal_queue_report` | `pending` シグナルの銘柄・売買方向・数量の確認 |
 | 08:05 | `position_reconciliation_report` | DB ポジションとブローカー（Mock）の整合確認 |
 
-> ℹ️ `signal_queue_report` は発注予定内容（銘柄・売買方向・数量）を一覧化します。ペーパートレードでも発注内容を事前確認するために活用してください。Pure Mock モードではブローカー接続が不要なため、`position_reconciliation_report` は常に CLEAN と判定されます。
+> ℹ️ `signal_queue_report` は発注予定内容（銘柄・売買方向・数量）を一覧化します。ペーパートレードでも発注内容を事前確認するために活用してください。Pure Mock モードではブローカー接続が不要なため、`position_reconciliation_report` は常に `CLEAN` と判定されます。
 
 手動で再実行したい場合（再確認・デバッグ時）:
 

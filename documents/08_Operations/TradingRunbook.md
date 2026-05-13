@@ -13,7 +13,7 @@
 08:02  signal_queue_report（自動）
 08:05  position_reconciliation_report（自動）
 08:30  Execution 起動（自動）
-09:00  Monitoring 起動・前場監視（自動）
+09:00  Monitoring 起動（自動）・前場監視
 11:30  昼休み確認
 12:30  後場監視
 15:00  Market Close 確認

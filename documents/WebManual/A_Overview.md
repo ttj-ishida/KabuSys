@@ -85,8 +85,8 @@ Addon 機能:（任意・後から追加可能。未設定でも Core は動作�
 08:00  pre_market_report（自動）
 08:02  signal_queue_report（自動）
 08:05  position_reconciliation_report（自動）
-08:30  execution start
-09:00  monitoring start
+08:30  execution start（自動）
+09:00  monitoring start（自動）
 15:00  market_close_report（手動）
 
 # AI Addon（ENABLE_AI_SENTIMENT=true のときのみ）
