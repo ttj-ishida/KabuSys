@@ -58,7 +58,7 @@ def main() -> None:
     logger.info("起動環境: KABUSYS_ENV=%s", settings.env)
 
     # 2. DB 接続（monitoring は環境にかかわらず本番 sqlite_path を使用）
-    sqlite_conn = sqlite3.connect(str(settings.sqlite_path))
+    sqlite_conn = sqlite3.connect(str(settings.sqlite_path), timeout=30.0)
     init_monitoring_db(sqlite_conn)
     duckdb_conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
 
