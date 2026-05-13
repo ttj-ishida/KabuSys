@@ -66,7 +66,11 @@ KabuSys は、**市場が閉まっている時間に翌営業日の売買準備�
 
 確認方法:
 
-`run_pre_market_report.py` が 08:00 前後に自動実行され、`artifacts/pre_market/{date}/report.md` にレポートを生成します。ステータスが `READY` であれば運用開始可能です。`BLOCKED` の場合は原因を確認して対処してください。
+08:00 前後にオペレーターが以下のコマンドを手動実行し、`artifacts/pre_market/{date}/report.md` にレポートを生成します。ステータスが `READY` であれば運用開始可能です。`BLOCKED` の場合は原因を確認して対処してください。
+
+```powershell
+python -m kabusys.run_pre_market_report --save
+```
 
 確認項目:
 
