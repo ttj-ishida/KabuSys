@@ -242,7 +242,8 @@ class KabuStationClient:
         resp = self._request("get", "/wallet/cash")
         if resp.status_code != 200:
             raise BrokerAPIError(f"余力照会失敗: {resp.status_code}", status_code=resp.status_code)
-        return float(self._json(resp).get("StockAccountWallet", 0.0))
+        value = self._json(resp).get("StockAccountWallet")
+        return float(value) if value is not None else 0.0
 
     def stream_push(
         self,
