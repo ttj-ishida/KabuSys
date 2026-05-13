@@ -132,7 +132,9 @@ def main() -> None:
                     }
 
                     pos_cur = conn.execute(
-                        "SELECT code, position_size FROM positions WHERE code IN (" + code_params + ")",
+                        "SELECT code, position_size FROM positions WHERE code IN ("
+                        + code_params
+                        + ")",
                         codes,
                     )
                     current_positions = {r[0]: int(r[1]) for r in pos_cur.fetchall()}

@@ -477,9 +477,7 @@ def save_financial_statements(
             fetched_at,
         )
         for r in records
-        if r.get("Code")
-        and r.get("DiscDate")
-        and r.get("CurPerType")  # PK 欠損行はスキップ
+        if r.get("Code") and r.get("DiscDate") and r.get("CurPerType")  # PK 欠損行はスキップ
     ]
     skipped = len(records) - len(rows)
     if skipped:
