@@ -59,6 +59,7 @@ def main() -> None:
     logger.info("SQLite (monitoring) を初期化します: %s", sqlite_path)
     with sqlite3.connect(sqlite_path) as sqlite_conn:
         init_monitoring_db(sqlite_conn)
+        init_orders_db(sqlite_conn)
     logger.info("SQLite (monitoring) 初期化完了")
 
     # --- SQLite (paper_trading) ---
