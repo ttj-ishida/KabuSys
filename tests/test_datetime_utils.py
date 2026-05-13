@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from kabusys.utils.datetime_utils import to_jst_str
 
 
@@ -12,8 +14,12 @@ class TestToJstStr:
         assert to_jst_str("2026-05-13T06:00:00+00:00") == "2026-05-13 15:00:00 JST"
 
     def test_utc_z_suffix(self):
-        """Z 末尾の UTC 文字列を JST に変換する。"""
+        """Z 末尾の UTC 文字列を JST に変換する（Python 3.10 互換）。"""
         assert to_jst_str("2026-05-13T06:00:00Z") == "2026-05-13 15:00:00 JST"
+
+    def test_utc_z_suffix_with_microseconds(self):
+        """Z 末尾 + マイクロ秒の文字列も正しく変換する。"""
+        assert to_jst_str("2026-05-13T06:00:00.123456Z") == "2026-05-13 15:00:00 JST"
 
     def test_midnight_utc_crosses_date(self):
         """UTC 00:00 は JST 09:00（日付変わらず）。"""
@@ -42,3 +48,13 @@ class TestToJstStr:
     def test_invalid_string_returns_original(self):
         """パース不能な文字列はそのまま返す（表示が壊れない）。"""
         assert to_jst_str("not-a-datetime") == "not-a-datetime"
+
+    def test_datetime_object_input(self):
+        """datetime オブジェクトを直接渡しても変換できる。"""
+        dt = datetime(2026, 5, 13, 6, 0, 0, tzinfo=timezone.utc)
+        assert to_jst_str(dt) == "2026-05-13 15:00:00 JST"
+
+    def test_datetime_object_naive_treated_as_utc(self):
+        """naive な datetime オブジェクトは UTC として扱う。"""
+        dt = datetime(2026, 5, 13, 6, 0, 0)
+        assert to_jst_str(dt) == "2026-05-13 15:00:00 JST"

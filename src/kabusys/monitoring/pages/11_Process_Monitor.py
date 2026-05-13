@@ -120,7 +120,7 @@ if completed:
                 "ジョブ名": r["job_name"],
                 "ステータス": _STATUS_BADGE.get(r["status"], f"❓ {r['status']}"),
                 "開始": to_jst_str(r["started_at"]),
-                "終了": to_jst_str(r["finished_at"]) if r["finished_at"] else "N/A",
+                "終了": to_jst_str(r["finished_at"]),
                 "経過": _elapsed(r["started_at"], r["finished_at"]),
                 "エラー": r.get("error_msg") or "",
             }
