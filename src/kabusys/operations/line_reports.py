@@ -25,7 +25,10 @@ def format_pre_market_message(
     pending_count: int,
     report_date: str,
 ) -> str:
-    """Pre-Market Report 完了時の LINE 通知メッセージを生成する。"""
+    """Pre-Market Report 完了時の LINE 通知メッセージを生成する。
+
+    status は "READY" / "READY_WITH_WARNINGS" / "BLOCKED" のいずれか。
+    """
     lines = [
         f"【KabuSys Pre-Market】{report_date}",
         f"ステータス: {status}",

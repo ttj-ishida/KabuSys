@@ -35,6 +35,7 @@ _JOB_NAME = "pre_market_report_job"
 _APP_NAME = "pre_market_report"
 _BASE = Path(__file__).resolve().parent.parent
 _STOP_FLAG = _BASE / "data" / "stop_requested.flag"
+# Pre-Market チェックで「08:30 の ExecutionStart タスクが Ready 状態か」を確認するために使用
 _TASK_NAME = "KabuSys_ExecutionStart"
 
 
