@@ -113,7 +113,7 @@ PAPER_TRADING_INITIAL_CASH=10000000
 
 夜間（または夕方）に注入し、翌朝レポートで確認します。
 
-```bash
+```powershell
 # 夜間：翌営業日向けシグナルを注入（--date 省略でよい）
 python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100
 
@@ -125,7 +125,7 @@ python -m kabusys.run_signal_queue_report
 
 注入とレポートで同じ日付を明示します。
 
-```bash
+```powershell
 # 今日の日付でシグナルを注入
 python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100 --date 2026-05-12
 
@@ -138,7 +138,7 @@ python -m kabusys.run_signal_queue_report --date 2026-05-12
 
 **パターン C: 注入後すぐに翌営業日のシグナルを確認したい場合**
 
-```bash
+```powershell
 # 翌営業日で注入（--date 省略）
 python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100
 
@@ -148,7 +148,7 @@ python -m kabusys.run_signal_queue_report --date 2026-05-13
 
 ### コマンド一覧
 
-```bash
+```powershell
 # BUY シグナルを注入
 python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100
 
@@ -178,8 +178,8 @@ python -m kabusys.run_signal_queue_report --date 2026-05-13
 
 本番と同様に Pre-Market Report で確認します。
 
-```bash
-python -m kabusys.run_pre_market_report
+```powershell
+python -m kabusys.run_pre_market_report --save
 ```
 
 | 確認項目 | ペーパートレードでの確認内容 |
@@ -200,7 +200,7 @@ python -m kabusys.run_execution
 
 または `.env` に `KABUSYS_ENV=paper_trading` を設定済みであれば：
 
-```bash
+```powershell
 python -m kabusys.run_execution
 ```
 
@@ -229,8 +229,7 @@ python scripts/stop_system.py
 
 または手動でフラグファイルを作成：
 
-```bash
-# PowerShell
+```powershell
 New-Item data/stop_requested.flag -ItemType File
 ```
 
@@ -263,7 +262,7 @@ python -m kabusys.tools.paper_verification_report --from 2026-05-01 --to 2026-05
 
 日次・週次・月次の運用成績を paper_trading 環境として集計できます。
 
-```bash
+```powershell
 # 日次成績
 python -m kabusys.run_performance_report --type daily --env paper_trading
 
