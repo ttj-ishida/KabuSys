@@ -10,6 +10,7 @@ from kabusys.operations.line_reports import (
     format_monthly_message,
     format_morning_message,
     format_pre_market_message,
+    format_signal_queue_message,
     format_weekly_message,
 )
 
@@ -159,6 +160,86 @@ class TestFormatMonthlyMessage:
             summary=summary,
             from_date="2026-04-01",
             to_date="2026-04-30",
+        )
+        assert isinstance(msg, str)
+        assert len(msg) > 0
+
+
+class TestFormatSignalQueueMessage:
+    _SIGNALS = [
+        {"code": "7203", "side": "buy", "target_size": 100},
+        {"code": "6758", "side": "sell", "target_size": 200},
+        {"code": "9984", "side": "buy", "target_size": None},
+    ]
+
+    def test_ready_with_signals(self):
+        msg = format_signal_queue_message(
+            status="READY",
+            buy_count=2,
+            sell_count=1,
+            signals=self._SIGNALS,
+            report_date="2026-05-13",
+        )
+        assert "2026-05-13" in msg
+        assert "READY" in msg
+        assert "2" in msg
+        assert "1" in msg
+        assert "7203" in msg
+        assert "BUY" in msg
+        assert "6758" in msg
+        assert "SELL" in msg
+
+    def test_empty_status(self):
+        msg = format_signal_queue_message(
+            status="EMPTY",
+            buy_count=0,
+            sell_count=0,
+            signals=[],
+            report_date="2026-05-13",
+        )
+        assert "EMPTY" in msg
+        assert "0" in msg
+
+    def test_target_size_shown(self):
+        msg = format_signal_queue_message(
+            status="READY",
+            buy_count=1,
+            sell_count=0,
+            signals=[{"code": "7203", "side": "buy", "target_size": 100}],
+            report_date="2026-05-13",
+        )
+        assert "100" in msg
+
+    def test_none_target_size_no_crash(self):
+        msg = format_signal_queue_message(
+            status="READY",
+            buy_count=1,
+            sell_count=0,
+            signals=[{"code": "9984", "side": "buy", "target_size": None}],
+            report_date="2026-05-13",
+        )
+        assert "9984" in msg
+        assert isinstance(msg, str)
+
+    def test_max_signals_truncation(self):
+        many = [{"code": str(1000 + i), "side": "buy", "target_size": 100} for i in range(15)]
+        msg = format_signal_queue_message(
+            status="READY",
+            buy_count=15,
+            sell_count=0,
+            signals=many,
+            report_date="2026-05-13",
+        )
+        assert "他" in msg
+        assert "5" in msg
+
+    def test_returns_string(self):
+        msg = format_signal_queue_message(
+            status="EMPTY",
+            buy_count=0,
+            sell_count=0,
+            signals=[],
+            report_date="2026-05-13",
         )
         assert isinstance(msg, str)
         assert len(msg) > 0
