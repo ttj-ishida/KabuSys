@@ -233,6 +233,36 @@ class TestFormatSignalQueueMessage:
         assert "他" in msg
         assert "5" in msg
 
+    def test_exact_max_signals_no_truncation(self):
+        exactly_ten = [
+            {"code": str(1000 + i), "side": "buy", "target_size": 100} for i in range(10)
+        ]
+        msg = format_signal_queue_message(
+            status="READY",
+            buy_count=10,
+            sell_count=0,
+            signals=exactly_ten,
+            report_date="2026-05-13",
+        )
+        assert "他" not in msg
+        assert "上位" not in msg
+
+    def test_side_uppercased(self):
+        msg = format_signal_queue_message(
+            status="READY",
+            buy_count=1,
+            sell_count=1,
+            signals=[
+                {"code": "7203", "side": "buy", "target_size": 100},
+                {"code": "6758", "side": "sell", "target_size": 50},
+            ],
+            report_date="2026-05-13",
+        )
+        assert "BUY" in msg
+        assert "SELL" in msg
+        assert "buy" not in msg
+        assert "sell" not in msg
+
     def test_returns_string(self):
         msg = format_signal_queue_message(
             status="EMPTY",

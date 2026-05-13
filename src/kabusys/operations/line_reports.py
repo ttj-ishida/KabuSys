@@ -39,13 +39,15 @@ def format_signal_queue_message(
     ]
     if signals:
         shown = signals[:max_signals]
-        lines.append("銘柄一覧:")
+        truncated = len(signals) > max_signals
+        header = f"銘柄一覧（上位 {max_signals} 件）:" if truncated else "銘柄一覧:"
+        lines.append(header)
         for s in shown:
             side = s["side"].upper()
             size = s.get("target_size")
             size_str = f" {size}株" if size is not None else ""
             lines.append(f"  {s['code']} {side}{size_str}")
-        if len(signals) > max_signals:
+        if truncated:
             lines.append(f"  … 他 {len(signals) - max_signals} 件")
     return "\n".join(lines)
 
