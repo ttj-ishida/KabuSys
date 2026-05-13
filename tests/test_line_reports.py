@@ -9,6 +9,7 @@ from kabusys.operations.line_reports import (
     format_evening_message,
     format_monthly_message,
     format_morning_message,
+    format_pre_market_message,
     format_weekly_message,
 )
 
@@ -158,6 +159,51 @@ class TestFormatMonthlyMessage:
             summary=summary,
             from_date="2026-04-01",
             to_date="2026-04-30",
+        )
+        assert isinstance(msg, str)
+        assert len(msg) > 0
+
+
+class TestFormatPreMarketMessage:
+    def test_ready_status(self):
+        msg = format_pre_market_message(
+            status="READY",
+            warnings_count=0,
+            pending_count=5,
+            report_date="2026-05-13",
+        )
+        assert "2026-05-13" in msg
+        assert "READY" in msg
+        assert "5" in msg
+        assert "0" in msg
+
+    def test_blocked_status(self):
+        msg = format_pre_market_message(
+            status="BLOCKED",
+            warnings_count=2,
+            pending_count=0,
+            report_date="2026-05-13",
+        )
+        assert "BLOCKED" in msg
+        assert "2" in msg
+
+    def test_ready_with_warnings(self):
+        msg = format_pre_market_message(
+            status="READY_WITH_WARNINGS",
+            warnings_count=1,
+            pending_count=3,
+            report_date="2026-05-13",
+        )
+        assert "READY_WITH_WARNINGS" in msg
+        assert "1" in msg
+        assert "3" in msg
+
+    def test_returns_string(self):
+        msg = format_pre_market_message(
+            status="READY",
+            warnings_count=0,
+            pending_count=0,
+            report_date="2026-05-13",
         )
         assert isinstance(msg, str)
         assert len(msg) > 0

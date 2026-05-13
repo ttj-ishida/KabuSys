@@ -18,6 +18,26 @@ def _fmt_yen(value: float | None) -> str:
     return f"{value:,.0f} 円"
 
 
+def format_pre_market_message(
+    *,
+    status: str,
+    warnings_count: int,
+    pending_count: int,
+    report_date: str,
+) -> str:
+    """Pre-Market Report 完了時の LINE 通知メッセージを生成する。
+
+    status は "READY" / "READY_WITH_WARNINGS" / "BLOCKED" のいずれか。
+    """
+    lines = [
+        f"【KabuSys Pre-Market】{report_date}",
+        f"ステータス: {status}",
+        f"警告件数: {warnings_count} 件",
+        f"pending シグナル: {pending_count} 件",
+    ]
+    return "\n".join(lines)
+
+
 def format_morning_message(
     *,
     status: str,
