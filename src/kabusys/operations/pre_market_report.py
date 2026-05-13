@@ -36,6 +36,7 @@ class PreMarketReport:
     status: str  # READY / READY_WITH_WARNINGS / BLOCKED
     checks: list[CheckItem]
     warnings: list[str]
+    signal_queue_pending: int
 
 
 def _determine_status(
@@ -156,6 +157,7 @@ def build_report(
         status=_determine_status(**kwargs),
         checks=_build_check_items(**kwargs),
         warnings=_generate_warnings(**kwargs),
+        signal_queue_pending=signal_queue_pending,
     )
 
 
