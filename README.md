@@ -206,8 +206,8 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
    本番前にペーパートレードモードで Execution と Monitoring を起動します:
 
-   ```
-   KABUSYS_ENV=paper_trading python -m kabusys.run_execution
+   ```powershell
+   $env:KABUSYS_ENV="paper_trading"; python -m kabusys.run_execution
    # 別ターミナル
    python -m kabusys.run_monitoring
    ```
@@ -368,9 +368,9 @@ python -m kabusys.run_execution
 - 起動時にブローカーとのポジション差分を自動チェック（リコンシリエーション）します
 - `data/execution.pid` に PID を記録し、`data/stop_requested.flag` で安全停止します
 
-```
+```powershell
 # ペーパートレードモードで起動
-KABUSYS_ENV=paper_trading python -m kabusys.run_execution
+$env:KABUSYS_ENV="paper_trading"; python -m kabusys.run_execution
 ```
 
 ---
