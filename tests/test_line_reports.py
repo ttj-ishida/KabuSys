@@ -9,6 +9,7 @@ from kabusys.operations.line_reports import (
     format_evening_message,
     format_monthly_message,
     format_morning_message,
+    format_position_reconciliation_message,
     format_pre_market_message,
     format_signal_queue_message,
     format_weekly_message,
@@ -160,6 +161,98 @@ class TestFormatMonthlyMessage:
             summary=summary,
             from_date="2026-04-01",
             to_date="2026-04-30",
+        )
+        assert isinstance(msg, str)
+        assert len(msg) > 0
+
+
+class TestFormatPositionReconciliationMessage:
+    _CLEAN_POSITIONS = [
+        {"code": "7203", "broker_qty": 100, "local_qty": 100, "diff": 0, "status": "MATCH"},
+        {"code": "6758", "broker_qty": 200, "local_qty": 200, "diff": 0, "status": "MATCH"},
+    ]
+    _MISMATCH_POSITIONS = [
+        {"code": "7203", "broker_qty": 100, "local_qty": 0, "diff": 100, "status": "MISMATCH"},
+        {"code": "6758", "broker_qty": 0, "local_qty": 200, "diff": -200, "status": "MISMATCH"},
+        {"code": "9984", "broker_qty": 50, "local_qty": 50, "diff": 0, "status": "MATCH"},
+    ]
+
+    def test_clean_status(self):
+        msg = format_position_reconciliation_message(
+            status="CLEAN",
+            total_count=2,
+            mismatch_count=0,
+            positions=self._CLEAN_POSITIONS,
+            report_date="2026-05-13",
+        )
+        assert "2026-05-13" in msg
+        assert "CLEAN" in msg
+        assert "2" in msg
+        assert "0" in msg
+
+    def test_discrepancy_status_has_alert(self):
+        msg = format_position_reconciliation_message(
+            status="DISCREPANCY",
+            total_count=3,
+            mismatch_count=2,
+            positions=self._MISMATCH_POSITIONS,
+            report_date="2026-05-13",
+        )
+        assert "DISCREPANCY" in msg
+        assert "2" in msg
+        assert "7203" in msg
+        assert "6758" in msg
+        # MATCH の 9984 は含まれない
+        assert "9984" not in msg
+
+    def test_discrepancy_includes_diff_detail(self):
+        msg = format_position_reconciliation_message(
+            status="DISCREPANCY",
+            total_count=3,
+            mismatch_count=2,
+            positions=self._MISMATCH_POSITIONS,
+            report_date="2026-05-13",
+        )
+        assert "100" in msg  # broker_qty
+        assert "200" in msg  # local_qty
+
+    def test_clean_no_position_detail(self):
+        msg = format_position_reconciliation_message(
+            status="CLEAN",
+            total_count=2,
+            mismatch_count=0,
+            positions=self._CLEAN_POSITIONS,
+            report_date="2026-05-13",
+        )
+        # CLEAN 時は銘柄詳細を表示しない
+        assert "7203" not in msg
+        assert "6758" not in msg
+
+    def test_positive_diff_shows_plus_sign(self):
+        msg = format_position_reconciliation_message(
+            status="DISCREPANCY",
+            total_count=1,
+            mismatch_count=1,
+            positions=[
+                {
+                    "code": "7203",
+                    "broker_qty": 100,
+                    "local_qty": 0,
+                    "diff": 100,
+                    "status": "MISMATCH",
+                }
+            ],
+            report_date="2026-05-13",
+        )
+        assert "+100" in msg
+
+    def test_returns_string(self):
+        msg = format_position_reconciliation_message(
+            status="CLEAN",
+            total_count=0,
+            mismatch_count=0,
+            positions=[],
+            report_date="2026-05-13",
         )
         assert isinstance(msg, str)
         assert len(msg) > 0
