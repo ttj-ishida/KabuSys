@@ -18,10 +18,12 @@ KabuSys は、夜間バッチで翌営業日のシグナルと発注キューを
 21:00  portfolio_construction
 21:15  night_batch_report（自動生成）
 21:30  night batch status confirmation（オペレーター確認）
-08:00  pre_market_report
-08:30  execution start
-09:00  monitoring start
-15:00  market_close_report
+08:00  pre_market_report（自動）
+08:02  signal_queue_report（自動）
+08:05  position_reconciliation_report（自動）
+08:30  execution start（自動）
+09:00  monitoring start（自動）
+15:00  market_close_report（手動）
 ```
 
 > **スケジュール設計の根拠**: J-Quants の日足株価データ（`daily_quotes`）は東証引け（15:30）直後ではなく 16:30〜17:00 頃に公開される。15:30 に data_update を実行すると当日データを取得できず feature_gen が 0 件になる。17:30 に遅延することでデータ確実取得後に実行できる。
@@ -153,19 +155,23 @@ Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object 
 
 ---
 
-## 4. Pre-Market（08:00）
+## 4. Pre-Market（08:00〜08:05）
 
-```cmd
-python -m kabusys.run_pre_market_report --save
-```
+3 本のレポートが Task Scheduler により自動実行される。
 
-判定:
+| 時刻 | タスク名 | スクリプト | 出力先 |
+|------|----------|------------|--------|
+| 08:00 | `KabuSys_PreMarketReport` | `scripts/run_pre_market_report.py` | `artifacts/pre_market/{date}/report.md` |
+| 08:02 | `KabuSys_SignalQueueReport` | `scripts/run_signal_queue_report.py` | `artifacts/signal_queue/{date}/report.md` |
+| 08:05 | `KabuSys_PositionReconciliationReport` | `scripts/run_position_reconciliation_report.py` | `artifacts/position_reconciliation/{date}/report.json` |
+
+判定（pre_market_report）:
 
 - `READY`
 - `READY_WITH_WARNINGS`
 - `BLOCKED`
 
-確認対象:
+確認対象（pre_market_report）:
 
 - stop flag
 - Task Scheduler readiness
@@ -173,9 +179,13 @@ python -m kabusys.run_pre_market_report --save
 - ポジション差分
 - データ鮮度
 
-出力先:
+手動再実行（デバッグ時）:
 
-- `artifacts/pre_market/{date}/report.md`
+```cmd
+python scripts/run_pre_market_report.py
+python scripts/run_signal_queue_report.py
+python scripts/run_position_reconciliation_report.py
+```
 
 ---
 
@@ -237,6 +247,9 @@ python -m kabusys.run_performance_report --type daily --save
 | 20:00 | `KabuSys_StrategySignal` | `scripts\run_strategy_signal.py` |
 | 21:00 | `KabuSys_PortfolioConstruction` | `scripts\run_portfolio_construction.py` |
 | 21:15 | `KabuSys_NightBatchReport` | `scripts\run_night_batch_report.py` |
+| 08:00 | `KabuSys_PreMarketReport` | `scripts\run_pre_market_report.py` |
+| 08:02 | `KabuSys_SignalQueueReport` | `scripts\run_signal_queue_report.py` |
+| 08:05 | `KabuSys_PositionReconciliationReport` | `scripts\run_position_reconciliation_report.py` |
 | 08:30 | `KabuSys_ExecutionStart` | `scripts\start_system.py --component execution` |
 | 09:00 | `KabuSys_MonitoringStart` | `scripts\start_system.py --component monitoring` |
 

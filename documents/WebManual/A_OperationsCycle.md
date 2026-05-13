@@ -25,7 +25,9 @@ KabuSys は、**市場が閉まっている時間に翌営業日の売買準備�
 
 ```text
 07:50  PC・kabuステーション起動確認
-08:00  Pre-Market Checklist（手動確認）
+08:00  pre_market_report（自動）
+08:02  signal_queue_report（自動）
+08:05  position_reconciliation_report（自動）
 08:30  Execution 起動（自動）
 09:00  Monitoring 起動（自動） / 前場開始
 09:00-11:30  前場監視
@@ -60,23 +62,33 @@ KabuSys は、**市場が閉まっている時間に翌営業日の売買準備�
 
 システムはこの時点では、まだ売買を始めません。
 
-### 3.2 Pre-Market Checklist（08:00）
+### 3.2 Pre-Market Checklist（08:00〜08:05）
 
-市場開始前に、ユーザーが手動で運用チェックを行います。
+市場開始前のレポート 3 本が Task Scheduler により自動実行されます。
 
-確認方法:
+| 時刻 | ジョブ | 出力先 |
+|------|--------|--------|
+| 08:00 | `pre_market_report` | `artifacts/pre_market/{date}/report.md` |
+| 08:02 | `signal_queue_report` | `artifacts/signal_queue/{date}/report.md` |
+| 08:05 | `position_reconciliation_report` | `artifacts/position_reconciliation/{date}/report.json` |
 
-08:00 前後にオペレーターが以下のコマンドを手動実行し、`artifacts/pre_market/{date}/report.md` にレポートを生成します。ステータスが `READY` であれば運用開始可能です。`BLOCKED` の場合は原因を確認して対処してください。
+LINE 通知が有効な場合、各レポートの結果がスマートフォンへ自動送信されます。結果は Streamlit の **Pre-Market** / **Signal Queue** ページでも確認できます。
+
+ステータスが `READY` であれば運用開始可能です。`BLOCKED` の場合は原因を確認して対処してください。
+
+手動で再実行したい場合（再確認・デバッグ時）:
 
 ```powershell
-python -m kabusys.run_pre_market_report --save
+python scripts/run_pre_market_report.py
+python scripts/run_signal_queue_report.py
+python scripts/run_position_reconciliation_report.py
 ```
 
 確認項目:
 
 - 前日分データが正常に取り込まれている
 - 本日の `Signal Queue` に `pending` シグナルが存在する
-- DB 上のポジションと証券口座のポジションが一致している
+- DB 上のポジションと証券口座のポジションが一致している（`position_reconciliation_report` で確認）
 - `data/stop_requested.flag` が存在しない
 - Task Scheduler の KabuSys タスクが `Ready` 状態である
 

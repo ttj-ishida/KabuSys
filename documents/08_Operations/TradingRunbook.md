@@ -9,9 +9,11 @@
 
 ```text
 07:50  PC / kabuステーション起動確認
-08:00  Pre-Market Checklist
-08:30  Execution 起動
-09:00  Monitoring 起動・前場監視
+08:00  pre_market_report（自動）
+08:02  signal_queue_report（自動）
+08:05  position_reconciliation_report（自動）
+08:30  Execution 起動（自動）
+09:00  Monitoring 起動（自動）・前場監視
 11:30  昼休み確認
 12:30  後場監視
 15:00  Market Close 確認
@@ -27,7 +29,15 @@
 
 ---
 
-## 2. Pre-Market（08:00）
+## 2. Pre-Market（08:00〜08:05）
+
+3 本のレポートが Task Scheduler により自動実行される。LINE 通知（有効時）で結果を確認する。
+
+| 時刻 | ジョブ | 出力先 |
+|------|--------|--------|
+| 08:00 | `KabuSys_PreMarketReport` | `artifacts/pre_market/{date}/report.md` |
+| 08:02 | `KabuSys_SignalQueueReport` | `artifacts/signal_queue/{date}/report.md` |
+| 08:05 | `KabuSys_PositionReconciliationReport` | `artifacts/position_reconciliation/{date}/report.json` |
 
 確認項目:
 
@@ -39,23 +49,19 @@
 - Task Scheduler の `KabuSys_*` が `Ready`
 - DB と口座のポジション差分が許容範囲
 
-主要コマンド:
-
-```cmd
-python -m kabusys.run_pre_market_report --save
-python -m kabusys.run_signal_queue_report
-python -m kabusys.run_position_reconciliation_report
-```
-
 判定:
 
 - `READY`: 執行開始可
 - `READY_WITH_WARNINGS`: 警告確認の上で開始判断
 - `BLOCKED`: 自動執行を開始しない
 
-出力先:
+手動再実行（再確認・デバッグ時）:
 
-- `artifacts/pre_market/{date}/report.md`
+```cmd
+python scripts/run_pre_market_report.py
+python scripts/run_signal_queue_report.py
+python scripts/run_position_reconciliation_report.py
+```
 
 **signal_queue に不要な pending がある場合:**
 

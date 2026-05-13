@@ -23,9 +23,11 @@
 ## D-2. 1日の流れ
 
 ```text
-08:00  Pre-Market
-08:30  Execution 起動
-09:00  Monitoring 起動
+08:00  pre_market_report（自動）
+08:02  signal_queue_report（自動）
+08:05  position_reconciliation_report（自動）
+08:30  Execution 起動（自動）
+09:00  Monitoring 起動（自動）
 09:00-15:00  ザラ場監視
 15:00  Market Close
 17:30-21:15  夜間バッチ（21:15 にレポート自動生成）
@@ -34,27 +36,33 @@
 
 ---
 
-## D-3. 朝の確認（08:00）
+## D-3. 朝の確認（08:00〜08:05）
 
-主要コマンド:
+3 本のレポートが Task Scheduler により自動実行されます。
 
-```cmd
-python -m kabusys.run_pre_market_report --save
-python -m kabusys.run_signal_queue_report
-python -m kabusys.run_position_reconciliation_report
-```
+| 時刻 | ジョブ | 出力先 |
+|------|--------|--------|
+| 08:00 | `KabuSys_PreMarketReport` | `artifacts/pre_market/{date}/report.md` |
+| 08:02 | `KabuSys_SignalQueueReport` | `artifacts/signal_queue/{date}/report.md` |
+| 08:05 | `KabuSys_PositionReconciliationReport` | `artifacts/position_reconciliation/{date}/report.json` |
+
+LINE 通知が有効な場合、各レポート完了後に結果が自動送信されます。
 
 判定:
 
-- `READY`
-- `READY_WITH_WARNINGS`
-- `BLOCKED`
+- `READY`: 執行開始可
+- `READY_WITH_WARNINGS`: 警告確認の上で開始判断
+- `BLOCKED`: Execution を開始しない
 
-`BLOCKED` の場合は Execution を開始しない。
+`BLOCKED` の場合は原因を解消してから Execution を起動してください。
 
-出力先:
+手動で再実行したい場合（再確認・デバッグ時）:
 
-- `artifacts/pre_market/{date}/report.md`
+```cmd
+python scripts/run_pre_market_report.py
+python scripts/run_signal_queue_report.py
+python scripts/run_position_reconciliation_report.py
+```
 
 ---
 

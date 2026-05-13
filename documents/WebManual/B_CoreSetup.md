@@ -214,8 +214,11 @@ powershell -File scripts\remove_task_scheduler.ps1
 | 20:00 | 売買シグナル生成 | `scripts/run_strategy_signal.py` |
 | 21:00 | ポートフォリオ構築 | `scripts/run_portfolio_construction.py` |
 | 21:15 | 夜間バッチ結果レポート | `scripts/run_night_batch_report.py` |
-| 08:30 | Execution Engine 起動 | `python -m kabusys.run_execution` |
-| 09:00 | Monitoring 起動 | `python -m kabusys.run_monitoring` |
+| 08:00 | Pre-Market レポート | `scripts/run_pre_market_report.py` |
+| 08:02 | Signal Queue レポート | `scripts/run_signal_queue_report.py` |
+| 08:05 | Position Reconciliation レポート | `scripts/run_position_reconciliation_report.py` |
+| 08:30 | Execution Engine 起動 | `scripts/start_system.py --component execution` |
+| 09:00 | Monitoring 起動 | `scripts/start_system.py --component monitoring` |
 
 > ℹ️ **スケジュール設計の根拠**: J-Quants の日足データは東証引け（15:30）直後ではなく 16:30〜17:00 頃に公開されます。17:30 に data_update を実行することで当日データを確実に取得してから feature_gen（18:30）を起動できます。
 
@@ -233,7 +236,7 @@ powershell -File scripts\remove_task_scheduler.ps1
 
 > 詳細は `documents/10_Runtime/RuntimeJobSchedule.md` を参照してください。
 
-> **補足:** `pre_market_report`（08:00）および `market_close_report`（15:00）は Task Scheduler の自動ジョブではなく、オペレーターが手動で実行するコマンドです（`python -m kabusys.run_pre_market_report`、`python -m kabusys.run_market_close_report`）。詳細は [D_LiveOperation.md](./D_LiveOperation.md) を参照してください。
+> **補足:** `pre_market_report`（08:00）・`signal_queue_report`（08:02）・`position_reconciliation_report`（08:05）は Task Scheduler の Core 標準ジョブとして自動実行されます。`market_close_report`（15:00）はオペレーターが手動で実行するコマンドです（`python -m kabusys.run_market_close_report`）。詳細は [D_LiveOperation.md](./D_LiveOperation.md) を参照してください。
 
 ---
 
