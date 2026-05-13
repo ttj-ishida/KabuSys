@@ -40,14 +40,14 @@
 ## 3. 想定される利用フロー
 
 1. テストしたい銘柄のダミーシグナルを注入する
-   ```bash
+   ```powershell
    python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100
    ```
 2. Signal Queueレポートで注入されたことを確認する
-   ```bash
+   ```powershell
    python -m kabusys.run_signal_queue_report
    ```
 3. ペーパートレード環境で Execution Engine を起動し、指定銘柄が正しく発注・約定シミュレーションされるか確認する
-   ```bash
-   KABUSYS_ENV=paper_trading python -m kabusys.run_execution
+   ```powershell
+   $env:KABUSYS_ENV="paper_trading"; python -m kabusys.run_execution
    ```
