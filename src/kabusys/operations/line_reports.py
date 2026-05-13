@@ -18,6 +18,44 @@ def _fmt_yen(value: float | None) -> str:
     return f"{value:,.0f} 円"
 
 
+def format_position_reconciliation_message(
+    *,
+    status: str,
+    total_count: int,
+    mismatch_count: int,
+    positions: list[dict],
+    report_date: str,
+) -> str:
+    """Position Reconciliation Report 完了時の LINE 通知メッセージを生成する。
+
+    status は "CLEAN" / "DISCREPANCY" のいずれか。
+    DISCREPANCY 時は差分銘柄の詳細を含め、緊急アラートとして送信する。
+    """
+    if status == "DISCREPANCY":
+        header = f"【⚠️ KabuSys ポジション差分検出】{report_date}"
+    else:
+        header = f"【KabuSys Reconciliation】{report_date}"
+
+    lines = [
+        header,
+        f"ステータス: {status}",
+        f"差分あり: {mismatch_count} 件 / 全体: {total_count} 件",
+    ]
+
+    if status == "DISCREPANCY":
+        mismatches = [p for p in positions if p.get("status") == "MISMATCH"]
+        if mismatches:
+            lines.append("差分銘柄:")
+            for p in mismatches:
+                diff = p["broker_qty"] - p["local_qty"]
+                diff_str = f"+{diff}" if diff > 0 else str(diff)
+                lines.append(
+                    f"  {p['code']} ブローカー:{p['broker_qty']} / ローカル:{p['local_qty']} (差分:{diff_str})"
+                )
+
+    return "\n".join(lines)
+
+
 def format_signal_queue_message(
     *,
     status: str,
