@@ -60,7 +60,7 @@ def main() -> None:
     # 2. DB 接続（monitoring は環境にかかわらず本番 sqlite_path を使用）
     sqlite_conn = sqlite3.connect(str(settings.sqlite_path))
     init_monitoring_db(sqlite_conn)
-    duckdb_conn = duckdb.connect(str(settings.duckdb_path))
+    duckdb_conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
 
     # 3. SystemMonitor 初期化
     monitor = SystemMonitor(

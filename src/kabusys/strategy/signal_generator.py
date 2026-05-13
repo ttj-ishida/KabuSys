@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import math
+import sqlite3
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -720,32 +721,53 @@ def _peak_close(
     conn: duckdb.DuckDBPyConnection,
     code: str,
     target_date: date,
+    sqlite_conn: sqlite3.Connection | None = None,
 ) -> float | None:
     """すべてのオープンエントリーの最古のエントリー日以降 target_date までの最高 close を返す。
 
     オープンな position_entries が存在しない場合は None を返す。
+    sqlite_conn が指定された場合は position_entries を SQLite から取得する（ライブ実行用）。
+    sqlite_conn が None の場合は DuckDB conn から取得する（バックテスト互換）。
     """
-    row = conn.execute(
-        """
-        WITH first_entry AS (
-            SELECT MIN(entry_date) AS entry_date
-            FROM position_entries
-            WHERE code = ?
-              AND sell_date IS NULL
-        )
-        SELECT MAX(pd.close)
-        FROM first_entry fe
-        JOIN prices_daily pd
-          ON pd.date >= fe.entry_date
-         AND pd.date <= ?
-         AND pd.code = ?
-        WHERE fe.entry_date IS NOT NULL
-        """,
-        [code, target_date, code],
-    ).fetchone()
-    if row is None or row[0] is None:
-        return None
-    return float(row[0])
+    if sqlite_conn is not None:
+        # SQLite から最古の未クローズ entry_date を取得
+        row = sqlite_conn.execute(
+            "SELECT MIN(entry_date) FROM position_entries WHERE code = ? AND sell_date IS NULL",
+            [code],
+        ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        first_entry_date = date.fromisoformat(str(row[0]))
+        # DuckDB から当該期間の最高 close を取得
+        price_row = conn.execute(
+            "SELECT MAX(close) FROM prices_daily WHERE code = ? AND date >= ? AND date <= ?",
+            [code, first_entry_date, target_date],
+        ).fetchone()
+        if price_row is None or price_row[0] is None:
+            return None
+        return float(price_row[0])
+    else:
+        row = conn.execute(
+            """
+            WITH first_entry AS (
+                SELECT MIN(entry_date) AS entry_date
+                FROM position_entries
+                WHERE code = ?
+                  AND sell_date IS NULL
+            )
+            SELECT MAX(pd.close)
+            FROM first_entry fe
+            JOIN prices_daily pd
+              ON pd.date >= fe.entry_date
+             AND pd.date <= ?
+             AND pd.code = ?
+            WHERE fe.entry_date IS NOT NULL
+            """,
+            [code, target_date, code],
+        ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        return float(row[0])
 
 
 # ---------------------------------------------------------------------------
@@ -757,19 +779,25 @@ def _held_days(
     conn: duckdb.DuckDBPyConnection,
     code: str,
     target_date: date,
+    sqlite_conn: sqlite3.Connection | None = None,
 ) -> int | None:
     """position_entries から最新の未クローズ entry_date を取得し、
     entry_date 〜 target_date の営業日数を返す（entry_date 当日 = 0）。
     レコードなし → None（チェックスキップ・安全側）。
+    sqlite_conn が指定された場合は SQLite から取得する（ライブ実行用）。
     """
-    row = conn.execute(
-        """
-        SELECT entry_date FROM position_entries
-        WHERE code = ? AND sell_date IS NULL
-        ORDER BY entry_date DESC LIMIT 1
-        """,
-        [code],
-    ).fetchone()
+    if sqlite_conn is not None:
+        row = sqlite_conn.execute(
+            "SELECT entry_date FROM position_entries WHERE code = ? AND sell_date IS NULL "
+            "ORDER BY entry_date DESC LIMIT 1",
+            [code],
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT entry_date FROM position_entries WHERE code = ? AND sell_date IS NULL "
+            "ORDER BY entry_date DESC LIMIT 1",
+            [code],
+        ).fetchone()
     if row is None:
         return None
     entry_date = row[0] if isinstance(row[0], date) else date.fromisoformat(str(row[0]))
@@ -784,18 +812,24 @@ def _is_reentry_blocked(
     code: str,
     target_date: date,
     cooldown_days: int = _REENTRY_COOLDOWN_DAYS,
+    sqlite_conn: sqlite3.Connection | None = None,
 ) -> bool:
     """最新の sell_date から target_date までの営業日数が cooldown_days 未満なら True。
     sell_date が NULL またはレコードなしは False（制限なし）。
+    sqlite_conn が指定された場合は SQLite から取得する（ライブ実行用）。
     """
-    row = conn.execute(
-        """
-        SELECT sell_date FROM position_entries
-        WHERE code = ? AND sell_date IS NOT NULL
-        ORDER BY sell_date DESC LIMIT 1
-        """,
-        [code],
-    ).fetchone()
+    if sqlite_conn is not None:
+        row = sqlite_conn.execute(
+            "SELECT sell_date FROM position_entries WHERE code = ? AND sell_date IS NOT NULL "
+            "ORDER BY sell_date DESC LIMIT 1",
+            [code],
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT sell_date FROM position_entries WHERE code = ? AND sell_date IS NOT NULL "
+            "ORDER BY sell_date DESC LIMIT 1",
+            [code],
+        ).fetchone()
     if row is None or row[0] is None:
         return False
     sell_date = row[0] if isinstance(row[0], date) else date.fromisoformat(str(row[0]))
@@ -844,6 +878,7 @@ def _generate_sell_signals(
     max_holding_days: int = _MAX_HOLDING_DAYS,
     trailing_stop_atr: float = _TRAILING_STOP_ATR_MULT,
     stop_loss_rate: float = _STOP_LOSS_RATE,
+    sqlite_conn: sqlite3.Connection | None = None,
 ) -> list[dict[str, Any]]:
     """保有ポジションに対してエグジット条件を判定し、SELL シグナルを返す。
 
@@ -948,7 +983,7 @@ def _generate_sell_signals(
 
         # トレーリングストップ（含み益保護）: min_holding_days を無視して発火
         # peak_close > avg_price のとき（含み益あり）のみ適用
-        peak = _peak_close(conn, code, target_date)
+        peak = _peak_close(conn, code, target_date, sqlite_conn=sqlite_conn)
         if peak is not None and peak > avg_price:
             atr = _atr_20d(conn, code, target_date)
             if atr is not None and close < peak - trailing_stop_atr * atr:
@@ -972,7 +1007,7 @@ def _generate_sell_signals(
                 continue
 
         # 時間決済（最大保有期間超過）: min_holding_days を無視して発火
-        held = _held_days(conn, code, target_date)
+        held = _held_days(conn, code, target_date, sqlite_conn=sqlite_conn)
         if held is not None and held >= max_holding_days:
             logger.debug(
                 "_generate_sell_signals: %s 保有 %d 営業日 >= max %d — time_exit date=%s",
@@ -1039,6 +1074,7 @@ def generate_signals(
     trailing_stop_atr: float | None = None,
     *,
     regime_provider: RegimeProvider | None = None,
+    sqlite_conn: sqlite3.Connection | None = None,
 ) -> int:
     """features テーブルを読み込み、売買シグナルを生成して signals テーブルへ書き込む。
 
@@ -1322,6 +1358,7 @@ def generate_signals(
                 r["code"],
                 target_date,
                 cooldown_days=_cfg["reentry_cooldown_days"],
+                sqlite_conn=sqlite_conn,
             ):
                 logger.debug("reentry blocked: %s — date=%s", r["code"], target_date)
                 reentry_suppressed += 1
@@ -1372,6 +1409,7 @@ def generate_signals(
         max_holding_days=max_holding_days,
         trailing_stop_atr=trailing_stop_atr,
         stop_loss_rate=_cfg["stop_loss_rate"],
+        sqlite_conn=sqlite_conn,
     )
 
     # SELL 対象銘柄は BUY から除外し、ランクを連番で再付与（SELL 優先ポリシー）

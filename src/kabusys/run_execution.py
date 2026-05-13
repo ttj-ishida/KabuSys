@@ -26,7 +26,10 @@ _RISK_CONFIG = _PROJECT_ROOT / "config" / "risk_config.yaml"
 from kabusys.execution.broker_factory import BrokerClientFactory  # noqa: E402
 from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine  # noqa: E402
 from kabusys.execution.order_manager import OrderManager  # noqa: E402
-from kabusys.execution.order_repository import OrderRepository  # noqa: E402
+from kabusys.execution.order_repository import (  # noqa: E402
+    OrderRepository,
+    init_position_entries_db,
+)
 from kabusys.execution.reconciler import Reconciler  # noqa: E402
 from kabusys.execution.risk_manager import RiskConfig, RiskManager  # noqa: E402
 from kabusys.monitoring.monitoring_db import init_monitoring_db  # noqa: E402
@@ -253,7 +256,8 @@ def main() -> None:
     sqlite_path = settings.paper_sqlite_path if settings.is_paper else settings.sqlite_path
     sqlite_conn = sqlite3.connect(str(sqlite_path))
     init_monitoring_db(sqlite_conn)  # 監視テーブルが存在することを保証（冪等）
-    duckdb_conn = duckdb.connect(str(settings.duckdb_path))
+    init_position_entries_db(sqlite_conn)  # position_entries テーブルが存在することを保証（冪等）
+    duckdb_conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
 
     try:
         # 3. ブローカークライアント（paper mode かつ非サンドボックスは前回状態を復元）
@@ -327,6 +331,7 @@ def main() -> None:
             risk_manager=risk_manager,
             order_manager=order_manager,
             duckdb_conn=duckdb_conn,
+            sqlite_conn=sqlite_conn,
             config=EngineConfig(target_date=today),
             reconciler=None,
             pid_file=_EXECUTION_PID,
