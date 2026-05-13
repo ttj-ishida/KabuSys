@@ -228,6 +228,24 @@ class TestFormatPositionReconciliationMessage:
         assert "7203" not in msg
         assert "6758" not in msg
 
+    def test_positive_diff_shows_plus_sign(self):
+        msg = format_position_reconciliation_message(
+            status="DISCREPANCY",
+            total_count=1,
+            mismatch_count=1,
+            positions=[
+                {
+                    "code": "7203",
+                    "broker_qty": 100,
+                    "local_qty": 0,
+                    "diff": 100,
+                    "status": "MISMATCH",
+                }
+            ],
+            report_date="2026-05-13",
+        )
+        assert "+100" in msg
+
     def test_returns_string(self):
         msg = format_position_reconciliation_message(
             status="CLEAN",

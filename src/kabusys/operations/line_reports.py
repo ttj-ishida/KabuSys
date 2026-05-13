@@ -25,6 +25,7 @@ def format_position_reconciliation_message(
     mismatch_count: int,
     positions: list[dict],
     report_date: str,
+    max_mismatches: int = 10,
 ) -> str:
     """Position Reconciliation Report 完了時の LINE 通知メッセージを生成する。
 
@@ -43,15 +44,21 @@ def format_position_reconciliation_message(
     ]
 
     if status == "DISCREPANCY":
-        mismatches = [p for p in positions if p.get("status") == "MISMATCH"]
+        mismatches = sorted(
+            [p for p in positions if p.get("status") == "MISMATCH"],
+            key=lambda p: p["code"],
+        )
         if mismatches:
+            shown = mismatches[:max_mismatches]
             lines.append("差分銘柄:")
-            for p in mismatches:
-                diff = p["broker_qty"] - p["local_qty"]
+            for p in shown:
+                diff = p.get("diff", p["broker_qty"] - p["local_qty"])
                 diff_str = f"+{diff}" if diff > 0 else str(diff)
                 lines.append(
                     f"  {p['code']} ブローカー:{p['broker_qty']} / ローカル:{p['local_qty']} (差分:{diff_str})"
                 )
+            if len(mismatches) > max_mismatches:
+                lines.append(f"  … 他 {len(mismatches) - max_mismatches} 件")
 
     return "\n".join(lines)
 

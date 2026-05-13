@@ -55,7 +55,7 @@ def main() -> None:
     sqlite_conn = None
     broker = None
     try:
-        sqlite_uri = Path(settings.sqlite_path).resolve().as_uri() + "?mode=ro"
+        sqlite_uri = f"file:{Path(settings.sqlite_path).resolve().as_posix()}?mode=ro"
         sqlite_conn = sqlite3.connect(sqlite_uri, uri=True)
         broker = BrokerClientFactory.create(settings)
         repo = OrderRepository(sqlite_conn)
@@ -64,7 +64,13 @@ def main() -> None:
         report = build_report(entries, report_date=today)
 
         saved_path = save_report(report)
-        logger.info("レポート保存: %s", saved_path)
+        logger.info(
+            "レポート保存: %s  ステータス=%s  差分=%d/%d",
+            saved_path,
+            report.status,
+            report.mismatch_count,
+            report.total_count,
+        )
         print(format_cli_summary(report))
 
         # LINE 通知（失敗しても処理継続）
@@ -75,7 +81,7 @@ def main() -> None:
                 total_count=report.total_count,
                 mismatch_count=report.mismatch_count,
                 positions=report.positions,
-                report_date=today.isoformat(),
+                report_date=report.report_date,
             )
             notifier.send(msg)
         except Exception:
