@@ -15,6 +15,7 @@ from kabusys.operations.pre_market_report import (
     STATUS_READY,
     STATUS_READY_WITH_WARNINGS,
 )
+from kabusys.utils.datetime_utils import to_jst_str
 
 st.set_page_config(page_title="Pre-Market", layout="wide", page_icon="🌅")
 st.title("🌅 Pre-Market — 朝の確認")
@@ -97,7 +98,7 @@ with col4:
 with col5:
     st.metric("保有ポジション", f"📊 {result['position_count']}銘柄")
 with col6:
-    st.caption(f"生成: {result['generated_at']}")
+    st.caption(f"生成: {to_jst_str(result['generated_at'])}")
 
 if result["warnings"]:
     st.divider()

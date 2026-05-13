@@ -11,6 +11,7 @@ import streamlit as st
 from kabusys.config import Settings
 from kabusys.monitoring.monitoring_db import MonitoringDB
 from kabusys.operations.process_registry import is_pid_alive
+from kabusys.utils.datetime_utils import to_jst_str
 
 st.set_page_config(page_title="Process Monitor", layout="wide", page_icon="🖥️")
 st.title("🖥️ Process Monitor — プロセス実行状況")
@@ -80,7 +81,7 @@ if alive_running:
             {
                 "ジョブ名": r["job_name"],
                 "PID": r["pid"] or "-",
-                "開始": r["started_at"][:19],
+                "開始": to_jst_str(r["started_at"]),
                 "経過": _elapsed(r["started_at"]),
                 "ログ": r.get("log_file") or "",
             }
@@ -100,7 +101,7 @@ if orphaned:
             {
                 "ジョブ名": r["job_name"],
                 "PID": r["pid"] or "-",
-                "開始": r["started_at"][:19],
+                "開始": to_jst_str(r["started_at"]),
                 "経過": _elapsed(r["started_at"]),
                 "ログ": r.get("log_file") or "",
             }
@@ -118,8 +119,8 @@ if completed:
             {
                 "ジョブ名": r["job_name"],
                 "ステータス": _STATUS_BADGE.get(r["status"], f"❓ {r['status']}"),
-                "開始": r["started_at"][:19],
-                "終了": r["finished_at"][:19] if r["finished_at"] else "?",
+                "開始": to_jst_str(r["started_at"]),
+                "終了": to_jst_str(r["finished_at"]),
                 "経過": _elapsed(r["started_at"], r["finished_at"]),
                 "エラー": r.get("error_msg") or "",
             }
