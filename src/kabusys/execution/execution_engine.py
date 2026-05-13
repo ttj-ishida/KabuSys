@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import queue
+import sqlite3
 import threading
 import time as _time_module
 from dataclasses import dataclass
@@ -48,6 +49,7 @@ class ExecutionEngine:
         order_manager: OrderManager,
         duckdb_conn: duckdb.DuckDBPyConnection,
         config: EngineConfig,
+        sqlite_conn: sqlite3.Connection | None = None,
         reconciler: Reconciler | None = None,
         pid_file: Path | None = None,
         monitoring_db: MonitoringDB | None = None,
@@ -57,6 +59,7 @@ class ExecutionEngine:
         self._risk_manager = risk_manager
         self._order_manager = order_manager
         self._duckdb_conn = duckdb_conn
+        self._sqlite_conn = sqlite_conn
         self._config = config
         self._reconciler = reconciler
         self._pid_file: Path | None = pid_file
@@ -178,24 +181,26 @@ class ExecutionEngine:
             # fill_date: 発注当日の翌営業日（バックテストと整合させるため）
             # BUY pending も記録する（発注確約済みとして扱う。キャンセル時はリコンシリエーションで回収）
             # SELL pending は記録しない（保有中のポジションのクローズ確定前のため）
-            if _order_sent:
+            # NOTE: _process_signals はメインスレッドからのみ呼び出される。
+            #       sqlite_conn は check_same_thread=True（デフォルト）のため他スレッドからアクセス不可。
+            if _order_sent and self._sqlite_conn is not None:
                 try:
                     fill_date = next_trading_day(self._duckdb_conn, self._config.target_date)
                     if side == "buy":
-                        self._duckdb_conn.execute(
-                            """
-                            INSERT INTO position_entries (code, entry_date)
-                            VALUES (?, ?)
-                            ON CONFLICT DO NOTHING
-                            """,
-                            [code, fill_date],
+                        self._sqlite_conn.execute(
+                            # INSERT OR IGNORE: 同一 (code, entry_date) の重複エントリーは無視する
+                            "INSERT OR IGNORE INTO position_entries (code, entry_date) VALUES (?, ?)",
+                            [code, str(fill_date)],
                         )
+                        self._sqlite_conn.commit()
                     elif side == "sell" and not _order_pending:
-                        self._duckdb_conn.execute(
+                        # 1銘柄1エントリー設計のため sell_date IS NULL のエントリーは常に1件以下
+                        self._sqlite_conn.execute(
                             "UPDATE position_entries SET sell_date = ? "
                             "WHERE code = ? AND sell_date IS NULL",
-                            [fill_date, code],
+                            [str(fill_date), code],
                         )
+                        self._sqlite_conn.commit()
                 except Exception as _pe_exc:
                     logger.warning("position_entries 書き込み失敗（発注フローは継続）: %s", _pe_exc)
 

@@ -7,6 +7,7 @@ Task Scheduler から 20:00 に起動される。
 from __future__ import annotations
 
 import logging
+import sqlite3
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -15,6 +16,7 @@ import duckdb
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
+from kabusys.execution.order_repository import init_position_entries_db
 from kabusys.operations.job_run_recorder import write_job_result
 from kabusys.operations.night_batch_report import JobRunResult
 from kabusys.operations.process_registry import register_process, update_process
@@ -41,11 +43,14 @@ def main() -> None:
     _errors: list[str] = []
     _updated_rows: dict[str, int] = {}
 
+    sqlite_conn = None
     try:
         settings = Settings()
         conn = duckdb.connect(str(settings.duckdb_path))
+        sqlite_conn = sqlite3.connect(str(settings.sqlite_path), timeout=30.0)
+        init_position_entries_db(sqlite_conn)
         target_date = date.today()
-        n = generate_signals(conn, target_date)
+        n = generate_signals(conn, target_date, sqlite_conn=sqlite_conn)
         _updated_rows["signals"] = n
         logger.info("シグナル生成完了: %d 件 (date=%s)", n, target_date)
     except Exception as exc:
@@ -55,6 +60,8 @@ def main() -> None:
     finally:
         if conn is not None:
             conn.close()
+        if sqlite_conn is not None:
+            sqlite_conn.close()
 
     finished_at = datetime.now(timezone.utc)
     try:

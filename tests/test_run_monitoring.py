@@ -49,7 +49,7 @@ class TestRunMonitoringMain:
     def test_uses_sqlite_path(self):
         _, mock_sqlite, _ = _run_main()
         settings = _make_settings()
-        mock_sqlite.assert_called_once_with(str(settings.sqlite_path))
+        mock_sqlite.assert_called_once_with(str(settings.sqlite_path), timeout=30.0)
 
 
 def test_run_monitoring_stops_on_flag(tmp_path):

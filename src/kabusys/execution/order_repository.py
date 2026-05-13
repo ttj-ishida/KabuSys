@@ -22,6 +22,25 @@ _TERMINAL_STATES = frozenset(
 )
 
 
+def init_position_entries_db(conn: sqlite3.Connection) -> None:
+    """position_entries テーブルとインデックスを作成する（冪等）。"""
+    conn.executescript("""
+        PRAGMA journal_mode=WAL;
+        PRAGMA busy_timeout=30000;
+        CREATE TABLE IF NOT EXISTS position_entries (
+            code        TEXT NOT NULL,
+            entry_date  TEXT NOT NULL,
+            sell_date   TEXT,
+            PRIMARY KEY (code, entry_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_position_entries_code_sell
+            ON position_entries(code, sell_date);
+        CREATE INDEX IF NOT EXISTS idx_position_entries_code_entry
+            ON position_entries(code, entry_date);
+    """)
+    conn.commit()
+
+
 def init_orders_db(conn: sqlite3.Connection) -> None:
     """orders テーブルとインデックスを作成する（冪等）。"""
     conn.executescript("""

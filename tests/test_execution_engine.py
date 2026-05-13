@@ -34,6 +34,7 @@ def _make_engine(
         risk_manager=rm,
         order_manager=order_manager,
         duckdb_conn=duckdb_conn,
+        sqlite_conn=sqlite_conn,
         config=cfg,
         monitoring_db=monitoring_db,
     )
@@ -411,7 +412,7 @@ class TestPositionEntriesOnFill:
     """BUY/SELL 発注成功時に position_entries が記録される。"""
 
     def test_buy_signal_inserts_position_entry(self, sqlite_conn, duckdb_conn):
-        """BUY 発注成功 → position_entries に entry_date が挿入される。"""
+        """BUY 発注成功 → position_entries（SQLite）に entry_date が挿入される。"""
         _insert_signal(duckdb_conn, "9999", side="buy")
         _insert_target(duckdb_conn, "9999", qty=100, price=1000.0)
         broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
@@ -419,14 +420,14 @@ class TestPositionEntriesOnFill:
 
         engine._process_signals()
 
-        row = duckdb_conn.execute(
+        row = sqlite_conn.execute(
             "SELECT entry_date FROM position_entries WHERE code = '9999'"
         ).fetchone()
         assert row is not None, "BUY 発注後に position_entries が挿入されるべき"
-        assert row[0] == FILL_DATE, "entry_date は約定日（翌営業日）であるべき"
+        assert str(row[0]) == str(FILL_DATE), "entry_date は約定日（翌営業日）であるべき"
 
     def test_buy_signal_pending_inserts_position_entry(self, sqlite_conn, duckdb_conn):
-        """BUY 発注保留（OrderSentPendingError）でも position_entries に entry_date が挿入される。"""
+        """BUY 発注保留（OrderSentPendingError）でも position_entries（SQLite）に entry_date が挿入される。"""
         _insert_signal(duckdb_conn, "8888", side="buy")
         _insert_target(duckdb_conn, "8888", qty=100, price=1000.0)
         broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
@@ -434,14 +435,14 @@ class TestPositionEntriesOnFill:
 
         engine._process_signals()
 
-        row = duckdb_conn.execute(
+        row = sqlite_conn.execute(
             "SELECT entry_date FROM position_entries WHERE code = '8888'"
         ).fetchone()
         assert row is not None, "発注保留（pending）後も position_entries が挿入されるべき"
-        assert row[0] == FILL_DATE, "entry_date は約定日（翌営業日）であるべき"
+        assert str(row[0]) == str(FILL_DATE), "entry_date は約定日（翌営業日）であるべき"
 
     def test_buy_signal_idempotent(self, sqlite_conn, duckdb_conn):
-        """同一 code/date の BUY を2回処理しても position_entries は1行のみ（冪等性）。"""
+        """同一 code/date の BUY を2回処理しても position_entries（SQLite）は1行のみ（冪等性）。"""
         _insert_signal(duckdb_conn, "7777", side="buy")
         _insert_target(duckdb_conn, "7777", qty=100, price=1000.0)
         broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
@@ -450,17 +451,18 @@ class TestPositionEntriesOnFill:
         engine._process_signals()
         engine._process_signals()  # 2回目: DuplicateOrderError でスキップされるが position_entries は変わらない
 
-        rows = duckdb_conn.execute(
+        rows = sqlite_conn.execute(
             "SELECT entry_date FROM position_entries WHERE code = '7777'"
         ).fetchall()
-        assert len(rows) == 1, "ON CONFLICT DO NOTHING により重複挿入されないこと"
+        assert len(rows) == 1, "INSERT OR IGNORE により重複挿入されないこと"
 
     def test_sell_signal_updates_sell_date(self, sqlite_conn, duckdb_conn):
-        """SELL 発注成功 → position_entries の sell_date が更新される。"""
-        duckdb_conn.execute(
+        """SELL 発注成功 → position_entries（SQLite）の sell_date が更新される。"""
+        sqlite_conn.execute(
             "INSERT INTO position_entries (code, entry_date) VALUES ('6666', ?)",
-            [TARGET_DATE],
+            [str(TARGET_DATE)],
         )
+        sqlite_conn.commit()
         _insert_signal(duckdb_conn, "6666", side="sell")
         _insert_target(duckdb_conn, "6666", qty=100, price=1000.0)
         broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
@@ -468,18 +470,19 @@ class TestPositionEntriesOnFill:
 
         engine._process_signals()
 
-        row = duckdb_conn.execute(
+        row = sqlite_conn.execute(
             "SELECT sell_date FROM position_entries WHERE code = '6666'"
         ).fetchone()
         assert row is not None
-        assert row[0] == FILL_DATE, "sell_date は約定日（翌営業日）であるべき"
+        assert str(row[0]) == str(FILL_DATE), "sell_date は約定日（翌営業日）であるべき"
 
     def test_sell_signal_pending_does_not_update_sell_date(self, sqlite_conn, duckdb_conn):
         """SELL 発注保留（pending）では sell_date を書かない（ポジションはまだ保有中）。"""
-        duckdb_conn.execute(
+        sqlite_conn.execute(
             "INSERT INTO position_entries (code, entry_date) VALUES ('5555', ?)",
-            [TARGET_DATE],
+            [str(TARGET_DATE)],
         )
+        sqlite_conn.commit()
         _insert_signal(duckdb_conn, "5555", side="sell")
         _insert_target(duckdb_conn, "5555", qty=100, price=1000.0)
         broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
@@ -487,7 +490,7 @@ class TestPositionEntriesOnFill:
 
         engine._process_signals()
 
-        row = duckdb_conn.execute(
+        row = sqlite_conn.execute(
             "SELECT sell_date FROM position_entries WHERE code = '5555'"
         ).fetchone()
         assert row is not None

@@ -11,7 +11,7 @@ import sqlite3
 import duckdb
 import pytest
 
-from kabusys.execution.order_repository import init_orders_db
+from kabusys.execution.order_repository import init_orders_db, init_position_entries_db
 from kabusys.monitoring.monitoring_db import init_monitoring_db
 
 # テスト対象テーブルのみ作成（FK CASCADE/SET NULL を持つテーブルは除外）
@@ -69,6 +69,7 @@ def mem_db():
 def sqlite_conn():
     c = sqlite3.connect(":memory:")
     init_orders_db(c)
+    init_position_entries_db(c)
     yield c
     c.close()
 
