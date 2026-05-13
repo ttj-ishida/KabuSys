@@ -7,8 +7,67 @@ DB 参照なし — メモリ内計算のみ。
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_PORTFOLIO_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "strategy_config.yaml"
+_DEFAULT_MAX_POSITIONS = 10
+
+
+def load_portfolio_config() -> dict[str, int]:
+    """config/strategy_config.yaml の portfolio セクションから設定を読み込む。
+
+    ファイル不在・読み込み失敗・不正値はデフォルト値にフォールバック。
+    """
+    import yaml
+
+    result: dict[str, int] = {"max_positions": _DEFAULT_MAX_POSITIONS}
+    if not _PORTFOLIO_CONFIG_PATH.exists():
+        logger.warning(
+            "strategy_config.yaml が見つからないため、max_positions はデフォルト %d を使用します",
+            _DEFAULT_MAX_POSITIONS,
+        )
+        return result
+    try:
+        with open(_PORTFOLIO_CONFIG_PATH, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except Exception:
+        logger.warning(
+            "strategy_config.yaml の読み込みに失敗したため、max_positions はデフォルト %d を使用します",
+            _DEFAULT_MAX_POSITIONS,
+            exc_info=True,
+        )
+        return result
+    if not isinstance(data, dict):
+        logger.debug(
+            "strategy_config.yaml のルートが dict でないため、max_positions はデフォルト値を使用します"
+        )
+        return result
+    p = data.get("portfolio")
+    if not isinstance(p, dict):
+        logger.debug(
+            "portfolio セクションが存在しないか dict でないため、max_positions はデフォルト値を使用します"
+        )
+        return result
+    v = p.get("max_positions")
+    if v is None:
+        logger.debug("portfolio.max_positions が未設定のため、デフォルト値を使用します")
+        return result
+    if (
+        isinstance(v, bool)
+        or not isinstance(v, (int, float))
+        or (isinstance(v, float) and not v.is_integer())
+        or int(v) < 1
+    ):
+        logger.warning(
+            "portfolio.max_positions=%r は無効な値のため、デフォルト %d を使用します",
+            v,
+            _DEFAULT_MAX_POSITIONS,
+        )
+        return result
+    result["max_positions"] = int(v)
+    return result
 
 
 def select_candidates(

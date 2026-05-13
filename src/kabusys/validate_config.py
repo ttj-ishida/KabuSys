@@ -397,6 +397,29 @@ def _check_strategy_config_content(data: object) -> None:
             " time_exit が最低保有日数より先に発火するため、min_holding_days は実質的に無効になります。"
         )
 
+    # portfolio.max_positions
+    port = data.get("portfolio") if isinstance(data, dict) else None
+    if port is not None:
+        if not isinstance(port, dict):
+            _error("strategy_config.yaml: 'portfolio' セクションが dict ではありません。")
+        else:
+            mp = port.get("max_positions")
+            if mp is not None:
+                if isinstance(mp, bool) or not isinstance(mp, (int, float)):
+                    _error(
+                        f"strategy_config.yaml: portfolio.max_positions は整数で設定してください（現在値: {mp!r}）。"
+                    )
+                elif isinstance(mp, float) and not mp.is_integer():
+                    _error(
+                        f"strategy_config.yaml: portfolio.max_positions は整数で設定してください（現在値: {mp}）。"
+                    )
+                elif int(mp) < 1:
+                    _error(
+                        f"strategy_config.yaml: portfolio.max_positions は 1 以上で設定してください（現在値: {mp}）。"
+                    )
+                else:
+                    _info(f"strategy_config.yaml: portfolio.max_positions = {int(mp)}")
+
 
 def _check_config_yaml_files() -> None:
     """config/*.yaml の存在・構文確認。risk_config.yaml および strategy_config.yaml はセマンティック検証も行う。"""
