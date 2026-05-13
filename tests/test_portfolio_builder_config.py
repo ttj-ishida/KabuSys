@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
 
 class TestLoadPortfolioConfig:
     def test_returns_default_when_no_file(self, tmp_path, monkeypatch):
