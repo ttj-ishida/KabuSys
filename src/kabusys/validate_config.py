@@ -409,6 +409,10 @@ def _check_strategy_config_content(data: object) -> None:
                     _error(
                         f"strategy_config.yaml: portfolio.max_positions は整数で設定してください（現在値: {mp!r}）。"
                     )
+                elif isinstance(mp, float) and not mp.is_integer():
+                    _error(
+                        f"strategy_config.yaml: portfolio.max_positions は整数で設定してください（現在値: {mp}）。"
+                    )
                 elif int(mp) < 1:
                     _error(
                         f"strategy_config.yaml: portfolio.max_positions は 1 以上で設定してください（現在値: {mp}）。"

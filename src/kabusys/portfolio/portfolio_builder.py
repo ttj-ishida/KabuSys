@@ -24,11 +24,20 @@ def load_portfolio_config() -> dict:
 
     result: dict = {"max_positions": _DEFAULT_MAX_POSITIONS}
     if not _PORTFOLIO_CONFIG_PATH.exists():
+        logger.warning(
+            "strategy_config.yaml が見つからないため、max_positions はデフォルト %d を使用します",
+            _DEFAULT_MAX_POSITIONS,
+        )
         return result
     try:
         with open(_PORTFOLIO_CONFIG_PATH, encoding="utf-8") as f:
             data = yaml.safe_load(f)
     except Exception:
+        logger.warning(
+            "strategy_config.yaml の読み込みに失敗したため、max_positions はデフォルト %d を使用します",
+            _DEFAULT_MAX_POSITIONS,
+            exc_info=True,
+        )
         return result
     if not isinstance(data, dict):
         return result
@@ -36,8 +45,21 @@ def load_portfolio_config() -> dict:
     if not isinstance(p, dict):
         return result
     v = p.get("max_positions")
-    if v is not None and not isinstance(v, bool) and isinstance(v, (int, float)) and int(v) >= 1:
-        result["max_positions"] = int(v)
+    if v is None:
+        return result
+    if (
+        isinstance(v, bool)
+        or not isinstance(v, (int, float))
+        or (isinstance(v, float) and not v.is_integer())
+        or int(v) < 1
+    ):
+        logger.warning(
+            "portfolio.max_positions=%r は無効な値のため、デフォルト %d を使用します",
+            v,
+            _DEFAULT_MAX_POSITIONS,
+        )
+        return result
+    result["max_positions"] = int(v)
     return result
 
 

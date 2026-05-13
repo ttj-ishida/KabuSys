@@ -104,7 +104,7 @@ def main() -> None:
 
         portfolio_cfg = load_portfolio_config()
         max_positions = portfolio_cfg["max_positions"]
-        logger.info("max_positions: %d", max_positions)
+        logger.info("最大保有銘柄数: %d", max_positions)
 
         if not buy_signals:
             logger.info("本日の BUY シグナルが 0 件です。signal_queue を更新しません。")
