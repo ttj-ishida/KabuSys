@@ -251,6 +251,7 @@ api = create_broker_api(mock=False, api_password="...", base_url="http://localho
 - 発注系 API はレート制限 5 req/sec（Section 3 第2関門で制御）
 - WebSocket（市場データ PUSH）は Execution Engine（Issue #30）で別途扱う
 - 詳細仕様: `docs/superpowers/specs/2026-03-26-broker-api-design.md`
+- **検証環境（ポート 18081）の `/wallet/cash` は `StockAccountWallet: null` を返す**: kabuステーション検証環境の仕様により、現物取引余力が `null` で返却される。`KabuStationClient.get_available_cash()` はこの場合 `0.0` を返す（Issue #317）。本番環境（ポート 18080）では正常な数値が返るため動作に差異はない。
 
 ---
 

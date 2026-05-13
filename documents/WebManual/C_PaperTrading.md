@@ -216,6 +216,8 @@ python -m kabusys.run_execution
 
 > kabuステーションを検証用（ポート 18081）でログインしてから起動してください。  
 > 発注リクエストはポート 18081 のsandbox APIへ実際に送信されます（`KABU_API_BASE_URL` の設定に関係なく 18081 を使用）。kabuステーション検証環境の仕様により実市場約定は発生しません。
+>
+> **現物取引余力（`/wallet/cash`）の注意**: 検証環境では `StockAccountWallet: null` が返るため、`get_available_cash()` は常に `0.0` を返します（Issue #317）。第1関門の資金チェックが常に失敗し発注がスキップされますが、これは検証環境の仕様です。発注フロー・認証・API接続の E2E テストは正常に行えます。
 
 ### 停止
 
@@ -298,6 +300,7 @@ python scripts/setup_db.py --paper-reset
 | モック口座の状態復元 | #255 | ✅ 実装済み | 毎日の再起動後にも前日のポジション・現金残高が `paper_trading.db` から自動復元される |
 | テスト DB リセット機能 | #255 | ✅ 実装済み | `python scripts/setup_db.py --paper-reset` でワンコマンド初期化 |
 | kabuステーション検証環境対応 | #255 | ✅ 実装済み | `KABU_USE_SANDBOX=true` でポート 18081 の検証環境に接続し、本番と同じ API コードパスをテスト |
+| 検証環境の null 余力に対応 | #317 | ✅ 実装済み | 検証環境（ポート 18081）の `/wallet/cash` が `null` を返す場合、`get_available_cash()` が `0.0` を返すよう修正（`TypeError` クラッシュを防止） |
 
 ---
 
