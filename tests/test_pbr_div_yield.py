@@ -88,14 +88,14 @@ class TestBpsExtraction:
         conn = init_schema(":memory:")
         records = [
             {
-                "LocalCode": "72030",
-                "DisclosedDate": "2024-03-31",
-                "TypeOfDocument": "Q4",
-                "NetSales": "1000000",
-                "OperatingProfit": "200000",
-                "Profit": "150000",
-                "EarningsPerShare": "100.0",
-                "ROE": "0.15",
+                "Code": "72030",
+                "DiscDate": "2024-03-31",
+                "CurPerType": "Q4",
+                "Sales": "1000000",
+                "OP": "200000",
+                "NP": "150000",
+                "EPS": "100.0",
+                "Eq": "1000000",
                 "BookValuePerShare": "1500.0",
             }
         ]
@@ -111,11 +111,12 @@ class TestBpsExtraction:
         conn = init_schema(":memory:")
         records = [
             {
-                "LocalCode": "72031",
-                "DisclosedDate": "2024-03-31",
-                "TypeOfDocument": "Q4",
-                "EarningsPerShare": "50.0",
-                "ROE": "0.10",
+                "Code": "72031",
+                "DiscDate": "2024-03-31",
+                "CurPerType": "Q4",
+                "EPS": "50.0",
+                "NP": "50000",
+                "Eq": "500000",
                 # BookValuePerShare なし
             }
         ]

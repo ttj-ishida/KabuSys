@@ -6,6 +6,12 @@ from kabusys.execution.broker_factory import BrokerClientFactory
 from kabusys.execution.mock_client import MockBrokerClient
 
 
+@pytest.fixture(autouse=True)
+def _clear_sandbox_env(monkeypatch):
+    """ローカル .env の KABU_USE_SANDBOX がテスト結果に影響しないよう除去する。"""
+    monkeypatch.delenv("KABU_USE_SANDBOX", raising=False)
+
+
 class TestPaperFillMode:
     def test_default_is_instant(self, monkeypatch):
         monkeypatch.delenv("PAPER_FILL_MODE", raising=False)
