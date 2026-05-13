@@ -174,12 +174,24 @@ python -m kabusys.run_signal_queue_report --date 2026-05-13
 ペーパートレードは本番と同じ `TradingRunbook.md` の運用フローに従います。
 以下は、ペーパートレード固有の差分のみを説明します。
 
-### 朝の確認（08:00）
+### 朝の確認（08:00〜08:05）
 
-本番と同様に Pre-Market Report で確認します。
+本番と同様に、3 本のレポートが Task Scheduler により自動実行されます。
+
+| 時刻 | ジョブ | ペーパートレードでの主な確認内容 |
+|------|--------|----------------------------------|
+| 08:00 | `pre_market_report` | READY/BLOCKED 判定・停止フラグ確認 |
+| 08:02 | `signal_queue_report` | `pending` シグナルの銘柄・売買方向・数量の確認 |
+| 08:05 | `position_reconciliation_report` | DB ポジションとブローカー（Mock）の整合確認 |
+
+> ℹ️ `signal_queue_report` は発注予定内容（銘柄・売買方向・数量）を一覧化します。ペーパートレードでも発注内容を事前確認するために活用してください。Pure Mock モードではブローカー接続が不要なため、`position_reconciliation_report` は常に CLEAN と判定されます。
+
+手動で再実行したい場合（再確認・デバッグ時）:
 
 ```powershell
-python -m kabusys.run_pre_market_report --save
+python scripts/run_pre_market_report.py
+python scripts/run_signal_queue_report.py
+python scripts/run_position_reconciliation_report.py
 ```
 
 | 確認項目 | ペーパートレードでの確認内容 |
