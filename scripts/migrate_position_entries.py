@@ -35,8 +35,7 @@ def migrate(dry_run: bool = False) -> None:
     try:
         # DuckDB に position_entries テーブルが存在するか確認
         tables = duckdb_conn.execute(
-            "SELECT table_name FROM information_schema.tables"
-            " WHERE table_name = 'position_entries'"
+            "SELECT table_name FROM information_schema.tables WHERE table_name = 'position_entries'"
         ).fetchall()
         if not tables:
             print("DuckDB に position_entries テーブルが存在しません。移行不要です。")
