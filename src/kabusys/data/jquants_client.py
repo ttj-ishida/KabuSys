@@ -473,7 +473,7 @@ def save_financial_statements(
             _to_float(r.get("NP")) / _to_float(r.get("Eq"))
             if _to_float(r.get("NP")) is not None and _to_float(r.get("Eq"))
             else None,
-            None,  # bps: /fins/summary に BPS 列なし
+            _to_float(r.get("BookValuePerShare")),
             fetched_at,
         )
         for r in records

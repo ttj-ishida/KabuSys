@@ -54,17 +54,17 @@ def _sample_financial_record(
     operating_profit: float = 100000.0,
     profit: float = 80000.0,
     eps: float = 120.5,
-    roe: float = 0.12,
+    equity: float = 666666.0,
 ) -> dict:
     return {
-        "LocalCode": code,
-        "DisclosedDate": disclosed_date,
-        "TypeOfDocument": type_of_doc,
-        "NetSales": net_sales,
-        "OperatingProfit": operating_profit,
-        "Profit": profit,
-        "EarningsPerShare": eps,
-        "ROE": roe,
+        "Code": code,
+        "DiscDate": disclosed_date,
+        "CurPerType": type_of_doc,
+        "Sales": net_sales,
+        "OP": operating_profit,
+        "NP": profit,
+        "EPS": eps,
+        "Eq": equity,
     }
 
 
@@ -229,7 +229,7 @@ class TestJQuantsClientMock:
         )
         result = jquants.fetch_financial_statements()
         assert len(result) == 1
-        assert result[0]["LocalCode"] == "7203"
+        assert result[0]["Code"] == "7203"
 
     def test_fetch_market_calendar(self, monkeypatch):
         """カレンダーデータを取得できることを確認。"""
