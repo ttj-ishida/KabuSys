@@ -14,6 +14,7 @@ from kabusys.operations.execution_startup_report import (
     STATUS_READY,
     STATUS_READY_WITH_WARNINGS,
 )
+from kabusys.utils.datetime_utils import to_jst_str
 
 st.set_page_config(page_title="Execution Startup", layout="wide", page_icon="🚀")
 st.title("🚀 Execution Startup — 起動確認")
@@ -63,4 +64,4 @@ if warnings:
     for w in warnings:
         st.warning(w)
 
-st.caption(f"生成: {report_data.get('generated_at', 'N/A')}")
+st.caption(f"生成: {to_jst_str(report_data.get('generated_at'))}")

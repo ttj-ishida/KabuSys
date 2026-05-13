@@ -15,6 +15,7 @@ from kabusys.operations.intraday_collector import (
     check_kill_switch,
     check_pid_file,
 )
+from kabusys.utils.datetime_utils import to_jst_str
 
 st.set_page_config(page_title="Intraday Monitor", layout="wide", page_icon="📡")
 st.title("📡 Intraday Monitor — ザラ場監視")
@@ -74,7 +75,10 @@ try:
             "SELECT event_type, metric_name, metric_value, threshold, detail, logged_at FROM risk_logs ORDER BY logged_at DESC LIMIT 50"
         ).fetchall()
         if rows:
-            st.dataframe([dict(r) for r in rows], use_container_width=True)
+            st.dataframe(
+                [{**dict(r), "logged_at": to_jst_str(r["logged_at"])} for r in rows],
+                use_container_width=True,
+            )
         else:
             st.success("リスクイベントはありません。")
         conn.row_factory = None
@@ -85,7 +89,10 @@ try:
             "SELECT event_type, client_order_id, code, side, qty, price, filled_qty, state, logged_at FROM trade_logs ORDER BY logged_at DESC LIMIT 50"
         ).fetchall()
         if rows:
-            st.dataframe([dict(r) for r in rows], use_container_width=True)
+            st.dataframe(
+                [{**dict(r), "logged_at": to_jst_str(r["logged_at"])} for r in rows],
+                use_container_width=True,
+            )
         else:
             st.info("取引ログはありません。")
         conn.row_factory = None
