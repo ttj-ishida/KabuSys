@@ -23,6 +23,7 @@ _TOGGLE_DEFAULTS: dict[str, str] = {
     "ENABLE_TDNET": "false",
     "ENABLE_EDINET": "false",
     "ENABLE_YAHOONEWS": "false",
+    "JQUANTS_ENABLE_DIVIDENDS": "false",
 }
 
 # ---------------------------------------------------------------------------
@@ -187,6 +188,17 @@ _ITEMS: list[dict] = [
             "  Yahoo News RSS から当日ニュースを収集し raw_news テーブルへ保存する（無料）\n"
             "  false の場合 yahoonews_collection ジョブはスキップされる\n"
             "  ニュース AI スコアリングには別途 ENABLE_AI_SENTIMENT=true が必要"
+        ),
+    },
+    {
+        "key": "JQUANTS_ENABLE_DIVIDENDS",
+        "label": "配当データ ETL の有効化",
+        "choices": ["true", "false"],
+        "default": "false",
+        "description": (
+            "  J-Quants の /fins/dividend エンドポイントを使って配当データを取得する\n"
+            "  Standard プランでは HTTP 403 となるため false を設定すること\n"
+            "  true にすると div_yield 特徴量が更新される（Premium プラン以上が必要）"
         ),
     },
     {

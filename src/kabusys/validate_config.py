@@ -85,6 +85,7 @@ _OPTIONAL_ENV_VARS = [
     "KABU_USE_SANDBOX",
     "KABU_SANDBOX_API_PASSWORD",
     "PAPER_TRADING_INITIAL_CASH",
+    "JQUANTS_ENABLE_DIVIDENDS",
 ]
 
 _VALID_KABUSYS_ENVS = frozenset({"development", "paper_trading", "live"})
