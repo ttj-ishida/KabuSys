@@ -91,7 +91,8 @@ python -m kabusys.config_setup
 | 環境変数 | 説明 | デフォルト |
 |---|---|---|
 | `PAPER_FILL_MODE` | ペーパートレードの約定方式（`instant`/`partial`/`never`/`reject`） | `instant` |
-| `PAPER_TRADING_INITIAL_CASH` | MockBrokerClient の初期仮想資金（円） | `10000000` |
+| `PAPER_TRADING_INITIAL_CASH` | MockBrokerClient の初期仮想資金（円）。Execution 起動時に `paper_trading.db` の約定履歴で上書きされる。portfolio_construction のフォールバック値としても使用される。 | `10000000` |
+| `PORTFOLIO_VALUE` | portfolio_construction が使う総資産前提値（円）。**Live 時のフォールバック専用**。通常はカブステーション余力 API および DuckDB 実績値から自動取得されるため設定不要。API・DuckDB の両方が取得不可の場合のみ参照される（[Issue #335](https://github.com/ttj-ishida/KabuSys/issues/335)）。 | `10000000` |
 | `KABU_USE_SANDBOX` | `true` でポート 18081 のkabu検証環境を使用（`paper_trading` 時のみ有効） | `false` |
 | `KABU_SANDBOX_API_PASSWORD` | kabu検証環境用 API パスワード（`KABU_USE_SANDBOX=true` 時） | （空） |
 | `JQUANTS_ENABLE_DIVIDENDS` | 配当データETLの有効化。J-Quants **Premium プラン以上**が必要。Standard プランでは `false` のまま使用する。`true` にすると `div_yield` 特徴量が更新される。 | `false` |

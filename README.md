@@ -96,7 +96,8 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 その他:
 - MONITOR_POLL_INTERVAL（run_monitoring のポーリング間隔、秒; デフォルト 60）
 - PAPER_FILL_MODE（paper_trading の fill 動作: `instant`/`partial`/`never`/`reject`）
-- PAPER_TRADING_INITIAL_CASH（MockBrokerClient の初期仮想資金（円）; デフォルト `10000000`）
+- PAPER_TRADING_INITIAL_CASH（MockBrokerClient の初期仮想資金（円）; Execution 起動時に `paper_trading.db` の約定履歴で上書きされる; portfolio_construction のフォールバック値; デフォルト `10000000`）
+- PORTFOLIO_VALUE（portfolio_construction が使う総資産前提値（円）; **Live 時のフォールバック専用** — 通常はカブステーション余力 API / DuckDB 実績値から自動取得; 両方が取得不可の場合のみ参照; デフォルト `10000000`; Issue #335）
 - KABU_USE_SANDBOX（`true` でポート 18081 のkabu検証環境に接続; `paper_trading` 時のみ有効; デフォルト `false`; 検証環境では `/wallet/cash` が `null` を返すため `get_available_cash()` は `0.0` を返す — Issue #317）
 - KABU_SANDBOX_API_PASSWORD（kabu検証環境用 API パスワード; 未設定時は `KABU_API_PASSWORD` を使用）
 

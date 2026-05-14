@@ -202,11 +202,27 @@ _ITEMS: list[dict] = [
         ),
     },
     {
+        "key": "PORTFOLIO_VALUE",
+        "label": "ポートフォリオ総資産前提値（円）— Live フォールバック用",
+        "default": "10000000",
+        "optional": True,
+        "description": (
+            "  KABUSYS_ENV=live 時に run_portfolio_construction.py が使用する総資産前提値（円）\n"
+            "  通常はカブステーション余力 API および DuckDB 実績値から自動取得するため設定不要\n"
+            "  API・DuckDB の両方が取得不可の場合のみフォールバックとして参照される\n"
+            "  デフォルト: 10,000,000 円（1,000 万円）\n"
+            "  ※ Paper 時は paper_trading.db から自動計算するため本変数は参照されない\n"
+            "  ※ Issue #335 で動的取得が実装されると本変数の出番はさらに限定される"
+        ),
+    },
+    {
         "key": "PAPER_TRADING_INITIAL_CASH",
         "label": "ペーパートレード用初期資金（円）",
         "default": "10000000",
         "description": (
             "  KABUSYS_ENV=paper_trading 時の MockBrokerClient 初期現金残高（円）\n"
+            "  Execution 起動時に paper_trading.db の約定履歴で実際の残高に上書きされる\n"
+            "  portfolio_construction のフォールバック値としても使用される（paper_trading.db 未存在時）\n"
             "  デフォルト: 10,000,000 円（1,000 万円）"
         ),
     },
@@ -278,6 +294,9 @@ def _write_env(path: Path, values: dict[str, str]) -> None:
         "",
         "# --- OpenAI (AI Co-Pilot / AI センチメント分析) ---",
         f"OPENAI_API_KEY={values.get('OPENAI_API_KEY', '')}",
+        "",
+        "# --- ポートフォリオ構築設定 ---",
+        f"# PORTFOLIO_VALUE={values.get('PORTFOLIO_VALUE', '10000000')}  # Live フォールバック用（通常は API/DuckDB から自動取得）",
         "",
         "# --- ペーパートレード設定 ---",
         f"PAPER_TRADING_INITIAL_CASH={values.get('PAPER_TRADING_INITIAL_CASH', '10000000')}",

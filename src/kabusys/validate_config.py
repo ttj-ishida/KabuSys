@@ -85,6 +85,7 @@ _OPTIONAL_ENV_VARS = [
     "KABU_USE_SANDBOX",
     "KABU_SANDBOX_API_PASSWORD",
     "PAPER_TRADING_INITIAL_CASH",
+    "PORTFOLIO_VALUE",
     "JQUANTS_ENABLE_DIVIDENDS",
 ]
 
@@ -487,6 +488,26 @@ def _check_paper_trading_cash() -> None:
         _error(f"PAPER_TRADING_INITIAL_CASH は正の値で設定してください（現在値: {val}）")
 
 
+def _check_portfolio_value() -> None:
+    """PORTFOLIO_VALUE の値域チェック（設定されている場合のみ）。
+
+    Live モードの portfolio_construction フォールバック値。
+    通常はカブステーション API / DuckDB から自動取得するため未設定でも動作する（Issue #335）。
+    """
+    raw = os.environ.get("PORTFOLIO_VALUE", "").strip()
+    if not raw:
+        return
+    try:
+        val = float(raw)
+    except ValueError:
+        _error(f"PORTFOLIO_VALUE の値が不正です: '{raw}'. 正の数値で設定してください。")
+        return
+    if val <= 0:
+        _error(f"PORTFOLIO_VALUE は正の値で設定してください（現在値: {val}）")
+    else:
+        _info(f"PORTFOLIO_VALUE: {val:,.0f} 円（Live portfolio_construction フォールバック値）")
+
+
 def _check_live_guards() -> None:
     """KABUSYS_ENV=live 時の追加チェック。"""
     env = os.environ.get("KABUSYS_ENV", "development").lower()
@@ -525,6 +546,7 @@ def validate() -> tuple[list[str], list[str], list[str]]:
     _check_config_yaml_files()
     _check_sandbox_config()
     _check_paper_trading_cash()
+    _check_portfolio_value()
     _check_live_guards()
 
     return list(_errors), list(_warnings), list(_infos)
