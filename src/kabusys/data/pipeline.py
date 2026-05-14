@@ -584,6 +584,7 @@ def run_daily_etl(
     # 4. 配当データETL（差分更新 + backfill）
     # JQUANTS_ENABLE_DIVIDENDS=true のときのみ実行（Standard プランでは /fins/dividend が利用不可）
     from kabusys.config import Settings as _Settings
+
     if _Settings().enable_dividends:
         try:
             fetched, saved = run_dividends_etl(conn, trading_day, backfill_days=backfill_days)
