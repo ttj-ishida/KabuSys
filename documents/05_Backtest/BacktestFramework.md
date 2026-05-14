@@ -141,6 +141,12 @@ python -m kabusys.backtest.run \
 
 主なオプション:
 
+- `--cash 10000000` — 初期資金（円）。デフォルト 10,000,000。実口座に合わせて変更可能。
+- `--allocation-method risk_based|equal|score` — 資金配分方式。デフォルト `risk_based`。
+- `--max-positions 10` — 最大同時保有銘柄数。
+- `--max-utilization 0.70` — 最大投下資金比率（全ポジション合計の上限）。
+- `--risk-pct 0.005` — 1トレードあたり許容リスク率（`risk_based` 時）。
+- `--stop-loss-pct 0.08` — 損切り率（株数計算用）。
 - `--scope-mode default_universe|manual_codes`
 - `--codes 7203 9984 ...`
 - `--no-preserve-universe-filters`

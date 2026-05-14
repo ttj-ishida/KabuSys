@@ -22,6 +22,7 @@
 | [A_StrategyFlow.md](./A_StrategyFlow.md) | 売買判断フロー |
 | [A_OperationsCycle.md](./A_OperationsCycle.md) | 日次運用サイクル |
 | [B_CoreSetup.md](./B_CoreSetup.md) | 初期セットアップ |
+| [C_Backtest.md](./C_Backtest.md) | バックテスト実行手順 |
 | [C_PaperTrading.md](./C_PaperTrading.md) | ペーパートレード |
 | [D_LiveOperation.md](./D_LiveOperation.md) | 本番運用手順 |
 | [E_FailureRecovery.md](./E_FailureRecovery.md) | 障害復旧 |
