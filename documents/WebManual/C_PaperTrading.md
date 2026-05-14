@@ -171,35 +171,54 @@ python -m kabusys.run_signal_queue_report --date 2026-05-13
 
 ## C-4. ペーパートレードの日次運用手順
 
-ペーパートレードは本番と同じ `TradingRunbook.md` の運用フローに従います。
-以下は、ペーパートレード固有の差分のみを説明します。
+ペーパートレードは本番と同じ夜間バッチ・実行フローに従います。以下は、ペーパートレード固有の差分のみ説明します。
+
+### 1日の流れ
+
+| 時刻 | 処理 | 実行方式 | 備考 |
+|------|------|----------|------|
+| 17:30 | 市場データ更新 | 自動 | 本番 DuckDB を使用（ペーパーと共用） |
+| 18:30 | 特徴量計算 | 自動 | 同上 |
+| 20:00 | 売買シグナル生成 | 自動 | 同上 |
+| 21:00 | ポートフォリオ構築 | 自動 | 同上 |
+| 21:15 | 夜間バッチ結果レポート | 自動 | |
+| 21:30 頃 | 夜間バッチ結果の確認 | **手動** | `artifacts/night_batch/` |
+| 08:00 | Pre-Market レポート | 自動 | |
+| 08:02 | Signal Queue レポート | 自動 | |
+| 08:05 | Position Reconciliation レポート | 自動 | Pure Mock では常に `CLEAN` |
+| 08:30 | Execution Engine 起動 | 自動 | `paper_trading.db` に約定記録 |
+| 09:00 | Monitoring 起動 | 自動 | |
+| 09:00〜15:00 | ザラ場監視 | **手動** | Streamlit ダッシュボード |
+| 15:00 | 引け後確認 | **手動** | |
+
+> ℹ️ 夜間バッチ（17:30〜21:15）は本番 DuckDB を使用するため、`KABUSYS_ENV` の値に関係なく本番と同じデータ・シグナルが生成されます。Execution のみが `paper_trading.db` に記録を行います。
 
 ### 朝の確認（08:00〜08:05）
 
-本番と同様に、3 本のレポートが Task Scheduler により自動実行されます。
+3 本のレポートが Task Scheduler により自動実行されます。
 
-| 時刻 | ジョブ | ペーパートレードでの主な確認内容 |
-|------|--------|----------------------------------|
-| 08:00 | `pre_market_report` | READY/BLOCKED 判定・停止フラグ確認 |
-| 08:02 | `signal_queue_report` | `pending` シグナルの銘柄・売買方向・数量の確認 |
-| 08:05 | `position_reconciliation_report` | DB ポジションとブローカー（Mock）の整合確認 |
+| 時刻 | ジョブ | 確認内容 |
+|------|--------|---------|
+| 08:00 | `KabuSys_PreMarketReport` | READY/BLOCKED 判定・停止フラグ確認 |
+| 08:02 | `KabuSys_SignalQueueReport` | `pending` シグナルの銘柄・売買方向・数量 |
+| 08:05 | `KabuSys_PositionReconciliationReport` | DB ポジションと Mock の整合（Pure Mock は常に `CLEAN`） |
 
-> ℹ️ `signal_queue_report` は発注予定内容（銘柄・売買方向・数量）を一覧化します。ペーパートレードでも発注内容を事前確認するために活用してください。Pure Mock モードではブローカー接続が不要なため、`position_reconciliation_report` は常に `CLEAN` と判定されます。
+**起動前チェック:**
 
-手動で再実行したい場合（再確認・デバッグ時）:
+| 確認項目 | 確認内容 |
+|----------|---------|
+| Signal Queue | `pending` シグナルが存在するか（または手動注入するか） |
+| DB 状態 | `data/paper_trading.db` が存在するか |
+| 停止フラグ | `data/stop_requested.flag` が存在しないか |
+| kabuステーション | Pure Mock モードでは**不要**（検証環境モードでは必要） |
+
+手動で再実行したい場合:
 
 ```powershell
 python scripts/run_pre_market_report.py
 python scripts/run_signal_queue_report.py
 python scripts/run_position_reconciliation_report.py
 ```
-
-| 確認項目 | ペーパートレードでの確認内容 |
-|---|---|
-| Signal Queue | `pending` のシグナルが存在するか（または手動注入するか） |
-| DB 状態 | `data/paper_trading.db` が存在するか |
-| 停止フラグ | `data/stop_requested.flag` が存在しないか |
-| kabuステーション | Pure Mock モードでは**不要**（②検証環境モードでは必要） |
 
 ### Execution の起動（08:30）
 
