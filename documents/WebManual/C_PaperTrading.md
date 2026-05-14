@@ -175,21 +175,21 @@ python -m kabusys.run_signal_queue_report --date 2026-05-13
 
 ### 1日の流れ
 
-| 時刻 | 処理 | 実行方式 | 備考 |
-|------|------|----------|------|
-| 17:30 | 市場データ更新 | 自動 | 本番 DuckDB を使用（ペーパーと共用） |
-| 18:30 | 特徴量計算 | 自動 | 同上 |
-| 20:00 | 売買シグナル生成 | 自動 | 同上 |
-| 21:00 | ポートフォリオ構築 | 自動 | 同上 |
-| 21:15 | 夜間バッチ結果レポート | 自動 | |
-| 21:30 頃 | 夜間バッチ結果の確認 | **手動** | `artifacts/night_batch/` |
-| 08:00 | Pre-Market レポート | 自動 | |
-| 08:02 | Signal Queue レポート | 自動 | |
-| 08:05 | Position Reconciliation レポート | 自動 | Pure Mock では常に `CLEAN` |
-| 08:30 | Execution Engine 起動 | 自動 | `paper_trading.db` に約定記録 |
-| 09:00 | Monitoring 起動 | 自動 | |
-| 09:00〜15:00 | ザラ場監視 | **手動** | Streamlit ダッシュボード |
-| 15:00 | 引け後確認 | **手動** | |
+| 時刻 | 処理 | 実行方式 | スクリプト / コマンド |
+|------|------|----------|----------------------|
+| 17:30 | 市場データ更新 | 自動 | `scripts/run_data_update.py` |
+| 18:30 | 特徴量計算 | 自動 | `scripts/run_feature_gen.py` |
+| 20:00 | 売買シグナル生成 | 自動 | `scripts/run_strategy_signal.py` |
+| 21:00 | ポートフォリオ構築 | 自動 | `scripts/run_portfolio_construction.py` |
+| 21:15 | 夜間バッチ結果レポート | 自動 | `scripts/run_night_batch_report.py` |
+| 21:30 頃 | 夜間バッチ結果の確認 | **手動** | `artifacts/night_batch/` を開く |
+| 08:00 | Pre-Market レポート | 自動 | `scripts/run_pre_market_report.py` |
+| 08:02 | Signal Queue レポート | 自動 | `scripts/run_signal_queue_report.py` |
+| 08:05 | Position Reconciliation レポート | 自動 | `scripts/run_position_reconciliation_report.py` |
+| 08:30 | Execution Engine 起動 | 自動 | `scripts/start_system.py --component execution` |
+| 09:00 | Monitoring 起動 | 自動 | `scripts/start_system.py --component monitoring` |
+| 09:00〜15:00 | ザラ場監視 | **手動** | `python scripts/run_streamlit_dashboard.py` |
+| 15:00 | 引け後確認 | **手動** | `python -m kabusys.run_market_close_report --save` |
 
 > ℹ️ 夜間バッチ（17:30〜21:15）は本番 DuckDB を使用するため、`KABUSYS_ENV` の値に関係なく本番と同じデータ・シグナルが生成されます。Execution のみが `paper_trading.db` に記録を行います。
 
