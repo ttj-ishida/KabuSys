@@ -52,4 +52,4 @@ regime:
 
 portfolio:
   # 最大保有銘柄数（select_candidates() に渡される上限値、1 以上の整数）
-  max_positions: 10
+  max_positions: 8
