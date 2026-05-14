@@ -163,13 +163,13 @@ python scripts\cancel_signal_queue.py --delete-cancelled
 
 **Addon ジョブ（`.env` フラグが `true` のときのみ実行）:**
 
-| 時刻 | ジョブ名 | 条件 |
-|------|----------|------|
-| 15:35 | `KabuSys_TdnetCollection` | `ENABLE_TDNET=true` |
-| 15:40 | `KabuSys_EdinetCollection` | `ENABLE_EDINET=true` |
-| 17:00 | `KabuSys_DisclosureClassification` | `ENABLE_TDNET=true` |
-| 17:33 | `KabuSys_YahooNewsCollection` | `ENABLE_YAHOONEWS=true` |
-| 19:00 | `KabuSys_AiAnalysis` | `ENABLE_AI_SENTIMENT=true` |
+| 時刻 | ジョブ名 | 条件 | スクリプト / コマンド |
+|------|----------|------|----------------------|
+| 15:35 | `KabuSys_TdnetCollection` | `ENABLE_TDNET=true` | `scripts/run_tdnet_collection.py` |
+| 15:40 | `KabuSys_EdinetCollection` | `ENABLE_EDINET=true` | `scripts/run_edinet_collection.py` |
+| 17:00 | `KabuSys_DisclosureClassification` | `ENABLE_TDNET=true` | `scripts/run_disclosure_classification.py` |
+| 17:33 | `KabuSys_YahooNewsCollection` | `ENABLE_YAHOONEWS=true` | `scripts/run_yahoonews_collection.py` |
+| 19:00 | `KabuSys_AiAnalysis` | `ENABLE_AI_SENTIMENT=true` | `scripts/run_ai_analysis.py` |
 
 ### 結果確認（21:30 頃 手動）
 
