@@ -31,7 +31,7 @@ value_score:
   weights:
     per: 0.50
     pbr: 0.30
-    div_yield: 0.20
+    div_yield: 0.00  # J-Quants Standard プランでは /fins/dividend が利用不可のため 0 に設定
   # 正規化基準値
   normalization:
     per_mid: 20.0

@@ -94,6 +94,7 @@ python -m kabusys.config_setup
 | `PAPER_TRADING_INITIAL_CASH` | MockBrokerClient の初期仮想資金（円） | `10000000` |
 | `KABU_USE_SANDBOX` | `true` でポート 18081 のkabu検証環境を使用（`paper_trading` 時のみ有効） | `false` |
 | `KABU_SANDBOX_API_PASSWORD` | kabu検証環境用 API パスワード（`KABU_USE_SANDBOX=true` 時） | （空） |
+| `JQUANTS_ENABLE_DIVIDENDS` | 配当データETLの有効化。J-Quants **Premium プラン以上**が必要。Standard プランでは `false` のまま使用する。`true` にすると `div_yield` 特徴量が更新される。 | `false` |
 | `LOG_LEVEL` | ログの詳細レベル | `INFO` |
 
 **Addon 任意設定:**（未設定でも Core の自動売買フローには影響しません）

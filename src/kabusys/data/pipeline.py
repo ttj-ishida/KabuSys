@@ -582,13 +582,18 @@ def run_daily_etl(
         result.errors.append("run_financials_etl 失敗")
 
     # 4. 配当データETL（差分更新 + backfill）
-    try:
-        fetched, saved = run_dividends_etl(conn, trading_day, backfill_days=backfill_days)
-        result.dividends_fetched = fetched
-        result.dividends_saved = saved
-    except Exception:
-        logger.exception("run_dividends_etl 失敗")
-        result.errors.append("run_dividends_etl 失敗")
+    # JQUANTS_ENABLE_DIVIDENDS=true のときのみ実行（Standard プランでは /fins/dividend が利用不可）
+    from kabusys.config import Settings as _Settings
+    if _Settings().enable_dividends:
+        try:
+            fetched, saved = run_dividends_etl(conn, trading_day, backfill_days=backfill_days)
+            result.dividends_fetched = fetched
+            result.dividends_saved = saved
+        except Exception:
+            logger.exception("run_dividends_etl 失敗")
+            result.errors.append("run_dividends_etl 失敗")
+    else:
+        logger.info("run_dividends_etl: スキップ (JQUANTS_ENABLE_DIVIDENDS=false)")
 
     # 5. TOPIX 日足 ETL
     try:

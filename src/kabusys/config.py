@@ -203,6 +203,17 @@ class Settings:
         """
         return os.environ.get("EDINET_API_KEY", "")
 
+    # --- J-Quants オプション機能 ---
+    @property
+    def enable_dividends(self) -> bool:
+        """配当データ ETL の有効フラグ（JQUANTS_ENABLE_DIVIDENDS、デフォルト: False）。
+
+        J-Quants の /fins/dividend エンドポイントは Premium プラン以上が必要。
+        Standard プランでは HTTP 403 が返るため、デフォルト無効とする。
+        True にすると run_dividends_etl が実行され div_yield 特徴量が更新される。
+        """
+        return _parse_bool_env("JQUANTS_ENABLE_DIVIDENDS", default=False)
+
     # --- Yahoo News ---
     @property
     def enable_yahoonews(self) -> bool:
