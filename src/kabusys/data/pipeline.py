@@ -495,9 +495,10 @@ def run_calendar_etl(
         date_from = (last + timedelta(days=1)) if last is not None else _MIN_DATA_DATE
 
     if date_from > date_to:
+        db_last = date_from - timedelta(days=1)
         logger.info(
-            "run_calendar_etl: すでに最新 date_from=%s date_to=%s",
-            date_from,
+            "run_calendar_etl: すでに最新 (DB最終日=%s, 必要範囲~%s)",
+            db_last,
             date_to,
         )
         return 0, 0
