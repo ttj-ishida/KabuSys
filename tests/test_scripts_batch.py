@@ -105,7 +105,17 @@ def test_run_strategy_signal_calls_generate_signals():
 # ---------- run_portfolio_construction ----------
 
 
-def test_portfolio_construction_writes_signal_queue():
+def _mock_paper_settings(mock_settings: MagicMock, tmp_path: Path) -> None:
+    """portfolio_construction テスト用の Paper モード settings を設定する。"""
+    mock_settings.return_value.duckdb_path = Path("/fake.duckdb")
+    mock_settings.return_value.is_live = False
+    mock_settings.return_value.is_paper = True
+    mock_settings.return_value.is_dev = False
+    mock_settings.return_value.paper_trading_initial_cash = 10_000_000.0
+    mock_settings.return_value.paper_sqlite_path = tmp_path / "nonexistent.db"
+
+
+def test_portfolio_construction_writes_signal_queue(tmp_path: Path):
     import run_portfolio_construction
 
     mock_conn = MagicMock()
@@ -143,7 +153,7 @@ def test_portfolio_construction_writes_signal_queue():
         patch("run_portfolio_construction.Settings") as mock_settings,
         patch("run_portfolio_construction.duckdb.connect", return_value=mock_conn),
     ):
-        mock_settings.return_value.duckdb_path = Path("/fake.duckdb")
+        _mock_paper_settings(mock_settings, tmp_path)
         run_portfolio_construction.main()
 
     # signal_queue への INSERT が呼ばれたことを確認
@@ -155,7 +165,7 @@ def test_portfolio_construction_writes_signal_queue():
     assert len(insert_calls) >= 1
 
 
-def test_portfolio_construction_no_signals_exits_0():
+def test_portfolio_construction_no_signals_exits_0(tmp_path: Path):
     """シグナルが 0 件のとき正常終了する（signal_queue は空のまま）。"""
     import run_portfolio_construction
 
@@ -169,7 +179,7 @@ def test_portfolio_construction_no_signals_exits_0():
         patch("run_portfolio_construction.Settings") as mock_settings,
         patch("run_portfolio_construction.duckdb.connect", return_value=mock_conn),
     ):
-        mock_settings.return_value.duckdb_path = Path("/fake.duckdb")
+        _mock_paper_settings(mock_settings, tmp_path)
         run_portfolio_construction.main()  # SystemExit が起きないこと
 
 

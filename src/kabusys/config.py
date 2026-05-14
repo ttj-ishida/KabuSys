@@ -247,6 +247,25 @@ class Settings:
         return Path(os.environ.get("SQLITE_PATH", "data/monitoring.db")).expanduser()
 
     @property
+    def portfolio_value(self) -> float:
+        """portfolio_construction フォールバック用総資産前提値（PORTFOLIO_VALUE、デフォルト: 10,000,000）。
+
+        Live 時: カブステーション余力 API / DuckDB portfolio_performance から自動取得できない場合のみ参照。
+        Paper 時: paper_trading.db から自動計算できない場合のみ参照。
+        Backtest 時: simulator.portfolio_value を使用するため参照されない。
+        """
+        raw = os.environ.get("PORTFOLIO_VALUE", "10000000")
+        try:
+            val = float(raw)
+        except ValueError as exc:
+            raise ValueError(
+                f"PORTFOLIO_VALUE の値が不正です: '{raw}'. 正の数値で設定してください。"
+            ) from exc
+        if val <= 0:
+            raise ValueError(f"PORTFOLIO_VALUE は正の値で設定してください（現在値: {val}）")
+        return val
+
+    @property
     def paper_trading_initial_cash(self) -> float:
         """ペーパートレード用初期資金（PAPER_TRADING_INITIAL_CASH、デフォルト: 10,000,000）。"""
         raw = os.environ.get("PAPER_TRADING_INITIAL_CASH", "10000000")
