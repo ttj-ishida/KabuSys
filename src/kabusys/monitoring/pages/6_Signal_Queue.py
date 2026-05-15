@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import duckdb
 import streamlit as st
 
 from kabusys.config import Settings
@@ -11,6 +10,7 @@ from kabusys.monitoring.dashboard_data import (
     load_signal_queue,
     load_signals,
 )
+from kabusys.monitoring.db_connect import connect_duckdb_ro
 
 _KNOWN_STATUSES = ["pending", "processing", "filled", "cancelled", "error", "failed"]
 
@@ -26,11 +26,7 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # 表示フェーズ（read_only=True — CLI の書き込みをブロックしない）
 # ---------------------------------------------------------------------------
-try:
-    conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
-except Exception as e:
-    st.error(f"DuckDB 接続失敗: {e}")
-    st.stop()
+conn = connect_duckdb_ro(settings.duckdb_path)
 
 try:
     tab_queue, tab_targets, tab_signals = st.tabs(

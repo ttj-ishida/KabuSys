@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 
-import duckdb
 import pandas as pd
 import streamlit as st
 
@@ -15,6 +14,7 @@ from kabusys.monitoring.dashboard_data import (
     load_portfolio_performance,
     load_recent_trades,
 )
+from kabusys.monitoring.db_connect import connect_duckdb_ro
 from kabusys.monitoring.operations_data import load_paper_verification_data
 
 st.set_page_config(page_title="Performance", layout="wide", page_icon="📈")
@@ -27,11 +27,7 @@ with st.sidebar:
     if st.button("🔄 Refresh"):
         st.rerun()
 
-try:
-    conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
-except Exception as e:
-    st.error(f"DuckDB 接続失敗: {e}")
-    st.stop()
+conn = connect_duckdb_ro(settings.duckdb_path)
 
 try:
     tab_perf, tab_pos, tab_trades, tab_paper = st.tabs(
