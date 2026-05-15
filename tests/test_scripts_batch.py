@@ -439,6 +439,36 @@ def test_settings_portfolio_value_non_numeric(monkeypatch):
         Settings().portfolio_value
 
 
+# ---------- Settings.paper_trading_initial_cash ----------
+
+
+def test_settings_paper_trading_initial_cash_negative(monkeypatch):
+    """PAPER_TRADING_INITIAL_CASH が負値のとき ValueError を送出する。"""
+    from kabusys.config import Settings
+
+    monkeypatch.setenv("PAPER_TRADING_INITIAL_CASH", "-1")
+    with pytest.raises(ValueError, match="正の値"):
+        Settings().paper_trading_initial_cash
+
+
+def test_settings_paper_trading_initial_cash_zero(monkeypatch):
+    """PAPER_TRADING_INITIAL_CASH が 0 のとき ValueError を送出する。"""
+    from kabusys.config import Settings
+
+    monkeypatch.setenv("PAPER_TRADING_INITIAL_CASH", "0")
+    with pytest.raises(ValueError, match="正の値"):
+        Settings().paper_trading_initial_cash
+
+
+def test_settings_paper_trading_initial_cash_non_numeric(monkeypatch):
+    """PAPER_TRADING_INITIAL_CASH が数値でないとき ValueError を送出する。"""
+    from kabusys.config import Settings
+
+    monkeypatch.setenv("PAPER_TRADING_INITIAL_CASH", "abc")
+    with pytest.raises(ValueError, match="不正"):
+        Settings().paper_trading_initial_cash
+
+
 # ---------- run_tdnet_collection ----------
 
 
