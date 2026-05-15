@@ -65,7 +65,34 @@ python -m kabusys.backtest.run `
 
 ---
 
-## C-B-5. 詳細リファレンス
+## C-B-5. strategy_config.yaml でチューニングできるパラメータ
+
+バックテストは実運用と同じ `strategy_config.yaml` を読み込みます。以下のパラメータを変更すると、バックテスト結果に反映されます。
+
+| パラメータ | デフォルト | 説明 |
+|---|---|---|
+| `strategy.threshold` | `0.60` | BUY シグナル生成の final_score 閾値 |
+| `strategy.stop_loss_rate` | `-0.08` | ストップロス閾値（終値 / avg_price − 1 がこれ以下で SELL） |
+| `strategy.min_holding_days` | `5` | スコア低下による SELL を抑制する最低保有営業日数 |
+| `strategy.max_holding_days` | `60` | 最大保有営業日数（超えると time_exit SELL） |
+| `strategy.trailing_stop_atr_mult` | `2.0` | トレーリングストップの ATR 乗数 |
+| `strategy.rsi_overbought_threshold` | `70.0` | RSI(14) 過熱判定閾値。この値を**超えた**銘柄は BUY を抑制（範囲: 50 < x ≤ 100）。`100.0` に設定するとフィルタ無効 |
+| `strategy.gap_up_threshold` | `0.05` | ギャップアップ閾値（この比率を超えた寄り高は BUY 抑制） |
+| `strategy.gap_down_threshold` | `-0.03` | ギャップダウン閾値（この比率以下の寄り安は BUY 抑制） |
+| `portfolio.max_positions` | `8` | 最大保有銘柄数 |
+
+**RSI フィルタのチューニング例:**
+
+```yaml
+# strategy_config.yaml
+strategy:
+  rsi_overbought_threshold: 75.0   # 過熱判定をやや緩めに設定（デフォルト: 70.0）
+  # rsi_overbought_threshold: 100.0  # RSI フィルタを完全に無効化する場合
+```
+
+---
+
+## C-B-6. 詳細リファレンス
 
 技術仕様・モジュール構成・インメモリ DB の詳細は設計ドキュメントを参照してください。
 
