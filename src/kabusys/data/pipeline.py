@@ -340,7 +340,11 @@ def sync_raw_prices_to_prices_daily(
 ) -> int:
     """raw_prices から prices_daily へ指定日付範囲を同期する（冪等）。
 
-    フィルタ条件: OHLCV が NOT NULL かつ OHLCV > 0 かつ low <= high。
+    フィルタ条件:
+      - open / high / low / close: NOT NULL かつ > 0
+      - volume: NOT NULL（出来高 0 は許容）
+      - low <= high
+
     既存行は ON CONFLICT DO UPDATE で上書きする。
 
     Args:
@@ -349,7 +353,8 @@ def sync_raw_prices_to_prices_daily(
         date_to:   同期終了日（含む）。
 
     Returns:
-        prices_daily に書き込んだレコード数。
+        同期対象となった (date, code) キーの件数。raw_prices は (date, code) 複合 PK
+        のため COUNT(*) は DISTINCT と等価。INSERT/UPDATE の区別はしない。
     """
     conn.execute("BEGIN")
     try:

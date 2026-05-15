@@ -692,3 +692,25 @@ class TestSyncRawPricesToPricesDaily:
         """raw_prices が空のとき 0 を返すこと。"""
         count = sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
         assert count == 0
+
+    def test_volume_zero_is_accepted(self, mem_db):
+        """volume=0 のレコードは同期されること（出来高 0 は許容する設計）。"""
+        _insert_raw_price(mem_db, "2024-01-10", volume=0)
+        count = sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        assert count == 1
+
+    def test_turnover_null_is_accepted(self, mem_db):
+        """turnover が NULL のレコードは同期されること（prices_daily DDL で NULL 可）。"""
+        _insert_raw_price(mem_db, "2024-01-10", turnover=None)
+        count = sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        assert count == 1
+        row = mem_db.execute(
+            "SELECT turnover FROM prices_daily WHERE date='2024-01-10' AND code='7203'"
+        ).fetchone()
+        assert row[0] is None
+
+    def test_low_equals_high_is_accepted(self, mem_db):
+        """low == high の境界値は同期されること（CHECK (low <= high) を満たす）。"""
+        _insert_raw_price(mem_db, "2024-01-10", low=2800.0, high=2800.0)
+        count = sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        assert count == 1
