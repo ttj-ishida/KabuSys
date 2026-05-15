@@ -29,7 +29,13 @@ with st.sidebar:
 try:
     conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
 except Exception as e:
-    st.error(f"DuckDB 接続失敗: {e}")
+    if "File is already open" in str(e) or "Cannot open file" in str(e):
+        st.warning(
+            "⚙️ バッチまたは執行エンジンが DB を使用中のため、データを一時的に表示できません。"
+            "しばらく待ってから **🔄 Refresh** してください。"
+        )
+    else:
+        st.error(f"DuckDB 接続失敗: {e}")
     st.stop()
 
 try:
