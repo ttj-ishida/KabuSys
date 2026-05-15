@@ -472,7 +472,7 @@ def calc_quality(
 # RSI ファクター
 # ---------------------------------------------------------------------------
 
-_RSI_PERIOD = 14  # Wilder's RSI 期間
+_RSI_PERIOD = 14  # RSI 期間
 _RSI_SCAN_DAYS = (_RSI_PERIOD + 1) * 3  # データスキャン範囲（カレンダー日）
 
 
@@ -480,11 +480,10 @@ def calc_rsi(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
 ) -> list[dict[str, Any]]:
-    """RSI(14) を計算する。
+    """RSI(14) を計算する（簡易 14 期間単純平均、Wilder の近似）。
 
-    Wilder の平滑移動平均（初期値は単純平均）で計算する。
     target_date 以前の最新 14+1 件の終値を使用するため、ルックアヘッドバイアスはない。
-    データ件数が 15 件未満の銘柄は rsi_14=None を返す。
+    データ件数が 15 件未満の銘柄は結果に含めない（features 側の辞書マージで rsi_14=None になる）。
 
     Args:
         conn:        DuckDB 接続。prices_daily テーブルを参照する。
@@ -492,6 +491,7 @@ def calc_rsi(
 
     Returns:
         [{"code": str, "rsi_14": float | None}, ...] のリスト。
+        rsi_14=None は avg_gain=avg_loss=0（横ばい価格）のケースで、BUY 許可の安全側として扱う。
     """
     scan_from = target_date - timedelta(days=_RSI_SCAN_DAYS)
     rows = conn.execute(

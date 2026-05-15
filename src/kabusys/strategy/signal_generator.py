@@ -80,6 +80,20 @@ _TOPIX_MIN_DATA_COUNT: int = 100  # 200MA を信頼できる最低データ数�
 
 _RSI_OVERBOUGHT_THRESHOLD: float = 70.0  # RSI(14) > この値の銘柄は BUY 抑制（過熱判定）
 
+# features テーブルから SELECT する列（2箇所で共用）
+_FEATURES_SELECT_COLS: tuple[str, ...] = (
+    "code",
+    "momentum_20",
+    "momentum_60",
+    "volatility_20",
+    "volume_ratio",
+    "per",
+    "pbr",
+    "div_yield",
+    "ma200_dev",
+    "rsi_14",
+)
+
 
 # ---------------------------------------------------------------------------
 # 設定ファイル読み込み
@@ -1186,16 +1200,13 @@ def generate_signals(
         # codes が指定されている場合（空リストを含む）
         _scope_codes = frozenset(scope.codes) if scope.codes else frozenset()
 
+    _select_cols = ", ".join(_FEATURES_SELECT_COLS)
     if _scope_codes is not None:
         if _scope_codes:
             # codes が空でない場合
             placeholders = ", ".join(["?" for _ in _scope_codes])
             feat_rows = conn.execute(
-                f"""
-                SELECT code, momentum_20, momentum_60, volatility_20, volume_ratio, per, pbr, div_yield, ma200_dev, rsi_14
-                FROM features
-                WHERE date = ? AND code IN ({placeholders})
-                """,
+                f"SELECT {_select_cols} FROM features WHERE date = ? AND code IN ({placeholders})",
                 [target_date, *_scope_codes],
             ).fetchall()
         else:
@@ -1203,26 +1214,10 @@ def generate_signals(
             feat_rows = []
     else:
         feat_rows = conn.execute(
-            """
-            SELECT code, momentum_20, momentum_60, volatility_20, volume_ratio, per, pbr, div_yield, ma200_dev, rsi_14
-            FROM features
-            WHERE date = ?
-            """,
+            f"SELECT {_select_cols} FROM features WHERE date = ?",
             [target_date],
         ).fetchall()
-    feat_cols = [
-        "code",
-        "momentum_20",
-        "momentum_60",
-        "volatility_20",
-        "volume_ratio",
-        "per",
-        "pbr",
-        "div_yield",
-        "ma200_dev",
-        "rsi_14",
-    ]
-    features = [dict(zip(feat_cols, r)) for r in feat_rows]
+    features = [dict(zip(_FEATURES_SELECT_COLS, r)) for r in feat_rows]
 
     if not features:
         logger.warning(

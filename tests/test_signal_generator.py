@@ -1027,3 +1027,31 @@ class TestRsiFilterInGenerateSignals:
             ).fetchall()
         ]
         assert "1001" in buy_codes
+
+    def test_rsi_at_threshold_allows_buy(self, conn):
+        """RSI がちょうど閾値（70.0）の場合は BUY を許可すること（> のため境界値は許可）。"""
+        import sqlite3
+
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        self._insert_feature_with_rsi(conn, "1001", TARGET_DATE, rsi=70.0)
+        conn.execute(
+            "INSERT INTO prices_daily (date, code, open, high, low, close, volume) "
+            "VALUES (?, '1001', 1000, 1010, 990, 1000, 100000)",
+            [TARGET_DATE],
+        )
+        sqlite_conn = sqlite3.connect(":memory:")
+        from kabusys.execution.order_repository import init_orders_db, init_position_entries_db
+
+        init_orders_db(sqlite_conn)
+        init_position_entries_db(sqlite_conn)
+        generate_signals(conn, TARGET_DATE, sqlite_conn=sqlite_conn)
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date=? AND side='buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "1001" in buy_codes, "RSI=70.0（閾値ちょうど）は BUY 許可（> 判定のため）"
