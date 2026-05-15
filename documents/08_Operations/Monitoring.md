@@ -550,6 +550,8 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 - Performance > Paper Verification タブ: SQLite `paper_trading.db`（read-only URI モード）
 - Signal Queue / Performance（Paper Verification 以外）/ Strategy Lab: DuckDB `kabusys.duckdb`（`read_only=True`）
 
+> **DuckDB ロック中の挙動:** ExecutionEngine（08:30〜15:00）または夜間バッチ（17:30〜21:15）が DuckDB を read-write で開いている間、Signal Queue / Performance / Strategy Lab の各ページは接続を取得できない。この場合、ページ上部に黄色の警告（`⚙️ バッチまたは執行エンジンが DB を使用中のため…`）を表示して停止する。これは正常な動作であり、バッチ・エンジン終了後に **🔄 Refresh** すれば通常表示に戻る。
+
 **Signal Queue の操作について:**
 
 DuckDB は同一ファイルへの read-write / read-only 接続の混在を許可しないため、Streamlit ダッシュボードは `read_only=True` のみを使用する。`signal_queue` への書き込み（キャンセル・削除）は CLI で行う。
