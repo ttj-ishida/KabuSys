@@ -78,8 +78,16 @@ def _calc_live_portfolio_value(
             "SELECT equity FROM portfolio_performance WHERE env = 'live' ORDER BY date DESC LIMIT 1"
         ).fetchone()
         if row and row[0] is not None:
-            portfolio_value = float(row[0])
-            logger.info("portfolio_value: DuckDB 実績値=%.0f 円 (env=live)", portfolio_value)
+            equity = float(row[0])
+            if math.isfinite(equity) and equity > 0:
+                portfolio_value = equity
+                logger.info("portfolio_value: DuckDB 実績値=%.0f 円 (env=live)", portfolio_value)
+            else:
+                logger.warning(
+                    "DuckDB equity が不正値(%.0f)。PORTFOLIO_VALUE=%.0f 円を使用",
+                    equity,
+                    fallback_pv,
+                )
         else:
             logger.info(
                 "portfolio_performance に live データなし。PORTFOLIO_VALUE=%.0f 円を使用",

@@ -365,6 +365,28 @@ def test_calc_live_portfolio_value_both_fail():
     assert ac == pytest.approx(10_000_000.0 * 0.70)
 
 
+def test_calc_live_portfolio_value_no_duckdb_row_api_success():
+    """DuckDB に live 行なし + Kabu API 成功 → portfolio_value=ENV値, available_cash=API値。"""
+    import run_portfolio_construction
+
+    settings = _make_live_settings()
+    db_cursor = MagicMock()
+    db_cursor.fetchone.return_value = None  # live 行なし
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value = db_cursor
+
+    mock_kabu_module = MagicMock()
+    mock_client = MagicMock()
+    mock_client.get_available_cash.return_value = 7_000_000.0
+    mock_kabu_module.KabuStationClient.return_value = mock_client
+
+    with patch.dict("sys.modules", {"kabusys.execution.kabu_client": mock_kabu_module}):
+        pv, ac = run_portfolio_construction._calc_live_portfolio_value(settings, mock_conn)
+
+    assert pv == pytest.approx(10_000_000.0)  # ENV フォールバック
+    assert ac == pytest.approx(7_000_000.0)  # API 値
+
+
 def test_calc_live_portfolio_value_api_returns_invalid():
     """Kabu API が不正値（負値）を返したとき pv×max_utilization にフォールバックする。"""
     import run_portfolio_construction
