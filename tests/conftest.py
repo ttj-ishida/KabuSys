@@ -49,6 +49,18 @@ MINIMAL_DDL = [
         is_sq_day       BOOLEAN     NOT NULL DEFAULT false,
         holiday_name    VARCHAR
     )""",
+    """CREATE TABLE IF NOT EXISTS prices_daily (
+        date        DATE          NOT NULL,
+        code        VARCHAR       NOT NULL,
+        open        DECIMAL(18,4) NOT NULL,
+        high        DECIMAL(18,4) NOT NULL,
+        low         DECIMAL(18,4) NOT NULL,
+        close       DECIMAL(18,4) NOT NULL,
+        volume      BIGINT        NOT NULL,
+        turnover    DECIMAL(18,2),
+        PRIMARY KEY (date, code),
+        CHECK (low <= high)
+    )""",
 ]
 
 

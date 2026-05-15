@@ -595,3 +595,122 @@ class TestRunTopixEtl:
             [(date(2024, 1, 10),), (date(2024, 1, 11),)],
         )
         assert get_last_topix_date(mem_db_topix) == date(2024, 1, 11)
+
+
+# ---------------------------------------------------------------------------
+# sync_raw_prices_to_prices_daily
+# ---------------------------------------------------------------------------
+
+
+from kabusys.data.pipeline import sync_raw_prices_to_prices_daily  # noqa: E402
+
+
+def _insert_raw_price(
+    conn,
+    date_str: str,
+    code: str = "7203",
+    open_: float | None = 2800.0,
+    high: float | None = 2850.0,
+    low: float | None = 2780.0,
+    close: float | None = 2830.0,
+    volume: int | None = 1000000,
+    turnover: float | None = 2830000000.0,
+) -> None:
+    conn.execute(
+        "INSERT INTO raw_prices (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (date, code) DO UPDATE SET "
+        "open=excluded.open, high=excluded.high, low=excluded.low, "
+        "close=excluded.close, volume=excluded.volume, turnover=excluded.turnover",
+        [date_str, code, open_, high, low, close, volume, turnover],
+    )
+
+
+class TestSyncRawPricesToPricesDaily:
+    def test_basic_sync(self, mem_db):
+        """有効なレコードが prices_daily に書き込まれること。"""
+        _insert_raw_price(mem_db, "2024-01-10")
+        count = sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        assert count == 1
+        row = mem_db.execute(
+            "SELECT close FROM prices_daily WHERE date='2024-01-10' AND code='7203'"
+        ).fetchone()
+        assert row is not None
+        assert float(row[0]) == 2830.0
+
+    def test_idempotent(self, mem_db):
+        """同一レコードを2回同期しても prices_daily の件数は変わらないこと。"""
+        _insert_raw_price(mem_db, "2024-01-10")
+        sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        count2 = sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        assert count2 == 1
+        rows = mem_db.execute("SELECT COUNT(*) FROM prices_daily").fetchone()[0]
+        assert rows == 1
+
+    def test_update_on_conflict(self, mem_db):
+        """raw_prices の値が変わったとき prices_daily も上書きされること。"""
+        _insert_raw_price(mem_db, "2024-01-10", close=2830.0)
+        sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        _insert_raw_price(mem_db, "2024-01-10", close=2900.0)
+        sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        close = mem_db.execute(
+            "SELECT close FROM prices_daily WHERE date='2024-01-10' AND code='7203'"
+        ).fetchone()[0]
+        assert float(close) == 2900.0
+
+    def test_filters_null_ohlcv(self, mem_db):
+        """OHLCV に NULL があるレコードは同期されないこと。"""
+        _insert_raw_price(mem_db, "2024-01-10", close=None)
+        count = sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        assert count == 0
+        rows = mem_db.execute("SELECT COUNT(*) FROM prices_daily").fetchone()[0]
+        assert rows == 0
+
+    def test_filters_zero_open(self, mem_db):
+        """open が 0 のレコードは同期されないこと。"""
+        _insert_raw_price(mem_db, "2024-01-10", open_=0.0)
+        count = sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        assert count == 0
+
+    def test_filters_low_gt_high(self, mem_db):
+        """low > high の不正レコードは同期されないこと。"""
+        _insert_raw_price(mem_db, "2024-01-10", low=2900.0, high=2800.0)
+        count = sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        assert count == 0
+
+    def test_date_range_filter(self, mem_db):
+        """指定した日付範囲外のレコードは同期されないこと。"""
+        _insert_raw_price(mem_db, "2024-01-09")
+        _insert_raw_price(mem_db, "2024-01-10", code="8001")
+        _insert_raw_price(mem_db, "2024-01-11")
+        count = sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        assert count == 1
+        row = mem_db.execute("SELECT code FROM prices_daily").fetchone()
+        assert row[0] == "8001"
+
+    def test_empty_raw_prices(self, mem_db):
+        """raw_prices が空のとき 0 を返すこと。"""
+        count = sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        assert count == 0
+
+    def test_volume_zero_is_accepted(self, mem_db):
+        """volume=0 のレコードは同期されること（出来高 0 は許容する設計）。"""
+        _insert_raw_price(mem_db, "2024-01-10", volume=0)
+        count = sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        assert count == 1
+
+    def test_turnover_null_is_accepted(self, mem_db):
+        """turnover が NULL のレコードは同期されること（prices_daily DDL で NULL 可）。"""
+        _insert_raw_price(mem_db, "2024-01-10", turnover=None)
+        count = sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        assert count == 1
+        row = mem_db.execute(
+            "SELECT turnover FROM prices_daily WHERE date='2024-01-10' AND code='7203'"
+        ).fetchone()
+        assert row[0] is None
+
+    def test_low_equals_high_is_accepted(self, mem_db):
+        """low == high の境界値は同期されること（CHECK (low <= high) を満たす）。"""
+        _insert_raw_price(mem_db, "2024-01-10", low=2800.0, high=2800.0)
+        count = sync_raw_prices_to_prices_daily(mem_db, date(2024, 1, 10), date(2024, 1, 10))
+        assert count == 1
