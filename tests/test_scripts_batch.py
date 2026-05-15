@@ -365,6 +365,58 @@ def test_calc_live_portfolio_value_both_fail():
     assert ac == pytest.approx(10_000_000.0 * 0.70)
 
 
+def test_calc_live_portfolio_value_api_returns_invalid():
+    """Kabu API が不正値（負値）を返したとき pv×max_utilization にフォールバックする。"""
+    import run_portfolio_construction
+
+    settings = _make_live_settings()
+    db_cursor = MagicMock()
+    db_cursor.fetchone.return_value = (10_000_000.0,)
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value = db_cursor
+
+    mock_kabu_module = MagicMock()
+    mock_client = MagicMock()
+    mock_client.get_available_cash.return_value = -1.0  # 不正値
+    mock_kabu_module.KabuStationClient.return_value = mock_client
+
+    with patch.dict("sys.modules", {"kabusys.execution.kabu_client": mock_kabu_module}):
+        pv, ac = run_portfolio_construction._calc_live_portfolio_value(settings, mock_conn)
+
+    assert pv == pytest.approx(10_000_000.0)
+    assert ac == pytest.approx(10_000_000.0 * 0.70)
+
+
+# ---------- Settings.portfolio_value ----------
+
+
+def test_settings_portfolio_value_negative(monkeypatch):
+    """PORTFOLIO_VALUE が負値のとき ValueError を送出する。"""
+    from kabusys.config import Settings
+
+    monkeypatch.setenv("PORTFOLIO_VALUE", "-1")
+    with pytest.raises(ValueError, match="正の値"):
+        Settings().portfolio_value
+
+
+def test_settings_portfolio_value_zero(monkeypatch):
+    """PORTFOLIO_VALUE が 0 のとき ValueError を送出する。"""
+    from kabusys.config import Settings
+
+    monkeypatch.setenv("PORTFOLIO_VALUE", "0")
+    with pytest.raises(ValueError, match="正の値"):
+        Settings().portfolio_value
+
+
+def test_settings_portfolio_value_non_numeric(monkeypatch):
+    """PORTFOLIO_VALUE が数値でないとき ValueError を送出する。"""
+    from kabusys.config import Settings
+
+    monkeypatch.setenv("PORTFOLIO_VALUE", "abc")
+    with pytest.raises(ValueError, match="不正"):
+        Settings().portfolio_value
+
+
 # ---------- run_tdnet_collection ----------
 
 

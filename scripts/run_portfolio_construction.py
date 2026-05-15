@@ -19,6 +19,7 @@ from __future__ import annotations
 import calendar
 import contextlib
 import logging
+import math
 import sqlite3
 import sys
 import uuid
@@ -55,7 +56,7 @@ from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_loggin
 _run_log = setup_logging(app_name="portfolio_construction", capture_stdio=True)
 logger = logging.getLogger(__name__)
 
-_MAX_UTILIZATION = 0.70  # Live モード専用: 余力の安全マージン。Paper では適用しない
+_MAX_UTILIZATION = 0.70  # Live/その他環境でのフォールバック時に適用。Paper では適用しない
 _JOB_NAME = "portfolio_construction_job"
 _APP_NAME = "portfolio_construction"
 
@@ -99,8 +100,15 @@ def _calc_live_portfolio_value(
             base_url=settings.kabu_api_base_url,
         )
         cash = client.get_available_cash()
-        available_cash = cash
-        logger.info("available_cash: カブステーション API 余力=%.0f 円", available_cash)
+        if isinstance(cash, (int, float)) and math.isfinite(cash) and cash >= 0:
+            available_cash = float(cash)
+            logger.info("available_cash: カブステーション API 余力=%.0f 円", available_cash)
+        else:
+            logger.warning(
+                "Kabu API 余力が不正値(%s)。pv×max_utilization=%.0f 円を使用",
+                cash,
+                available_cash,
+            )
     except Exception:
         logger.warning(
             "カブステーション余力 API 呼び出しに失敗。"
@@ -121,8 +129,9 @@ def _calc_paper_portfolio_value(
     paper_trading.db の約定履歴から現金残高・保有ポジション時価を計算する。
     DB が存在しない・読み取り失敗時は PAPER_TRADING_INITIAL_CASH にフォールバックする。
 
-    portfolio_value = 現金残高 + 保有ポジション時価
+    portfolio_value = 現金残高 + 保有ロングポジション時価
     available_cash  = 現金残高（マイナスの場合は 0 に補正）
+    注: ショートポジション（net_qty < 0）は市場価値に含めない（Paper ではショート非対応）。
     """
     initial_cash = settings.paper_trading_initial_cash
     sqlite_path = settings.paper_sqlite_path
@@ -204,10 +213,11 @@ def _calc_paper_portfolio_value(
     portfolio_value = max(net_cash + market_value, 0.0)
 
     logger.info(
-        "Paper portfolio_value 算出: 現金=%.0f 円, 時価=%.0f 円, 合計=%.0f 円",
+        "Paper portfolio_value 算出: 現金=%.0f 円, 時価=%.0f 円, 合計=%.0f 円, 利用可能現金=%.0f 円",
         net_cash,
         market_value,
         portfolio_value,
+        available_cash,
     )
     return portfolio_value, available_cash
 
@@ -249,6 +259,9 @@ def main() -> None:
             available_cash = portfolio_value * _MAX_UTILIZATION
             logger.info(
                 "portfolio_value: PORTFOLIO_VALUE=%.0f 円 (env=%s)", portfolio_value, settings.env
+            )
+            logger.info(
+                "available_cash: pv×max_utilization=%.0f 円 (env=%s)", available_cash, settings.env
             )
 
         inserted = 0
