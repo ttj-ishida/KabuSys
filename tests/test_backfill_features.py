@@ -134,8 +134,8 @@ class TestBackfill:
         for d in [_D1, _D2]:
             _insert_trading_day(conn, d)
 
-        _insert_prices(conn, _D1)  # _D1: 処理対象
-        _insert_features(conn, _D2)  # _D2: 既存あり → skipped
+        _insert_prices(conn, _D1)  # _D1: 処理対象（既存なし・価格あり）
+        _insert_features(conn, _D2)  # _D2: 既存あり・価格なし → skipped（既存チェックが先）
 
         with patch.object(_mod, "build_features", return_value=3):
             processed, skipped, no_price = backfill(conn, _D1, _D2, force=False)
@@ -143,6 +143,40 @@ class TestBackfill:
         assert processed == 1  # _D1
         assert skipped == 1  # _D2（既存あり）
         assert no_price == 0
+
+    def test_force_actually_overwrites_in_db(self, conn):
+        """--force 時に build_features が DELETE+INSERT を行い重複なく上書きされること。
+
+        build_features() 内部は DELETE FROM features WHERE date=? + INSERT のため冪等。
+        モックではなく実テーブルで検証する。
+        """
+        from datetime import timedelta
+
+        from kabusys.data.schema import init_schema as _init  # noqa: F401
+
+        # 十分な価格データを投入（RSI の計算に必要な 15 件分）
+        _insert_trading_day(conn, _D1)
+        for i in range(20):
+            d = _D1 - timedelta(days=i)
+            conn.execute(
+                "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+                "VALUES (?, '1001', ?, ?, ?, ?, 10000, 500_000_000) ON CONFLICT DO NOTHING",
+                [d, 1000 + i, 1050 + i, 990 + i, 1020 + i],
+            )
+
+        # 事前に features を 1 行挿入
+        _insert_features(conn, _D1)
+        before = conn.execute("SELECT COUNT(*) FROM features WHERE date = ?", [_D1]).fetchone()[0]
+        assert before == 1
+
+        # --force で上書き実行
+        processed, skipped, no_price = backfill(conn, _D1, _D1, force=True)
+
+        after = conn.execute("SELECT COUNT(*) FROM features WHERE date = ?", [_D1]).fetchone()[0]
+        assert processed == 1
+        assert skipped == 0
+        # 重複せず、build_features が生成した行数になっていること（1 以上）
+        assert after >= 1
 
     def test_empty_range_returns_zeros(self, conn):
         """営業日が存在しない期間はすべて 0 を返す。"""

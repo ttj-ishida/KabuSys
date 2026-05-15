@@ -79,11 +79,13 @@ def _dates_with_features(conn: duckdb.DuckDBPyConnection, start: date, end: date
     return {r[0] for r in rows}
 
 
-def _has_prices(conn: duckdb.DuckDBPyConnection, target_date: date) -> bool:
-    count = conn.execute(
-        "SELECT COUNT(*) FROM prices_daily WHERE date = ?", [target_date]
-    ).fetchone()[0]
-    return count > 0
+def _dates_with_prices(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> set[date]:
+    """期間内で prices_daily にデータが存在する日付を一括取得する。"""
+    rows = conn.execute(
+        "SELECT DISTINCT date FROM prices_daily WHERE date >= ? AND date <= ?",
+        [start, end],
+    ).fetchall()
+    return {r[0] for r in rows}
 
 
 def backfill(
@@ -94,6 +96,9 @@ def backfill(
     dry_run: bool = False,
 ) -> tuple[int, int, int]:
     """指定期間の特徴量を生成する。
+
+    force=True のとき build_features() は内部で DELETE FROM features WHERE date=? を
+    実行してから INSERT するため、既存行との重複・衝突は発生しない（冪等）。
 
     Returns:
         (processed, skipped, no_price_data) のタプル。
@@ -106,6 +111,7 @@ def backfill(
         return 0, 0, 0
 
     existing = _dates_with_features(conn, start, end) if not force else set()
+    price_dates = _dates_with_prices(conn, start, end)
 
     processed = skipped = no_price = 0
 
@@ -113,11 +119,11 @@ def backfill(
         prefix = f"[{i}/{len(trading_days)}] {target_date}"
 
         if target_date in existing:
-            logger.info("%s — スキップ（既存データあり。上書きは --force を指定）", prefix)
+            logger.debug("%s — スキップ（既存データあり。上書きは --force を指定）", prefix)
             skipped += 1
             continue
 
-        if not _has_prices(conn, target_date):
+        if target_date not in price_dates:
             logger.warning("%s — スキップ（prices_daily にデータなし）", prefix)
             no_price += 1
             continue
@@ -128,7 +134,7 @@ def backfill(
             continue
 
         n = build_features(conn, target_date)
-        logger.info("%s — 完了 (%d 銘柄)", prefix, n)
+        logger.debug("%s — 完了 (%d 銘柄)", prefix, n)
         processed += 1
 
     return processed, skipped, no_price
