@@ -68,6 +68,7 @@ class ETLResult:
         earnings_calendar_saved:     DBに保存を試みた決算カレンダーレコード数。
         dividends_fetched:           取得した配当レコード数。
         dividends_saved:             DBに保存した配当レコード数。
+        prices_daily_synced:         raw_prices -> prices_daily 同期で書き込んだレコード数。
         quality_issues:              品質チェックで検出された問題のリスト。
         errors:                      処理中に発生したエラーの概要メッセージのリスト。
     """
@@ -85,6 +86,7 @@ class ETLResult:
     dividends_saved: int = 0
     topix_fetched: int = 0
     topix_saved: int = 0
+    prices_daily_synced: int = 0
     quality_issues: list[quality.QualityIssue] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -331,6 +333,76 @@ def run_prices_etl(
     return len(records), saved
 
 
+def sync_raw_prices_to_prices_daily(
+    conn: duckdb.DuckDBPyConnection,
+    date_from: date,
+    date_to: date,
+) -> int:
+    """raw_prices から prices_daily へ指定日付範囲を同期する（冪等）。
+
+    フィルタ条件: OHLCV が NOT NULL かつ OHLCV > 0 かつ low <= high。
+    既存行は ON CONFLICT DO UPDATE で上書きする。
+
+    Args:
+        conn:      DuckDB 接続。
+        date_from: 同期開始日（含む）。
+        date_to:   同期終了日（含む）。
+
+    Returns:
+        prices_daily に書き込んだレコード数。
+    """
+    conn.execute("BEGIN")
+    try:
+        conn.execute(
+            """
+            INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover)
+            SELECT date, code, open, high, low, close, volume, turnover
+            FROM raw_prices
+            WHERE date >= ? AND date <= ?
+              AND open IS NOT NULL AND open > 0
+              AND high IS NOT NULL AND high > 0
+              AND low IS NOT NULL AND low > 0
+              AND close IS NOT NULL AND close > 0
+              AND volume IS NOT NULL
+              AND low <= high
+            ON CONFLICT (date, code) DO UPDATE SET
+                open = excluded.open,
+                high = excluded.high,
+                low = excluded.low,
+                close = excluded.close,
+                volume = excluded.volume,
+                turnover = excluded.turnover
+            """,
+            [date_from, date_to],
+        )
+        row = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM raw_prices
+            WHERE date >= ? AND date <= ?
+              AND open IS NOT NULL AND open > 0
+              AND high IS NOT NULL AND high > 0
+              AND low IS NOT NULL AND low > 0
+              AND close IS NOT NULL AND close > 0
+              AND volume IS NOT NULL
+              AND low <= high
+            """,
+            [date_from, date_to],
+        ).fetchone()
+        count = int(row[0]) if row else 0
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    logger.info(
+        "sync_raw_prices_to_prices_daily: date_from=%s date_to=%s synced=%d",
+        date_from,
+        date_to,
+        count,
+    )
+    return count
+
+
 def run_financials_etl(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
@@ -572,6 +644,15 @@ def run_daily_etl(
         logger.exception("run_prices_etl 失敗")
         result.errors.append("run_prices_etl 失敗")
 
+    # 2b. raw_prices -> prices_daily 同期
+    try:
+        sync_date_from = trading_day - timedelta(days=backfill_days - 1)
+        synced = sync_raw_prices_to_prices_daily(conn, sync_date_from, trading_day)
+        result.prices_daily_synced = synced
+    except Exception:
+        logger.exception("sync_raw_prices_to_prices_daily 失敗")
+        result.errors.append("sync_raw_prices_to_prices_daily 失敗")
+
     # 3. 財務データETL
     try:
         fetched, saved = run_financials_etl(conn, trading_day, backfill_days=backfill_days)
@@ -634,6 +715,7 @@ def run_daily_etl(
     logger.info(
         "run_daily_etl 完了: date=%s "
         "prices fetched=%d saved=%d "
+        "prices_daily_synced=%d "
         "financials fetched=%d saved=%d "
         "dividends fetched=%d saved=%d "
         "calendar fetched=%d saved=%d "
@@ -642,6 +724,7 @@ def run_daily_etl(
         today,
         result.prices_fetched,
         result.prices_saved,
+        result.prices_daily_synced,
         result.financials_fetched,
         result.financials_saved,
         result.dividends_fetched,
