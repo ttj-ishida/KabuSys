@@ -183,6 +183,193 @@ def test_portfolio_construction_no_signals_exits_0(tmp_path: Path):
         run_portfolio_construction.main()  # SystemExit が起きないこと
 
 
+# ---------- _calc_paper_portfolio_value ----------
+
+
+def test_calc_paper_portfolio_value_db_not_exists(tmp_path: Path):
+    """paper_trading.db が未存在のとき (initial_cash, initial_cash) を返す（_MAX_UTILIZATION 非適用）。"""
+    import sqlite3
+
+    import run_portfolio_construction
+
+    settings = MagicMock()
+    settings.paper_trading_initial_cash = 5_000_000.0
+    settings.paper_sqlite_path = tmp_path / "nonexistent.db"
+    mock_conn = MagicMock()
+
+    pv, ac = run_portfolio_construction._calc_paper_portfolio_value(settings, mock_conn)
+
+    assert pv == pytest.approx(5_000_000.0)
+    assert ac == pytest.approx(5_000_000.0)
+
+
+def test_calc_paper_portfolio_value_with_positions(tmp_path: Path):
+    """買いポジションあり: portfolio_value = 現金残高 + 時価。"""
+    import sqlite3
+
+    import run_portfolio_construction
+
+    db_path = tmp_path / "paper_trading.db"
+    with sqlite3.connect(str(db_path)) as db:
+        db.execute(
+            "CREATE TABLE orders"
+            " (side TEXT, code TEXT, filled_qty INTEGER, avg_fill_price REAL)"
+        )
+        db.execute("INSERT INTO orders VALUES ('buy', '7203', 100, 2000.0)")
+
+    settings = MagicMock()
+    settings.paper_trading_initial_cash = 1_000_000.0
+    settings.paper_sqlite_path = db_path
+
+    price_cursor = MagicMock()
+    price_cursor.fetchall.return_value = [("7203", 2500.0)]
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value = price_cursor
+
+    pv, ac = run_portfolio_construction._calc_paper_portfolio_value(settings, mock_conn)
+
+    # net_cash = 1,000,000 - 100*2000 = 800,000
+    # market_value = 100 * 2500 = 250,000
+    assert pv == pytest.approx(1_050_000.0)
+    assert ac == pytest.approx(800_000.0)
+
+
+def test_calc_paper_portfolio_value_negative_cash_clipped(tmp_path: Path):
+    """net_cash が負のとき available_cash は 0 に補正される。"""
+    import sqlite3
+
+    import run_portfolio_construction
+
+    db_path = tmp_path / "paper_trading.db"
+    with sqlite3.connect(str(db_path)) as db:
+        db.execute(
+            "CREATE TABLE orders"
+            " (side TEXT, code TEXT, filled_qty INTEGER, avg_fill_price REAL)"
+        )
+        # 1,000株買い (cost=2,000,000 > initial_cash=1,000,000)
+        db.execute("INSERT INTO orders VALUES ('buy', '7203', 1000, 2000.0)")
+
+    settings = MagicMock()
+    settings.paper_trading_initial_cash = 1_000_000.0
+    settings.paper_sqlite_path = db_path
+
+    price_cursor = MagicMock()
+    price_cursor.fetchall.return_value = [("7203", 2000.0)]
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value = price_cursor
+
+    pv, ac = run_portfolio_construction._calc_paper_portfolio_value(settings, mock_conn)
+
+    # net_cash = 1,000,000 - 2,000,000 = -1,000,000 → available_cash=0
+    assert ac == pytest.approx(0.0)
+    # portfolio_value = max(-1,000,000 + 2,000,000, 0) = 1,000,000
+    assert pv == pytest.approx(1_000_000.0)
+
+
+def test_calc_paper_portfolio_value_price_fetch_fails(tmp_path: Path):
+    """DuckDB 価格取得失敗時に market_value=0 でフォールバック。"""
+    import sqlite3
+
+    import run_portfolio_construction
+
+    db_path = tmp_path / "paper_trading.db"
+    with sqlite3.connect(str(db_path)) as db:
+        db.execute(
+            "CREATE TABLE orders"
+            " (side TEXT, code TEXT, filled_qty INTEGER, avg_fill_price REAL)"
+        )
+        db.execute("INSERT INTO orders VALUES ('buy', '7203', 100, 2000.0)")
+
+    settings = MagicMock()
+    settings.paper_trading_initial_cash = 1_000_000.0
+    settings.paper_sqlite_path = db_path
+
+    mock_conn = MagicMock()
+    mock_conn.execute.side_effect = Exception("DuckDB connection error")
+
+    pv, ac = run_portfolio_construction._calc_paper_portfolio_value(settings, mock_conn)
+
+    # net_cash = 1,000,000 - 200,000 = 800,000; market_value = 0 (failed)
+    assert pv == pytest.approx(800_000.0)
+    assert ac == pytest.approx(800_000.0)
+
+
+# ---------- _calc_live_portfolio_value ----------
+
+
+def _make_live_settings() -> MagicMock:
+    s = MagicMock()
+    s.portfolio_value = 10_000_000.0
+    s.kabu_api_password = "pass"
+    s.kabu_trade_password = None
+    s.kabu_api_base_url = "http://localhost:18080/kabusapi"
+    return s
+
+
+def test_calc_live_portfolio_value_api_and_duckdb_success():
+    """Kabu API 成功 → available_cash = API 値。portfolio_value = DuckDB 値。"""
+    import run_portfolio_construction
+
+    settings = _make_live_settings()
+    db_cursor = MagicMock()
+    db_cursor.fetchone.return_value = (12_000_000.0,)
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value = db_cursor
+
+    mock_kabu_module = MagicMock()
+    mock_client = MagicMock()
+    mock_client.get_available_cash.return_value = 8_000_000.0
+    mock_kabu_module.KabuStationClient.return_value = mock_client
+
+    with patch.dict("sys.modules", {"kabusys.execution.kabu_client": mock_kabu_module}):
+        pv, ac = run_portfolio_construction._calc_live_portfolio_value(settings, mock_conn)
+
+    assert pv == pytest.approx(12_000_000.0)
+    assert ac == pytest.approx(8_000_000.0)
+
+
+def test_calc_live_portfolio_value_api_fails_duckdb_success():
+    """Kabu API 失敗 + DuckDB 成功 → available_cash = pv × 0.7。"""
+    import run_portfolio_construction
+
+    settings = _make_live_settings()
+    db_cursor = MagicMock()
+    db_cursor.fetchone.return_value = (12_000_000.0,)
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value = db_cursor
+
+    mock_kabu_module = MagicMock()
+    mock_client = MagicMock()
+    mock_client.get_available_cash.side_effect = RuntimeError("API error")
+    mock_kabu_module.KabuStationClient.return_value = mock_client
+
+    with patch.dict("sys.modules", {"kabusys.execution.kabu_client": mock_kabu_module}):
+        pv, ac = run_portfolio_construction._calc_live_portfolio_value(settings, mock_conn)
+
+    assert pv == pytest.approx(12_000_000.0)
+    assert ac == pytest.approx(12_000_000.0 * 0.70)
+
+
+def test_calc_live_portfolio_value_both_fail():
+    """Kabu API 失敗 + DuckDB 失敗 → portfolio_value = ENV 値, available_cash = pv × 0.7。"""
+    import run_portfolio_construction
+
+    settings = _make_live_settings()
+    mock_conn = MagicMock()
+    mock_conn.execute.side_effect = Exception("DuckDB error")
+
+    mock_kabu_module = MagicMock()
+    mock_client = MagicMock()
+    mock_client.get_available_cash.side_effect = RuntimeError("API error")
+    mock_kabu_module.KabuStationClient.return_value = mock_client
+
+    with patch.dict("sys.modules", {"kabusys.execution.kabu_client": mock_kabu_module}):
+        pv, ac = run_portfolio_construction._calc_live_portfolio_value(settings, mock_conn)
+
+    assert pv == pytest.approx(10_000_000.0)
+    assert ac == pytest.approx(10_000_000.0 * 0.70)
+
+
 # ---------- run_tdnet_collection ----------
 
 

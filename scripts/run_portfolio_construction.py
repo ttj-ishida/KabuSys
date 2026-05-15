@@ -55,7 +55,7 @@ from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_loggin
 _run_log = setup_logging(app_name="portfolio_construction", capture_stdio=True)
 logger = logging.getLogger(__name__)
 
-_MAX_UTILIZATION = 0.70
+_MAX_UTILIZATION = 0.70  # Live モード専用: 余力の安全マージン。Paper では適用しない
 _JOB_NAME = "portfolio_construction_job"
 _APP_NAME = "portfolio_construction"
 
@@ -131,7 +131,7 @@ def _calc_paper_portfolio_value(
         logger.info(
             "paper_trading.db が未存在。PAPER_TRADING_INITIAL_CASH=%.0f 円を使用", initial_cash
         )
-        return initial_cash, initial_cash * _MAX_UTILIZATION
+        return initial_cash, initial_cash
 
     try:
         with contextlib.closing(sqlite3.connect(str(sqlite_path))) as conn:
@@ -146,7 +146,7 @@ def _calc_paper_portfolio_value(
             initial_cash,
             exc_info=True,
         )
-        return initial_cash, initial_cash * _MAX_UTILIZATION
+        return initial_cash, initial_cash
 
     data: dict[str, list[float]] = {}
     for row in rows:
