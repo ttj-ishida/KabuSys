@@ -5,11 +5,11 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import duckdb
 import streamlit as st
 
 from kabusys.config import Settings
 from kabusys.monitoring.components.ai_wizard import render as render_wizard
+from kabusys.monitoring.db_connect import connect_duckdb_ro
 from kabusys.monitoring.monitoring_db import init_monitoring_db
 from kabusys.monitoring.strategy_lab_data import (
     load_ai_scores,
@@ -27,17 +27,7 @@ with st.sidebar:
     if st.button("🔄 Refresh"):
         st.rerun()
 
-try:
-    conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
-except Exception as e:
-    if "File is already open" in str(e) or "Cannot open file" in str(e):
-        st.warning(
-            "⚙️ バッチまたは執行エンジンが DB を使用中のため、データを一時的に表示できません。"
-            "しばらく待ってから **🔄 Refresh** してください。"
-        )
-    else:
-        st.error(f"DuckDB 接続失敗: {e}")
-    st.stop()
+conn = connect_duckdb_ro(settings.duckdb_path)
 
 try:
     tab_regime, tab_ai, tab_signals, tab_copilot = st.tabs(
