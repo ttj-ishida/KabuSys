@@ -389,6 +389,18 @@ def _check_strategy_config_content(data: object) -> None:
                 f"strategy_config.yaml: strategy.reentry_cooldown_days は 0 以上で設定してください（現在値: {rcd}）。"
             )
 
+    # rsi_overbought_threshold
+    rot = s.get("rsi_overbought_threshold")
+    if rot is not None:
+        if isinstance(rot, bool) or not isinstance(rot, (int, float)):
+            _error(
+                f"strategy_config.yaml: strategy.rsi_overbought_threshold は数値で設定してください（現在値: {rot!r}）。"
+            )
+        elif not (50.0 < float(rot) <= 100.0):
+            _error(
+                f"strategy_config.yaml: strategy.rsi_overbought_threshold は 50 超 100 以下で設定してください（現在値: {rot}）。"
+            )
+
     # min/max 整合性チェック
     mhd_valid = mhd is not None and not isinstance(mhd, bool) and isinstance(mhd, (int, float))
     xhd_valid = xhd is not None and not isinstance(xhd, bool) and isinstance(xhd, (int, float))

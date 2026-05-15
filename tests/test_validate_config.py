@@ -444,6 +444,50 @@ strategy:
         errors, _ = self._run_with_yaml(content, tmp_path)
         assert any("strategy_config" in e and "reentry_cooldown_days" in e for e in errors)
 
+    def test_rsi_overbought_threshold_out_of_range_errors(self, tmp_path):
+        content = """\
+strategy:
+  weights:
+    momentum: 0.40
+    value: 0.20
+    volatility: 0.15
+    liquidity: 0.15
+    news: 0.10
+  threshold: 0.60
+  stop_loss_rate: -0.08
+  min_holding_days: 5
+  max_holding_days: 60
+  trailing_stop_atr_mult: 2.0
+  reentry_cooldown_days: 5
+  gap_up_threshold: 0.05
+  gap_down_threshold: -0.03
+  rsi_overbought_threshold: 50.0
+"""
+        errors, _ = self._run_with_yaml(content, tmp_path)
+        assert any("strategy_config" in e and "rsi_overbought_threshold" in e for e in errors)
+
+    def test_rsi_overbought_threshold_valid_accepted(self, tmp_path):
+        content = """\
+strategy:
+  weights:
+    momentum: 0.40
+    value: 0.20
+    volatility: 0.15
+    liquidity: 0.15
+    news: 0.10
+  threshold: 0.60
+  stop_loss_rate: -0.08
+  min_holding_days: 5
+  max_holding_days: 60
+  trailing_stop_atr_mult: 2.0
+  reentry_cooldown_days: 5
+  gap_up_threshold: 0.05
+  gap_down_threshold: -0.03
+  rsi_overbought_threshold: 75.0
+"""
+        errors, _ = self._run_with_yaml(content, tmp_path)
+        assert not any("rsi_overbought_threshold" in e for e in errors)
+
     def test_min_holding_days_gte_max_warns(self, tmp_path):
         content = """\
 strategy:
