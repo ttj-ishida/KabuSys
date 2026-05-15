@@ -33,45 +33,6 @@ from kabusys.strategy.feature_engineering import build_features
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-# RSI(14) に必要なルックバック日数（カレンダー日）
-# factor_research._RSI_SCAN_DAYS と同値: (14+1) * 3 = 45
-_RSI_LOOKBACK_DAYS = 45
-
-
-def _check_rsi_lookback(conn: duckdb.DuckDBPyConnection, start: date) -> None:
-    """start 以前に RSI 計算に必要な価格データが存在するか確認し、不足時は警告を出す。
-
-    RSI(14) は target_date から遡って最低 14 件の日次変化量が必要。
-    prices_daily の最古日が start - _RSI_LOOKBACK_DAYS より新しい場合、
-    開始直後の数営業日は rsi_14 = NULL となりバックテスト精度が下がる。
-    """
-    from datetime import timedelta
-
-    required_from = start - timedelta(days=_RSI_LOOKBACK_DAYS)
-    row = conn.execute(
-        "SELECT MIN(date) FROM prices_daily WHERE date < ?", [start]
-    ).fetchone()
-    oldest = row[0] if row else None
-
-    if oldest is None:
-        logger.warning(
-            "prices_daily に --start (%s) 以前のデータが存在しません。"
-            "開始直後の約 14 営業日は rsi_14 = NULL になります。"
-            "先に `python -m kabusys.data.bootstrap` で過去データを取得してください。",
-            start,
-        )
-    elif oldest > required_from:
-        logger.warning(
-            "prices_daily の最古データ (%s) が RSI ルックバック要求日 (%s) より新しいです。"
-            "--start 付近の最初の約 14 営業日は rsi_14 = NULL になる可能性があります。"
-            "より古いデータを bootstrap で取得するか、--start を %s 以降に設定してください。",
-            oldest,
-            required_from,
-            oldest + timedelta(days=_RSI_LOOKBACK_DAYS),
-        )
-    else:
-        logger.debug("RSI ルックバック確認OK: 最古価格=%s, 要求=%s", oldest, required_from)
-
 
 def _dates_with_features(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> set[date]:
     rows = conn.execute(
@@ -100,8 +61,6 @@ def backfill(
     Returns:
         (processed, skipped, no_price_data) のタプル。
     """
-    _check_rsi_lookback(conn, start)
-
     trading_days = get_trading_days(conn, start, end)
     if not trading_days:
         logger.warning("指定期間に営業日が見つかりません: %s ~ %s", start, end)
