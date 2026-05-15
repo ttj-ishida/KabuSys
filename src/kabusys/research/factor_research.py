@@ -535,6 +535,7 @@ def calc_rsi(
         )
         SELECT code,
             CASE
+                WHEN avg_gain = 0 AND avg_loss = 0 THEN NULL
                 WHEN avg_loss = 0 THEN 100.0
                 ELSE 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
             END AS rsi_14
