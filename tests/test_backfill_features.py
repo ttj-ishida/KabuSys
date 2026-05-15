@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -19,6 +19,8 @@ _spec = importlib.util.spec_from_file_location("backfill_features", _SCRIPT)
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 backfill = _mod.backfill
+_check_rsi_lookback = _mod._check_rsi_lookback
+_RSI_LOOKBACK_DAYS = _mod._RSI_LOOKBACK_DAYS
 
 
 # ---------------------------------------------------------------------------
@@ -161,3 +163,39 @@ class TestBackfill:
         assert skipped == 0
         assert no_price == 0
         mock_bf.assert_not_called()
+
+
+class TestCheckRsiLookback:
+    def test_no_prior_prices_emits_warning(self, conn, caplog):
+        """prices_daily に start 以前のデータが全くない場合は WARNING を出す。"""
+        import logging
+        with caplog.at_level(logging.WARNING):
+            _check_rsi_lookback(conn, _D1)
+        assert any("以前のデータが存在しません" in r.message for r in caplog.records)
+
+    def test_sufficient_prior_prices_no_warning(self, conn, caplog):
+        """start より十分前に価格データがあれば WARNING を出さない。"""
+        import logging
+        old_date = _D1 - timedelta(days=_RSI_LOOKBACK_DAYS + 10)
+        conn.execute(
+            "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+            "VALUES (?, '1001', 1000, 1000, 1000, 1000, 1000, 1000) ON CONFLICT DO NOTHING",
+            [old_date],
+        )
+        with caplog.at_level(logging.WARNING):
+            _check_rsi_lookback(conn, _D1)
+        assert not any(r.levelno == logging.WARNING for r in caplog.records)
+
+    def test_insufficient_prior_prices_emits_warning(self, conn, caplog):
+        """start より古いデータがあるが RSI ルックバック日数に満たない場合は WARNING を出す。"""
+        import logging
+        # _RSI_LOOKBACK_DAYS - 5 日前のデータしかない（要求より新しい）
+        insufficient_date = _D1 - timedelta(days=_RSI_LOOKBACK_DAYS - 5)
+        conn.execute(
+            "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+            "VALUES (?, '1001', 1000, 1000, 1000, 1000, 1000, 1000) ON CONFLICT DO NOTHING",
+            [insufficient_date],
+        )
+        with caplog.at_level(logging.WARNING):
+            _check_rsi_lookback(conn, _D1)
+        assert any("最古データ" in r.message for r in caplog.records)
