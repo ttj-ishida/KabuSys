@@ -188,8 +188,6 @@ def test_portfolio_construction_no_signals_exits_0(tmp_path: Path):
 
 def test_calc_paper_portfolio_value_db_not_exists(tmp_path: Path):
     """paper_trading.db が未存在のとき (initial_cash, initial_cash) を返す（_MAX_UTILIZATION 非適用）。"""
-    import sqlite3
-
     import run_portfolio_construction
 
     settings = MagicMock()
