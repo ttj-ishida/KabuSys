@@ -6,14 +6,21 @@ signals テーブルから当日の BUY シグナルを読み込み、
 ポートフォリオ構築を行って signal_queue と portfolio_targets に書き込む。
 
 環境変数:
-    PORTFOLIO_VALUE: 総資産額（円）。デフォルト: 10,000,000
+    PORTFOLIO_VALUE: Live 時フォールバック用総資産前提値（円）。
+                     通常はカブステーション余力 API / DuckDB 実績値から自動取得されるため設定不要。
+                     デフォルト: 10,000,000
+    PAPER_TRADING_INITIAL_CASH: Paper 時フォールバック用初期資金（円）。
+                                通常は paper_trading.db の約定履歴から自動算出される。
+                                デフォルト: 10,000,000
 """
 
 from __future__ import annotations
 
 import calendar
+import contextlib
 import logging
-import os
+import math
+import sqlite3
 import sys
 import uuid
 from datetime import date, datetime, timezone
@@ -49,10 +56,178 @@ from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_loggin
 _run_log = setup_logging(app_name="portfolio_construction", capture_stdio=True)
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PORTFOLIO_VALUE = 10_000_000
-_MAX_UTILIZATION = 0.70
+_MAX_UTILIZATION = 0.70  # Live/その他環境でのフォールバック時に適用。Paper では適用しない
 _JOB_NAME = "portfolio_construction_job"
 _APP_NAME = "portfolio_construction"
+
+
+def _calc_live_portfolio_value(
+    settings: Settings,
+    duckdb_conn: duckdb.DuckDBPyConnection,
+) -> tuple[float, float]:
+    """Live モード用 (portfolio_value, available_cash) を算出する。
+
+    portfolio_value: DuckDB portfolio_performance の直近 equity → PORTFOLIO_VALUE 環境変数
+    available_cash:  カブステーション /wallet/cash API → portfolio_value × max_utilization
+    """
+    fallback_pv = settings.portfolio_value
+
+    portfolio_value = fallback_pv
+    try:
+        row = duckdb_conn.execute(
+            "SELECT equity FROM portfolio_performance WHERE env = 'live' ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+        if row and row[0] is not None:
+            equity = float(row[0])
+            if math.isfinite(equity) and equity > 0:
+                portfolio_value = equity
+                logger.info("portfolio_value: DuckDB 実績値=%.0f 円 (env=live)", portfolio_value)
+            else:
+                logger.warning(
+                    "DuckDB equity が不正値(%.0f)。PORTFOLIO_VALUE=%.0f 円を使用",
+                    equity,
+                    fallback_pv,
+                )
+        else:
+            logger.info(
+                "portfolio_performance に live データなし。PORTFOLIO_VALUE=%.0f 円を使用",
+                fallback_pv,
+            )
+    except Exception:
+        logger.warning(
+            "DuckDB portfolio_performance 参照に失敗。フォールバックを使用", exc_info=True
+        )
+
+    available_cash = portfolio_value * _MAX_UTILIZATION
+    try:
+        from kabusys.execution.kabu_client import KabuStationClient
+
+        client = KabuStationClient(
+            api_password=settings.kabu_api_password,
+            trade_password=settings.kabu_trade_password,
+            base_url=settings.kabu_api_base_url,
+        )
+        cash = client.get_available_cash()
+        if isinstance(cash, (int, float)) and math.isfinite(cash) and cash >= 0:
+            available_cash = float(cash)
+            logger.info("available_cash: カブステーション API 余力=%.0f 円", available_cash)
+        else:
+            logger.warning(
+                "Kabu API 余力が不正値(%s)。pv×max_utilization=%.0f 円を使用",
+                cash,
+                available_cash,
+            )
+    except Exception:
+        logger.warning(
+            "カブステーション余力 API 呼び出しに失敗。"
+            "portfolio_value × max_utilization=%.0f 円を使用",
+            available_cash,
+            exc_info=True,
+        )
+
+    return portfolio_value, available_cash
+
+
+def _calc_paper_portfolio_value(
+    settings: Settings,
+    duckdb_conn: duckdb.DuckDBPyConnection,
+) -> tuple[float, float]:
+    """Paper モード用 (portfolio_value, available_cash) を算出する。
+
+    paper_trading.db の約定履歴から現金残高・保有ポジション時価を計算する。
+    DB が存在しない・読み取り失敗時は PAPER_TRADING_INITIAL_CASH にフォールバックする。
+
+    portfolio_value = 現金残高 + 保有ロングポジション時価
+    available_cash  = 現金残高（マイナスの場合は 0 に補正）
+    注: ショートポジション（net_qty < 0）は市場価値に含めない（Paper ではショート非対応）。
+    """
+    initial_cash = settings.paper_trading_initial_cash
+    sqlite_path = settings.paper_sqlite_path
+
+    if not sqlite_path.exists():
+        logger.info(
+            "paper_trading.db が未存在。PAPER_TRADING_INITIAL_CASH=%.0f 円を使用", initial_cash
+        )
+        return initial_cash, initial_cash
+
+    try:
+        with contextlib.closing(sqlite3.connect(str(sqlite_path))) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT side, code, filled_qty, avg_fill_price FROM orders"
+                " WHERE filled_qty > 0 AND avg_fill_price IS NOT NULL"
+            ).fetchall()
+    except Exception:
+        logger.warning(
+            "paper_trading.db の読み込みに失敗。PAPER_TRADING_INITIAL_CASH=%.0f 円を使用",
+            initial_cash,
+            exc_info=True,
+        )
+        return initial_cash, initial_cash
+
+    data: dict[str, list[float]] = {}
+    for row in rows:
+        side = (row["side"] or "").lower()
+        if side not in ("buy", "sell"):
+            continue
+        code = row["code"]
+        filled_qty = int(row["filled_qty"])
+        avg_price = float(row["avg_fill_price"])
+        if code not in data:
+            data[code] = [0.0, 0.0, 0.0, 0.0]
+        if side == "buy":
+            data[code][0] += filled_qty
+            data[code][1] += filled_qty * avg_price
+        else:
+            data[code][2] += filled_qty
+            data[code][3] += filled_qty * avg_price
+
+    net_cash = initial_cash
+    positions: dict[str, int] = {}
+    for code, (buy_qty, buy_cost, sell_qty, sell_proceeds) in data.items():
+        net_cash -= buy_cost
+        net_cash += sell_proceeds
+        net_qty = int(buy_qty) - int(sell_qty)
+        if net_qty > 0:
+            positions[code] = net_qty
+
+    market_value = 0.0
+    if positions:
+        codes = list(positions.keys())
+        code_params = ",".join(["?"] * len(codes))
+        try:
+            price_rows = duckdb_conn.execute(
+                f"""
+                SELECT p.code, p.close
+                FROM prices_daily p
+                INNER JOIN (
+                    SELECT code, MAX(date) AS max_date
+                    FROM prices_daily
+                    WHERE code IN ({code_params})
+                    GROUP BY code
+                ) latest ON p.code = latest.code AND p.date = latest.max_date
+                """,
+                codes,
+            ).fetchall()
+            for pcode, price in price_rows:
+                if price is not None and pcode in positions:
+                    market_value += positions[pcode] * float(price)
+        except Exception:
+            logger.warning(
+                "ポジション時価計算に失敗。現金のみで portfolio_value を算出します", exc_info=True
+            )
+
+    available_cash = max(net_cash, 0.0)
+    portfolio_value = max(net_cash + market_value, 0.0)
+
+    logger.info(
+        "Paper portfolio_value 算出: 現金=%.0f 円, 時価=%.0f 円, 合計=%.0f 円, 利用可能現金=%.0f 円",
+        net_cash,
+        market_value,
+        portfolio_value,
+        available_cash,
+    )
+    return portfolio_value, available_cash
 
 
 def _get_today_return(conn: duckdb.DuckDBPyConnection, target_date: date, env: str) -> float | None:
@@ -82,17 +257,21 @@ def main() -> None:
     try:
         settings = Settings()
         conn = duckdb.connect(str(settings.duckdb_path))
-        portfolio_value_str = os.environ.get("PORTFOLIO_VALUE", str(_DEFAULT_PORTFOLIO_VALUE))
-        try:
-            portfolio_value = float(portfolio_value_str)
-        except ValueError:
-            logger.warning(
-                "PORTFOLIO_VALUE が不正な値です (%s)。デフォルト値を使用します: %s",
-                portfolio_value_str,
-                _DEFAULT_PORTFOLIO_VALUE,
+
+        if settings.is_live:
+            portfolio_value, available_cash = _calc_live_portfolio_value(settings, conn)
+        elif settings.is_paper or settings.is_dev:
+            portfolio_value, available_cash = _calc_paper_portfolio_value(settings, conn)
+        else:
+            portfolio_value = settings.portfolio_value
+            available_cash = portfolio_value * _MAX_UTILIZATION
+            logger.info(
+                "portfolio_value: PORTFOLIO_VALUE=%.0f 円 (env=%s)", portfolio_value, settings.env
             )
-            portfolio_value = float(_DEFAULT_PORTFOLIO_VALUE)
-        available_cash = portfolio_value * _MAX_UTILIZATION
+            logger.info(
+                "available_cash: pv×max_utilization=%.0f 円 (env=%s)", available_cash, settings.env
+            )
+
         inserted = 0
 
         cur = conn.execute(
