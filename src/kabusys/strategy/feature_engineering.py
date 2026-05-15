@@ -28,6 +28,7 @@ from kabusys.data.stats import zscore_normalize
 from kabusys.research.factor_research import (
     calc_momentum,
     calc_quality,
+    calc_rsi,
     calc_topix_relative,
     calc_value,
     calc_volatility,
@@ -112,12 +113,14 @@ def build_features(
     val_list = calc_value(conn, target_date)
     topix_rel_list = calc_topix_relative(conn, target_date)
     quality_list = calc_quality(conn, target_date)
+    rsi_list = calc_rsi(conn, target_date)
 
     mom_map: dict[str, dict] = {r["code"]: r for r in mom_list}
     vol_map: dict[str, dict] = {r["code"]: r for r in vol_list}
     val_map: dict[str, dict] = {r["code"]: r for r in val_list}
     topix_map: dict[str, dict] = {r["code"]: r for r in topix_rel_list}
     quality_map: dict[str, dict] = {r["code"]: r for r in quality_list}
+    rsi_map: dict[str, dict] = {r["code"]: r for r in rsi_list}
 
     # 2. current close prices（ユニバースフィルタ用）
     # target_date 以前の最新価格を参照（休場日・当日欠損に対応）
@@ -145,6 +148,7 @@ def build_features(
         f = val_map.get(code, {})
         t = topix_map.get(code, {})
         q = quality_map.get(code, {})
+        r = rsi_map.get(code, {})
         merged.append(
             {
                 "code": code,
@@ -155,13 +159,14 @@ def build_features(
                 "atr_pct": v.get("atr_pct"),
                 "volume_ratio": v.get("volume_ratio"),
                 "per": f.get("per"),
-                "pbr": f.get("pbr"),  # 追加
-                "div_yield": f.get("div_yield"),  # 追加
+                "pbr": f.get("pbr"),
+                "div_yield": f.get("div_yield"),
                 "topix_rel_20": t.get("topix_rel_20"),
                 "topix_rel_60": t.get("topix_rel_60"),
                 "op_margin": q.get("op_margin"),
                 "rev_growth_yoy": q.get("rev_growth_yoy"),
                 "profit_growth_yoy": q.get("profit_growth_yoy"),
+                "rsi_14": r.get("rsi_14"),
             }
         )
 
@@ -198,12 +203,13 @@ def build_features(
             r.get("atr_pct"),
             r.get("volume_ratio"),
             r.get("per"),
-            r.get("pbr"),  # 追加
-            r.get("div_yield"),  # 追加
+            r.get("pbr"),
+            r.get("div_yield"),
             r.get("ma200_dev"),
             r.get("topix_rel_20"),
             r.get("topix_rel_60"),
             r.get("quality_score"),
+            r.get("rsi_14"),
         )
         for r in normalized
     ]
@@ -216,8 +222,8 @@ def build_features(
                 INSERT INTO features
                     (date, code, momentum_20, momentum_60, volatility_20, volume_ratio,
                      per, pbr, div_yield, ma200_dev,
-                     topix_rel_20, topix_rel_60, quality_score, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
+                     topix_rel_20, topix_rel_60, quality_score, rsi_14, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
                 """,
                 params,
             )

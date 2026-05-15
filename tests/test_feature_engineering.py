@@ -141,3 +141,30 @@ class TestBuildFeaturesWithNewColumns:
         build_features(conn, TARGET)
         count = conn.execute("SELECT COUNT(*) FROM features WHERE date=?", [TARGET]).fetchone()[0]
         assert count == 1  # 日付単位で置換されるため重複なし
+
+    def test_rsi_14_populated_with_sufficient_data(self, conn):
+        """15件以上の価格データがある場合、rsi_14 が計算されること。"""
+        _insert_prices(conn, "1001", START, 430)
+        _insert_financials(conn, "1001")
+        build_features(conn, TARGET)
+        row = conn.execute(
+            "SELECT rsi_14 FROM features WHERE date=? AND code=?",
+            [TARGET, "1001"],
+        ).fetchone()
+        assert row is not None
+        assert row[0] is not None
+        assert 0.0 <= float(row[0]) <= 100.0
+
+    def test_rsi_14_null_with_insufficient_data(self, conn):
+        """価格データが 14 件以下の場合、rsi_14 が NULL になること。"""
+        # 10 件のみ挿入（RSI 計算に必要な 15 件未満）
+        _insert_prices(conn, "1001", TARGET - timedelta(days=10), 10, base=600.0)
+        _insert_financials(conn, "1001")
+        build_features(conn, TARGET)
+        row = conn.execute(
+            "SELECT rsi_14 FROM features WHERE date=? AND code=?",
+            [TARGET, "1001"],
+        ).fetchone()
+        # データ不足で銘柄がフィルタされるか rsi_14=None のいずれか
+        if row is not None:
+            assert row[0] is None

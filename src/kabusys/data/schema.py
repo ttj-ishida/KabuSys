@@ -205,6 +205,7 @@ CREATE TABLE IF NOT EXISTS features (
     topix_rel_20    DOUBLE,
     topix_rel_60    DOUBLE,
     quality_score   DOUBLE,
+    rsi_14          DOUBLE,
     created_at      TIMESTAMP   NOT NULL DEFAULT current_timestamp,
     PRIMARY KEY (date, code)
 )
@@ -490,6 +491,8 @@ _MIGRATIONS: list[str] = [
     "ALTER TABLE features ADD COLUMN IF NOT EXISTS topix_rel_20 DOUBLE",
     "ALTER TABLE features ADD COLUMN IF NOT EXISTS topix_rel_60 DOUBLE",
     "ALTER TABLE features ADD COLUMN IF NOT EXISTS quality_score DOUBLE",
+    # Issue #338: features に RSI(14) を追加
+    "ALTER TABLE features ADD COLUMN IF NOT EXISTS rsi_14 DOUBLE",
 ]
 
 # ---------------------------------------------------------------------------

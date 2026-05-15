@@ -25,6 +25,8 @@ strategy:
   gap_up_threshold: 0.05
   # ギャップダウン閾値（この比率以下の寄り安は BUY 抑制）
   gap_down_threshold: -0.03
+  # RSI(14) 過熱判定閾値（この値超の銘柄は BUY 抑制。50 < x <= 100）
+  rsi_overbought_threshold: 70.0
 
 value_score:
   # バリュースコア計算の重み（合計 1.0）

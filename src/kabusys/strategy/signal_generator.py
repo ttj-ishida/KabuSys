@@ -78,6 +78,8 @@ _TOPIX_DRAWDOWN_THRESHOLD: float = -0.15  # 200MA 乖離率がこの値未満で
 _TOPIX_SIZE_MULTIPLIER_BEAR: float = 0.5  # 地合い悪化時の size_multiplier
 _TOPIX_MIN_DATA_COUNT: int = 100  # 200MA を信頼できる最低データ数（初期運用でのデータ蓄積期間を考慮し 200 でなく 100 に設定）
 
+_RSI_OVERBOUGHT_THRESHOLD: float = 70.0  # RSI(14) > この値の銘柄は BUY 抑制（過熱判定）
+
 
 # ---------------------------------------------------------------------------
 # 設定ファイル読み込み
@@ -97,6 +99,7 @@ _STRATEGY_CONFIG_DEFAULTS: dict = {
     "sector_quartile": _SECTOR_QUARTILE,
     "topix_drawdown_threshold": _TOPIX_DRAWDOWN_THRESHOLD,
     "topix_size_multiplier_bear": _TOPIX_SIZE_MULTIPLIER_BEAR,
+    "rsi_overbought_threshold": _RSI_OVERBOUGHT_THRESHOLD,
 }
 
 _STRATEGY_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "strategy_config.yaml"
@@ -127,6 +130,7 @@ def _load_strategy_config() -> dict:
             "sector_quartile": float,
             "topix_drawdown_threshold": float,
             "topix_size_multiplier_bear": float,
+            "rsi_overbought_threshold": float,
         }
     """
     global _strategy_config_cache, _strategy_config_mtime
@@ -271,6 +275,17 @@ def _load_strategy_config() -> dict:
             and 0.0 < float(v) <= 1.0
         ):
             result["topix_size_multiplier_bear"] = float(v)
+
+    # rsi_overbought_threshold: strategy セクション配下（50 < x <= 100）
+    v = s.get("rsi_overbought_threshold") if isinstance(s, dict) else None
+    if (
+        v is not None
+        and isinstance(v, (int, float))
+        and not isinstance(v, bool)
+        and math.isfinite(float(v))
+        and 50.0 < float(v) <= 100.0
+    ):
+        result["rsi_overbought_threshold"] = float(v)
 
     _strategy_config_cache = result
     _strategy_config_mtime = current_mtime
@@ -1177,7 +1192,7 @@ def generate_signals(
             placeholders = ", ".join(["?" for _ in _scope_codes])
             feat_rows = conn.execute(
                 f"""
-                SELECT code, momentum_20, momentum_60, volatility_20, volume_ratio, per, pbr, div_yield, ma200_dev
+                SELECT code, momentum_20, momentum_60, volatility_20, volume_ratio, per, pbr, div_yield, ma200_dev, rsi_14
                 FROM features
                 WHERE date = ? AND code IN ({placeholders})
                 """,
@@ -1189,7 +1204,7 @@ def generate_signals(
     else:
         feat_rows = conn.execute(
             """
-            SELECT code, momentum_20, momentum_60, volatility_20, volume_ratio, per, pbr, div_yield, ma200_dev
+            SELECT code, momentum_20, momentum_60, volatility_20, volume_ratio, per, pbr, div_yield, ma200_dev, rsi_14
             FROM features
             WHERE date = ?
             """,
@@ -1205,6 +1220,7 @@ def generate_signals(
         "pbr",
         "div_yield",
         "ma200_dev",
+        "rsi_14",
     ]
     features = [dict(zip(feat_cols, r)) for r in feat_rows]
 
@@ -1300,7 +1316,7 @@ def generate_signals(
                 target_date,
             )
             boosted_count += 1
-        scored.append({"code": code, "score": final_score})
+        scored.append({"code": code, "score": final_score, "rsi_14": feat.get("rsi_14")})
 
     if not regime_is_bear and not breadth_stop and boosted_count:
         logger.info(
@@ -1316,6 +1332,7 @@ def generate_signals(
     # 6. BUY シグナル生成（Bear レジームまたは breadth_stop では抑制）
     _gap_up = _cfg["gap_up_threshold"]
     _gap_down = _cfg["gap_down_threshold"]
+    _rsi_threshold = _cfg["rsi_overbought_threshold"]
     buy_signals: list[dict] = []
     if not regime_is_bear and not breadth_stop:
         # 3c. ギャップ比率を一括取得（BUY 生成が必要な場合のみ実行）
@@ -1323,11 +1340,23 @@ def generate_signals(
             conn, [r["code"] for r in scored if r["score"] >= threshold], target_date
         )
         gap_suppressed = 0
+        rsi_suppressed = 0
         sector_suppressed = 0
         reentry_suppressed = 0
         earnings_suppressed = 0
         for rank, r in enumerate(scored, 1):
             if r["score"] < threshold:
+                continue
+            # RSI 過熱フィルタ（rsi_14 が None の場合は安全側で許可）
+            rsi = r.get("rsi_14")
+            if rsi is not None and rsi > _rsi_threshold:
+                logger.debug(
+                    "rsi filter: %s rsi=%.1f — BUY を抑制 date=%s",
+                    r["code"],
+                    rsi,
+                    target_date,
+                )
+                rsi_suppressed += 1
                 continue
             gap = gap_ratios.get(r["code"])
             if gap is not None and (
@@ -1373,6 +1402,13 @@ def generate_signals(
                 earnings_suppressed += 1
                 continue
             buy_signals.append({"code": r["code"], "score": r["score"], "rank": rank})
+        if rsi_suppressed:
+            logger.info(
+                "generate_signals: rsi filter — %d 銘柄を RSI 過熱(%s超)で抑制 date=%s",
+                rsi_suppressed,
+                _rsi_threshold,
+                target_date,
+            )
         if gap_suppressed:
             logger.info(
                 "generate_signals: gap filter — %d 銘柄を抑制 date=%s",

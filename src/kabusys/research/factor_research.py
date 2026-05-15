@@ -466,3 +466,84 @@ def calc_quality(
     result = [dict(zip(cols, r)) for r in rows]
     logger.debug("calc_quality: %d 銘柄 date=%s", len(result), target_date)
     return result
+
+
+# ---------------------------------------------------------------------------
+# RSI ファクター
+# ---------------------------------------------------------------------------
+
+_RSI_PERIOD = 14  # Wilder's RSI 期間
+_RSI_SCAN_DAYS = (_RSI_PERIOD + 1) * 3  # データスキャン範囲（カレンダー日）
+
+
+def calc_rsi(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+) -> list[dict[str, Any]]:
+    """RSI(14) を計算する。
+
+    Wilder の平滑移動平均（初期値は単純平均）で計算する。
+    target_date 以前の最新 14+1 件の終値を使用するため、ルックアヘッドバイアスはない。
+    データ件数が 15 件未満の銘柄は rsi_14=None を返す。
+
+    Args:
+        conn:        DuckDB 接続。prices_daily テーブルを参照する。
+        target_date: 計算基準日。
+
+    Returns:
+        [{"code": str, "rsi_14": float | None}, ...] のリスト。
+    """
+    scan_from = target_date - timedelta(days=_RSI_SCAN_DAYS)
+    rows = conn.execute(
+        """
+        WITH price_window AS (
+            SELECT code, date,
+                CAST(close AS DOUBLE) AS close,
+                ROW_NUMBER() OVER (PARTITION BY code ORDER BY date DESC) AS rn
+            FROM prices_daily
+            WHERE date <= ? AND date >= ?
+              AND close IS NOT NULL
+        ),
+        recent AS (
+            SELECT code, date, close
+            FROM price_window
+            WHERE rn <= ?
+        ),
+        changes AS (
+            SELECT code, date,
+                close - LAG(close) OVER (PARTITION BY code ORDER BY date) AS chg
+            FROM recent
+        ),
+        gains_losses AS (
+            SELECT code,
+                GREATEST(chg, 0)  AS gain,
+                GREATEST(-chg, 0) AS loss
+            FROM changes
+            WHERE chg IS NOT NULL
+        ),
+        counts AS (
+            SELECT code, COUNT(*) AS n FROM gains_losses GROUP BY code
+        ),
+        avg_gl AS (
+            SELECT g.code,
+                AVG(g.gain) AS avg_gain,
+                AVG(g.loss) AS avg_loss
+            FROM gains_losses g
+            INNER JOIN counts c ON g.code = c.code
+            WHERE c.n >= ?
+            GROUP BY g.code
+        )
+        SELECT code,
+            CASE
+                WHEN avg_loss = 0 THEN 100.0
+                ELSE 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+            END AS rsi_14
+        FROM avg_gl
+        ORDER BY code
+        """,
+        [target_date, scan_from, _RSI_PERIOD + 1, _RSI_PERIOD],
+    ).fetchall()
+
+    result = [{"code": code, "rsi_14": rsi} for code, rsi in rows]
+    logger.debug("calc_rsi: %d 銘柄 date=%s", len(result), target_date)
+    return result

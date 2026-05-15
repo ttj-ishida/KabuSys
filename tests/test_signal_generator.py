@@ -808,3 +808,222 @@ class TestCalcSectorStrengthsQuartile:
         self._setup_4sectors(conn)
         top, _, _ = _calc_sector_strengths(conn, date(2026, 1, 21), sector_quartile=0.50)
         assert len(top) == 2  # ceil(4 * 0.50) = 2
+
+
+# ---------------------------------------------------------------------------
+# RSI 過熱フィルタ テスト (Issue #338)
+# ---------------------------------------------------------------------------
+
+from kabusys.research.factor_research import calc_rsi  # noqa: E402
+
+
+class TestCalcRsi:
+    """calc_rsi の単体テスト。"""
+
+    def test_returns_rsi_with_sufficient_data(self, conn):
+        """15件以上の価格データで RSI が計算されること。"""
+        base = date(2024, 1, 1)
+        rows = [
+            (
+                base + timedelta(days=i),
+                "1001",
+                1000.0 + i,
+                1010.0 + i,
+                990.0 + i,
+                1000.0 + i,
+                100000,
+            )
+            for i in range(20)
+        ]
+        conn.executemany(
+            "INSERT INTO prices_daily (date, code, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        result = calc_rsi(conn, base + timedelta(days=19))
+        assert len(result) == 1
+        rsi = result[0]["rsi_14"]
+        assert rsi is not None
+        assert 0.0 <= rsi <= 100.0
+
+    def test_returns_empty_with_insufficient_data(self, conn):
+        """14件以下の価格データでは結果が空または rsi_14=None になること。"""
+        base = date(2024, 1, 1)
+        rows = [
+            (base + timedelta(days=i), "1001", 1000.0, 1010.0, 990.0, 1000.0, 100000)
+            for i in range(10)
+        ]
+        conn.executemany(
+            "INSERT INTO prices_daily (date, code, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        result = calc_rsi(conn, base + timedelta(days=9))
+        # データ不足なら空リストか rsi_14=None
+        assert all(r["rsi_14"] is None for r in result) or len(result) == 0
+
+    def test_rsi_100_when_all_gains(self, conn):
+        """終値が毎日上昇する場合、RSI は 100 に近づくこと。"""
+        base = date(2024, 1, 1)
+        rows = [
+            (
+                base + timedelta(days=i),
+                "1001",
+                1000.0 + i * 10,
+                1010.0 + i * 10,
+                990.0 + i * 10,
+                1000.0 + i * 10,
+                100000,
+            )
+            for i in range(20)
+        ]
+        conn.executemany(
+            "INSERT INTO prices_daily (date, code, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        result = calc_rsi(conn, base + timedelta(days=19))
+        assert len(result) == 1
+        assert result[0]["rsi_14"] == 100.0
+
+    def test_rsi_0_when_all_losses(self, conn):
+        """終値が毎日下降する場合、RSI は 0 に近づくこと。"""
+        base = date(2024, 1, 1)
+        rows = [
+            (
+                base + timedelta(days=i),
+                "1001",
+                1000.0 - i * 10,
+                1010.0 - i * 10,
+                990.0 - i * 10,
+                max(100.0, 1000.0 - i * 10),
+                100000,
+            )
+            for i in range(20)
+        ]
+        conn.executemany(
+            "INSERT INTO prices_daily (date, code, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        result = calc_rsi(conn, base + timedelta(days=19))
+        assert len(result) == 1
+        assert result[0]["rsi_14"] == 0.0
+
+
+class TestRsiOverboughtConfig:
+    """rsi_overbought_threshold の config 読み込みテスト。"""
+
+    def test_default_is_70(self):
+        from kabusys.strategy.signal_generator import _STRATEGY_CONFIG_DEFAULTS
+
+        assert _STRATEGY_CONFIG_DEFAULTS["rsi_overbought_threshold"] == 70.0
+
+    def test_valid_value_accepted(self, tmp_path, monkeypatch):
+        yaml_text = "strategy:\n  rsi_overbought_threshold: 75.0\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["rsi_overbought_threshold"] == 75.0
+
+    def test_value_50_rejected(self, tmp_path, monkeypatch):
+        """50 以下は無効（50 < x <= 100 の範囲外）。"""
+        yaml_text = "strategy:\n  rsi_overbought_threshold: 50.0\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["rsi_overbought_threshold"] == 70.0  # default
+
+    def test_value_100_accepted(self, tmp_path, monkeypatch):
+        """100 は有効（フィルタ実質オフ）。"""
+        yaml_text = "strategy:\n  rsi_overbought_threshold: 100.0\n"
+        cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
+        assert cfg["rsi_overbought_threshold"] == 100.0
+
+
+class TestRsiFilterInGenerateSignals:
+    """generate_signals の RSI 過熱フィルタ動作テスト。"""
+
+    def _insert_feature_with_rsi(self, conn, code: str, d: date, rsi: float | None) -> None:
+        conn.execute(
+            "INSERT INTO features "
+            "(date, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev, rsi_14) "
+            "VALUES (?, ?, 3.0, 3.0, -3.0, 3.0, 5.0, 3.0, ?)",
+            [d, code, rsi],
+        )
+
+    def test_rsi_over_threshold_suppresses_buy(self, conn):
+        """RSI > 70 の銘柄が BUY 対象から除外されること。"""
+        import sqlite3
+
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        self._insert_feature_with_rsi(conn, "1001", TARGET_DATE, rsi=75.0)
+        conn.execute(
+            "INSERT INTO prices_daily (date, code, open, high, low, close, volume) "
+            "VALUES (?, '1001', 1000, 1010, 990, 1000, 100000)",
+            [TARGET_DATE],
+        )
+        sqlite_conn = sqlite3.connect(":memory:")
+        from kabusys.execution.order_repository import init_orders_db, init_position_entries_db
+
+        init_orders_db(sqlite_conn)
+        init_position_entries_db(sqlite_conn)
+        generate_signals(conn, TARGET_DATE, sqlite_conn=sqlite_conn)
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date=? AND side='buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "1001" not in buy_codes
+
+    def test_rsi_below_threshold_allows_buy(self, conn):
+        """RSI <= 70 の銘柄は BUY 対象になること。"""
+        import sqlite3
+
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        self._insert_feature_with_rsi(conn, "1001", TARGET_DATE, rsi=65.0)
+        conn.execute(
+            "INSERT INTO prices_daily (date, code, open, high, low, close, volume) "
+            "VALUES (?, '1001', 1000, 1010, 990, 1000, 100000)",
+            [TARGET_DATE],
+        )
+        sqlite_conn = sqlite3.connect(":memory:")
+        from kabusys.execution.order_repository import init_orders_db, init_position_entries_db
+
+        init_orders_db(sqlite_conn)
+        init_position_entries_db(sqlite_conn)
+        generate_signals(conn, TARGET_DATE, sqlite_conn=sqlite_conn)
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date=? AND side='buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "1001" in buy_codes
+
+    def test_rsi_none_allows_buy(self, conn):
+        """RSI が NULL（データ不足）の場合は安全側で BUY を許可すること。"""
+        import sqlite3
+
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        self._insert_feature_with_rsi(conn, "1001", TARGET_DATE, rsi=None)
+        conn.execute(
+            "INSERT INTO prices_daily (date, code, open, high, low, close, volume) "
+            "VALUES (?, '1001', 1000, 1010, 990, 1000, 100000)",
+            [TARGET_DATE],
+        )
+        sqlite_conn = sqlite3.connect(":memory:")
+        from kabusys.execution.order_repository import init_orders_db, init_position_entries_db
+
+        init_orders_db(sqlite_conn)
+        init_position_entries_db(sqlite_conn)
+        generate_signals(conn, TARGET_DATE, sqlite_conn=sqlite_conn)
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date=? AND side='buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "1001" in buy_codes
