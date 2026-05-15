@@ -210,8 +210,7 @@ def test_calc_paper_portfolio_value_with_positions(tmp_path: Path):
     db_path = tmp_path / "paper_trading.db"
     with sqlite3.connect(str(db_path)) as db:
         db.execute(
-            "CREATE TABLE orders"
-            " (side TEXT, code TEXT, filled_qty INTEGER, avg_fill_price REAL)"
+            "CREATE TABLE orders (side TEXT, code TEXT, filled_qty INTEGER, avg_fill_price REAL)"
         )
         db.execute("INSERT INTO orders VALUES ('buy', '7203', 100, 2000.0)")
 
@@ -241,8 +240,7 @@ def test_calc_paper_portfolio_value_negative_cash_clipped(tmp_path: Path):
     db_path = tmp_path / "paper_trading.db"
     with sqlite3.connect(str(db_path)) as db:
         db.execute(
-            "CREATE TABLE orders"
-            " (side TEXT, code TEXT, filled_qty INTEGER, avg_fill_price REAL)"
+            "CREATE TABLE orders (side TEXT, code TEXT, filled_qty INTEGER, avg_fill_price REAL)"
         )
         # 1,000株買い (cost=2,000,000 > initial_cash=1,000,000)
         db.execute("INSERT INTO orders VALUES ('buy', '7203', 1000, 2000.0)")
@@ -273,8 +271,7 @@ def test_calc_paper_portfolio_value_price_fetch_fails(tmp_path: Path):
     db_path = tmp_path / "paper_trading.db"
     with sqlite3.connect(str(db_path)) as db:
         db.execute(
-            "CREATE TABLE orders"
-            " (side TEXT, code TEXT, filled_qty INTEGER, avg_fill_price REAL)"
+            "CREATE TABLE orders (side TEXT, code TEXT, filled_qty INTEGER, avg_fill_price REAL)"
         )
         db.execute("INSERT INTO orders VALUES ('buy', '7203', 100, 2000.0)")
 
