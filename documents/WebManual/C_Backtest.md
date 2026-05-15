@@ -11,7 +11,36 @@ KabuSys のバックテストは、実運用と同じ `generate_signals()` ロ�
 
 ---
 
-## C-B-2. 基本実行
+## C-B-2. 事前準備 — 特徴量のバックフィル
+
+バックテストは `features` テーブルにデータが存在することを前提とします。
+初めてバックテストを実行する際、または対象期間を拡張した場合は、先に `backfill_features.py` で特徴量を生成してください。
+
+```powershell
+# ステップ 1: 価格・財務データを取得（初回または差分更新）
+python -m kabusys.data.bootstrap
+
+# ステップ 2: 特徴量を期間一括生成
+python scripts/backfill_features.py --start 2022-01-01 --end 2024-12-31
+
+# ステップ 3: バックテスト実行
+python -m kabusys.backtest.run --start 2022-01-01 --end 2024-12-31 --db data/kabusys.duckdb
+```
+
+### backfill_features.py のオプション
+
+| オプション | 説明 |
+|---|---|
+| `--start` / `--end` | 対象期間（必須） |
+| `--db` | DuckDB ファイルパス（省略時は設定ファイルのデフォルト） |
+| `--force` | 既存データを上書きする（省略時は既存データがある日をスキップ） |
+| `--dry-run` | 対象日付の一覧を表示するのみ（DB への書き込みなし） |
+
+> **ヒント:** 価格データが存在しない日は自動的にスキップされます。スキップ数が多い場合は先に `bootstrap` を実行してください。
+
+---
+
+## C-B-4. 基本実行
 
 ```powershell
 python -m kabusys.backtest.run `
@@ -22,7 +51,7 @@ python -m kabusys.backtest.run `
 
 ---
 
-## C-B-3. 主なオプション
+## C-B-5. 主なオプション
 
 | オプション | デフォルト | 説明 |
 |---|---|---|
@@ -50,7 +79,7 @@ python -m kabusys.backtest.run `
 
 ---
 
-## C-B-4. 対象銘柄を絞る（Targeted Backtest）
+## C-B-6. 対象銘柄を絞る（Targeted Backtest）
 
 特定銘柄のみで検証する場合は `--scope-mode manual_codes` を使います。
 
@@ -65,7 +94,7 @@ python -m kabusys.backtest.run `
 
 ---
 
-## C-B-5. strategy_config.yaml でチューニングできるパラメータ
+## C-B-7. strategy_config.yaml でチューニングできるパラメータ
 
 バックテストは実運用と同じ `strategy_config.yaml` を読み込みます。以下のパラメータを変更すると、バックテスト結果に反映されます。
 
@@ -92,7 +121,7 @@ strategy:
 
 ---
 
-## C-B-6. 詳細リファレンス
+## C-B-8. 詳細リファレンス
 
 技術仕様・モジュール構成・インメモリ DB の詳細は設計ドキュメントを参照してください。
 
