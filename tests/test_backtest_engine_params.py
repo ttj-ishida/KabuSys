@@ -53,6 +53,7 @@ def test_build_backtest_conn_copies_topix_daily(source_conn):
 def test_run_backtest_accepts_threshold_param():
     """run_backtest() が threshold パラメータを受け取れること。"""
     import inspect
+
     from kabusys.backtest.engine import run_backtest
 
     sig = inspect.signature(run_backtest)
@@ -62,6 +63,7 @@ def test_run_backtest_accepts_threshold_param():
 def test_run_backtest_accepts_topix_params():
     """run_backtest() が topix_drawdown_threshold / topix_size_multiplier_bear を受け取れること。"""
     import inspect
+
     from kabusys.backtest.engine import run_backtest
 
     sig = inspect.signature(run_backtest)
