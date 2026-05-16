@@ -1126,6 +1126,11 @@ def generate_signals(
                            1 以上を指定すること。
         trailing_stop_atr: ATR 乗数。peak_close − N×ATR を下回ったら trailing_stop SELL。
                            正の値を指定すること（None の場合は config から読み込む）。
+        topix_drawdown_threshold: TOPIX 200MA 乖離率のベア判定閾値（負の値、例: -0.12）。
+                           この値未満のとき size_multiplier_bear を適用する。
+                           None の場合は strategy_config.yaml から読み込む。
+        topix_size_multiplier_bear: ベア判定時の BUY size_multiplier（0 < x <= 1）。
+                           None の場合は strategy_config.yaml から読み込む。
         regime_provider:   レジームラベルを返すプロバイダー。明示的に渡した場合は
                            ENABLE_AI_SENTIMENT の設定値より優先される。省略時は
                            ENABLE_AI_SENTIMENT フラグに基づいて自動生成する。
