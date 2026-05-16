@@ -109,7 +109,14 @@ def _build_backtest_conn(
             placeholders = ", ".join(["?" for _ in cols])
             bt_conn.executemany(f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})", rows)
         except Exception as exc:
-            logger.warning("_build_backtest_conn: %s のコピーをスキップ: %s", table, exc)
+            if table == "topix_daily":
+                logger.warning(
+                    "_build_backtest_conn: topix_daily が見つかりません — ベアガードは無効化されます"
+                    " (size_multiplier=1.0): %s",
+                    exc,
+                )
+            else:
+                logger.warning("_build_backtest_conn: %s のコピーをスキップ: %s", table, exc)
 
     # market_calendar は全件コピー
     try:
