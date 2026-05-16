@@ -1101,6 +1101,8 @@ def generate_signals(
     min_holding_days: int | None = None,
     max_holding_days: int | None = None,
     trailing_stop_atr: float | None = None,
+    topix_drawdown_threshold: float | None = None,
+    topix_size_multiplier_bear: float | None = None,
     *,
     regime_provider: RegimeProvider | None = None,
     sqlite_conn: sqlite3.Connection | None = None,
@@ -1189,8 +1191,16 @@ def generate_signals(
     topix_multiplier = _get_topix_size_multiplier(
         conn,
         target_date,
-        drawdown_threshold=_cfg["topix_drawdown_threshold"],
-        size_multiplier_bear=_cfg["topix_size_multiplier_bear"],
+        drawdown_threshold=(
+            topix_drawdown_threshold
+            if topix_drawdown_threshold is not None
+            else _cfg["topix_drawdown_threshold"]
+        ),
+        size_multiplier_bear=(
+            topix_size_multiplier_bear
+            if topix_size_multiplier_bear is not None
+            else _cfg["topix_size_multiplier_bear"]
+        ),
     )
     size_multiplier = min(size_multiplier, topix_multiplier)
 

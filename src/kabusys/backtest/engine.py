@@ -92,7 +92,7 @@ def _build_backtest_conn(
     data_start = start_date - timedelta(days=300)
 
     # 日付範囲でフィルタするテーブル
-    _core_tables: tuple[str, ...] = ("prices_daily", "features", "market_regime")
+    _core_tables: tuple[str, ...] = ("prices_daily", "features", "market_regime", "topix_daily")
     _ai_tables: tuple[str, ...] = ("ai_scores",) if ai_enabled else ()
     date_filtered_tables = _core_tables + _ai_tables
     for table in date_filtered_tables:
@@ -367,6 +367,9 @@ def run_backtest(
     min_holding_days: int = 5,
     max_holding_days: int = 60,
     trailing_stop_atr: float = 2.0,
+    threshold: float | None = None,
+    topix_drawdown_threshold: float | None = None,
+    topix_size_multiplier_bear: float | None = None,
 ) -> BacktestResult:
     """バックテストを実行し結果を返す。
 
@@ -397,6 +400,11 @@ def run_backtest(
         trailing_stop_atr: トレーリングストップの ATR 乗数（デフォルト 2.0）。
                            close < peak_close - trailing_stop_atr × ATR_20d のとき SELL 発動。
                            正の値を指定すること。
+        threshold:         BUY シグナル生成の final_score 閾値（None のとき strategy_config.yaml から読み込む）。
+        topix_drawdown_threshold: TOPIX 200MA 乖離率のベア判定閾値（None のとき strategy_config.yaml から読み込む）。
+                           負の値を指定すること（例: -0.12）。
+        topix_size_multiplier_bear: ベア判定時の size_multiplier（None のとき strategy_config.yaml から読み込む）。
+                           0 < x <= 1 の範囲で指定すること。
 
     Returns:
         BacktestResult（history, trades, metrics および scope_mode/excluded_codes 等のスコープメタデータ）。
@@ -520,11 +528,14 @@ def run_backtest(
             generate_signals(
                 bt_conn,
                 target_date=trading_day,
+                threshold=threshold,
                 event_dates=event_dates or {},
                 scope=backtest_scope,
                 min_holding_days=min_holding_days,
                 max_holding_days=max_holding_days,
                 trailing_stop_atr=trailing_stop_atr,
+                topix_drawdown_threshold=topix_drawdown_threshold,
+                topix_size_multiplier_bear=topix_size_multiplier_bear,
             )
 
             # Step 5: ポートフォリオ構築（Phase 5 モジュール使用）

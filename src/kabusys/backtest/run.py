@@ -147,6 +147,24 @@ def main() -> None:
         default=2.0,
         help="ATR multiplier for trailing stop. Position is sold when close < peak − N×ATR. [default: %(default)s]",
     )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="BUY signal score threshold. Overrides strategy_config.yaml when specified.",
+    )
+    parser.add_argument(
+        "--topix-drawdown-threshold",
+        type=float,
+        default=None,
+        help="TOPIX 200MA deviation threshold for bear guard (negative value, e.g. -0.12). Overrides strategy_config.yaml when specified.",
+    )
+    parser.add_argument(
+        "--topix-size-multiplier-bear",
+        type=float,
+        default=None,
+        help="size_multiplier applied when TOPIX bear guard triggers (0 < x <= 1). Overrides strategy_config.yaml when specified.",
+    )
     parser.add_argument("--db", required=True, help="DuckDB file path")
     parser.add_argument(
         "--output-format",
@@ -213,6 +231,9 @@ def main() -> None:
             min_holding_days=args.min_holding_days,
             max_holding_days=args.max_holding_days,
             trailing_stop_atr=args.trailing_stop_atr,
+            threshold=args.threshold,
+            topix_drawdown_threshold=args.topix_drawdown_threshold,
+            topix_size_multiplier_bear=args.topix_size_multiplier_bear,
         )
     finally:
         conn.close()
