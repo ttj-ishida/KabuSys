@@ -1101,6 +1101,8 @@ def generate_signals(
     min_holding_days: int | None = None,
     max_holding_days: int | None = None,
     trailing_stop_atr: float | None = None,
+    topix_drawdown_threshold: float | None = None,
+    topix_size_multiplier_bear: float | None = None,
     *,
     regime_provider: RegimeProvider | None = None,
     sqlite_conn: sqlite3.Connection | None = None,
@@ -1124,6 +1126,11 @@ def generate_signals(
                            1 以上を指定すること。
         trailing_stop_atr: ATR 乗数。peak_close − N×ATR を下回ったら trailing_stop SELL。
                            正の値を指定すること（None の場合は config から読み込む）。
+        topix_drawdown_threshold: TOPIX 200MA 乖離率のベア判定閾値（負の値、例: -0.12）。
+                           この値未満のとき size_multiplier_bear を適用する。
+                           None の場合は strategy_config.yaml から読み込む。
+        topix_size_multiplier_bear: ベア判定時の BUY size_multiplier（0 < x <= 1）。
+                           None の場合は strategy_config.yaml から読み込む。
         regime_provider:   レジームラベルを返すプロバイダー。明示的に渡した場合は
                            ENABLE_AI_SENTIMENT の設定値より優先される。省略時は
                            ENABLE_AI_SENTIMENT フラグに基づいて自動生成する。
@@ -1189,8 +1196,16 @@ def generate_signals(
     topix_multiplier = _get_topix_size_multiplier(
         conn,
         target_date,
-        drawdown_threshold=_cfg["topix_drawdown_threshold"],
-        size_multiplier_bear=_cfg["topix_size_multiplier_bear"],
+        drawdown_threshold=(
+            topix_drawdown_threshold
+            if topix_drawdown_threshold is not None
+            else _cfg["topix_drawdown_threshold"]
+        ),
+        size_multiplier_bear=(
+            topix_size_multiplier_bear
+            if topix_size_multiplier_bear is not None
+            else _cfg["topix_size_multiplier_bear"]
+        ),
     )
     size_multiplier = min(size_multiplier, topix_multiplier)
 
