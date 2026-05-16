@@ -437,9 +437,13 @@ def run_backtest(
     if threshold is not None and not (0 < threshold < 1):
         raise ValueError(f"threshold は (0, 1) の範囲で指定してください: {threshold}")
     if topix_drawdown_threshold is not None and topix_drawdown_threshold >= 0:
-        raise ValueError(f"topix_drawdown_threshold は負の値を指定してください: {topix_drawdown_threshold}")
+        raise ValueError(
+            f"topix_drawdown_threshold は負の値を指定してください: {topix_drawdown_threshold}"
+        )
     if topix_size_multiplier_bear is not None and not (0 < topix_size_multiplier_bear <= 1):
-        raise ValueError(f"topix_size_multiplier_bear は (0, 1] の範囲で指定してください: {topix_size_multiplier_bear}")
+        raise ValueError(
+            f"topix_size_multiplier_bear は (0, 1] の範囲で指定してください: {topix_size_multiplier_bear}"
+        )
 
     # try ブロック外でも参照できるようデフォルト初期化
     _scope_mode: Literal["default_universe", "manual_codes"] = (

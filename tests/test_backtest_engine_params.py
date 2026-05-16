@@ -90,6 +90,7 @@ def test_run_py_cli_has_threshold_arg():
     with patch.object(argparse.ArgumentParser, "parse_args", capturing_parse):
         try:
             import kabusys.backtest.run as run_module
+
             importlib.reload(run_module)
             run_module.main()
         except SystemExit:
@@ -115,6 +116,7 @@ def test_run_py_cli_has_topix_args():
     with patch.object(argparse.ArgumentParser, "parse_args", capturing_parse):
         try:
             import kabusys.backtest.run as run_module
+
             importlib.reload(run_module)
             run_module.main()
         except SystemExit:
