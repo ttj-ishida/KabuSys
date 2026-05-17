@@ -377,6 +377,8 @@ def run_backtest(
     threshold: float | None = None,
     topix_drawdown_threshold: float | None = None,
     topix_size_multiplier_bear: float | None = None,
+    use_ma200_filter: bool = False,
+    volume_breakout_threshold: float | None = None,
 ) -> BacktestResult:
     """バックテストを実行し結果を返す。
 
@@ -546,6 +548,8 @@ def run_backtest(
                 bt_conn,
                 target_date=trading_day,
                 threshold=threshold,
+                use_ma200_filter=use_ma200_filter,
+                volume_breakout_threshold=volume_breakout_threshold,
                 event_dates=event_dates or {},
                 scope=backtest_scope,
                 min_holding_days=min_holding_days,

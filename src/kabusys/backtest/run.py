@@ -165,6 +165,18 @@ def main() -> None:
         default=None,
         help="size_multiplier applied when TOPIX bear guard triggers (0 < x <= 1). Overrides strategy_config.yaml when specified.",
     )
+    parser.add_argument(
+        "--ma200-filter",
+        action="store_true",
+        default=False,
+        help="When set, suppress BUY signals for stocks trading below their 200-day MA (ma200_dev < 0).",
+    )
+    parser.add_argument(
+        "--volume-breakout-threshold",
+        type=float,
+        default=None,
+        help="Suppress BUY signals when volume_ratio is below this multiplier (e.g. 1.5 means volume must be >= 1.5x 20-day average).",
+    )
     parser.add_argument("--db", required=True, help="DuckDB file path")
     parser.add_argument(
         "--output-format",
@@ -234,6 +246,8 @@ def main() -> None:
             threshold=args.threshold,
             topix_drawdown_threshold=args.topix_drawdown_threshold,
             topix_size_multiplier_bear=args.topix_size_multiplier_bear,
+            use_ma200_filter=args.ma200_filter,
+            volume_breakout_threshold=args.volume_breakout_threshold,
         )
     finally:
         conn.close()

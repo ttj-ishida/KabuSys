@@ -75,6 +75,21 @@ def test_run_backtest_accepts_topix_params():
     )
 
 
+def test_run_backtest_accepts_factor_filter_params():
+    """run_backtest() が use_ma200_filter / volume_breakout_threshold を受け取れること。"""
+    import inspect
+
+    from kabusys.backtest.engine import run_backtest
+
+    sig = inspect.signature(run_backtest)
+    assert "use_ma200_filter" in sig.parameters, (
+        "run_backtest() に use_ma200_filter パラメータが存在しない"
+    )
+    assert "volume_breakout_threshold" in sig.parameters, (
+        "run_backtest() に volume_breakout_threshold パラメータが存在しない"
+    )
+
+
 def test_run_py_cli_has_threshold_arg():
     """kabusys.backtest.run の argparse に --threshold が定義されていること。"""
     import argparse
@@ -129,4 +144,33 @@ def test_run_py_cli_has_topix_args():
     )
     assert "topix_size_multiplier_bear" in actions, (
         f"--topix-size-multiplier-bear が argparse に定義されていない: {actions}"
+    )
+
+
+def test_run_py_cli_has_factor_filter_args():
+    """kabusys.backtest.run の argparse に --ma200-filter / --volume-breakout-threshold が定義されていること。"""
+    import argparse
+    import importlib
+    from unittest.mock import patch
+
+    captured: list[argparse.ArgumentParser] = []
+
+    def capturing_parse(self, args=None, namespace=None):
+        captured.append(self)
+        raise SystemExit(0)
+
+    with patch.object(argparse.ArgumentParser, "parse_args", capturing_parse):
+        try:
+            import kabusys.backtest.run as run_module
+
+            importlib.reload(run_module)
+            run_module.main()
+        except SystemExit:
+            pass
+
+    assert captured
+    actions = {a.dest for a in captured[0]._actions}
+    assert "ma200_filter" in actions, f"--ma200-filter が argparse に定義されていない: {actions}"
+    assert "volume_breakout_threshold" in actions, (
+        f"--volume-breakout-threshold が argparse に定義されていない: {actions}"
     )
