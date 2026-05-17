@@ -910,10 +910,10 @@ class TestCalcRsi:
 class TestRsiOverboughtConfig:
     """rsi_overbought_threshold の config 読み込みテスト。"""
 
-    def test_default_is_70(self):
+    def test_default_is_65(self):
         from kabusys.strategy.signal_generator import _STRATEGY_CONFIG_DEFAULTS
 
-        assert _STRATEGY_CONFIG_DEFAULTS["rsi_overbought_threshold"] == 70.0
+        assert _STRATEGY_CONFIG_DEFAULTS["rsi_overbought_threshold"] == 65.0
 
     def test_valid_value_accepted(self, tmp_path, monkeypatch):
         yaml_text = "strategy:\n  rsi_overbought_threshold: 75.0\n"
@@ -921,10 +921,10 @@ class TestRsiOverboughtConfig:
         assert cfg["rsi_overbought_threshold"] == 75.0
 
     def test_value_50_rejected(self, tmp_path, monkeypatch):
-        """50 以下は無効（50 < x <= 100 の範囲外）。"""
+        """50 以下は無効（50 < x <= 100 の範囲外）→ デフォルト 65.0 にフォールバック。"""
         yaml_text = "strategy:\n  rsi_overbought_threshold: 50.0\n"
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
-        assert cfg["rsi_overbought_threshold"] == 70.0  # default
+        assert cfg["rsi_overbought_threshold"] == 65.0  # default
 
     def test_value_100_accepted(self, tmp_path, monkeypatch):
         """100 は有効（フィルタ実質オフ）。"""

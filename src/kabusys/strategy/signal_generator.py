@@ -78,7 +78,7 @@ _TOPIX_DRAWDOWN_THRESHOLD: float = -0.15  # 200MA 乖離率がこの値未満で
 _TOPIX_SIZE_MULTIPLIER_BEAR: float = 0.5  # 地合い悪化時の size_multiplier
 _TOPIX_MIN_DATA_COUNT: int = 100  # 200MA を信頼できる最低データ数（初期運用でのデータ蓄積期間を考慮し 200 でなく 100 に設定）
 
-_RSI_OVERBOUGHT_THRESHOLD: float = 70.0  # RSI(14) > この値の銘柄は BUY 抑制（過熱判定）
+_RSI_OVERBOUGHT_THRESHOLD: float = 65.0  # RSI(14) > この値の銘柄は BUY 抑制（過熱判定）
 
 # features テーブルから SELECT する列（2箇所で共用）
 _FEATURES_SELECT_COLS: tuple[str, ...] = (
@@ -1133,6 +1133,13 @@ def generate_signals(
                            None の場合は strategy_config.yaml から読み込む。
         topix_size_multiplier_bear: ベア判定時の BUY size_multiplier（0 < x <= 1）。
                            None の場合は strategy_config.yaml から読み込む。
+        use_ma200_filter:  True のとき株価が 200 日移動平均線を下回る銘柄（ma200_dev < 0）
+                           の BUY を抑制する。ma200_dev が None の場合は安全側で BUY 許可。
+                           False（デフォルト）では無効。
+        volume_breakout_threshold: 指定した場合、volume_ratio（20日平均出来高比）が
+                           この値を下回る銘柄の BUY を抑制する（例: 1.5 = 1.5倍未満を除外）。
+                           volume_ratio が None の場合は安全側で BUY 許可。
+                           None（デフォルト）で無効。
         regime_provider:   レジームラベルを返すプロバイダー。明示的に渡した場合は
                            ENABLE_AI_SENTIMENT の設定値より優先される。省略時は
                            ENABLE_AI_SENTIMENT フラグに基づいて自動生成する。

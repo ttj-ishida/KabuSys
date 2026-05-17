@@ -414,6 +414,10 @@ def run_backtest(
                            負の値を指定すること（例: -0.12）。
         topix_size_multiplier_bear: ベア判定時の size_multiplier（None のとき strategy_config.yaml から読み込む）。
                            0 < x <= 1 の範囲で指定すること。
+        use_ma200_filter:  True のとき株価が 200 日移動平均線を下回る銘柄の BUY を抑制する。
+                           False（デフォルト）で無効。generate_signals() の同名引数に転送。
+        volume_breakout_threshold: 指定した場合、volume_ratio が閾値未満の銘柄の BUY を抑制する。
+                           None（デフォルト）で無効。generate_signals() の同名引数に転送。
 
     Returns:
         BacktestResult（history, trades, metrics および scope_mode/excluded_codes 等のスコープメタデータ）。
