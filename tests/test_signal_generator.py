@@ -910,10 +910,10 @@ class TestCalcRsi:
 class TestRsiOverboughtConfig:
     """rsi_overbought_threshold の config 読み込みテスト。"""
 
-    def test_default_is_70(self):
+    def test_default_is_65(self):
         from kabusys.strategy.signal_generator import _STRATEGY_CONFIG_DEFAULTS
 
-        assert _STRATEGY_CONFIG_DEFAULTS["rsi_overbought_threshold"] == 70.0
+        assert _STRATEGY_CONFIG_DEFAULTS["rsi_overbought_threshold"] == 65.0
 
     def test_valid_value_accepted(self, tmp_path, monkeypatch):
         yaml_text = "strategy:\n  rsi_overbought_threshold: 75.0\n"
@@ -921,10 +921,10 @@ class TestRsiOverboughtConfig:
         assert cfg["rsi_overbought_threshold"] == 75.0
 
     def test_value_50_rejected(self, tmp_path, monkeypatch):
-        """50 以下は無効（50 < x <= 100 の範囲外）。"""
+        """50 以下は無効（50 < x <= 100 の範囲外）→ デフォルト 65.0 にフォールバック。"""
         yaml_text = "strategy:\n  rsi_overbought_threshold: 50.0\n"
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
-        assert cfg["rsi_overbought_threshold"] == 70.0  # default
+        assert cfg["rsi_overbought_threshold"] == 65.0  # default
 
     def test_value_100_accepted(self, tmp_path, monkeypatch):
         """100 は有効（フィルタ実質オフ）。"""
@@ -1029,14 +1029,14 @@ class TestRsiFilterInGenerateSignals:
         assert "1001" in buy_codes
 
     def test_rsi_at_threshold_allows_buy(self, conn):
-        """RSI がちょうど閾値（70.0）の場合は BUY を許可すること（> のため境界値は許可）。"""
+        """RSI がちょうど閾値（65.0）の場合は BUY を許可すること（> のため境界値は許可）。"""
         import sqlite3
 
         from kabusys.strategy.signal_generator import generate_signals
 
         _insert_regime(conn, TARGET_DATE, "bull")
         _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
-        self._insert_feature_with_rsi(conn, "1001", TARGET_DATE, rsi=70.0)
+        self._insert_feature_with_rsi(conn, "1001", TARGET_DATE, rsi=65.0)
         conn.execute(
             "INSERT INTO prices_daily (date, code, open, high, low, close, volume) "
             "VALUES (?, '1001', 1000, 1010, 990, 1000, 100000)",
@@ -1054,4 +1054,181 @@ class TestRsiFilterInGenerateSignals:
                 "SELECT code FROM signals WHERE date=? AND side='buy'", [TARGET_DATE]
             ).fetchall()
         ]
-        assert "1001" in buy_codes, "RSI=70.0（閾値ちょうど）は BUY 許可（> 判定のため）"
+        assert "1001" in buy_codes, "RSI=65.0（閾値ちょうど）は BUY 許可（> 判定のため）"
+
+
+# ---------------------------------------------------------------------------
+# 200MA バイナリフィルター / 出来高ブレイクアウトフィルター テスト (Issue #346)
+# ---------------------------------------------------------------------------
+
+
+def _insert_feature_with_values(
+    conn,
+    code: str,
+    d: date,
+    *,
+    momentum_20: float = 3.0,
+    momentum_60: float = 3.0,
+    volatility_20: float = -3.0,
+    volume_ratio: float = 3.0,
+    per: float = 5.0,
+    ma200_dev: float = 3.0,
+) -> None:
+    conn.execute(
+        "INSERT INTO features "
+        "(date, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [d, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev],
+    )
+
+
+class TestMa200Filter:
+    """use_ma200_filter=True のとき MA200 下の銘柄の BUY を抑制する。"""
+
+    def test_below_ma200_suppressed(self, conn):
+        """use_ma200_filter=True → ma200_dev < 0 の銘柄の BUY を抑制する。"""
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        _insert_feature_with_values(conn, "8001", TARGET_DATE, ma200_dev=-0.05)
+
+        generate_signals(conn, TARGET_DATE, use_ma200_filter=True)
+
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "8001" not in buy_codes
+
+    def test_above_ma200_allowed(self, conn):
+        """use_ma200_filter=True → ma200_dev >= 0 の銘柄の BUY を許可する。"""
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        _insert_feature_with_values(conn, "8002", TARGET_DATE, ma200_dev=0.05)
+
+        generate_signals(conn, TARGET_DATE, use_ma200_filter=True)
+
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "8002" in buy_codes
+
+    def test_filter_disabled_by_default(self, conn):
+        """use_ma200_filter=False（デフォルト）→ ma200_dev < 0 でも BUY を許可する。"""
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        _insert_feature_with_values(conn, "8003", TARGET_DATE, ma200_dev=-0.05)
+
+        generate_signals(conn, TARGET_DATE)
+
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "8003" in buy_codes
+
+    def test_ma200_dev_zero_allowed(self, conn):
+        """ma200_dev == 0.0 は MA200 と同値 → BUY を許可する（>= 0 判定）。"""
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        _insert_feature_with_values(conn, "8004", TARGET_DATE, ma200_dev=0.0)
+
+        generate_signals(conn, TARGET_DATE, use_ma200_filter=True)
+
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "8004" in buy_codes
+
+
+class TestVolumeBreakoutFilter:
+    """volume_breakout_threshold が指定されると出来高比率が低い銘柄の BUY を抑制する。"""
+
+    def test_low_volume_suppressed(self, conn):
+        """volume_breakout_threshold=1.5 → volume_ratio=1.2 の銘柄の BUY を抑制する。"""
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        _insert_feature_with_values(conn, "9001", TARGET_DATE, volume_ratio=1.2)
+
+        generate_signals(conn, TARGET_DATE, volume_breakout_threshold=1.5)
+
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "9001" not in buy_codes
+
+    def test_high_volume_allowed(self, conn):
+        """volume_breakout_threshold=1.5 → volume_ratio=2.0 の銘柄の BUY を許可する。"""
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        _insert_feature_with_values(conn, "9002", TARGET_DATE, volume_ratio=2.0)
+
+        generate_signals(conn, TARGET_DATE, volume_breakout_threshold=1.5)
+
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "9002" in buy_codes
+
+    def test_threshold_none_disabled(self, conn):
+        """volume_breakout_threshold=None（デフォルト）→ volume_ratio=1.0 でも BUY 許可。"""
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        _insert_feature_with_values(conn, "9003", TARGET_DATE, volume_ratio=1.0)
+
+        generate_signals(conn, TARGET_DATE)
+
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "9003" in buy_codes
+
+    def test_volume_exactly_at_threshold_allowed(self, conn):
+        """volume_ratio がちょうど閾値の場合は BUY を許可する（>= 判定）。"""
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        _insert_feature_with_values(conn, "9004", TARGET_DATE, volume_ratio=1.5)
+
+        generate_signals(conn, TARGET_DATE, volume_breakout_threshold=1.5)
+
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "9004" in buy_codes

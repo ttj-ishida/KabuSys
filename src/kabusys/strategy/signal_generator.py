@@ -78,7 +78,7 @@ _TOPIX_DRAWDOWN_THRESHOLD: float = -0.15  # 200MA 乖離率がこの値未満で
 _TOPIX_SIZE_MULTIPLIER_BEAR: float = 0.5  # 地合い悪化時の size_multiplier
 _TOPIX_MIN_DATA_COUNT: int = 100  # 200MA を信頼できる最低データ数（初期運用でのデータ蓄積期間を考慮し 200 でなく 100 に設定）
 
-_RSI_OVERBOUGHT_THRESHOLD: float = 70.0  # RSI(14) > この値の銘柄は BUY 抑制（過熱判定）
+_RSI_OVERBOUGHT_THRESHOLD: float = 65.0  # RSI(14) > この値の銘柄は BUY 抑制（過熱判定）
 
 # features テーブルから SELECT する列（2箇所で共用）
 _FEATURES_SELECT_COLS: tuple[str, ...] = (
@@ -1103,6 +1103,8 @@ def generate_signals(
     trailing_stop_atr: float | None = None,
     topix_drawdown_threshold: float | None = None,
     topix_size_multiplier_bear: float | None = None,
+    use_ma200_filter: bool = False,
+    volume_breakout_threshold: float | None = None,
     *,
     regime_provider: RegimeProvider | None = None,
     sqlite_conn: sqlite3.Connection | None = None,
@@ -1131,6 +1133,13 @@ def generate_signals(
                            None の場合は strategy_config.yaml から読み込む。
         topix_size_multiplier_bear: ベア判定時の BUY size_multiplier（0 < x <= 1）。
                            None の場合は strategy_config.yaml から読み込む。
+        use_ma200_filter:  True のとき株価が 200 日移動平均線を下回る銘柄（ma200_dev < 0）
+                           の BUY を抑制する。ma200_dev が None の場合は安全側で BUY 許可。
+                           False（デフォルト）では無効。
+        volume_breakout_threshold: 指定した場合、volume_ratio（20日平均出来高比）が
+                           この値を下回る銘柄の BUY を抑制する（例: 1.5 = 1.5倍未満を除外）。
+                           volume_ratio が None の場合は安全側で BUY 許可。
+                           None（デフォルト）で無効。
         regime_provider:   レジームラベルを返すプロバイダー。明示的に渡した場合は
                            ENABLE_AI_SENTIMENT の設定値より優先される。省略時は
                            ENABLE_AI_SENTIMENT フラグに基づいて自動生成する。
@@ -1326,7 +1335,15 @@ def generate_signals(
                 target_date,
             )
             boosted_count += 1
-        scored.append({"code": code, "score": final_score, "rsi_14": feat.get("rsi_14")})
+        scored.append(
+            {
+                "code": code,
+                "score": final_score,
+                "rsi_14": feat.get("rsi_14"),
+                "ma200_dev": feat.get("ma200_dev"),
+                "volume_ratio": feat.get("volume_ratio"),
+            }
+        )
 
     if not regime_is_bear and not breadth_stop and boosted_count:
         logger.info(
@@ -1351,6 +1368,8 @@ def generate_signals(
         )
         gap_suppressed = 0
         rsi_suppressed = 0
+        ma200_suppressed = 0
+        volume_suppressed = 0
         sector_suppressed = 0
         reentry_suppressed = 0
         earnings_suppressed = 0
@@ -1368,6 +1387,31 @@ def generate_signals(
                 )
                 rsi_suppressed += 1
                 continue
+            # 200MA バイナリフィルタ（use_ma200_filter=True のとき MA200 下の銘柄を抑制）
+            if use_ma200_filter:
+                ma200_dev_val = r.get("ma200_dev")
+                if ma200_dev_val is not None and ma200_dev_val < 0:
+                    logger.debug(
+                        "ma200 filter: %s ma200_dev=%.4f — BUY を抑制 date=%s",
+                        r["code"],
+                        ma200_dev_val,
+                        target_date,
+                    )
+                    ma200_suppressed += 1
+                    continue
+            # 出来高ブレイクアウトフィルタ（threshold 指定時に volume_ratio が閾値未満の銘柄を抑制）
+            if volume_breakout_threshold is not None:
+                volume_ratio_val = r.get("volume_ratio")
+                if volume_ratio_val is not None and volume_ratio_val < volume_breakout_threshold:
+                    logger.debug(
+                        "volume breakout filter: %s volume_ratio=%.2f < threshold=%.2f — BUY を抑制 date=%s",
+                        r["code"],
+                        volume_ratio_val,
+                        volume_breakout_threshold,
+                        target_date,
+                    )
+                    volume_suppressed += 1
+                    continue
             gap = gap_ratios.get(r["code"])
             if gap is not None and (
                 gap > _gap_up + _GAP_THRESHOLD_EPSILON or gap <= _gap_down + _GAP_THRESHOLD_EPSILON
@@ -1417,6 +1461,18 @@ def generate_signals(
                 "generate_signals: rsi filter — %d 銘柄を RSI 過熱(%s超)で抑制 date=%s",
                 rsi_suppressed,
                 _rsi_threshold,
+                target_date,
+            )
+        if ma200_suppressed:
+            logger.info(
+                "generate_signals: ma200 filter — %d 銘柄を MA200 下で抑制 date=%s",
+                ma200_suppressed,
+                target_date,
+            )
+        if volume_suppressed:
+            logger.info(
+                "generate_signals: volume breakout filter — %d 銘柄を出来高不足で抑制 date=%s",
+                volume_suppressed,
                 target_date,
             )
         if gap_suppressed:
