@@ -208,6 +208,7 @@ def test_is_entry_blocked_at_exact_threshold_is_not_blocked():
 
 def test_run_backtest_accepts_portfolio_drawdown_stop_pct():
     import inspect
+
     from kabusys.backtest.engine import run_backtest
 
     assert "portfolio_drawdown_stop_pct" in inspect.signature(run_backtest).parameters
@@ -215,6 +216,7 @@ def test_run_backtest_accepts_portfolio_drawdown_stop_pct():
 
 def test_run_backtest_portfolio_drawdown_stop_pct_default_is_none():
     import inspect
+
     from kabusys.backtest.engine import run_backtest
 
     param = inspect.signature(run_backtest).parameters["portfolio_drawdown_stop_pct"]
