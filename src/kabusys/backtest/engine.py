@@ -350,6 +350,21 @@ def _fetch_sector_map(conn: duckdb.DuckDBPyConnection) -> dict[str, str]:
     return {code: sector for code, sector in rows if sector}
 
 
+def _is_entry_blocked(
+    portfolio_value: float,
+    peak_value: float,
+    portfolio_drawdown_stop_pct: float | None,
+) -> bool:
+    """ポートフォリオドローダウンストップ判定。
+
+    portfolio_value がピーク比で portfolio_drawdown_stop_pct を超えて下落している場合 True を返す。
+    portfolio_drawdown_stop_pct が None または peak_value が 0 の場合は常に False（機能無効）。
+    """
+    if portfolio_drawdown_stop_pct is None or peak_value == 0:
+        return False
+    return (peak_value - portfolio_value) / peak_value > portfolio_drawdown_stop_pct
+
+
 # ---------------------------------------------------------------------------
 # パブリック API
 # ---------------------------------------------------------------------------
@@ -379,6 +394,7 @@ def run_backtest(
     topix_size_multiplier_bear: float | None = None,
     use_ma200_filter: bool = False,
     volume_breakout_threshold: float | None = None,
+    portfolio_drawdown_stop_pct: float | None = None,
 ) -> BacktestResult:
     """バックテストを実行し結果を返す。
 
@@ -418,6 +434,9 @@ def run_backtest(
                            False（デフォルト）で無効。generate_signals() の同名引数に転送。
         volume_breakout_threshold: 指定した場合、volume_ratio が閾値未満の銘柄の BUY を抑制する。
                            None（デフォルト）で無効。generate_signals() の同名引数に転送。
+        portfolio_drawdown_stop_pct: ポートフォリオがピーク比でこの割合を超えて下落した場合、
+                           新規 BUY エントリーを停止する（既存ポジションの SELL は継続）。
+                           None（デフォルト）で無効。0 < x < 1 の範囲で指定すること。
 
     Returns:
         BacktestResult（history, trades, metrics および scope_mode/excluded_codes 等のスコープメタデータ）。
@@ -447,6 +466,10 @@ def run_backtest(
         raise ValueError(f"max_holding_days は 1 以上を指定してください: {max_holding_days}")
     if trailing_stop_atr <= 0:
         raise ValueError(f"trailing_stop_atr は正の値を指定してください: {trailing_stop_atr}")
+    if portfolio_drawdown_stop_pct is not None and not (0 < portfolio_drawdown_stop_pct < 1):
+        raise ValueError(
+            f"portfolio_drawdown_stop_pct は (0, 1) の範囲で指定してください: {portfolio_drawdown_stop_pct}"
+        )
     if threshold is not None and not (0 < threshold < 1):
         raise ValueError(f"threshold は (0, 1) の範囲で指定してください: {threshold}")
     if topix_drawdown_threshold is not None and topix_drawdown_threshold >= 0:
@@ -483,6 +506,7 @@ def run_backtest(
     # バックテストループ内でメモリ上に持ち回る翌日用発注リスト
     # （本番 live trading とは異なり、バックテストは単一関数呼び出し内で完結するためDB永続化不要）
     next_day_orders: list[dict] = []
+    peak_value: float = initial_cash  # ポートフォリオドローダウンストップ用ピーク追跡
 
     try:
         trading_days = get_trading_days(bt_conn, start_date, end_date)
@@ -571,6 +595,14 @@ def run_backtest(
             current_pv = (
                 simulator.history[-1].portfolio_value if simulator.history else initial_cash
             )
+            peak_value = max(peak_value, current_pv)
+            entry_blocked = _is_entry_blocked(current_pv, peak_value, portfolio_drawdown_stop_pct)
+            if entry_blocked:
+                logger.debug(
+                    "run_backtest: ドローダウンストップ発動 date=%s drawdown=%.2f%%",
+                    trading_day,
+                    (1 - current_pv / peak_value) * 100,
+                )
             # max_utilization を全配分方式に一貫適用（risk_based 含む）
             available_cash = min(simulator.cash * multiplier, current_pv * max_utilization)
 
@@ -617,16 +649,23 @@ def run_backtest(
             # 翌日の約定に使う発注リストをメモリ上で更新（次ループの Step 1 で消費）
             # BUY と SELL が同一銘柄になる場合は BUY を除外（SELL を優先）
             # size_multiplier を各 BUY に適用（主要イベント前は 50% 縮小）
+            # ドローダウンストップ発動中は BUY を全スキップ（SELL は継続）
             sm_map = {s["code"]: s.get("size_multiplier", 1.0) for s in buy_signals}
-            next_day_orders = [
-                {
-                    "code": code,
-                    "side": "buy",
-                    "shares": max(0, (int(shares * sm_map.get(code, 1.0)) // lot_size) * lot_size),
-                }
-                for code, shares in sized.items()
-                if shares > 0 and code not in sell_codes
-            ] + [{"code": s["code"], "side": "sell"} for s in sell_signals]
+            next_day_orders = (
+                []
+                if entry_blocked
+                else [
+                    {
+                        "code": code,
+                        "side": "buy",
+                        "shares": max(
+                            0, (int(shares * sm_map.get(code, 1.0)) // lot_size) * lot_size
+                        ),
+                    }
+                    for code, shares in sized.items()
+                    if shares > 0 and code not in sell_codes
+                ]
+            ) + [{"code": s["code"], "side": "sell"} for s in sell_signals]
             # shares=0 になったエントリーを除外
             next_day_orders = [o for o in next_day_orders if o.get("shares", 1) > 0]
     finally:

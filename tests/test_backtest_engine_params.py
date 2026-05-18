@@ -174,3 +174,68 @@ def test_run_py_cli_has_factor_filter_args():
     assert "volume_breakout_threshold" in actions, (
         f"--volume-breakout-threshold が argparse に定義されていない: {actions}"
     )
+
+
+# ── _is_entry_blocked ────────────────────────────────────────────────────────
+
+
+def test_is_entry_blocked_returns_false_when_disabled():
+    from kabusys.backtest.engine import _is_entry_blocked
+
+    assert _is_entry_blocked(900_000.0, 1_000_000.0, None) is False
+
+
+def test_is_entry_blocked_returns_false_when_within_threshold():
+    from kabusys.backtest.engine import _is_entry_blocked
+
+    # drawdown = -10%、threshold = 15% → ブロックしない
+    assert _is_entry_blocked(900_000.0, 1_000_000.0, 0.15) is False
+
+
+def test_is_entry_blocked_returns_true_when_exceeded():
+    from kabusys.backtest.engine import _is_entry_blocked
+
+    # drawdown = -20%、threshold = 15% → ブロック
+    assert _is_entry_blocked(800_000.0, 1_000_000.0, 0.15) is True
+
+
+def test_is_entry_blocked_at_exact_threshold_is_not_blocked():
+    from kabusys.backtest.engine import _is_entry_blocked
+
+    # drawdown = -15%（= threshold）→ 厳密に「未満」でないためブロックしない
+    assert _is_entry_blocked(850_000.0, 1_000_000.0, 0.15) is False
+
+
+def test_run_backtest_accepts_portfolio_drawdown_stop_pct():
+    import inspect
+
+    from kabusys.backtest.engine import run_backtest
+
+    assert "portfolio_drawdown_stop_pct" in inspect.signature(run_backtest).parameters
+
+
+def test_run_backtest_portfolio_drawdown_stop_pct_default_is_none():
+    import inspect
+
+    from kabusys.backtest.engine import run_backtest
+
+    param = inspect.signature(run_backtest).parameters["portfolio_drawdown_stop_pct"]
+    assert param.default is None
+
+
+def test_run_py_cli_has_portfolio_drawdown_stop_arg():
+    import os
+    import pathlib
+    import subprocess
+    import sys
+
+    src_dir = str(pathlib.Path(__file__).parent.parent / "src")
+    env = {**os.environ, "PYTHONPATH": src_dir, "PYTHONUTF8": "1"}
+    result = subprocess.run(
+        [sys.executable, "-m", "kabusys.backtest.run", "--help"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+    )
+    assert "--portfolio-drawdown-stop" in result.stdout

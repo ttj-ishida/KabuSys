@@ -177,6 +177,15 @@ def main() -> None:
         default=None,
         help="Suppress BUY signals when volume_ratio is below this multiplier (e.g. 1.5 means volume must be >= 1.5x 20-day average).",
     )
+    parser.add_argument(
+        "--portfolio-drawdown-stop",
+        type=float,
+        default=None,
+        help=(
+            "ポートフォリオがピーク比でこの割合（例: 0.15 = 15%%）を超えて下落した場合、"
+            "新規 BUY エントリーを停止する。None（デフォルト）で無効。"
+        ),
+    )
     parser.add_argument("--db", required=True, help="DuckDB file path")
     parser.add_argument(
         "--output-format",
@@ -248,6 +257,7 @@ def main() -> None:
             topix_size_multiplier_bear=args.topix_size_multiplier_bear,
             use_ma200_filter=args.ma200_filter,
             volume_breakout_threshold=args.volume_breakout_threshold,
+            portfolio_drawdown_stop_pct=args.portfolio_drawdown_stop,
         )
     finally:
         conn.close()
