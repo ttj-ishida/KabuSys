@@ -219,3 +219,21 @@ def test_run_backtest_portfolio_drawdown_stop_pct_default_is_none():
 
     param = inspect.signature(run_backtest).parameters["portfolio_drawdown_stop_pct"]
     assert param.default is None
+
+
+def test_run_py_cli_has_portfolio_drawdown_stop_arg():
+    import os
+    import pathlib
+    import subprocess
+    import sys
+
+    src_dir = str(pathlib.Path(__file__).parent.parent / "src")
+    env = {**os.environ, "PYTHONPATH": src_dir, "PYTHONUTF8": "1"}
+    result = subprocess.run(
+        [sys.executable, "-m", "kabusys.backtest.run", "--help"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+    )
+    assert "--portfolio-drawdown-stop" in result.stdout
