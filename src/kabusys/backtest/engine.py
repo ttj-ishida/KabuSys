@@ -358,9 +358,9 @@ def _is_entry_blocked(
     """ポートフォリオドローダウンストップ判定。
 
     portfolio_value がピーク比で portfolio_drawdown_stop_pct を超えて下落している場合 True を返す。
-    portfolio_drawdown_stop_pct が None の場合は常に False（機能無効）。
+    portfolio_drawdown_stop_pct が None または peak_value が 0 の場合は常に False（機能無効）。
     """
-    if portfolio_drawdown_stop_pct is None:
+    if portfolio_drawdown_stop_pct is None or peak_value == 0:
         return False
     return (peak_value - portfolio_value) / peak_value > portfolio_drawdown_stop_pct
 
@@ -601,7 +601,7 @@ def run_backtest(
                 logger.debug(
                     "run_backtest: ドローダウンストップ発動 date=%s drawdown=%.2f%%",
                     trading_day,
-                    (current_pv / peak_value - 1) * 100,
+                    (1 - current_pv / peak_value) * 100,
                 )
             # max_utilization を全配分方式に一貫適用（risk_based 含む）
             available_cash = min(simulator.cash * multiplier, current_pv * max_utilization)
