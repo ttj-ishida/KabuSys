@@ -1,17 +1,14 @@
-"""1m ファクターアブレーション分析スクリプト
+"""1m アウトオブサンプル検証スクリプト
 
-各ファクターを1つずつ weight=0 にして 2023/2024/2025 を検証し、
-どのファクターが 2023/2024 の損失を引き起こしているかを特定する。
+1m_equal_4slots（v2 最良設定）を 2023・2024・2025 の各年度で検証し、
+オーバーフィットでないかを確認する。
 
-残りの重みは generate_signals() 内で自動正規化されるため合計が 1.0 でなくても動作する。
+1M スケールの構造的制約（参考）：
+  - 1M × 80% / 4slots = 200K/ポジション → 単元株 100 株で上限 2,000 円株に制限
+  - 本検証はフィルターなしのベース設定のみ適用し、まず汎化性能を確認する
 
-シナリオ（計6件）× 3年（2023/2024/2025）= 18ラン:
-  base          : 現行重み（momentum=0.40, value=0.20, vol=0.15, liq=0.15, news=0.10）
-  no_momentum   : momentum weight = 0
-  no_value      : value weight = 0
-  no_volatility : volatility weight = 0
-  no_liquidity  : liquidity weight = 0
-  no_news       : news weight = 0
+シナリオ（計3件）:
+  1m_eq4_base_2023 / 2024 / 2025
 """
 
 from __future__ import annotations
@@ -45,9 +42,9 @@ STRATEGY_CONFIG_PATH = REPO_ROOT / "config" / "strategy_config.yaml"
 RISK_CONFIG_PATH = REPO_ROOT / "config" / "risk_config.yaml"
 RUN_ID_PATTERN = re.compile(r"run_id:\s*([0-9a-fA-F-]+)|run_id=([0-9a-fA-F-]+)")
 SUBPROCESS_ENCODING = locale.getpreferredencoding(False) or "cp932"
-ARTIFACTS_ROOT = REPO_ROOT / "artifacts" / "backtest_improvement_1m_ablation"
+ARTIFACTS_ROOT = REPO_ROOT / "artifacts" / "backtest_improvement_1m_oos"
 
-# 1m_equal_4slots の固定ベースパラメータ（v2 最良設定）
+# 1m_equal_4slots の固定パラメータ（v2 最良設定）
 _BASE = {
     "cash": 1_000_000,
     "allocation_method": "equal",
@@ -63,25 +60,11 @@ _BASE = {
     "max_holding_days": 60,
 }
 
-# 現行の重み（ベースライン）
-_WEIGHTS_BASE = {
-    "momentum": 0.40,
-    "value": 0.20,
-    "volatility": 0.15,
-    "liquidity": 0.15,
-    "news": 0.10,
-}
-
 SCENARIOS = [
-    {**_BASE, "name": "base", "weights": _WEIGHTS_BASE},
-    {**_BASE, "name": "no_momentum", "weights": {**_WEIGHTS_BASE, "momentum": 0.0}},
-    {**_BASE, "name": "no_value", "weights": {**_WEIGHTS_BASE, "value": 0.0}},
-    {**_BASE, "name": "no_volatility", "weights": {**_WEIGHTS_BASE, "volatility": 0.0}},
-    {**_BASE, "name": "no_liquidity", "weights": {**_WEIGHTS_BASE, "liquidity": 0.0}},
-    {**_BASE, "name": "no_news", "weights": {**_WEIGHTS_BASE, "news": 0.0}},
+    {**_BASE, "name": "1m_eq4_base_2023", "year": 2023},
+    {**_BASE, "name": "1m_eq4_base_2024", "year": 2024},
+    {**_BASE, "name": "1m_eq4_base_2025", "year": 2025},
 ]
-
-YEARS = [2023, 2024, 2025]
 
 
 def _load_env(path: Path) -> dict[str, str]:
@@ -113,10 +96,16 @@ def _build_base_context() -> dict[str, object]:
     env = _load_env(ENV_PATH)
     strategy_config = _load_yaml(STRATEGY_CONFIG_PATH)
     risk_config = _load_yaml(RISK_CONFIG_PATH)
+
     db_path = Path(env.get("DUCKDB_PATH", "data/kabusys.duckdb"))
     if not db_path.is_absolute():
         db_path = REPO_ROOT / db_path
-    return {"db_path": db_path, "strategy_config": strategy_config, "risk_config": risk_config}
+
+    return {
+        "db_path": db_path,
+        "strategy_config": strategy_config,
+        "risk_config": risk_config,
+    }
 
 
 def _build_strategy_config(base: dict, scenario: dict[str, object]) -> dict:
@@ -125,9 +114,6 @@ def _build_strategy_config(base: dict, scenario: dict[str, object]) -> dict:
     sector_section = strategy_config.setdefault("sector", {})
     regime_section = strategy_config.setdefault("regime", {})
     portfolio_section = strategy_config.setdefault("portfolio", {})
-
-    # ファクター重み（シナリオごとに上書き）
-    strategy_section["weights"] = scenario["weights"]
 
     strategy_section["threshold"] = scenario.get("threshold", 0.58)
     strategy_section["gap_up_threshold"] = 0.07
@@ -157,7 +143,8 @@ def _build_risk_config(base: dict, scenario: dict[str, object]) -> dict:
     return risk_config
 
 
-def _build_backtest_params(scenario: dict[str, object], year: int) -> dict[str, object]:
+def _build_backtest_params(scenario: dict[str, object]) -> dict[str, object]:
+    year = int(scenario.get("year", 2025))
     return {
         "start": f"{year}-01-01",
         "end": f"{year}-12-31",
@@ -306,11 +293,6 @@ def main() -> None:
     fieldnames = [
         "name",
         "year",
-        "w_momentum",
-        "w_value",
-        "w_volatility",
-        "w_liquidity",
-        "w_news",
         "run_id",
         "created_at",
         "cash",
@@ -345,93 +327,82 @@ def main() -> None:
 
         try:
             for scenario in SCENARIOS:
-                for year in YEARS:
-                    strategy_config = _build_strategy_config(context["strategy_config"], scenario)
-                    risk_config = _build_risk_config(context["risk_config"], scenario)
-                    _save_yaml(STRATEGY_CONFIG_PATH, strategy_config)
-                    _save_yaml(RISK_CONFIG_PATH, risk_config)
+                strategy_config = _build_strategy_config(context["strategy_config"], scenario)
+                risk_config = _build_risk_config(context["risk_config"], scenario)
+                _save_yaml(STRATEGY_CONFIG_PATH, strategy_config)
+                _save_yaml(RISK_CONFIG_PATH, risk_config)
 
-                    scenario_name = str(scenario["name"])
-                    run_slug = f"{scenario_name}_{year}"
-                    scenario_dir = output_dir / run_slug
-                    scenario_dir.mkdir(parents=True, exist_ok=True)
+                scenario_slug = str(scenario["name"])
+                scenario_dir = output_dir / scenario_slug
+                scenario_dir.mkdir(parents=True, exist_ok=True)
 
-                    params = _build_backtest_params(scenario, year)
-                    (scenario_dir / "effective_backtest_params.json").write_text(
-                        json.dumps(params, ensure_ascii=False, indent=2), encoding="utf-8"
+                params = _build_backtest_params(scenario)
+                (scenario_dir / "effective_backtest_params.json").write_text(
+                    json.dumps(params, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+
+                report_base_dir = scenario_dir / "report"
+                cmd = _build_command(db_path, params, report_base_dir)
+                print(f"\n=== running: {scenario_slug} ({params['start']} ~ {params['end']}) ===")
+                print("command:", subprocess.list2cmdline(cmd))
+
+                completed = subprocess.run(
+                    cmd,
+                    cwd=str(REPO_ROOT),
+                    capture_output=True,
+                    text=True,
+                    encoding=SUBPROCESS_ENCODING,
+                    errors="replace",
+                )
+
+                (scenario_dir / "stdout.log").write_text(completed.stdout or "", encoding="utf-8")
+                (scenario_dir / "stderr.log").write_text(completed.stderr or "", encoding="utf-8")
+
+                if completed.returncode != 0:
+                    raise RuntimeError(
+                        f"scenario={scenario_slug} failed with exit code {completed.returncode}"
                     )
 
-                    report_base_dir = scenario_dir / "report"
-                    cmd = _build_command(db_path, params, report_base_dir)
-                    print(f"\n=== running: {run_slug} ===")
+                run_id = _extract_run_id(f"{completed.stdout}\n{completed.stderr}")
+                conn = duckdb.connect(str(db_path), read_only=True)
+                try:
+                    metrics = _fetch_metrics(conn, run_id)
+                    _export_trades_csv(conn, run_id, scenario_dir / "trades.csv")
+                finally:
+                    conn.close()
 
-                    completed = subprocess.run(
-                        cmd,
-                        cwd=str(REPO_ROOT),
-                        capture_output=True,
-                        text=True,
-                        encoding=SUBPROCESS_ENCODING,
-                        errors="replace",
-                    )
+                record = {
+                    "name": scenario_slug,
+                    "year": scenario.get("year"),
+                    "run_id": run_id,
+                    "created_at": metrics["created_at"],
+                    "cash": params["cash"],
+                    "allocation_method": params["allocation_method"],
+                    "threshold": scenario.get("threshold", 0.58),
+                    "stop_loss_pct": params["stop_loss_pct"],
+                    "trailing_stop_atr": scenario.get("trailing_stop_atr_mult", 2.0),
+                    "max_holding_days": params["max_holding_days"],
+                    "max_positions": params["max_positions"],
+                    "max_position_pct": params["max_position_pct"],
+                    "max_utilization": params["max_utilization"],
+                    **metrics,
+                    "trades_csv": str(scenario_dir / "trades.csv"),
+                }
 
-                    (scenario_dir / "stdout.log").write_text(
-                        completed.stdout or "", encoding="utf-8"
-                    )
-                    (scenario_dir / "stderr.log").write_text(
-                        completed.stderr or "", encoding="utf-8"
-                    )
+                jsonl_file.write(json.dumps(record, ensure_ascii=False) + "\n")
+                jsonl_file.flush()
+                writer.writerow(record)
+                csv_file.flush()
 
-                    if completed.returncode != 0:
-                        raise RuntimeError(
-                            f"scenario={run_slug} failed with exit code {completed.returncode}"
-                        )
-
-                    run_id = _extract_run_id(f"{completed.stdout}\n{completed.stderr}")
-                    conn = duckdb.connect(str(db_path), read_only=True)
-                    try:
-                        metrics = _fetch_metrics(conn, run_id)
-                        _export_trades_csv(conn, run_id, scenario_dir / "trades.csv")
-                    finally:
-                        conn.close()
-
-                    weights = scenario["weights"]
-                    record = {
-                        "name": scenario_name,
-                        "year": year,
-                        "w_momentum": weights["momentum"],
-                        "w_value": weights["value"],
-                        "w_volatility": weights["volatility"],
-                        "w_liquidity": weights["liquidity"],
-                        "w_news": weights["news"],
-                        "run_id": run_id,
-                        "created_at": metrics["created_at"],
-                        "cash": params["cash"],
-                        "allocation_method": params["allocation_method"],
-                        "threshold": params["threshold"],
-                        "stop_loss_pct": params["stop_loss_pct"],
-                        "trailing_stop_atr": params["trailing_stop_atr"],
-                        "max_holding_days": params["max_holding_days"],
-                        "max_positions": params["max_positions"],
-                        "max_position_pct": params["max_position_pct"],
-                        "max_utilization": params["max_utilization"],
-                        **metrics,
-                        "trades_csv": str(scenario_dir / "trades.csv"),
-                    }
-
-                    jsonl_file.write(json.dumps(record, ensure_ascii=False) + "\n")
-                    jsonl_file.flush()
-                    writer.writerow(record)
-                    csv_file.flush()
-
-                    print(
-                        f"{run_slug}\t{year}\t"
-                        f"{_format_metric(metrics['cagr'])}\t"
-                        f"{_format_metric(metrics['sharpe'])}\t"
-                        f"{_format_metric(metrics['max_drawdown'])}\t"
-                        f"{_format_metric(metrics['win_rate'])}\t"
-                        f"{_format_metric(metrics['profit_factor'])}\t"
-                        f"{metrics['total_trades']}"
-                    )
+                print(
+                    f"{scenario_slug}\t{scenario.get('year')}\t"
+                    f"{_format_metric(metrics['cagr'])}\t"
+                    f"{_format_metric(metrics['sharpe'])}\t"
+                    f"{_format_metric(metrics['max_drawdown'])}\t"
+                    f"{_format_metric(metrics['win_rate'])}\t"
+                    f"{_format_metric(metrics['profit_factor'])}\t"
+                    f"{metrics['total_trades']}"
+                )
         finally:
             STRATEGY_CONFIG_PATH.write_text(original_strategy_text, encoding="utf-8")
             RISK_CONFIG_PATH.write_text(original_risk_text, encoding="utf-8")

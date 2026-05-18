@@ -191,25 +191,45 @@ def _build_backtest_params(scenario: dict[str, object], year: int) -> dict[str, 
 
 def _build_command(db_path: Path, params: dict[str, object], output_dir: Path) -> list[str]:
     cmd = [
-        sys.executable, "-m", "kabusys.backtest.run",
-        "--db", str(db_path),
-        "--start", str(params["start"]),
-        "--end", str(params["end"]),
-        "--cash", str(params["cash"]),
-        "--allocation-method", str(params["allocation_method"]),
-        "--max-position-pct", str(params["max_position_pct"]),
-        "--max-utilization", str(params["max_utilization"]),
-        "--max-positions", str(params["max_positions"]),
-        "--risk-pct", str(params["risk_pct"]),
-        "--stop-loss-pct", str(params["stop_loss_pct"]),
-        "--min-holding-days", str(params["min_holding_days"]),
-        "--max-holding-days", str(params["max_holding_days"]),
-        "--trailing-stop-atr", str(params["trailing_stop_atr"]),
-        "--threshold", str(params["threshold"]),
-        "--topix-drawdown-threshold", str(params["topix_drawdown_threshold"]),
-        "--topix-size-multiplier-bear", str(params["topix_size_multiplier_bear"]),
-        "--output-format", "all",
-        "--output-dir", str(output_dir),
+        sys.executable,
+        "-m",
+        "kabusys.backtest.run",
+        "--db",
+        str(db_path),
+        "--start",
+        str(params["start"]),
+        "--end",
+        str(params["end"]),
+        "--cash",
+        str(params["cash"]),
+        "--allocation-method",
+        str(params["allocation_method"]),
+        "--max-position-pct",
+        str(params["max_position_pct"]),
+        "--max-utilization",
+        str(params["max_utilization"]),
+        "--max-positions",
+        str(params["max_positions"]),
+        "--risk-pct",
+        str(params["risk_pct"]),
+        "--stop-loss-pct",
+        str(params["stop_loss_pct"]),
+        "--min-holding-days",
+        str(params["min_holding_days"]),
+        "--max-holding-days",
+        str(params["max_holding_days"]),
+        "--trailing-stop-atr",
+        str(params["trailing_stop_atr"]),
+        "--threshold",
+        str(params["threshold"]),
+        "--topix-drawdown-threshold",
+        str(params["topix_drawdown_threshold"]),
+        "--topix-size-multiplier-bear",
+        str(params["topix_size_multiplier_bear"]),
+        "--output-format",
+        "all",
+        "--output-dir",
+        str(output_dir),
     ]
     if params.get("portfolio_drawdown_stop_pct") is not None:
         cmd.extend(["--portfolio-drawdown-stop", str(params["portfolio_drawdown_stop_pct"])])
@@ -299,21 +319,40 @@ def main() -> None:
     original_risk_text = RISK_CONFIG_PATH.read_text(encoding="utf-8")
 
     fieldnames = [
-        "name", "year",
-        "topix_drawdown_threshold", "topix_size_multiplier_bear", "portfolio_drawdown_stop_pct",
-        "run_id", "created_at", "cash", "allocation_method",
-        "threshold", "stop_loss_pct", "trailing_stop_atr", "max_holding_days",
-        "max_positions", "max_position_pct", "max_utilization",
-        "cagr", "sharpe", "max_drawdown", "win_rate",
-        "payoff_ratio", "profit_factor", "avg_holding_days", "total_trades", "trades_csv",
+        "name",
+        "year",
+        "topix_drawdown_threshold",
+        "topix_size_multiplier_bear",
+        "portfolio_drawdown_stop_pct",
+        "run_id",
+        "created_at",
+        "cash",
+        "allocation_method",
+        "threshold",
+        "stop_loss_pct",
+        "trailing_stop_atr",
+        "max_holding_days",
+        "max_positions",
+        "max_position_pct",
+        "max_utilization",
+        "cagr",
+        "sharpe",
+        "max_drawdown",
+        "win_rate",
+        "payoff_ratio",
+        "profit_factor",
+        "avg_holding_days",
+        "total_trades",
+        "trades_csv",
     ]
 
     print(f"output_dir={output_dir}")
     print("scenario\tyear\tbear_thr\tbear_mult\tdd_stop\tcagr\tsharpe\tmax_dd\ttrades")
 
-    with log_jsonl_path.open("w", encoding="utf-8") as jsonl_file, log_csv_path.open(
-        "w", newline="", encoding="utf-8"
-    ) as csv_file:
+    with (
+        log_jsonl_path.open("w", encoding="utf-8") as jsonl_file,
+        log_csv_path.open("w", newline="", encoding="utf-8") as csv_file,
+    ):
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
 
