@@ -535,7 +535,7 @@ def _get_topix_size_multiplier(
         size_multiplier_strong_bear: 強いベア時の size_multiplier（MA75 < MA200）。
 
     Returns:
-        size_multiplier（0.0、0.5、または 1.0）。
+        size_multiplier（設定値に依存。デフォルトは strong_bear=0.0 / weak_bear=0.5 / bull=1.0）。
     """
     try:
         row = conn.execute(
@@ -1199,19 +1199,27 @@ def generate_signals(
 
     event_dates = event_dates or {}
     size_multiplier = _get_event_size_multiplier(event_dates, target_date, conn)
+
+    _weak_bear: float = (
+        topix_size_multiplier_weak_bear
+        if topix_size_multiplier_weak_bear is not None
+        else _cfg["topix_size_multiplier_weak_bear"]
+    )
+    _strong_bear: float = (
+        topix_size_multiplier_strong_bear
+        if topix_size_multiplier_strong_bear is not None
+        else _cfg["topix_size_multiplier_strong_bear"]
+    )
+    if _strong_bear > _weak_bear:
+        raise ValueError(
+            f"topix_size_multiplier_strong_bear ({_strong_bear}) は"
+            f" topix_size_multiplier_weak_bear ({_weak_bear}) 以下にしてください"
+        )
     topix_multiplier = _get_topix_size_multiplier(
         conn,
         target_date,
-        size_multiplier_weak_bear=(
-            topix_size_multiplier_weak_bear
-            if topix_size_multiplier_weak_bear is not None
-            else _cfg["topix_size_multiplier_weak_bear"]
-        ),
-        size_multiplier_strong_bear=(
-            topix_size_multiplier_strong_bear
-            if topix_size_multiplier_strong_bear is not None
-            else _cfg["topix_size_multiplier_strong_bear"]
-        ),
+        size_multiplier_weak_bear=_weak_bear,
+        size_multiplier_strong_bear=_strong_bear,
     )
     size_multiplier = min(size_multiplier, topix_multiplier)
 

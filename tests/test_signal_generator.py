@@ -1245,3 +1245,38 @@ class TestVolumeBreakoutFilter:
             ).fetchall()
         ]
         assert "9004" in buy_codes
+
+
+class TestGenerateSignalsTopixMultiplierValidation:
+    """generate_signals() が YAML 設定値で strong_bear > weak_bear のとき ValueError を上げること。"""
+
+    def test_yaml_strong_bear_greater_than_weak_bear_raises(self, conn, tmp_path, monkeypatch):
+        import kabusys.strategy.signal_generator as _sg
+
+        yaml_text = """
+strategy:
+  weights: {momentum: 1.0, value: 0.0, volatility: 0.0, liquidity: 0.0, news: 0.0}
+  threshold: 0.5
+  stop_loss_rate: -0.08
+  trailing_stop_atr_mult: 2.0
+  min_holding_days: 1
+  max_holding_days: 60
+  gap_up_threshold: 0.05
+  gap_down_threshold: -0.03
+sector:
+  boost: 0.03
+  quartile: 0.25
+regime:
+  topix_size_multiplier_weak_bear: 0.3
+  topix_size_multiplier_strong_bear: 0.8
+"""
+        cfg_file = tmp_path / "strategy_config.yaml"
+        cfg_file.write_text(yaml_text, encoding="utf-8")
+        monkeypatch.setattr(_sg, "_STRATEGY_CONFIG_PATH", cfg_file)
+        monkeypatch.setattr(_sg, "_strategy_config_cache", None)
+        monkeypatch.setattr(_sg, "_strategy_config_mtime", -1.0)
+
+        from kabusys.strategy.signal_generator import generate_signals
+
+        with pytest.raises(ValueError, match="topix_size_multiplier_strong_bear"):
+            generate_signals(conn, TARGET_DATE)
