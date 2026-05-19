@@ -17,9 +17,10 @@ import pytest
 
 
 def _make_conn_with_drawdown(initial_cash: float, drop_ratio: float, n_days: int):
-    """
-    n_days 分の取引日を持ち、初日から close が initial_cash * (1 - drop_ratio) 相当の
-    価格に設定した最小 DB を返す。
+    """n_days 分の取引日を持つ最小 DB を返す。
+
+    initial_cash / drop_ratio は将来の E2E テスト拡張用プレースホルダー。
+    現時点は topix_daily の close を固定値で設定し、シグナルなし構成とする。
 
     drawdown テスト用にシンプルな構造を用意する:
     - topix_daily: MA 不要（TOPIX ガード無効のまま）

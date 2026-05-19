@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Literal
+from typing import Any, Literal
 
 import duckdb
 
@@ -60,7 +60,7 @@ class BacktestResult:
     # excluded_codes の各コードについての除外理由（キー：コード、値：理由文字列）
     excluded_reasons: dict[str, str] = field(default_factory=dict)
     # run_backtest() に渡した主要パラメータのスナップショット
-    params: dict = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -442,7 +442,7 @@ def run_backtest(
                            None（デフォルト）で無効。0 < x < 1 の範囲で指定すること。
         portfolio_drawdown_stop_timeout_days: ドローダウンストップ発動からこのカレンダー日数が
                            経過すると自動的にストップを解除しピーク値をリセットする。
-                           None（デフォルト）でタイムアウト無効（手動リセットなし）。
+                           None（デフォルト）でタイムアウト無効（自動解除なし）。
                            1 以上の整数を指定すること。
 
     Returns:
@@ -632,17 +632,22 @@ def run_backtest(
                     (1 - current_pv / peak_value) * 100,
                 )
             # タイムアウト解除チェック
+            # 発動当日を 0 日として (trading_day - entry_blocked_since).days で経過カレンダー日数を計算。
+            # 翌日が 1 日目となり、N 日後（発動日から N 日後）に解除される。
             if (
                 entry_blocked
                 and portfolio_drawdown_stop_timeout_days is not None
                 and entry_blocked_since is not None
                 and (trading_day - entry_blocked_since).days >= portfolio_drawdown_stop_timeout_days
             ):
+                _blocked_days = (trading_day - entry_blocked_since).days
                 entry_blocked = False
                 peak_value = current_pv  # ピークをリセットして再エントリーを許可
                 entry_blocked_since = None
                 logger.debug(
-                    "run_backtest: ドローダウンストップ タイムアウト解除 date=%s", trading_day
+                    "run_backtest: ドローダウンストップ タイムアウト解除 date=%s blocked_days=%d",
+                    trading_day,
+                    _blocked_days,
                 )
             # entry_blocked_since を更新
             if entry_blocked:
