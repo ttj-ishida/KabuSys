@@ -522,10 +522,11 @@ def _get_topix_size_multiplier(
     """TOPIX の MA クロス状態に基づく size_multiplier を返す。
 
     topix_daily に事前計算済みの ma25/ma75/ma200 を参照する。
+    強いベア判定（MA75 < MA200）が弱いベア（MA25 < MA75）に常に優先する。
     - MA75 < MA200（強いベア）: size_multiplier_strong_bear を返す（デフォルト 0.0）
     - MA25 < MA75（弱いベア）: size_multiplier_weak_bear を返す（デフォルト 0.5）
     - それ以外（強気）: 1.0 を返す
-    - MA が NULL（データ不足）またはレコードなし: 1.0 を返す
+    - MA が NULL（データ不足）またはレコードなし: 安全側フォールバックとして 1.0 を返す
 
     Args:
         conn:                       DuckDB 接続。topix_daily テーブルを参照する。

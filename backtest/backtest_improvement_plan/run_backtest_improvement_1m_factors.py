@@ -428,6 +428,12 @@ def main() -> None:
                     "max_positions": params["max_positions"],
                     "max_position_pct": params["max_position_pct"],
                     "max_utilization": params["max_utilization"],
+                    "topix_size_multiplier_weak_bear": params.get(
+                        "topix_size_multiplier_weak_bear", 0.50
+                    ),
+                    "topix_size_multiplier_strong_bear": params.get(
+                        "topix_size_multiplier_strong_bear", 0.00
+                    ),
                     "use_ma200_filter": params["use_ma200_filter"],
                     "volume_breakout_threshold": params["volume_breakout_threshold"],
                     **metrics,

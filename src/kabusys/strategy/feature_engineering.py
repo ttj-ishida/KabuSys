@@ -256,7 +256,10 @@ def update_topix_ma(conn: duckdb.DuckDBPyConnection, target_date: date) -> bool:
 
     データ不足の場合は対応 MA を NULL にして保存する。
     対象日付のレコードがない場合は False を返す。
+    既存 DB に MA 列がなければ冪等に追加してから計算する。
     """
+    ensure_topix_ma_columns(conn)
+
     row = conn.execute(
         """
         WITH topix_data AS (
@@ -271,10 +274,11 @@ def update_topix_ma(conn: duckdb.DuckDBPyConnection, target_date: date) -> bool:
                         THEN AVG(close) OVER (ORDER BY date ROWS BETWEEN 199 PRECEDING AND CURRENT ROW)
                         ELSE NULL END AS ma200
             FROM topix_daily
+            WHERE date <= ?
         )
         SELECT ma25, ma75, ma200 FROM topix_data WHERE date = ?
         """,
-        [target_date],
+        [target_date, target_date],
     ).fetchone()
 
     if row is None:

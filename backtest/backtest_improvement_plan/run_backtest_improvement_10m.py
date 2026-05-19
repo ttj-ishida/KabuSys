@@ -446,6 +446,9 @@ def main() -> None:
                     "topix_size_multiplier_weak_bear": scenario.get(
                         "topix_size_multiplier_weak_bear", 0.50
                     ),
+                    "topix_size_multiplier_strong_bear": scenario.get(
+                        "topix_size_multiplier_strong_bear", 0.00
+                    ),
                     "trailing_stop_atr": scenario.get("trailing_stop_atr_mult", 2.0),
                     "rsi_overbought_threshold": 65.0,
                     "max_positions": params["max_positions"],
