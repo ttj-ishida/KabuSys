@@ -44,8 +44,8 @@ _SAMPLE_PARAMS = {
     "gap_down_threshold": -0.04,
     "min_holding_days": 5,
     "max_holding_days": 60,
-    "topix_drawdown_threshold": -0.15,
-    "topix_size_multiplier_bear": 0.5,
+    "topix_size_multiplier_weak_bear": 0.5,
+    "topix_size_multiplier_strong_bear": 0.0,
 }
 
 
@@ -106,7 +106,7 @@ class TestLoadLatestSummary:
         assert result is not None
         assert "stop_loss_rate=-0.08" in result
         assert "trailing_stop_atr_mult=2.0" in result
-        assert "topix_drawdown_threshold=-0.15" in result
+        assert "topix_size_multiplier_weak_bear=0.5" in result
 
     def test_invalid_params_json_no_crash(self, bt_conn):
         bt_conn.execute(

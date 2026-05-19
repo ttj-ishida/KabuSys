@@ -676,17 +676,13 @@ class TestGetTopixSizeMultiplier:
     def test_custom_weak_bear_multiplier(self, conn):
         """カスタム size_multiplier_weak_bear が適用される。"""
         self._insert_topix_with_ma(conn, TARGET_DATE, 1950.0, 2000.0, 1980.0)
-        result = _get_topix_size_multiplier(
-            conn, TARGET_DATE, size_multiplier_weak_bear=0.3
-        )
+        result = _get_topix_size_multiplier(conn, TARGET_DATE, size_multiplier_weak_bear=0.3)
         assert result == 0.3
 
     def test_custom_strong_bear_multiplier(self, conn):
         """カスタム size_multiplier_strong_bear が適用される。"""
         self._insert_topix_with_ma(conn, TARGET_DATE, 1900.0, 1950.0, 2000.0)
-        result = _get_topix_size_multiplier(
-            conn, TARGET_DATE, size_multiplier_strong_bear=0.25
-        )
+        result = _get_topix_size_multiplier(conn, TARGET_DATE, size_multiplier_strong_bear=0.25)
         assert result == 0.25
 
     def test_uses_latest_date_not_after_target(self, conn):
@@ -763,18 +759,24 @@ regime:
         assert cfg["sector_quartile"] == 0.25  # default
 
     def test_topix_weak_bear_over_one_falls_back(self, tmp_path, monkeypatch):
-        yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_size_multiplier_weak_bear: 1.5\n"
+        yaml_text = (
+            "strategy:\n  threshold: 0.60\nregime:\n  topix_size_multiplier_weak_bear: 1.5\n"
+        )
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["topix_size_multiplier_weak_bear"] == 0.5  # default
 
     def test_topix_weak_bear_exactly_one_accepted(self, tmp_path, monkeypatch):
-        yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_size_multiplier_weak_bear: 1.0\n"
+        yaml_text = (
+            "strategy:\n  threshold: 0.60\nregime:\n  topix_size_multiplier_weak_bear: 1.0\n"
+        )
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["topix_size_multiplier_weak_bear"] == 1.0
 
     def test_topix_strong_bear_zero_accepted(self, tmp_path, monkeypatch):
         """strong_bear=0.0 は有効（エントリー完全停止を意味する）。"""
-        yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_size_multiplier_strong_bear: 0.0\n"
+        yaml_text = (
+            "strategy:\n  threshold: 0.60\nregime:\n  topix_size_multiplier_strong_bear: 0.0\n"
+        )
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["topix_size_multiplier_strong_bear"] == 0.0
 

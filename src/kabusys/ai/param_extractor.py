@@ -20,8 +20,8 @@ ALLOWED_KEYS = frozenset(
         "gap_down_threshold",
         "min_holding_days",
         "max_holding_days",
-        "topix_drawdown_threshold",
-        "topix_size_multiplier_bear",
+        "topix_size_multiplier_weak_bear",
+        "topix_size_multiplier_strong_bear",
     }
 )
 
@@ -45,8 +45,8 @@ _VALUE_RANGES: dict[str, tuple[float, float]] = {
     "gap_down_threshold": (-1.0, 0.0),
     "min_holding_days": (0.0, 365.0),
     "max_holding_days": (1.0, 365.0),
-    "topix_drawdown_threshold": (-1.0, -0.001),
-    "topix_size_multiplier_bear": (0.01, 1.0),
+    "topix_size_multiplier_weak_bear": (0.0, 1.0),
+    "topix_size_multiplier_strong_bear": (0.0, 1.0),
 }
 
 _INT_KEYS = frozenset({"min_holding_days", "max_holding_days"})

@@ -56,7 +56,7 @@ _BASE = {
     "risk_pct": 0.005,
     "stop_loss_pct": 0.07,
     "threshold": 0.58,
-    "topix_size_multiplier_weak_bear": 0.50,    # MA25 < MA75 時の size_multiplier
+    "topix_size_multiplier_weak_bear": 0.50,  # MA25 < MA75 時の size_multiplier
     "topix_size_multiplier_strong_bear": 0.00,  # MA75 < MA200 時の size_multiplier（エントリー停止）
     "trailing_stop_atr_mult": 2.0,
     "max_holding_days": 60,
@@ -150,8 +150,12 @@ def _build_strategy_config(base: dict, scenario: dict[str, object]) -> dict:
     sector_section["boost"] = 0.05
     sector_section["quartile"] = 0.30
 
-    regime_section["topix_size_multiplier_weak_bear"] = scenario.get("topix_size_multiplier_weak_bear", 0.50)
-    regime_section["topix_size_multiplier_strong_bear"] = scenario.get("topix_size_multiplier_strong_bear", 0.00)
+    regime_section["topix_size_multiplier_weak_bear"] = scenario.get(
+        "topix_size_multiplier_weak_bear", 0.50
+    )
+    regime_section["topix_size_multiplier_strong_bear"] = scenario.get(
+        "topix_size_multiplier_strong_bear", 0.00
+    )
 
     portfolio_section["max_positions"] = scenario.get("max_positions", 4)
     return strategy_config
@@ -181,7 +185,9 @@ def _build_backtest_params(scenario: dict[str, object], year: int) -> dict[str, 
         "trailing_stop_atr": scenario.get("trailing_stop_atr_mult", 2.0),
         "threshold": scenario.get("threshold", 0.58),
         "topix_size_multiplier_weak_bear": scenario.get("topix_size_multiplier_weak_bear", 0.50),
-        "topix_size_multiplier_strong_bear": scenario.get("topix_size_multiplier_strong_bear", 0.00),
+        "topix_size_multiplier_strong_bear": scenario.get(
+            "topix_size_multiplier_strong_bear", 0.00
+        ),
         "portfolio_drawdown_stop_pct": scenario.get("portfolio_drawdown_stop_pct"),
     }
 
@@ -407,8 +413,12 @@ def main() -> None:
                     record = {
                         "name": scenario_name,
                         "year": year,
-                        "topix_size_multiplier_weak_bear": params["topix_size_multiplier_weak_bear"],
-                        "topix_size_multiplier_strong_bear": params["topix_size_multiplier_strong_bear"],
+                        "topix_size_multiplier_weak_bear": params[
+                            "topix_size_multiplier_weak_bear"
+                        ],
+                        "topix_size_multiplier_strong_bear": params[
+                            "topix_size_multiplier_strong_bear"
+                        ],
                         "portfolio_drawdown_stop_pct": params["portfolio_drawdown_stop_pct"],
                         "run_id": run_id,
                         "created_at": metrics["created_at"],
