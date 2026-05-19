@@ -484,6 +484,15 @@ def run_backtest(
         raise ValueError(
             f"topix_size_multiplier_strong_bear は [0, 1] の範囲で指定してください: {topix_size_multiplier_strong_bear}"
         )
+    if (
+        topix_size_multiplier_weak_bear is not None
+        and topix_size_multiplier_strong_bear is not None
+        and topix_size_multiplier_strong_bear > topix_size_multiplier_weak_bear
+    ):
+        raise ValueError(
+            f"topix_size_multiplier_strong_bear ({topix_size_multiplier_strong_bear}) は"
+            f" topix_size_multiplier_weak_bear ({topix_size_multiplier_weak_bear}) 以下にしてください"
+        )
 
     # try ブロック外でも参照できるようデフォルト初期化
     _scope_mode: Literal["default_universe", "manual_codes"] = (

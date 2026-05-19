@@ -176,6 +176,9 @@ def _build_backtest_params(scenario: dict[str, object], year: int) -> dict[str, 
         "trailing_stop_atr": scenario.get("trailing_stop_atr_mult", 2.0),
         "threshold": scenario.get("threshold", 0.58),
         "topix_size_multiplier_weak_bear": scenario.get("topix_size_multiplier_weak_bear", 0.50),
+        "topix_size_multiplier_strong_bear": scenario.get(
+            "topix_size_multiplier_strong_bear", 0.00
+        ),
     }
 
 

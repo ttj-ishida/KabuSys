@@ -223,6 +223,21 @@ def test_run_backtest_portfolio_drawdown_stop_pct_default_is_none():
     assert param.default is None
 
 
+def test_strong_bear_greater_than_weak_bear_raises():
+    """topix_size_multiplier_strong_bear > weak_bear のとき ValueError が上がること。"""
+    from kabusys.backtest.engine import run_backtest
+
+    with pytest.raises(ValueError, match="topix_size_multiplier_strong_bear"):
+        run_backtest(
+            conn=None,  # type: ignore[arg-type]
+            start_date=date(2025, 1, 6),
+            end_date=date(2025, 1, 10),
+            initial_cash=1_000_000,
+            topix_size_multiplier_weak_bear=0.5,
+            topix_size_multiplier_strong_bear=0.8,
+        )
+
+
 def test_run_py_cli_has_portfolio_drawdown_stop_arg():
     import os
     import pathlib

@@ -167,6 +167,9 @@ def _build_backtest_params(scenario: dict[str, object]) -> dict[str, object]:
         "trailing_stop_atr": scenario.get("trailing_stop_atr_mult", 2.0),
         "threshold": scenario.get("threshold", 0.58),
         "topix_size_multiplier_weak_bear": scenario.get("topix_size_multiplier_weak_bear", 0.50),
+        "topix_size_multiplier_strong_bear": scenario.get(
+            "topix_size_multiplier_strong_bear", 0.00
+        ),
         "use_ma200_filter": scenario.get("use_ma200_filter", False),
     }
 
