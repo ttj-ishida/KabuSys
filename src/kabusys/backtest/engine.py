@@ -59,6 +59,8 @@ class BacktestResult:
     excluded_codes: list[str] = field(default_factory=list)
     # excluded_codes の各コードについての除外理由（キー：コード、値：理由文字列）
     excluded_reasons: dict[str, str] = field(default_factory=dict)
+    # run_backtest() に渡した主要パラメータのスナップショット
+    params: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +397,7 @@ def run_backtest(
     use_ma200_filter: bool = False,
     volume_breakout_threshold: float | None = None,
     portfolio_drawdown_stop_pct: float | None = None,
+    portfolio_drawdown_stop_timeout_days: int | None = None,
 ) -> BacktestResult:
     """バックテストを実行し結果を返す。
 
@@ -437,6 +440,10 @@ def run_backtest(
         portfolio_drawdown_stop_pct: ポートフォリオがピーク比でこの割合を超えて下落した場合、
                            新規 BUY エントリーを停止する（既存ポジションの SELL は継続）。
                            None（デフォルト）で無効。0 < x < 1 の範囲で指定すること。
+        portfolio_drawdown_stop_timeout_days: ドローダウンストップ発動からこのカレンダー日数が
+                           経過すると自動的にストップを解除しピーク値をリセットする。
+                           None（デフォルト）でタイムアウト無効（手動リセットなし）。
+                           1 以上の整数を指定すること。
 
     Returns:
         BacktestResult（history, trades, metrics および scope_mode/excluded_codes 等のスコープメタデータ）。
@@ -469,6 +476,13 @@ def run_backtest(
     if portfolio_drawdown_stop_pct is not None and not (0 < portfolio_drawdown_stop_pct < 1):
         raise ValueError(
             f"portfolio_drawdown_stop_pct は (0, 1) の範囲で指定してください: {portfolio_drawdown_stop_pct}"
+        )
+    if (
+        portfolio_drawdown_stop_timeout_days is not None
+        and portfolio_drawdown_stop_timeout_days < 1
+    ):
+        raise ValueError(
+            f"portfolio_drawdown_stop_timeout_days は 1 以上を指定してください: {portfolio_drawdown_stop_timeout_days}"
         )
     if threshold is not None and not (0 < threshold < 1):
         raise ValueError(f"threshold は (0, 1) の範囲で指定してください: {threshold}")
@@ -520,6 +534,7 @@ def run_backtest(
     # （本番 live trading とは異なり、バックテストは単一関数呼び出し内で完結するためDB永続化不要）
     next_day_orders: list[dict] = []
     peak_value: float = initial_cash  # ポートフォリオドローダウンストップ用ピーク追跡
+    entry_blocked_since: date | None = None  # ドローダウンストップ発動日（タイムアウト計算用）
 
     try:
         trading_days = get_trading_days(bt_conn, start_date, end_date)
@@ -616,6 +631,25 @@ def run_backtest(
                     trading_day,
                     (1 - current_pv / peak_value) * 100,
                 )
+            # タイムアウト解除チェック
+            if (
+                entry_blocked
+                and portfolio_drawdown_stop_timeout_days is not None
+                and entry_blocked_since is not None
+                and (trading_day - entry_blocked_since).days >= portfolio_drawdown_stop_timeout_days
+            ):
+                entry_blocked = False
+                peak_value = current_pv  # ピークをリセットして再エントリーを許可
+                entry_blocked_since = None
+                logger.debug(
+                    "run_backtest: ドローダウンストップ タイムアウト解除 date=%s", trading_day
+                )
+            # entry_blocked_since を更新
+            if entry_blocked:
+                if entry_blocked_since is None:
+                    entry_blocked_since = trading_day
+            else:
+                entry_blocked_since = None
             # max_utilization を全配分方式に一貫適用（risk_based 含む）
             available_cash = min(simulator.cash * multiplier, current_pv * max_utilization)
 
@@ -701,4 +735,5 @@ def run_backtest(
         effective_universe_size=_effective_universe_size,
         excluded_codes=_excluded_codes,
         excluded_reasons=_excluded_reasons,
+        params={"portfolio_drawdown_stop_timeout_days": portfolio_drawdown_stop_timeout_days},
     )

@@ -186,6 +186,16 @@ def main() -> None:
             "新規 BUY エントリーを停止する。None（デフォルト）で無効。"
         ),
     )
+    parser.add_argument(
+        "--portfolio-drawdown-stop-timeout",
+        type=int,
+        default=None,
+        dest="portfolio_drawdown_stop_timeout_days",
+        help=(
+            "ドローダウンストップ発動からこのカレンダー日数が経過すると自動解除する。"
+            "None（デフォルト）でタイムアウト無効。1 以上の整数を指定すること。"
+        ),
+    )
     parser.add_argument("--db", required=True, help="DuckDB file path")
     parser.add_argument(
         "--output-format",
@@ -258,6 +268,7 @@ def main() -> None:
             use_ma200_filter=args.ma200_filter,
             volume_breakout_threshold=args.volume_breakout_threshold,
             portfolio_drawdown_stop_pct=args.portfolio_drawdown_stop,
+            portfolio_drawdown_stop_timeout_days=args.portfolio_drawdown_stop_timeout_days,
         )
     finally:
         conn.close()
@@ -279,6 +290,8 @@ def main() -> None:
         min_holding_days=getattr(args, "min_holding_days", 5),
         max_holding_days=getattr(args, "max_holding_days", 60),
         trailing_stop_atr=getattr(args, "trailing_stop_atr", 2.0),
+        portfolio_drawdown_stop_pct=args.portfolio_drawdown_stop,
+        portfolio_drawdown_stop_timeout_days=args.portfolio_drawdown_stop_timeout_days,
     )
 
     fmt = args.output_format

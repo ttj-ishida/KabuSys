@@ -150,10 +150,7 @@ def test_pos_value_prefers_current_price_and_fallbacks(caplog):
     val = _pos_value(p3)
     assert val == 0.0
     # Expect a warning mentioning code Z
-    found = any(
-        "code=Z" in rec.getMessage() or "Z" in rec.getMessage()
-        for rec in caplog.records
-    )
+    found = any("code=Z" in rec.getMessage() or "Z" in rec.getMessage() for rec in caplog.records)
     assert found
 
 
@@ -534,9 +531,7 @@ risk:
     cfg_dir = _make_risk_config_dir(tmp_path, yaml_bad)
     monkeypatch.setattr(validate_config, "_CONFIG_DIR", cfg_dir)
     errors, _, _ = validate_config.validate()
-    relation_errors = [
-        e for e in errors if "max_position_pct" in e and "max_utilization" in e
-    ]
+    relation_errors = [e for e in errors if "max_position_pct" in e and "max_utilization" in e]
     assert relation_errors, "max_position_pct > max_utilization のエラーが見つからない"
     assert all("risk.max_position_pct" in e for e in relation_errors)
     assert all("risk.max_utilization" in e for e in relation_errors)
