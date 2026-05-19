@@ -95,8 +95,8 @@ def load_latest_summary(conn: duckdb.DuckDBPyConnection) -> str | None:
             f"gap_down_threshold={params.get('gap_down_threshold', 'N/A')}",
             f"min_holding_days={params.get('min_holding_days', 'N/A')}",
             f"max_holding_days={params.get('max_holding_days', 'N/A')}",
-            f"topix_drawdown_threshold={params.get('topix_drawdown_threshold', 'N/A')}",
-            f"topix_size_multiplier_bear={params.get('topix_size_multiplier_bear', 'N/A')}",
+            f"topix_size_multiplier_weak_bear={params.get('topix_size_multiplier_weak_bear', 'N/A')}",
+            f"topix_size_multiplier_strong_bear={params.get('topix_size_multiplier_strong_bear', 'N/A')}",
         ]
         lines += [
             "",

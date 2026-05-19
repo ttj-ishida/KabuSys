@@ -29,8 +29,8 @@ _SECTOR_KEY_MAP = {
 
 _REGIME_KEYS = frozenset(
     {
-        "topix_drawdown_threshold",
-        "topix_size_multiplier_bear",
+        "topix_size_multiplier_weak_bear",
+        "topix_size_multiplier_strong_bear",
     }
 )
 
@@ -55,7 +55,7 @@ def apply_params(config_path: Path, params: dict) -> None:
     - weights.*                                 → strategy.weights.*（他は保持）
     - threshold, stop_loss_rate 等               → strategy.*
     - sector_boost, sector_quartile             → sector.boost, sector.quartile
-    - topix_drawdown_threshold 等               → regime.*
+    - topix_size_multiplier_weak_bear 等        → regime.*
 
     YAML 全体を読み込み→パッチ→書き戻す。コメントは失われる。
     """

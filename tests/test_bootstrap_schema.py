@@ -35,7 +35,7 @@ def test_topix_daily_table_exists(schema_conn):
         "SELECT column_name FROM information_schema.columns WHERE table_name='topix_daily'"
     ).fetchall()
     cols = {r[0] for r in rows}
-    assert cols == {"date", "open", "high", "low", "close"}
+    assert cols == {"date", "open", "high", "low", "close", "ma25", "ma75", "ma200"}
 
 
 def test_bootstrap_load_history_table_exists(schema_conn):

@@ -11,7 +11,7 @@
 
 検証方針：
   1. 200MA バイナリフィルター    : MA200 上の銘柄のみ BUY
-  2. TOPIX ベアガード前倒し      : topix_drawdown_threshold=-0.10（現行 -0.15）
+  2. TOPIX ベアガード前倒し      : topix_size_multiplier_weak_bear=0.25（現行 0.5）
   3. 出来高ブレイクアウト 1.5x   : volume_ratio >= 1.5 の銘柄のみ BUY
   4. MA200 + ベアガード強化       : 組み合わせ
   5. MA200 + 出来高 1.5x         : 組み合わせ
@@ -61,8 +61,7 @@ _BASE = {
     "risk_pct": 0.005,
     "stop_loss_pct": 0.09,
     "threshold": 0.58,
-    "topix_size_multiplier_bear": 0.50,
-    "topix_drawdown_threshold": -0.15,
+    "topix_size_multiplier_weak_bear": 0.50,
     "trailing_stop_atr_mult": 2.0,
     "max_holding_days": 60,
     "use_ma200_filter": False,
@@ -75,7 +74,6 @@ SCENARIOS = [
     # ── 200MA フィルター：MA200 上の銘柄のみ BUY ───────────────────────────
     {**_BASE, "name": "1m_eq4_ma200", "use_ma200_filter": True},
     # ── TOPIX ベアガード強化：乖離率 -10% 未満でサイズ縮小（現行 -15%）─────
-    {**_BASE, "name": "1m_eq4_bear10", "topix_drawdown_threshold": -0.10},
     # ── 出来高ブレイクアウト 1.5x ─────────────────────────────────────────
     {**_BASE, "name": "1m_eq4_vol15", "volume_breakout_threshold": 1.5},
     # ── MA200 + ベアガード強化 ──────────────────────────────────────────────
@@ -83,7 +81,6 @@ SCENARIOS = [
         **_BASE,
         "name": "1m_eq4_ma200_bear10",
         "use_ma200_filter": True,
-        "topix_drawdown_threshold": -0.10,
     },
     # ── MA200 + 出来高 1.5x ────────────────────────────────────────────────
     {
@@ -97,7 +94,6 @@ SCENARIOS = [
         **_BASE,
         "name": "1m_eq4_all_filters",
         "use_ma200_filter": True,
-        "topix_drawdown_threshold": -0.10,
         "volume_breakout_threshold": 1.5,
     },
 ]
@@ -164,8 +160,12 @@ def _build_strategy_config(base: dict, scenario: dict[str, object]) -> dict:
     sector_section["boost"] = 0.05
     sector_section["quartile"] = 0.30
 
-    regime_section["topix_drawdown_threshold"] = scenario.get("topix_drawdown_threshold", -0.15)
-    regime_section["topix_size_multiplier_bear"] = scenario.get("topix_size_multiplier_bear", 0.50)
+    regime_section["topix_size_multiplier_weak_bear"] = scenario.get(
+        "topix_size_multiplier_weak_bear", 0.50
+    )
+    regime_section["topix_size_multiplier_strong_bear"] = scenario.get(
+        "topix_size_multiplier_strong_bear", 0.00
+    )
 
     portfolio_section["max_positions"] = scenario.get("max_positions", 4)
     return strategy_config
@@ -194,8 +194,7 @@ def _build_backtest_params(scenario: dict[str, object]) -> dict[str, object]:
         "max_holding_days": scenario.get("max_holding_days", 60),
         "trailing_stop_atr": scenario.get("trailing_stop_atr_mult", 2.0),
         "threshold": scenario.get("threshold", 0.58),
-        "topix_drawdown_threshold": scenario.get("topix_drawdown_threshold", -0.15),
-        "topix_size_multiplier_bear": scenario.get("topix_size_multiplier_bear", 0.50),
+        "topix_size_multiplier_weak_bear": scenario.get("topix_size_multiplier_weak_bear", 0.50),
         "use_ma200_filter": scenario.get("use_ma200_filter", False),
         "volume_breakout_threshold": scenario.get("volume_breakout_threshold"),
     }
@@ -234,10 +233,10 @@ def _build_command(db_path: Path, params: dict[str, object], output_dir: Path) -
         str(params["trailing_stop_atr"]),
         "--threshold",
         str(params["threshold"]),
-        "--topix-drawdown-threshold",
-        str(params["topix_drawdown_threshold"]),
-        "--topix-size-multiplier-bear",
-        str(params["topix_size_multiplier_bear"]),
+        "--topix-size-multiplier-weak-bear",
+        str(params["topix_size_multiplier_weak_bear"]),
+        "--topix-size-multiplier-strong-bear",
+        str(params.get("topix_size_multiplier_strong_bear", 0.0)),
         "--output-format",
         "all",
         "--output-dir",
@@ -345,7 +344,8 @@ def main() -> None:
         "max_positions",
         "max_position_pct",
         "max_utilization",
-        "topix_drawdown_threshold",
+        "topix_size_multiplier_weak_bear",
+        "topix_size_multiplier_strong_bear",
         "use_ma200_filter",
         "volume_breakout_threshold",
         "cagr",
@@ -428,7 +428,12 @@ def main() -> None:
                     "max_positions": params["max_positions"],
                     "max_position_pct": params["max_position_pct"],
                     "max_utilization": params["max_utilization"],
-                    "topix_drawdown_threshold": params["topix_drawdown_threshold"],
+                    "topix_size_multiplier_weak_bear": params.get(
+                        "topix_size_multiplier_weak_bear", 0.50
+                    ),
+                    "topix_size_multiplier_strong_bear": params.get(
+                        "topix_size_multiplier_strong_bear", 0.00
+                    ),
                     "use_ma200_filter": params["use_ma200_filter"],
                     "volume_breakout_threshold": params["volume_breakout_threshold"],
                     **metrics,
@@ -449,7 +454,7 @@ def main() -> None:
                     f"{_format_metric(metrics['profit_factor'])}\t"
                     f"{metrics['total_trades']}\t"
                     f"{params['use_ma200_filter']}\t"
-                    f"{params['topix_drawdown_threshold']}\t"
+                    f"{params.get('topix_size_multiplier_weak_bear', 0.5)}\t"
                     f"{params['volume_breakout_threshold']}"
                 )
         finally:

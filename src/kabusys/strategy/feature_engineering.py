@@ -238,3 +238,54 @@ def build_features(
     count = len(normalized)
     logger.info("build_features: %d 銘柄 date=%s", count, target_date)
     return count
+
+
+# ---------------------------------------------------------------------------
+# TOPIX MA 事前計算
+# ---------------------------------------------------------------------------
+
+
+def ensure_topix_ma_columns(conn: duckdb.DuckDBPyConnection) -> None:
+    """既存 DB に ma25/ma75/ma200 列がなければ追加する（冪等）。"""
+    for col in ("ma25", "ma75", "ma200"):
+        conn.execute(f"ALTER TABLE topix_daily ADD COLUMN IF NOT EXISTS {col} DOUBLE")
+
+
+def update_topix_ma(conn: duckdb.DuckDBPyConnection, target_date: date) -> bool:
+    """target_date の TOPIX MA25/MA75/MA200 を計算して topix_daily に保存する。
+
+    データ不足の場合は対応 MA を NULL にして保存する。
+    対象日付のレコードがない場合は False を返す。
+    既存 DB に MA 列がなければ冪等に追加してから計算する。
+    """
+    ensure_topix_ma_columns(conn)
+
+    row = conn.execute(
+        """
+        WITH topix_data AS (
+            SELECT date, close,
+                   CASE WHEN COUNT(*) OVER (ORDER BY date ROWS BETWEEN 24 PRECEDING AND CURRENT ROW) >= 25
+                        THEN AVG(close) OVER (ORDER BY date ROWS BETWEEN 24 PRECEDING AND CURRENT ROW)
+                        ELSE NULL END AS ma25,
+                   CASE WHEN COUNT(*) OVER (ORDER BY date ROWS BETWEEN 74 PRECEDING AND CURRENT ROW) >= 75
+                        THEN AVG(close) OVER (ORDER BY date ROWS BETWEEN 74 PRECEDING AND CURRENT ROW)
+                        ELSE NULL END AS ma75,
+                   CASE WHEN COUNT(*) OVER (ORDER BY date ROWS BETWEEN 199 PRECEDING AND CURRENT ROW) >= 200
+                        THEN AVG(close) OVER (ORDER BY date ROWS BETWEEN 199 PRECEDING AND CURRENT ROW)
+                        ELSE NULL END AS ma200
+            FROM topix_daily
+            WHERE date <= ?
+        )
+        SELECT ma25, ma75, ma200 FROM topix_data WHERE date = ?
+        """,
+        [target_date, target_date],
+    ).fetchone()
+
+    if row is None:
+        return False
+
+    conn.execute(
+        "UPDATE topix_daily SET ma25 = ?, ma75 = ?, ma200 = ? WHERE date = ?",
+        [row[0], row[1], row[2], target_date],
+    )
+    return True

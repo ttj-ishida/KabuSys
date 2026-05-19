@@ -27,8 +27,8 @@ _DISPLAY_NAMES: dict[str, str] = {
     "gap_down_threshold": "gap_down_threshold（ギャップダウン閾値）",
     "sector_boost": "sector_boost（セクターブースト）",
     "sector_quartile": "sector_quartile（セクター区切り）",
-    "topix_drawdown_threshold": "topix_drawdown_threshold（TOPIX 下落閾値）",
-    "topix_size_multiplier_bear": "topix_size_multiplier_bear（弱気相場サイズ係数）",
+    "topix_size_multiplier_weak_bear": "topix_size_multiplier_weak_bear（弱いベア時サイズ係数）",
+    "topix_size_multiplier_strong_bear": "topix_size_multiplier_strong_bear（強いベア時サイズ係数）",
 }
 
 
@@ -64,7 +64,7 @@ def _read_current_params(config_path: Path) -> dict:
         result["sector_quartile"] = sec["quartile"]
 
     reg = data.get("regime", {}) or {}
-    for key in ("topix_drawdown_threshold", "topix_size_multiplier_bear"):
+    for key in ("topix_size_multiplier_weak_bear", "topix_size_multiplier_strong_bear"):
         if key in reg:
             result[key] = reg[key]
 

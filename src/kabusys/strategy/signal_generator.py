@@ -74,9 +74,8 @@ _MAX_HOLDING_DAYS: int = 60  # この営業日数を超えた保有は time_exit
 _TRAILING_STOP_ATR_MULT: float = 2.0  # peak_close から ATR × N 下落で trailing_stop SELL を発動
 _REENTRY_COOLDOWN_DAYS: int = 5  # SELL 後この営業日数を経過するまで同一銘柄の BUY を禁止
 
-_TOPIX_DRAWDOWN_THRESHOLD: float = -0.15  # 200MA 乖離率がこの値未満で縮小
-_TOPIX_SIZE_MULTIPLIER_BEAR: float = 0.5  # 地合い悪化時の size_multiplier
-_TOPIX_MIN_DATA_COUNT: int = 100  # 200MA を信頼できる最低データ数（初期運用でのデータ蓄積期間を考慮し 200 でなく 100 に設定）
+_TOPIX_SIZE_MULTIPLIER_WEAK_BEAR: float = 0.5  # MA25 < MA75（弱いベア）の size_multiplier
+_TOPIX_SIZE_MULTIPLIER_STRONG_BEAR: float = 0.0  # MA75 < MA200（強いベア）の size_multiplier
 
 _RSI_OVERBOUGHT_THRESHOLD: float = 65.0  # RSI(14) > この値の銘柄は BUY 抑制（過熱判定）
 
@@ -111,8 +110,8 @@ _STRATEGY_CONFIG_DEFAULTS: dict = {
     "reentry_cooldown_days": _REENTRY_COOLDOWN_DAYS,
     "sector_boost": _SECTOR_BOOST,
     "sector_quartile": _SECTOR_QUARTILE,
-    "topix_drawdown_threshold": _TOPIX_DRAWDOWN_THRESHOLD,
-    "topix_size_multiplier_bear": _TOPIX_SIZE_MULTIPLIER_BEAR,
+    "topix_size_multiplier_weak_bear": _TOPIX_SIZE_MULTIPLIER_WEAK_BEAR,
+    "topix_size_multiplier_strong_bear": _TOPIX_SIZE_MULTIPLIER_STRONG_BEAR,
     "rsi_overbought_threshold": _RSI_OVERBOUGHT_THRESHOLD,
 }
 
@@ -142,8 +141,8 @@ def _load_strategy_config() -> dict:
             "reentry_cooldown_days": int,
             "sector_boost": float,
             "sector_quartile": float,
-            "topix_drawdown_threshold": float,
-            "topix_size_multiplier_bear": float,
+            "topix_size_multiplier_weak_bear": float,
+            "topix_size_multiplier_strong_bear": float,
             "rsi_overbought_threshold": float,
         }
     """
@@ -270,25 +269,25 @@ def _load_strategy_config() -> dict:
     # regime セクション
     reg = data.get("regime")
     if isinstance(reg, dict):
-        v = reg.get("topix_drawdown_threshold")
+        v = reg.get("topix_size_multiplier_weak_bear")
         if (
             v is not None
             and isinstance(v, (int, float))
             and not isinstance(v, bool)
             and math.isfinite(float(v))
-            and float(v) < 0
+            and 0.0 <= float(v) <= 1.0
         ):
-            result["topix_drawdown_threshold"] = float(v)
+            result["topix_size_multiplier_weak_bear"] = float(v)
 
-        v = reg.get("topix_size_multiplier_bear")
+        v = reg.get("topix_size_multiplier_strong_bear")
         if (
             v is not None
             and isinstance(v, (int, float))
             and not isinstance(v, bool)
             and math.isfinite(float(v))
-            and 0.0 < float(v) <= 1.0
+            and 0.0 <= float(v) <= 1.0
         ):
-            result["topix_size_multiplier_bear"] = float(v)
+            result["topix_size_multiplier_strong_bear"] = float(v)
 
     # rsi_overbought_threshold: strategy セクション配下（50 < x <= 100）
     v = s.get("rsi_overbought_threshold") if isinstance(s, dict) else None
@@ -517,39 +516,35 @@ def _is_breadth_stop(
 def _get_topix_size_multiplier(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
-    drawdown_threshold: float = _TOPIX_DRAWDOWN_THRESHOLD,
-    size_multiplier_bear: float = _TOPIX_SIZE_MULTIPLIER_BEAR,
+    size_multiplier_weak_bear: float = _TOPIX_SIZE_MULTIPLIER_WEAK_BEAR,
+    size_multiplier_strong_bear: float = _TOPIX_SIZE_MULTIPLIER_STRONG_BEAR,
 ) -> float:
-    """TOPIX の 200 日移動平均乖離率に基づく size_multiplier を返す。
+    """TOPIX の MA クロス状態に基づく size_multiplier を返す。
 
-    TOPIX の 200 日 MA に対する乖離率が drawdown_threshold 未満（より低い側）の場合は
-    size_multiplier_bear を返す。
-    データ不足または topix_daily が空の場合は 1.0 を返す（制限なし）。
+    topix_daily に事前計算済みの ma25/ma75/ma200 を参照する。
+    強いベア判定（MA75 < MA200）が弱いベア（MA25 < MA75）に常に優先する。
+    - MA75 < MA200（強いベア）: size_multiplier_strong_bear を返す（デフォルト 0.0）
+    - MA25 < MA75（弱いベア）: size_multiplier_weak_bear を返す（デフォルト 0.5）
+    - それ以外（強気）: 1.0 を返す
+    - MA が NULL（データ不足）またはレコードなし: 安全側フォールバックとして 1.0 を返す
 
     Args:
-        conn:                DuckDB 接続。topix_daily テーブルを参照する。
-        target_date:         基準日（この日以前の最新 TOPIX を使用）。
-        drawdown_threshold:  Bear 判定の乖離率閾値（デフォルト: _TOPIX_DRAWDOWN_THRESHOLD）。
-        size_multiplier_bear: Bear 時の size_multiplier（デフォルト: _TOPIX_SIZE_MULTIPLIER_BEAR）。
+        conn:                       DuckDB 接続。topix_daily テーブルを参照する。
+        target_date:                基準日（この日以前の最新 TOPIX を使用）。
+        size_multiplier_weak_bear:  弱いベア時の size_multiplier（MA25 < MA75）。
+        size_multiplier_strong_bear: 強いベア時の size_multiplier（MA75 < MA200）。
 
     Returns:
-        size_multiplier（size_multiplier_bear または 1.0）。
+        size_multiplier（設定値に依存。デフォルトは strong_bear=0.0 / weak_bear=0.5 / bull=1.0）。
     """
     try:
         row = conn.execute(
             """
-            WITH topix_data AS (
-                SELECT date, close,
-                       AVG(close) OVER (ORDER BY date ROWS BETWEEN 199 PRECEDING AND CURRENT ROW) AS ma200,
-                       COUNT(*) OVER (ORDER BY date ROWS BETWEEN 199 PRECEDING AND CURRENT ROW) AS cnt
-                FROM topix_daily
-                WHERE date <= ?
-            )
-            SELECT close, ma200, cnt
-            FROM topix_data
+            SELECT ma25, ma75, ma200
+            FROM topix_daily
             WHERE date = (SELECT MAX(date) FROM topix_daily WHERE date <= ?)
             """,
-            [target_date, target_date],
+            [target_date],
         ).fetchone()
     except Exception:
         logger.debug(
@@ -558,11 +553,14 @@ def _get_topix_size_multiplier(
         )
         return 1.0
 
-    if row is None or row[1] is None or row[2] < _TOPIX_MIN_DATA_COUNT:
+    if row is None or row[0] is None or row[1] is None or row[2] is None:
         return 1.0
-    close, ma200, _ = float(row[0]), float(row[1]), row[2]
-    if ma200 > 0 and (close / ma200 - 1.0) < drawdown_threshold:
-        return size_multiplier_bear
+
+    ma25, ma75, ma200 = float(row[0]), float(row[1]), float(row[2])
+    if ma75 < ma200:
+        return size_multiplier_strong_bear
+    if ma25 < ma75:
+        return size_multiplier_weak_bear
     return 1.0
 
 
@@ -1101,8 +1099,8 @@ def generate_signals(
     min_holding_days: int | None = None,
     max_holding_days: int | None = None,
     trailing_stop_atr: float | None = None,
-    topix_drawdown_threshold: float | None = None,
-    topix_size_multiplier_bear: float | None = None,
+    topix_size_multiplier_weak_bear: float | None = None,
+    topix_size_multiplier_strong_bear: float | None = None,
     use_ma200_filter: bool = False,
     volume_breakout_threshold: float | None = None,
     *,
@@ -1128,10 +1126,9 @@ def generate_signals(
                            1 以上を指定すること。
         trailing_stop_atr: ATR 乗数。peak_close − N×ATR を下回ったら trailing_stop SELL。
                            正の値を指定すること（None の場合は config から読み込む）。
-        topix_drawdown_threshold: TOPIX 200MA 乖離率のベア判定閾値（負の値、例: -0.12）。
-                           この値未満のとき size_multiplier_bear を適用する。
+        topix_size_multiplier_weak_bear: MA25 < MA75（弱いベア）時の BUY size_multiplier（0 <= x <= 1）。
                            None の場合は strategy_config.yaml から読み込む。
-        topix_size_multiplier_bear: ベア判定時の BUY size_multiplier（0 < x <= 1）。
+        topix_size_multiplier_strong_bear: MA75 < MA200（強いベア）時の BUY size_multiplier（0 <= x <= 1）。
                            None の場合は strategy_config.yaml から読み込む。
         use_ma200_filter:  True のとき株価が 200 日移動平均線を下回る銘柄（ma200_dev < 0）
                            の BUY を抑制する。ma200_dev が None の場合は安全側で BUY 許可。
@@ -1202,19 +1199,27 @@ def generate_signals(
 
     event_dates = event_dates or {}
     size_multiplier = _get_event_size_multiplier(event_dates, target_date, conn)
+
+    _weak_bear: float = (
+        topix_size_multiplier_weak_bear
+        if topix_size_multiplier_weak_bear is not None
+        else _cfg["topix_size_multiplier_weak_bear"]
+    )
+    _strong_bear: float = (
+        topix_size_multiplier_strong_bear
+        if topix_size_multiplier_strong_bear is not None
+        else _cfg["topix_size_multiplier_strong_bear"]
+    )
+    if _strong_bear > _weak_bear:
+        raise ValueError(
+            f"topix_size_multiplier_strong_bear ({_strong_bear}) は"
+            f" topix_size_multiplier_weak_bear ({_weak_bear}) 以下にしてください"
+        )
     topix_multiplier = _get_topix_size_multiplier(
         conn,
         target_date,
-        drawdown_threshold=(
-            topix_drawdown_threshold
-            if topix_drawdown_threshold is not None
-            else _cfg["topix_drawdown_threshold"]
-        ),
-        size_multiplier_bear=(
-            topix_size_multiplier_bear
-            if topix_size_multiplier_bear is not None
-            else _cfg["topix_size_multiplier_bear"]
-        ),
+        size_multiplier_weak_bear=_weak_bear,
+        size_multiplier_strong_bear=_strong_bear,
     )
     size_multiplier = min(size_multiplier, topix_multiplier)
 

@@ -379,7 +379,10 @@ CREATE TABLE IF NOT EXISTS topix_daily (
     open   DECIMAL(18,4) NOT NULL,
     high   DECIMAL(18,4) NOT NULL,
     low    DECIMAL(18,4) NOT NULL,
-    close  DECIMAL(18,4) NOT NULL
+    close  DECIMAL(18,4) NOT NULL,
+    ma25   DOUBLE,
+    ma75   DOUBLE,
+    ma200  DOUBLE
 )
 """
 
@@ -493,6 +496,10 @@ _MIGRATIONS: list[str] = [
     "ALTER TABLE features ADD COLUMN IF NOT EXISTS quality_score DOUBLE",
     # Issue #338: features に RSI(14) を追加
     "ALTER TABLE features ADD COLUMN IF NOT EXISTS rsi_14 DOUBLE",
+    # Issue #349: topix_daily に MA 列を追加
+    "ALTER TABLE topix_daily ADD COLUMN IF NOT EXISTS ma25 DOUBLE",
+    "ALTER TABLE topix_daily ADD COLUMN IF NOT EXISTS ma75 DOUBLE",
+    "ALTER TABLE topix_daily ADD COLUMN IF NOT EXISTS ma200 DOUBLE",
 ]
 
 # ---------------------------------------------------------------------------

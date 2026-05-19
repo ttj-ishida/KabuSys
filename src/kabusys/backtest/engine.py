@@ -390,8 +390,8 @@ def run_backtest(
     max_holding_days: int = 60,
     trailing_stop_atr: float = 2.0,
     threshold: float | None = None,
-    topix_drawdown_threshold: float | None = None,
-    topix_size_multiplier_bear: float | None = None,
+    topix_size_multiplier_weak_bear: float | None = None,
+    topix_size_multiplier_strong_bear: float | None = None,
     use_ma200_filter: bool = False,
     volume_breakout_threshold: float | None = None,
     portfolio_drawdown_stop_pct: float | None = None,
@@ -426,10 +426,10 @@ def run_backtest(
                            close < peak_close - trailing_stop_atr × ATR_20d のとき SELL 発動。
                            正の値を指定すること。
         threshold:         BUY シグナル生成の final_score 閾値（None のとき strategy_config.yaml から読み込む）。
-        topix_drawdown_threshold: TOPIX 200MA 乖離率のベア判定閾値（None のとき strategy_config.yaml から読み込む）。
-                           負の値を指定すること（例: -0.12）。
-        topix_size_multiplier_bear: ベア判定時の size_multiplier（None のとき strategy_config.yaml から読み込む）。
-                           0 < x <= 1 の範囲で指定すること。
+        topix_size_multiplier_weak_bear: MA25 < MA75（弱いベア）時の size_multiplier（None のとき strategy_config.yaml から読み込む）。
+                           0 <= x <= 1 の範囲で指定すること。
+        topix_size_multiplier_strong_bear: MA75 < MA200（強いベア）時の size_multiplier（None のとき strategy_config.yaml から読み込む）。
+                           0 <= x <= 1 の範囲で指定すること。
         use_ma200_filter:  True のとき株価が 200 日移動平均線を下回る銘柄の BUY を抑制する。
                            False（デフォルト）で無効。generate_signals() の同名引数に転送。
         volume_breakout_threshold: 指定した場合、volume_ratio が閾値未満の銘柄の BUY を抑制する。
@@ -472,13 +472,26 @@ def run_backtest(
         )
     if threshold is not None and not (0 < threshold < 1):
         raise ValueError(f"threshold は (0, 1) の範囲で指定してください: {threshold}")
-    if topix_drawdown_threshold is not None and topix_drawdown_threshold >= 0:
+    if topix_size_multiplier_weak_bear is not None and not (
+        0.0 <= topix_size_multiplier_weak_bear <= 1.0
+    ):
         raise ValueError(
-            f"topix_drawdown_threshold は負の値を指定してください: {topix_drawdown_threshold}"
+            f"topix_size_multiplier_weak_bear は [0, 1] の範囲で指定してください: {topix_size_multiplier_weak_bear}"
         )
-    if topix_size_multiplier_bear is not None and not (0 < topix_size_multiplier_bear <= 1):
+    if topix_size_multiplier_strong_bear is not None and not (
+        0.0 <= topix_size_multiplier_strong_bear <= 1.0
+    ):
         raise ValueError(
-            f"topix_size_multiplier_bear は (0, 1] の範囲で指定してください: {topix_size_multiplier_bear}"
+            f"topix_size_multiplier_strong_bear は [0, 1] の範囲で指定してください: {topix_size_multiplier_strong_bear}"
+        )
+    if (
+        topix_size_multiplier_weak_bear is not None
+        and topix_size_multiplier_strong_bear is not None
+        and topix_size_multiplier_strong_bear > topix_size_multiplier_weak_bear
+    ):
+        raise ValueError(
+            f"topix_size_multiplier_strong_bear ({topix_size_multiplier_strong_bear}) は"
+            f" topix_size_multiplier_weak_bear ({topix_size_multiplier_weak_bear}) 以下にしてください"
         )
 
     # try ブロック外でも参照できるようデフォルト初期化
@@ -583,8 +596,8 @@ def run_backtest(
                 min_holding_days=min_holding_days,
                 max_holding_days=max_holding_days,
                 trailing_stop_atr=trailing_stop_atr,
-                topix_drawdown_threshold=topix_drawdown_threshold,
-                topix_size_multiplier_bear=topix_size_multiplier_bear,
+                topix_size_multiplier_weak_bear=topix_size_multiplier_weak_bear,
+                topix_size_multiplier_strong_bear=topix_size_multiplier_strong_bear,
             )
 
             # Step 5: ポートフォリオ構築（Phase 5 モジュール使用）

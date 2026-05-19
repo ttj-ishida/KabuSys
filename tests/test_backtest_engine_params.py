@@ -61,17 +61,17 @@ def test_run_backtest_accepts_threshold_param():
 
 
 def test_run_backtest_accepts_topix_params():
-    """run_backtest() が topix_drawdown_threshold / topix_size_multiplier_bear を受け取れること。"""
+    """run_backtest() が topix_size_multiplier_weak_bear / topix_size_multiplier_strong_bear を受け取れること。"""
     import inspect
 
     from kabusys.backtest.engine import run_backtest
 
     sig = inspect.signature(run_backtest)
-    assert "topix_drawdown_threshold" in sig.parameters, (
-        "run_backtest() に topix_drawdown_threshold パラメータが存在しない"
+    assert "topix_size_multiplier_weak_bear" in sig.parameters, (
+        "run_backtest() に topix_size_multiplier_weak_bear パラメータが存在しない"
     )
-    assert "topix_size_multiplier_bear" in sig.parameters, (
-        "run_backtest() に topix_size_multiplier_bear パラメータが存在しない"
+    assert "topix_size_multiplier_strong_bear" in sig.parameters, (
+        "run_backtest() に topix_size_multiplier_strong_bear パラメータが存在しない"
     )
 
 
@@ -117,7 +117,7 @@ def test_run_py_cli_has_threshold_arg():
 
 
 def test_run_py_cli_has_topix_args():
-    """kabusys.backtest.run の argparse に --topix-drawdown-threshold / --topix-size-multiplier-bear が定義されていること。"""
+    """kabusys.backtest.run の argparse に --topix-size-multiplier-weak-bear / --topix-size-multiplier-strong-bear が定義されていること。"""
     import argparse
     import importlib
     from unittest.mock import patch
@@ -139,11 +139,11 @@ def test_run_py_cli_has_topix_args():
 
     assert captured
     actions = {a.dest for a in captured[0]._actions}
-    assert "topix_drawdown_threshold" in actions, (
-        f"--topix-drawdown-threshold が argparse に定義されていない: {actions}"
+    assert "topix_size_multiplier_weak_bear" in actions, (
+        f"--topix-size-multiplier-weak-bear が argparse に定義されていない: {actions}"
     )
-    assert "topix_size_multiplier_bear" in actions, (
-        f"--topix-size-multiplier-bear が argparse に定義されていない: {actions}"
+    assert "topix_size_multiplier_strong_bear" in actions, (
+        f"--topix-size-multiplier-strong-bear が argparse に定義されていない: {actions}"
     )
 
 
@@ -221,6 +221,21 @@ def test_run_backtest_portfolio_drawdown_stop_pct_default_is_none():
 
     param = inspect.signature(run_backtest).parameters["portfolio_drawdown_stop_pct"]
     assert param.default is None
+
+
+def test_strong_bear_greater_than_weak_bear_raises():
+    """topix_size_multiplier_strong_bear > weak_bear のとき ValueError が上がること。"""
+    from kabusys.backtest.engine import run_backtest
+
+    with pytest.raises(ValueError, match="topix_size_multiplier_strong_bear"):
+        run_backtest(
+            conn=None,  # type: ignore[arg-type]
+            start_date=date(2025, 1, 6),
+            end_date=date(2025, 1, 10),
+            initial_cash=1_000_000,
+            topix_size_multiplier_weak_bear=0.5,
+            topix_size_multiplier_strong_bear=0.8,
+        )
 
 
 def test_run_py_cli_has_portfolio_drawdown_stop_arg():

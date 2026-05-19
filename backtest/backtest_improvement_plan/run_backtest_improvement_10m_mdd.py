@@ -56,8 +56,8 @@ _BASE = {
     "risk_pct": 0.005,
     "stop_loss_pct": 0.07,
     "threshold": 0.58,
-    "topix_size_multiplier_bear": 0.50,
-    "topix_drawdown_threshold": -0.15,
+    "topix_size_multiplier_weak_bear": 0.50,  # MA25 < MA75 時の size_multiplier
+    "topix_size_multiplier_strong_bear": 0.00,  # MA75 < MA200 時の size_multiplier（エントリー停止）
     "trailing_stop_atr_mult": 2.0,
     "max_holding_days": 60,
     "portfolio_drawdown_stop_pct": None,
@@ -66,12 +66,11 @@ _BASE = {
 SCENARIOS = [
     # ── ベースライン（OOS2 との内部一貫性確認）─────────────────────────────
     {**_BASE, "name": "base"},
-    # ── TOPIXガード強化のみ ──────────────────────────────────────────────
+    # ── TOPIXガード強化のみ（弱いベアも 0.25 に縮小）────────────────────────
     {
         **_BASE,
         "name": "bear_stronger",
-        "topix_drawdown_threshold": -0.10,
-        "topix_size_multiplier_bear": 0.25,
+        "topix_size_multiplier_weak_bear": 0.25,
     },
     # ── ポートフォリオストップのみ（15%）────────────────────────────────────
     {**_BASE, "name": "dd_stop15", "portfolio_drawdown_stop_pct": 0.15},
@@ -81,16 +80,14 @@ SCENARIOS = [
     {
         **_BASE,
         "name": "combined15",
-        "topix_drawdown_threshold": -0.10,
-        "topix_size_multiplier_bear": 0.25,
+        "topix_size_multiplier_weak_bear": 0.25,
         "portfolio_drawdown_stop_pct": 0.15,
     },
     # ── TOPIX強化 + ポートフォリオストップ12% ───────────────────────────────
     {
         **_BASE,
         "name": "combined12",
-        "topix_drawdown_threshold": -0.10,
-        "topix_size_multiplier_bear": 0.25,
+        "topix_size_multiplier_weak_bear": 0.25,
         "portfolio_drawdown_stop_pct": 0.12,
     },
 ]
@@ -153,8 +150,12 @@ def _build_strategy_config(base: dict, scenario: dict[str, object]) -> dict:
     sector_section["boost"] = 0.05
     sector_section["quartile"] = 0.30
 
-    regime_section["topix_drawdown_threshold"] = scenario.get("topix_drawdown_threshold", -0.15)
-    regime_section["topix_size_multiplier_bear"] = scenario.get("topix_size_multiplier_bear", 0.50)
+    regime_section["topix_size_multiplier_weak_bear"] = scenario.get(
+        "topix_size_multiplier_weak_bear", 0.50
+    )
+    regime_section["topix_size_multiplier_strong_bear"] = scenario.get(
+        "topix_size_multiplier_strong_bear", 0.00
+    )
 
     portfolio_section["max_positions"] = scenario.get("max_positions", 4)
     return strategy_config
@@ -183,8 +184,10 @@ def _build_backtest_params(scenario: dict[str, object], year: int) -> dict[str, 
         "max_holding_days": scenario.get("max_holding_days", 60),
         "trailing_stop_atr": scenario.get("trailing_stop_atr_mult", 2.0),
         "threshold": scenario.get("threshold", 0.58),
-        "topix_drawdown_threshold": scenario.get("topix_drawdown_threshold", -0.15),
-        "topix_size_multiplier_bear": scenario.get("topix_size_multiplier_bear", 0.50),
+        "topix_size_multiplier_weak_bear": scenario.get("topix_size_multiplier_weak_bear", 0.50),
+        "topix_size_multiplier_strong_bear": scenario.get(
+            "topix_size_multiplier_strong_bear", 0.00
+        ),
         "portfolio_drawdown_stop_pct": scenario.get("portfolio_drawdown_stop_pct"),
     }
 
@@ -222,10 +225,10 @@ def _build_command(db_path: Path, params: dict[str, object], output_dir: Path) -
         str(params["trailing_stop_atr"]),
         "--threshold",
         str(params["threshold"]),
-        "--topix-drawdown-threshold",
-        str(params["topix_drawdown_threshold"]),
-        "--topix-size-multiplier-bear",
-        str(params["topix_size_multiplier_bear"]),
+        "--topix-size-multiplier-weak-bear",
+        str(params["topix_size_multiplier_weak_bear"]),
+        "--topix-size-multiplier-strong-bear",
+        str(params["topix_size_multiplier_strong_bear"]),
         "--output-format",
         "all",
         "--output-dir",
@@ -321,8 +324,8 @@ def main() -> None:
     fieldnames = [
         "name",
         "year",
-        "topix_drawdown_threshold",
-        "topix_size_multiplier_bear",
+        "topix_size_multiplier_weak_bear",
+        "topix_size_multiplier_strong_bear",
         "portfolio_drawdown_stop_pct",
         "run_id",
         "created_at",
@@ -347,7 +350,7 @@ def main() -> None:
     ]
 
     print(f"output_dir={output_dir}")
-    print("scenario\tyear\tbear_thr\tbear_mult\tdd_stop\tcagr\tsharpe\tmax_dd\ttrades")
+    print("scenario\tyear\tweak_bear\tstrong_bear\tdd_stop\tcagr\tsharpe\tmax_dd\ttrades")
 
     with (
         log_jsonl_path.open("w", encoding="utf-8") as jsonl_file,
@@ -410,8 +413,12 @@ def main() -> None:
                     record = {
                         "name": scenario_name,
                         "year": year,
-                        "topix_drawdown_threshold": params["topix_drawdown_threshold"],
-                        "topix_size_multiplier_bear": params["topix_size_multiplier_bear"],
+                        "topix_size_multiplier_weak_bear": params[
+                            "topix_size_multiplier_weak_bear"
+                        ],
+                        "topix_size_multiplier_strong_bear": params[
+                            "topix_size_multiplier_strong_bear"
+                        ],
                         "portfolio_drawdown_stop_pct": params["portfolio_drawdown_stop_pct"],
                         "run_id": run_id,
                         "created_at": metrics["created_at"],
@@ -435,8 +442,8 @@ def main() -> None:
 
                     print(
                         f"{run_slug}\t{year}\t"
-                        f"{params['topix_drawdown_threshold']}\t"
-                        f"{params['topix_size_multiplier_bear']}\t"
+                        f"{params['topix_size_multiplier_weak_bear']}\t"
+                        f"{params['topix_size_multiplier_strong_bear']}\t"
                         f"{params['portfolio_drawdown_stop_pct']}\t"
                         f"{_format_metric(metrics['cagr'])}\t"
                         f"{_format_metric(metrics['sharpe'])}\t"

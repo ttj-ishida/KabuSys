@@ -32,8 +32,8 @@ def config_file(tmp_path: Path) -> Path:
         },
         "sector": {"boost": 0.03, "quartile": 0.25},
         "regime": {
-            "topix_drawdown_threshold": -0.15,
-            "topix_size_multiplier_bear": 0.5,
+            "topix_size_multiplier_weak_bear": 0.5,
+            "topix_size_multiplier_strong_bear": 0.0,
         },
     }
     cfg.write_text(yaml.dump(content, allow_unicode=True), encoding="utf-8")

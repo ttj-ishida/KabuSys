@@ -28,7 +28,7 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
 from kabusys.data.calendar_management import get_trading_days
-from kabusys.strategy.feature_engineering import build_features
+from kabusys.strategy.feature_engineering import build_features, update_topix_ma
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -140,6 +140,46 @@ def backfill(
     return processed, skipped, no_price
 
 
+def backfill_topix_ma(
+    conn: duckdb.DuckDBPyConnection,
+    start: date,
+    end: date,
+    dry_run: bool = False,
+) -> tuple[int, int]:
+    """指定期間の TOPIX MA (MA25/MA75/MA200) を topix_daily に一括保存する。
+
+    topix_daily にデータが存在する日付のみを処理する（冪等）。
+
+    Returns:
+        (updated, skipped) のタプル。
+    """
+    rows = conn.execute(
+        "SELECT date FROM topix_daily WHERE date >= ? AND date <= ? ORDER BY date",
+        [start, end],
+    ).fetchall()
+    topix_dates = [r[0] for r in rows]
+
+    if not topix_dates:
+        logger.warning("指定期間に topix_daily データが見つかりません: %s ~ %s", start, end)
+        return 0, 0
+
+    updated = skipped = 0
+    for i, target_date in enumerate(topix_dates, 1):
+        prefix = f"[{i}/{len(topix_dates)}] {target_date}"
+        if dry_run:
+            logger.info("%s — [dry-run] TOPIX MA 更新対象", prefix)
+            updated += 1
+            continue
+        if update_topix_ma(conn, target_date):
+            logger.debug("%s — TOPIX MA 更新完了", prefix)
+            updated += 1
+        else:
+            logger.warning("%s — TOPIX MA 更新スキップ（データなし）", prefix)
+            skipped += 1
+
+    return updated, skipped
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="バックテスト用特徴量バックフィル",
@@ -187,6 +227,12 @@ def main() -> None:
             force=args.force,
             dry_run=args.dry_run,
         )
+        topix_updated, topix_skipped = backfill_topix_ma(
+            conn,
+            start=start_date,
+            end=end_date,
+            dry_run=args.dry_run,
+        )
     except Exception:
         logger.exception("backfill_features が失敗しました")
         sys.exit(1)
@@ -200,6 +246,12 @@ def main() -> None:
         processed,
         skipped,
         no_price,
+    )
+    logger.info(
+        "%sTOPIX MA — 更新: %d 日 / スキップ: %d 日",
+        label,
+        topix_updated,
+        topix_skipped,
     )
 
     if no_price > 0:

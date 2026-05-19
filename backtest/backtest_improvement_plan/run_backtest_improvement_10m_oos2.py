@@ -52,8 +52,7 @@ _BASE = {
     "risk_pct": 0.005,
     "stop_loss_pct": 0.07,
     "threshold": 0.58,
-    "topix_size_multiplier_bear": 0.50,
-    "topix_drawdown_threshold": -0.15,
+    "topix_size_multiplier_weak_bear": 0.50,
     "trailing_stop_atr_mult": 2.0,
     "max_holding_days": 60,
     "use_ma200_filter": False,
@@ -132,8 +131,12 @@ def _build_strategy_config(base: dict, scenario: dict[str, object]) -> dict:
     sector_section["boost"] = 0.05
     sector_section["quartile"] = 0.30
 
-    regime_section["topix_drawdown_threshold"] = scenario.get("topix_drawdown_threshold", -0.15)
-    regime_section["topix_size_multiplier_bear"] = scenario.get("topix_size_multiplier_bear", 0.50)
+    regime_section["topix_size_multiplier_weak_bear"] = scenario.get(
+        "topix_size_multiplier_weak_bear", 0.50
+    )
+    regime_section["topix_size_multiplier_strong_bear"] = scenario.get(
+        "topix_size_multiplier_strong_bear", 0.00
+    )
 
     portfolio_section["max_positions"] = scenario.get("max_positions", 4)
     return strategy_config
@@ -163,8 +166,10 @@ def _build_backtest_params(scenario: dict[str, object]) -> dict[str, object]:
         "max_holding_days": scenario.get("max_holding_days", 60),
         "trailing_stop_atr": scenario.get("trailing_stop_atr_mult", 2.0),
         "threshold": scenario.get("threshold", 0.58),
-        "topix_drawdown_threshold": scenario.get("topix_drawdown_threshold", -0.15),
-        "topix_size_multiplier_bear": scenario.get("topix_size_multiplier_bear", 0.50),
+        "topix_size_multiplier_weak_bear": scenario.get("topix_size_multiplier_weak_bear", 0.50),
+        "topix_size_multiplier_strong_bear": scenario.get(
+            "topix_size_multiplier_strong_bear", 0.00
+        ),
         "use_ma200_filter": scenario.get("use_ma200_filter", False),
     }
 
@@ -202,10 +207,10 @@ def _build_command(db_path: Path, params: dict[str, object], output_dir: Path) -
         str(params["trailing_stop_atr"]),
         "--threshold",
         str(params["threshold"]),
-        "--topix-drawdown-threshold",
-        str(params["topix_drawdown_threshold"]),
-        "--topix-size-multiplier-bear",
-        str(params["topix_size_multiplier_bear"]),
+        "--topix-size-multiplier-weak-bear",
+        str(params["topix_size_multiplier_weak_bear"]),
+        "--topix-size-multiplier-strong-bear",
+        str(params.get("topix_size_multiplier_strong_bear", 0.0)),
         "--output-format",
         "all",
         "--output-dir",

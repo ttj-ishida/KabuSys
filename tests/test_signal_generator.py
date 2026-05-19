@@ -613,79 +613,85 @@ def test_generate_signals_no_ai_warning_when_ai_disabled(conn, monkeypatch, capl
 
 
 # ---------------------------------------------------------------------------
-# Task 6: TOPIX 200MA 乖離率に基づく size_multiplier 縮小
+# Task 6: TOPIX MA クロスに基づく size_multiplier 縮小
 # ---------------------------------------------------------------------------
 
 from kabusys.strategy.signal_generator import _get_topix_size_multiplier  # noqa: E402
 
 
 class TestGetTopixSizeMultiplier:
-    """TOPIX 200MA 乖離率に基づく size_multiplier のテスト。"""
+    """TOPIX MA25/MA75/MA200 クロスに基づく size_multiplier のテスト。"""
 
-    def _insert_topix(self, conn, rows: list[tuple]) -> None:
-        conn.executemany(
-            "INSERT INTO topix_daily (date, open, high, low, close) VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT DO NOTHING",
-            rows,
-        )
-
-    def _make_topix_series(
-        self, conn, start: date, days: int, start_close: float, end_close: float
+    def _insert_topix_with_ma(
+        self,
+        conn,
+        target_date: date,
+        ma25: float | None,
+        ma75: float | None,
+        ma200: float | None,
     ) -> None:
-        from datetime import timedelta
-
-        rows = []
-        for i in range(days):
-            d = start + timedelta(days=i)
-            c = start_close + (end_close - start_close) * i / max(days - 1, 1)
-            rows.append((d, c, c, c, c))
-        self._insert_topix(conn, rows)
+        """target_date に MA 列付きで topix_daily へ1行挿入する。"""
+        conn.execute(
+            "INSERT INTO topix_daily (date, open, high, low, close, ma25, ma75, ma200) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [target_date, 2000.0, 2000.0, 2000.0, 2000.0, ma25, ma75, ma200],
+        )
 
     def test_returns_1_when_no_topix_data(self, conn):
+        """topix_daily にデータがない場合は 1.0 を返す（エントリー規制なし）。"""
         assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
 
-    def test_returns_1_when_above_ma200(self, conn):
-        self._make_topix_series(conn, TARGET_DATE - timedelta(days=250), 250, 2000.0, 2000.0)
+    def test_returns_1_when_all_ma_none(self, conn):
+        """MA 列がすべて NULL（データ不足）のとき 1.0 を返す。"""
+        self._insert_topix_with_ma(conn, TARGET_DATE, None, None, None)
         assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
 
-    def test_returns_05_when_below_ma200_by_15_percent(self, conn):
-        from datetime import timedelta
+    def test_returns_1_in_bull_market(self, conn):
+        """MA25 > MA75 > MA200 のとき（強気相場）1.0 を返す。"""
+        # MA25 > MA75 > MA200
+        self._insert_topix_with_ma(conn, TARGET_DATE, 2100.0, 2050.0, 2000.0)
+        assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
 
-        self._make_topix_series(conn, TARGET_DATE - timedelta(days=250), 240, 2000.0, 2000.0)
-        # 直近 10 日を 1600 に設定（200MA ≈ 2000 なので乖離率 ≈ -0.20）
-        recent_start = TARGET_DATE - timedelta(days=10)
-        self._make_topix_series(conn, recent_start, 11, 1600.0, 1600.0)
+    def test_returns_weak_bear_when_ma25_below_ma75(self, conn):
+        """MA25 < MA75 かつ MA75 > MA200 のとき（弱いベア）size_multiplier_weak_bear を返す。"""
+        # MA25 < MA75、MA75 > MA200
+        self._insert_topix_with_ma(conn, TARGET_DATE, 1950.0, 2000.0, 1980.0)
         result = _get_topix_size_multiplier(conn, TARGET_DATE)
-        assert result == 0.5
+        assert result == 0.5  # デフォルト weak_bear
 
-    def test_returns_1_when_insufficient_data(self, conn):
-        from datetime import timedelta
+    def test_returns_strong_bear_when_ma75_below_ma200(self, conn):
+        """MA75 < MA200 のとき（強いベア）size_multiplier_strong_bear を返す。"""
+        # MA75 < MA200（強いベア）
+        self._insert_topix_with_ma(conn, TARGET_DATE, 1900.0, 1950.0, 2000.0)
+        result = _get_topix_size_multiplier(conn, TARGET_DATE)
+        assert result == 0.0  # デフォルト strong_bear
 
-        self._make_topix_series(conn, TARGET_DATE - timedelta(days=50), 50, 2000.0, 2000.0)
-        assert _get_topix_size_multiplier(conn, TARGET_DATE) == 1.0
+    def test_strong_bear_takes_priority_over_weak_bear(self, conn):
+        """MA75 < MA200 のときは MA25 < MA75 でも strong_bear が優先される。"""
+        # MA25 < MA75 < MA200（両条件成立）
+        self._insert_topix_with_ma(conn, TARGET_DATE, 1800.0, 1900.0, 2000.0)
+        result = _get_topix_size_multiplier(conn, TARGET_DATE)
+        assert result == 0.0  # strong_bear 優先
 
-    def test_custom_drawdown_threshold_and_multiplier(self, conn):
-        """カスタム drawdown_threshold と size_multiplier_bear が適用されることを確認する。"""
-        # 240日は 2000.0、直近11日は 1600.0（乖離率≈-20%）
-        self._make_topix_series(conn, TARGET_DATE - timedelta(days=250), 240, 2000.0, 2000.0)
-        recent_start = TARGET_DATE - timedelta(days=10)
-        self._make_topix_series(conn, recent_start, 11, 1600.0, 1600.0)
-
-        # drawdown_threshold=-0.10 → 乖離率-20% < -10% → Bear 判定 → 0.3 を返す
-        result = _get_topix_size_multiplier(
-            conn, TARGET_DATE, drawdown_threshold=-0.10, size_multiplier_bear=0.3
-        )
+    def test_custom_weak_bear_multiplier(self, conn):
+        """カスタム size_multiplier_weak_bear が適用される。"""
+        self._insert_topix_with_ma(conn, TARGET_DATE, 1950.0, 2000.0, 1980.0)
+        result = _get_topix_size_multiplier(conn, TARGET_DATE, size_multiplier_weak_bear=0.3)
         assert result == 0.3
 
-    def test_custom_threshold_not_triggered(self, conn):
-        """乖離率が drawdown_threshold を超えない場合は 1.0 を返すことを確認する。"""
-        # 250日すべて 2000.0（乖離率≈0%）
-        self._make_topix_series(conn, TARGET_DATE - timedelta(days=250), 250, 2000.0, 2000.0)
-        # drawdown_threshold=-0.10 → 乖離率≈0% > -10% → Bear 未判定 → 1.0
-        result = _get_topix_size_multiplier(
-            conn, TARGET_DATE, drawdown_threshold=-0.10, size_multiplier_bear=0.3
-        )
-        assert result == 1.0
+    def test_custom_strong_bear_multiplier(self, conn):
+        """カスタム size_multiplier_strong_bear が適用される。"""
+        self._insert_topix_with_ma(conn, TARGET_DATE, 1900.0, 1950.0, 2000.0)
+        result = _get_topix_size_multiplier(conn, TARGET_DATE, size_multiplier_strong_bear=0.25)
+        assert result == 0.25
+
+    def test_uses_latest_date_not_after_target(self, conn):
+        """target_date 以前の直近データを参照する（当日データがなくても OK）。"""
+        yesterday = TARGET_DATE - timedelta(days=1)
+        self._insert_topix_with_ma(conn, yesterday, 1900.0, 1950.0, 2000.0)
+        # TARGET_DATE のレコードはなし
+        result = _get_topix_size_multiplier(conn, TARGET_DATE)
+        assert result == 0.0  # 昨日のデータ（strong_bear）を参照
 
 
 # ---------------------------------------------------------------------------
@@ -716,14 +722,14 @@ sector:
   boost: 0.05
   quartile: 0.30
 regime:
-  topix_drawdown_threshold: -0.20
-  topix_size_multiplier_bear: 0.4
+  topix_size_multiplier_weak_bear: 0.4
+  topix_size_multiplier_strong_bear: 0.0
 """
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["sector_boost"] == 0.05
         assert cfg["sector_quartile"] == 0.30
-        assert cfg["topix_drawdown_threshold"] == -0.20
-        assert cfg["topix_size_multiplier_bear"] == 0.4
+        assert cfg["topix_size_multiplier_weak_bear"] == 0.4
+        assert cfg["topix_size_multiplier_strong_bear"] == 0.0
 
     def test_missing_sector_section_uses_defaults(self, tmp_path, monkeypatch):
         yaml_text = "strategy:\n  threshold: 0.60\n"
@@ -734,8 +740,8 @@ regime:
     def test_missing_regime_section_uses_defaults(self, tmp_path, monkeypatch):
         yaml_text = "strategy:\n  threshold: 0.60\n"
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
-        assert cfg["topix_drawdown_threshold"] == -0.15
-        assert cfg["topix_size_multiplier_bear"] == 0.5
+        assert cfg["topix_size_multiplier_weak_bear"] == 0.5
+        assert cfg["topix_size_multiplier_strong_bear"] == 0.0
 
     def test_sector_boost_negative_falls_back(self, tmp_path, monkeypatch):
         yaml_text = "strategy:\n  threshold: 0.60\nsector:\n  boost: -0.01\n  quartile: 0.25\n"
@@ -752,20 +758,27 @@ regime:
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
         assert cfg["sector_quartile"] == 0.25  # default
 
-    def test_topix_drawdown_threshold_positive_falls_back(self, tmp_path, monkeypatch):
-        yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_drawdown_threshold: 0.10\n  topix_size_multiplier_bear: 0.5\n"
+    def test_topix_weak_bear_over_one_falls_back(self, tmp_path, monkeypatch):
+        yaml_text = (
+            "strategy:\n  threshold: 0.60\nregime:\n  topix_size_multiplier_weak_bear: 1.5\n"
+        )
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
-        assert cfg["topix_drawdown_threshold"] == -0.15  # default
+        assert cfg["topix_size_multiplier_weak_bear"] == 0.5  # default
 
-    def test_topix_size_multiplier_bear_over_one_falls_back(self, tmp_path, monkeypatch):
-        yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_drawdown_threshold: -0.15\n  topix_size_multiplier_bear: 1.5\n"
+    def test_topix_weak_bear_exactly_one_accepted(self, tmp_path, monkeypatch):
+        yaml_text = (
+            "strategy:\n  threshold: 0.60\nregime:\n  topix_size_multiplier_weak_bear: 1.0\n"
+        )
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
-        assert cfg["topix_size_multiplier_bear"] == 0.5  # default
+        assert cfg["topix_size_multiplier_weak_bear"] == 1.0
 
-    def test_topix_size_multiplier_bear_exactly_one_accepted(self, tmp_path, monkeypatch):
-        yaml_text = "strategy:\n  threshold: 0.60\nregime:\n  topix_drawdown_threshold: -0.15\n  topix_size_multiplier_bear: 1.0\n"
+    def test_topix_strong_bear_zero_accepted(self, tmp_path, monkeypatch):
+        """strong_bear=0.0 は有効（エントリー完全停止を意味する）。"""
+        yaml_text = (
+            "strategy:\n  threshold: 0.60\nregime:\n  topix_size_multiplier_strong_bear: 0.0\n"
+        )
         cfg = _load_cfg_with_yaml(yaml_text, tmp_path, monkeypatch)
-        assert cfg["topix_size_multiplier_bear"] == 1.0
+        assert cfg["topix_size_multiplier_strong_bear"] == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -1232,3 +1245,38 @@ class TestVolumeBreakoutFilter:
             ).fetchall()
         ]
         assert "9004" in buy_codes
+
+
+class TestGenerateSignalsTopixMultiplierValidation:
+    """generate_signals() が YAML 設定値で strong_bear > weak_bear のとき ValueError を上げること。"""
+
+    def test_yaml_strong_bear_greater_than_weak_bear_raises(self, conn, tmp_path, monkeypatch):
+        import kabusys.strategy.signal_generator as _sg
+
+        yaml_text = """
+strategy:
+  weights: {momentum: 1.0, value: 0.0, volatility: 0.0, liquidity: 0.0, news: 0.0}
+  threshold: 0.5
+  stop_loss_rate: -0.08
+  trailing_stop_atr_mult: 2.0
+  min_holding_days: 1
+  max_holding_days: 60
+  gap_up_threshold: 0.05
+  gap_down_threshold: -0.03
+sector:
+  boost: 0.03
+  quartile: 0.25
+regime:
+  topix_size_multiplier_weak_bear: 0.3
+  topix_size_multiplier_strong_bear: 0.8
+"""
+        cfg_file = tmp_path / "strategy_config.yaml"
+        cfg_file.write_text(yaml_text, encoding="utf-8")
+        monkeypatch.setattr(_sg, "_STRATEGY_CONFIG_PATH", cfg_file)
+        monkeypatch.setattr(_sg, "_strategy_config_cache", None)
+        monkeypatch.setattr(_sg, "_strategy_config_mtime", -1.0)
+
+        from kabusys.strategy.signal_generator import generate_signals
+
+        with pytest.raises(ValueError, match="topix_size_multiplier_strong_bear"):
+            generate_signals(conn, TARGET_DATE)
