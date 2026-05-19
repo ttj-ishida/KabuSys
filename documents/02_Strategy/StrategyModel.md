@@ -138,7 +138,10 @@ final_score =
 ### 5.1 エントリー（Entry）
 - **条件**: `final_score` が閾値以上であること。
 - **レジームフィルタ** （Issue #271 実装済み）: `market_regime` テーブルのラベルが `'bear'`（弱気・下落トレンド）の時は、どんなにスコアが高くても**新規の買いエントリーは生成しない（見送り）**。実装は `RegimeProvider` プロトコル経由で行われ、`ENABLE_AI_SENTIMENT=false`（Core-only モード）のときは `NullRegimeProvider` が使用されて常に `'bull'` を返すため、Bear フィルタは発動しない。実装: `src/kabusys/core/interfaces/regime.py`
-- **TOPIX 200MA サイズ縮小** （Issue #257 実装済み）: TOPIX 終値が 200 日移動平均を 15% 以上下回った場合（`(close/ma200 - 1) < -0.15`）、新規 BUY の発注サイズを通常の **50%** に縮小する（`signals.size_multiplier` の `topix_multiplier = 0.5`）。Bear レジーム判定・breadth_stop とは独立して動作し、最も小さい `size_multiplier` が採用される。`topix_daily` に 100 件未満のデータしかない期間（初期運用開始直後）はこのフィルタを無効化する。実装: `signal_generator.py::_get_topix_size_multiplier()`
+- **TOPIX MA クロスベアガード** （Issue #257 実装済み、Issue #349 で MA クロス判定に改訂）: TOPIX の MA クロス状況に応じて新規 BUY の発注サイズを縮小する（`signals.size_multiplier` の `topix_multiplier`）。判定は MA 25/75/200 の位置関係で行い、強いベア判定（MA75 < MA200）が弱いベア（MA25 < MA75）に常に優先する。Bear レジーム判定・breadth_stop とは独立して動作し、最も小さい `size_multiplier` が採用される。MA 列は `feature_engineering.py::update_topix_ma()` で事前計算し `topix_daily` に保存する。データ不足時（MA 計算に必要な件数未満）は `size_multiplier = 1.0` で無効化する。実装: `signal_generator.py::_get_topix_size_multiplier()`
+  - **強ベア（MA75 < MA200）**: `topix_size_multiplier_strong_bear`（デフォルト 0.0、新規 BUY 完全停止）
+  - **弱ベア（MA25 < MA75、かつ MA75 ≥ MA200）**: `topix_size_multiplier_weak_bear`（デフォルト 0.5、サイズ半減）
+  - **それ以外（ブル）**: 1.0（通常サイズ）
 - **breadth_stop フィルタ** （Issue #173 実装済み）: 東証全銘柄の 25 日移動平均上銘柄比率が 35% 未満の場合、市場全体の内部悪化と判定し**全銘柄の新規 BUY を停止する**。Bear レジーム判定とは独立して動作する。
 - **ギャップリスクフィルタ** （Issue #170 実装済み）: 当日の始値が前日終値比 **+5% 超**（ギャップアップ過大）または **-3% 以下**（ギャップダウン過大）の銘柄は、その銘柄の新規 BUY を見送る。SELL は対象外。
 - **セクター相対強弱フィルタ** （Issue #172 実装済み）: セクター20営業日リターンの下位25%セクターに属する銘柄は新規 BUY を禁止する。上位25%セクターの銘柄は `final_score +0.03` の補正を行う（Section 4.2 参照）。セクター集中制限（`apply_sector_cap`）とは独立して動作する。SELL は対象外。

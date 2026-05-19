@@ -221,20 +221,24 @@ J-Quants から取得した生の財務データ。
 
 TOPIX 日足データ。以下の用途で使用する。
 
-- `regime_detector`: TOPIX の ma200_ratio（200MA比）算出
 - `factor_research.calc_topix_relative()`: TOPIX 相対強度（Issue #257）の算出基準
-- `signal_generator._get_topix_size_multiplier()`: TOPIX 200MA 大幅乖離時の発注サイズ縮小（Issue #257）
+- `feature_engineering.update_topix_ma()`: MA25/MA75/MA200 を計算して ma25/ma75/ma200 列に保存（Issue #349）
+- `signal_generator._get_topix_size_multiplier()`: MA クロス判定（MA25/MA75/MA200）による発注サイズ縮小（Issue #349）
 
-  column   type   description
-  -------- ------ -----------
-  date     date   取引日（PRIMARY KEY）
-  open     float  始値
-  high     float  高値
-  low      float  安値
-  close    float  終値
+  column   type    description
+  -------- ------- -----------
+  date     date    取引日（PRIMARY KEY）
+  open     float   始値
+  high     float   高値
+  low      float   安値
+  close    float   終値
+  ma25     float?  25 日移動平均（`update_topix_ma()` で事前計算、データ不足時 NULL）
+  ma75     float?  75 日移動平均（同上）
+  ma200    float?  200 日移動平均（同上）
 
 取得元: Bulk API `/indices/bars/daily/topix`
   Date→date, O→open, H→high, L→low, C→close
+  ma25/ma75/ma200 は `feature_engineering.update_topix_ma()` が日次バッチで補完する
 
 ------------------------------------------------------------------------
 

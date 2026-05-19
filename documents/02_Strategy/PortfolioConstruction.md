@@ -244,17 +244,20 @@ calc_position_sizes(
 
 実装モジュール: `src/kabusys/portfolio/risk_adjustment.py`（`calc_regime_multiplier`）
 
-## 9.2 TOPIX 200MA サイズ縮小（Issue #257 実装済み）
+## 9.2 TOPIX MA クロスベアガード（Issue #257 実装済み、Issue #349 で MA クロス判定に改訂）
 
-TOPIX 終値が 200 日移動平均を 15% 以上下回った場合（深刻な弱地合い）、新規 BUY の `size_multiplier` を 0.5 に設定する。これにより算出株数がおよそ半分になる。
+TOPIX の MA クロス状況に応じて新規 BUY の `size_multiplier` を縮小する。判定は MA25/MA75/MA200 の位置関係で 3 段階に行い、強ベア判定（MA75 < MA200）が弱ベア（MA25 < MA75）に常に優先する。MA 列は `feature_engineering.py::update_topix_ma()` で事前計算し `topix_daily` に保存する。
 
-| 条件 | `topix_multiplier` | 説明 |
-|------|-------------------|------|
-| `(close/ma200 - 1) < -0.15` | 0.5 | 200MA から 15% 超下落中：サイズ半減 |
-| それ以外 | 1.0 | 通常サイズ |
+| 条件 | `topix_multiplier` | 設定キー | 説明 |
+|------|--------------------|---------|------|
+| MA75 < MA200 | 0.0（デフォルト） | `topix_size_multiplier_strong_bear` | 強ベア：新規 BUY 完全停止 |
+| MA25 < MA75（かつ MA75 ≥ MA200） | 0.5（デフォルト） | `topix_size_multiplier_weak_bear` | 弱ベア：サイズ半減 |
+| それ以外 | 1.0 | — | ブル：通常サイズ |
 
+- `strong_bear ≤ weak_bear` を強制（逆転時は ValueError）
 - AI レジーム乗数・breadth_stop とは独立して動作し、最も小さい `size_multiplier` が採用される
-- `topix_daily` に 100 件未満しかない期間（初期運用開始直後）は 1.0 を返して無効化する
+- MA 計算に必要な件数不足時（初期運用開始直後など）は 1.0 を返して無効化する
+- CLI オプション `--topix-size-multiplier-weak-bear` / `--topix-size-multiplier-strong-bear` でオーバーライド可能
 - 実装: `src/kabusys/strategy/signal_generator.py::_get_topix_size_multiplier()`
 
 ---

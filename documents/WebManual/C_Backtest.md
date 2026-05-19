@@ -64,6 +64,10 @@ python -m kabusys.backtest.run `
 | `--min-holding-days` | `5` | 最低保有営業日数 |
 | `--max-holding-days` | `60` | 最大保有営業日数（超えると time_exit SELL） |
 | `--trailing-stop-atr` | `2.0` | トレーリングストップの ATR 乗数 |
+| `--topix-size-multiplier-weak-bear` | ―（yaml 参照） | 弱ベア（MA25 < MA75）時の発注サイズ乗数（0〜1） |
+| `--topix-size-multiplier-strong-bear` | ―（yaml 参照） | 強ベア（MA75 < MA200）時の発注サイズ乗数（0〜1） |
+| `--portfolio-drawdown-stop` | ―（無効） | ポートフォリオがピーク比でこの割合超下落で新規 BUY 停止（例: `0.15` = 15%） |
+| `--portfolio-drawdown-stop-timeout` | ―（無効） | ドローダウンストップのタイムアウト日数（N カレンダー日経過で自動解除） |
 | `--output-format` | `summary` | 出力形式: `summary` / `json` / `markdown` / `all` |
 | `--output-dir` | ―　| レポートの保存先ディレクトリ（`--output-format all` 時） |
 

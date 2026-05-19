@@ -61,7 +61,7 @@
 | 銘柄マスタ           | J-Quants                       | 差分 API / Bulk API       | 銘柄一覧・上場情報                         |
 | JPXカレンダー        | J-Quants                       | 差分 API / Bulk API       | 祝日、半日取引、SQ日フラグ                 |
 | 配当情報             | J-Quants Bulk API              | Bulk API のみ             | 配当率・権利落ち日・支払日等               |
-| TOPIX 日足           | J-Quants Bulk API              | Bulk API のみ             | regime_detector の ma200_ratio 算出に使用  |
+| TOPIX 日足           | J-Quants Bulk API              | Bulk API のみ             | MA クロス判定（MA25/MA75/MA200）による発注サイズ縮小・TOPIX 相対強度算出に使用  |
 | 適時開示一覧         | 適時開示情報閲覧サービス (TDnet) | HTTP スクレイピング / XML | 開示イベント全件を `raw_disclosures` に保存（先に全件保存・後から参照）。31日掲載制限あり |
 | 法定開示（有報等）   | EDINET API                     | REST API（無料）          | TDnet で取れない有報・四半期報告・大量保有等の補完 |
 | ニュース記事（補助） | Yahoo News                     | RSS                       | ニュースセンチメント分析の補助入力。売買判断の主役にはしない |

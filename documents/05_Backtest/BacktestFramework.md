@@ -99,6 +99,13 @@ run_backtest(
     min_holding_days=5,
     max_holding_days=60,
     trailing_stop_atr=2.0,
+    threshold=None,                          # BUY 閾値（None で yaml 読み込み）
+    topix_size_multiplier_weak_bear=None,    # 弱ベア時 size_multiplier（None で yaml 読み込み）
+    topix_size_multiplier_strong_bear=None,  # 強ベア時 size_multiplier（None で yaml 読み込み）
+    use_ma200_filter=False,                  # MA200 フィルタ有効化
+    volume_breakout_threshold=None,          # 出来高ブレイクアウト閾値
+    portfolio_drawdown_stop_pct=None,        # ポートフォリオドローダウンストップ閾値（Issue #348）
+    portfolio_drawdown_stop_timeout_days=None,  # ストップのタイムアウト日数（Issue #350）
 )
 ```
 
@@ -124,6 +131,7 @@ BacktestScope(
 - `effective_universe_size`
 - `excluded_codes`
 - `preserve_universe_filters`
+- `params` — 実行パラメータのスナップショット（例: `{"portfolio_drawdown_stop_timeout_days": 30}`）
 
 ---
 
@@ -153,6 +161,13 @@ python -m kabusys.backtest.run \
 - `--min-holding-days 5`
 - `--max-holding-days 60`
 - `--trailing-stop-atr 2.0`
+- `--threshold 0.60` — BUY シグナル閾値（未指定時は strategy_config.yaml から読み込む）
+- `--topix-size-multiplier-weak-bear 0.5` — 弱ベア時の size_multiplier（Issue #349）
+- `--topix-size-multiplier-strong-bear 0.0` — 強ベア時の size_multiplier（Issue #349）
+- `--ma200-filter` — MA200 フィルタ有効化
+- `--volume-breakout-threshold 1.5` — 出来高ブレイクアウト閾値
+- `--portfolio-drawdown-stop 0.15` — ドローダウンストップ閾値（ピーク比 N% 超下落で新規 BUY 停止、Issue #348）
+- `--portfolio-drawdown-stop-timeout 30` — ストップのタイムアウト日数（N カレンダー日経過で自動解除、Issue #350）
 - `--output-format summary|json|markdown|all`
 - `--output-dir artifacts/backtests/...`
 
@@ -205,8 +220,11 @@ Bear レジーム判定は `RegimeProvider` プロトコルを経由する（Iss
 - `trailing_stop_atr`
 - Bear regime による BUY 抑制
 - `breadth_stop` による BUY 抑制
+- TOPIX MA クロスベアガード（`topix_size_multiplier_weak_bear` / `topix_size_multiplier_strong_bear`）による発注サイズ縮小（Issue #349）
 - 決算回避
 - ストップロス
+- `portfolio_drawdown_stop_pct`: ポートフォリオがピーク比で閾値超下落した場合、新規 BUY を停止（Issue #348）
+  - `portfolio_drawdown_stop_timeout_days`: N カレンダー日経過で自動解除（Issue #350）
 
 `min_holding_days` は通常 SELL を抑制するが、ストップロス・決算回避・time exit・一部の優先 SELL 条件はバイパスされる。
 
