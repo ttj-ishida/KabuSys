@@ -472,11 +472,15 @@ def run_backtest(
         )
     if threshold is not None and not (0 < threshold < 1):
         raise ValueError(f"threshold は (0, 1) の範囲で指定してください: {threshold}")
-    if topix_size_multiplier_weak_bear is not None and not (0.0 <= topix_size_multiplier_weak_bear <= 1.0):
+    if topix_size_multiplier_weak_bear is not None and not (
+        0.0 <= topix_size_multiplier_weak_bear <= 1.0
+    ):
         raise ValueError(
             f"topix_size_multiplier_weak_bear は [0, 1] の範囲で指定してください: {topix_size_multiplier_weak_bear}"
         )
-    if topix_size_multiplier_strong_bear is not None and not (0.0 <= topix_size_multiplier_strong_bear <= 1.0):
+    if topix_size_multiplier_strong_bear is not None and not (
+        0.0 <= topix_size_multiplier_strong_bear <= 1.0
+    ):
         raise ValueError(
             f"topix_size_multiplier_strong_bear は [0, 1] の範囲で指定してください: {topix_size_multiplier_strong_bear}"
         )

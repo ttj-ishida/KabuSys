@@ -74,7 +74,7 @@ _MAX_HOLDING_DAYS: int = 60  # この営業日数を超えた保有は time_exit
 _TRAILING_STOP_ATR_MULT: float = 2.0  # peak_close から ATR × N 下落で trailing_stop SELL を発動
 _REENTRY_COOLDOWN_DAYS: int = 5  # SELL 後この営業日数を経過するまで同一銘柄の BUY を禁止
 
-_TOPIX_SIZE_MULTIPLIER_WEAK_BEAR: float = 0.5   # MA25 < MA75（弱いベア）の size_multiplier
+_TOPIX_SIZE_MULTIPLIER_WEAK_BEAR: float = 0.5  # MA25 < MA75（弱いベア）の size_multiplier
 _TOPIX_SIZE_MULTIPLIER_STRONG_BEAR: float = 0.0  # MA75 < MA200（強いベア）の size_multiplier
 
 _RSI_OVERBOUGHT_THRESHOLD: float = 65.0  # RSI(14) > この値の銘柄は BUY 抑制（過熱判定）

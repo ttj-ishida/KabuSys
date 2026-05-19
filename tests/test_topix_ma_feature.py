@@ -19,7 +19,9 @@ def conn():
     c.close()
 
 
-def _insert_topix(conn: duckdb.DuckDBPyConnection, start: date, count: int, base: float = 2000.0) -> None:
+def _insert_topix(
+    conn: duckdb.DuckDBPyConnection, start: date, count: int, base: float = 2000.0
+) -> None:
     """count 日分の TOPIX データを挿入（close は base + 日連番）"""
     rows = []
     for i in range(count):
@@ -36,6 +38,7 @@ def _insert_topix(conn: duckdb.DuckDBPyConnection, start: date, count: int, base
 # schema: topix_daily に MA 列が存在することを確認
 # ---------------------------------------------------------------------------
 
+
 class TestTopixDailySchema:
     def test_ma_columns_exist_in_new_db(self, conn):
         """新規 DB では topix_daily に ma25/ma75/ma200 列が存在する"""
@@ -51,7 +54,9 @@ class TestTopixDailySchema:
             "INSERT INTO topix_daily (date, open, high, low, close) VALUES (?, ?, ?, ?, ?)",
             [d, 2000, 2000, 2000, 2000],
         )
-        row = conn.execute("SELECT ma25, ma75, ma200 FROM topix_daily WHERE date = ?", [d]).fetchone()
+        row = conn.execute(
+            "SELECT ma25, ma75, ma200 FROM topix_daily WHERE date = ?", [d]
+        ).fetchone()
         assert row is not None
         assert row[0] is None
         assert row[1] is None
@@ -61,6 +66,7 @@ class TestTopixDailySchema:
 # ---------------------------------------------------------------------------
 # ensure_topix_ma_columns: 既存 DB への移行（冪等性）
 # ---------------------------------------------------------------------------
+
 
 class TestEnsureTopixMaColumns:
     def test_ensure_is_idempotent(self, conn):
@@ -103,6 +109,7 @@ class TestEnsureTopixMaColumns:
 # update_topix_ma: MA を計算して topix_daily に保存
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateTopixMa:
     def test_returns_false_when_no_data(self, conn):
         """対象日付のデータがない場合 False を返す"""
@@ -144,8 +151,8 @@ class TestUpdateTopixMa:
         # 2000, 2001, ..., 2024 の平均 = 2012.0
         assert row[0] is not None
         assert abs(row[0] - 2012.0) < 0.01
-        assert row[1] is None   # ma75: まだ不足
-        assert row[2] is None   # ma200: まだ不足
+        assert row[1] is None  # ma75: まだ不足
+        assert row[2] is None  # ma200: まだ不足
 
     def test_ma75_computed_when_75_days_available(self, conn):
         """75 日分のデータがあれば ma75 も計算される"""
@@ -158,7 +165,7 @@ class TestUpdateTopixMa:
         ).fetchone()
         assert row[0] is not None  # ma25 あり
         assert row[1] is not None  # ma75 あり
-        assert row[2] is None      # ma200: まだ不足
+        assert row[2] is None  # ma200: まだ不足
 
     def test_all_ma_computed_when_200_days_available(self, conn):
         """200 日分のデータがあれば ma25/ma75/ma200 すべて計算される"""
