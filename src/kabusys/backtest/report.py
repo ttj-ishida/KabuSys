@@ -49,6 +49,8 @@ class ReportMeta:
     min_holding_days: int = 5
     max_holding_days: int = 60
     trailing_stop_atr: float = 2.0
+    portfolio_drawdown_stop_pct: float | None = None
+    portfolio_drawdown_stop_timeout_days: int | None = None
     scope_mode: str = "default_universe"
     scope_codes: list[str] | None = None
     effective_universe_size: int | None = None
@@ -135,6 +137,8 @@ def build_report(
     min_holding_days: int = 5,
     max_holding_days: int = 60,
     trailing_stop_atr: float = 2.0,
+    portfolio_drawdown_stop_pct: float | None = None,
+    portfolio_drawdown_stop_timeout_days: int | None = None,
 ) -> BacktestReport:
     """BacktestResult から BacktestReport を構築する。
 
@@ -196,6 +200,8 @@ def build_report(
         min_holding_days=min_holding_days,
         max_holding_days=max_holding_days,
         trailing_stop_atr=trailing_stop_atr,
+        portfolio_drawdown_stop_pct=portfolio_drawdown_stop_pct,
+        portfolio_drawdown_stop_timeout_days=portfolio_drawdown_stop_timeout_days,
         scope_mode=scope_mode,
         scope_codes=scope_codes,
         effective_universe_size=effective_universe_size,
