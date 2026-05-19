@@ -18,7 +18,7 @@ from kabusys.config import Settings
 from kabusys.operations.job_run_recorder import write_job_result
 from kabusys.operations.night_batch_report import JobRunResult
 from kabusys.operations.process_registry import register_process, update_process
-from kabusys.strategy.feature_engineering import build_features
+from kabusys.strategy.feature_engineering import build_features, update_topix_ma
 from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
 _run_log = setup_logging(app_name="feature_gen", capture_stdio=True)
@@ -48,6 +48,10 @@ def main() -> None:
         n = build_features(conn, target_date)
         _updated_rows["features"] = n
         logger.info("特徴量生成完了: %d 件 (date=%s)", n, target_date)
+        if update_topix_ma(conn, target_date):
+            logger.info("TOPIX MA 更新完了 (date=%s)", target_date)
+        else:
+            logger.warning("TOPIX MA 更新スキップ: topix_daily にデータなし (date=%s)", target_date)
     except Exception as exc:
         logger.exception("build_features が失敗しました")
         _errors.append(str(exc))

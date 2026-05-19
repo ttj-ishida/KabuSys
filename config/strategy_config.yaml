@@ -47,10 +47,10 @@ sector:
   quartile: 0.25
 
 regime:
-  # TOPIX 200MA 乖離率がこの値未満で地合い悪化と判定（負値）
-  topix_drawdown_threshold: -0.15
-  # 地合い悪化時の size_multiplier（0 < x ≤ 1）
-  topix_size_multiplier_bear: 0.5
+  # MA25 < MA75（弱いベア）時の size_multiplier（0 ≤ x ≤ 1）
+  topix_size_multiplier_weak_bear: 0.5
+  # MA75 < MA200（強いベア）時の size_multiplier（0 ≤ x ≤ 1、0.0 でエントリー停止）
+  topix_size_multiplier_strong_bear: 0.0
 
 portfolio:
   # 最大保有銘柄数（select_candidates() に渡される上限値、1 以上の整数）

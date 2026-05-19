@@ -154,16 +154,16 @@ def main() -> None:
         help="BUY signal score threshold. Overrides strategy_config.yaml when specified.",
     )
     parser.add_argument(
-        "--topix-drawdown-threshold",
+        "--topix-size-multiplier-weak-bear",
         type=float,
         default=None,
-        help="TOPIX 200MA deviation threshold for bear guard (negative value, e.g. -0.12). Overrides strategy_config.yaml when specified.",
+        help="size_multiplier when MA25 < MA75 (weak bear, 0 <= x <= 1). Overrides strategy_config.yaml when specified.",
     )
     parser.add_argument(
-        "--topix-size-multiplier-bear",
+        "--topix-size-multiplier-strong-bear",
         type=float,
         default=None,
-        help="size_multiplier applied when TOPIX bear guard triggers (0 < x <= 1). Overrides strategy_config.yaml when specified.",
+        help="size_multiplier when MA75 < MA200 (strong bear, 0 <= x <= 1). Overrides strategy_config.yaml when specified.",
     )
     parser.add_argument(
         "--ma200-filter",
@@ -253,8 +253,8 @@ def main() -> None:
             max_holding_days=args.max_holding_days,
             trailing_stop_atr=args.trailing_stop_atr,
             threshold=args.threshold,
-            topix_drawdown_threshold=args.topix_drawdown_threshold,
-            topix_size_multiplier_bear=args.topix_size_multiplier_bear,
+            topix_size_multiplier_weak_bear=args.topix_size_multiplier_weak_bear,
+            topix_size_multiplier_strong_bear=args.topix_size_multiplier_strong_bear,
             use_ma200_filter=args.ma200_filter,
             volume_breakout_threshold=args.volume_breakout_threshold,
             portfolio_drawdown_stop_pct=args.portfolio_drawdown_stop,
