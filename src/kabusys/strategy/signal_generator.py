@@ -1432,7 +1432,11 @@ def generate_signals(
                     )
                     stock_ma_cross_suppressed += 1
                     continue
-                if ma25_dev_val is not None and ma25_dev_val < 0 and (ma75_dev_val is None or ma75_dev_val >= 0):
+                if (
+                    ma25_dev_val is not None
+                    and ma25_dev_val < 0
+                    and (ma75_dev_val is None or ma75_dev_val >= 0)
+                ):
                     logger.debug(
                         "stock ma cross filter: %s ma25_dev=%.4f — size 縮小 date=%s",
                         r["code"],
@@ -1500,7 +1504,14 @@ def generate_signals(
             per_signal_multiplier = size_multiplier
             if stock_ma_cross_size_multiplier is not None:
                 per_signal_multiplier = min(per_signal_multiplier, stock_ma_cross_size_multiplier)
-            buy_signals.append({"code": r["code"], "score": r["score"], "rank": rank, "size_multiplier": per_signal_multiplier})
+            buy_signals.append(
+                {
+                    "code": r["code"],
+                    "score": r["score"],
+                    "rank": rank,
+                    "size_multiplier": per_signal_multiplier,
+                }
+            )
         if rsi_suppressed:
             logger.info(
                 "generate_signals: rsi filter — %d 銘柄を RSI 過熱(%s超)で抑制 date=%s",

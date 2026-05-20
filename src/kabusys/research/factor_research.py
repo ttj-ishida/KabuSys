@@ -34,9 +34,9 @@ logger = logging.getLogger(__name__)
 _MOMENTUM_SHORT_DAYS = 21  # 約1ヶ月（営業日）
 _MOMENTUM_MID_DAYS = 63  # 約3ヶ月（営業日）
 _MOMENTUM_LONG_DAYS = 126  # 約6ヶ月（営業日）
-_MA_SHORT_DAYS = 25   # 短期移動平均
-_MA_MID_DAYS = 75     # 中期移動平均
-_MA_LONG_DAYS = 200   # 長期移動平均
+_MA_SHORT_DAYS = 25  # 短期移動平均
+_MA_MID_DAYS = 75  # 中期移動平均
+_MA_LONG_DAYS = 200  # 長期移動平均
 _ATR_DAYS = 20  # ATR 計算期間
 _VOLUME_DAYS = 20  # 出来高移動平均期間
 

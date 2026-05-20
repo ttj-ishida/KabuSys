@@ -1093,7 +1093,18 @@ def _insert_feature_with_values(
         "INSERT INTO features "
         "(date, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev, ma75_dev, ma25_dev) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [d, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev, ma75_dev, ma25_dev],
+        [
+            d,
+            code,
+            momentum_20,
+            momentum_60,
+            volatility_20,
+            volume_ratio,
+            per,
+            ma200_dev,
+            ma75_dev,
+            ma25_dev,
+        ],
     )
 
 
