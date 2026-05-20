@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 _MOMENTUM_SHORT_DAYS = 21  # 約1ヶ月（営業日）
 _MOMENTUM_MID_DAYS = 63  # 約3ヶ月（営業日）
 _MOMENTUM_LONG_DAYS = 126  # 約6ヶ月（営業日）
+_MA_SHORT_DAYS = 25  # 短期移動平均
+_MA_MID_DAYS = 75  # 中期移動平均
 _MA_LONG_DAYS = 200  # 長期移動平均
 _ATR_DAYS = 20  # ATR 計算期間
 _VOLUME_DAYS = 20  # 出来高移動平均期間
@@ -60,6 +62,8 @@ def calc_momentum(
       - mom_6m : 約6ヶ月前終値に対するリターン
       - ma200_dev: 200日移動平均に対する乖離率（(close - MA200) / MA200）
                    ウィンドウ内データが 200 行未満の場合は None を返す。
+      - ma75_dev : 75日移動平均に対する乖離率。ウィンドウ内データが 75 行未満の場合は None。
+      - ma25_dev : 25日移動平均に対する乖離率。ウィンドウ内データが 25 行未満の場合は None。
 
     データ不足（過去データが少ない）銘柄は None を返す。
 
@@ -92,7 +96,23 @@ def calc_momentum(
                 COUNT(close) OVER (
                     PARTITION BY code ORDER BY date
                     ROWS BETWEEN {_MA_LONG_DAYS - 1} PRECEDING AND CURRENT ROW
-                ) AS cnt_200
+                ) AS cnt_200,
+                AVG(close) OVER (
+                    PARTITION BY code ORDER BY date
+                    ROWS BETWEEN {_MA_MID_DAYS - 1} PRECEDING AND CURRENT ROW
+                ) AS ma75,
+                COUNT(close) OVER (
+                    PARTITION BY code ORDER BY date
+                    ROWS BETWEEN {_MA_MID_DAYS - 1} PRECEDING AND CURRENT ROW
+                ) AS cnt_75,
+                AVG(close) OVER (
+                    PARTITION BY code ORDER BY date
+                    ROWS BETWEEN {_MA_SHORT_DAYS - 1} PRECEDING AND CURRENT ROW
+                ) AS ma25,
+                COUNT(close) OVER (
+                    PARTITION BY code ORDER BY date
+                    ROWS BETWEEN {_MA_SHORT_DAYS - 1} PRECEDING AND CURRENT ROW
+                ) AS cnt_25
             FROM prices_daily
             WHERE date BETWEEN ? AND ?
         )
@@ -106,7 +126,11 @@ def calc_momentum(
             CASE WHEN close_6m_ago > 0
                  THEN (close - close_6m_ago) / close_6m_ago END AS mom_6m,
             CASE WHEN ma200 > 0 AND cnt_200 >= {_MA_LONG_DAYS}
-                 THEN (close - ma200) / ma200 END AS ma200_dev
+                 THEN (close - ma200) / ma200 END AS ma200_dev,
+            CASE WHEN ma75 > 0 AND cnt_75 >= {_MA_MID_DAYS}
+                 THEN (close - ma75) / ma75 END AS ma75_dev,
+            CASE WHEN ma25 > 0 AND cnt_25 >= {_MA_SHORT_DAYS}
+                 THEN (close - ma25) / ma25 END AS ma25_dev
         FROM base
         WHERE date = (SELECT MAX(date) FROM prices_daily WHERE date <= ?)
         ORDER BY code
@@ -114,7 +138,7 @@ def calc_momentum(
         [start_date, target_date, target_date],
     ).fetchall()
 
-    cols = ["date", "code", "mom_1m", "mom_3m", "mom_6m", "ma200_dev"]
+    cols = ["date", "code", "mom_1m", "mom_3m", "mom_6m", "ma200_dev", "ma75_dev", "ma25_dev"]
     result = [dict(zip(cols, r)) for r in rows]
     logger.debug("calc_momentum: %d 銘柄 date=%s", len(result), target_date)
     return result

@@ -90,6 +90,8 @@ _FEATURES_SELECT_COLS: tuple[str, ...] = (
     "pbr",
     "div_yield",
     "ma200_dev",
+    "ma75_dev",
+    "ma25_dev",
     "rsi_14",
 )
 
@@ -1104,6 +1106,8 @@ def generate_signals(
     use_ma200_filter: bool = False,
     volume_breakout_threshold: float | None = None,
     *,
+    use_stock_ma_cross_filter: bool = False,
+    stock_ma_cross_weak_bear_multiplier: float = 0.5,
     regime_provider: RegimeProvider | None = None,
     sqlite_conn: sqlite3.Connection | None = None,
 ) -> int:
@@ -1133,6 +1137,14 @@ def generate_signals(
         use_ma200_filter:  True のとき株価が 200 日移動平均線を下回る銘柄（ma200_dev < 0）
                            の BUY を抑制する。ma200_dev が None の場合は安全側で BUY 許可。
                            False（デフォルト）では無効。
+        use_stock_ma_cross_filter: True のとき銘柄単位の MA クロスで BUY を段階制御する。
+                           - ma75_dev < 0（株価が MA75 を下回る）→ BUY スキップ（強ベア）
+                           - ma75_dev >= 0 かつ ma25_dev < 0 → size_multiplier を縮小（弱ベア）
+                           ma75_dev / ma25_dev のどちらかが None の場合は安全側で BUY 許可。
+                           False（デフォルト）では無効。
+        stock_ma_cross_weak_bear_multiplier: 弱ベア時（ma75_dev >= 0 かつ ma25_dev < 0）の
+                           size_multiplier 縮小率（0 < x <= 1）。デフォルト 0.5。
+                           use_stock_ma_cross_filter=True のときのみ有効。
         volume_breakout_threshold: 指定した場合、volume_ratio（20日平均出来高比）が
                            この値を下回る銘柄の BUY を抑制する（例: 1.5 = 1.5倍未満を除外）。
                            volume_ratio が None の場合は安全側で BUY 許可。
@@ -1346,6 +1358,8 @@ def generate_signals(
                 "score": final_score,
                 "rsi_14": feat.get("rsi_14"),
                 "ma200_dev": feat.get("ma200_dev"),
+                "ma75_dev": feat.get("ma75_dev"),
+                "ma25_dev": feat.get("ma25_dev"),
                 "volume_ratio": feat.get("volume_ratio"),
             }
         )
@@ -1374,6 +1388,8 @@ def generate_signals(
         gap_suppressed = 0
         rsi_suppressed = 0
         ma200_suppressed = 0
+        stock_ma_cross_suppressed = 0
+        stock_ma_cross_reduced = 0
         volume_suppressed = 0
         sector_suppressed = 0
         reentry_suppressed = 0
@@ -1404,6 +1420,37 @@ def generate_signals(
                     )
                     ma200_suppressed += 1
                     continue
+            # 銘柄単位 MA クロスフィルタ
+            # - ma75_dev < 0（株価が MA75 を下回る）→ BUY スキップ（強ベア）
+            # - ma75_dev >= 0 かつ ma25_dev < 0 → size_multiplier を縮小（弱ベア）
+            # - どちらかが None（データ不足）→ 安全側で制御しない
+            stock_ma_cross_size_multiplier: float | None = None
+            if use_stock_ma_cross_filter:
+                ma75_dev_val = r.get("ma75_dev")
+                ma25_dev_val = r.get("ma25_dev")
+                if ma75_dev_val is not None and ma75_dev_val < 0:
+                    logger.debug(
+                        "stock ma cross filter: %s ma75_dev=%.4f — BUY を抑制 date=%s",
+                        r["code"],
+                        ma75_dev_val,
+                        target_date,
+                    )
+                    stock_ma_cross_suppressed += 1
+                    continue
+                if (
+                    ma75_dev_val is not None
+                    and ma75_dev_val >= 0
+                    and ma25_dev_val is not None
+                    and ma25_dev_val < 0
+                ):
+                    logger.debug(
+                        "stock ma cross filter: %s ma25_dev=%.4f — size 縮小 date=%s",
+                        r["code"],
+                        ma25_dev_val,
+                        target_date,
+                    )
+                    stock_ma_cross_size_multiplier = stock_ma_cross_weak_bear_multiplier
+                    stock_ma_cross_reduced += 1
             # 出来高ブレイクアウトフィルタ（threshold 指定時に volume_ratio が閾値未満の銘柄を抑制）
             if volume_breakout_threshold is not None:
                 volume_ratio_val = r.get("volume_ratio")
@@ -1460,7 +1507,17 @@ def generate_signals(
                 )
                 earnings_suppressed += 1
                 continue
-            buy_signals.append({"code": r["code"], "score": r["score"], "rank": rank})
+            per_signal_multiplier = size_multiplier
+            if stock_ma_cross_size_multiplier is not None:
+                per_signal_multiplier = min(per_signal_multiplier, stock_ma_cross_size_multiplier)
+            buy_signals.append(
+                {
+                    "code": r["code"],
+                    "score": r["score"],
+                    "rank": rank,
+                    "size_multiplier": per_signal_multiplier,
+                }
+            )
         if rsi_suppressed:
             logger.info(
                 "generate_signals: rsi filter — %d 銘柄を RSI 過熱(%s超)で抑制 date=%s",
@@ -1472,6 +1529,18 @@ def generate_signals(
             logger.info(
                 "generate_signals: ma200 filter — %d 銘柄を MA200 下で抑制 date=%s",
                 ma200_suppressed,
+                target_date,
+            )
+        if stock_ma_cross_suppressed:
+            logger.info(
+                "generate_signals: stock ma cross filter — %d 銘柄を MA75 下で抑制 date=%s",
+                stock_ma_cross_suppressed,
+                target_date,
+            )
+        if stock_ma_cross_reduced:
+            logger.info(
+                "generate_signals: stock ma cross filter — %d 銘柄を MA25 下で size 縮小 date=%s",
+                stock_ma_cross_reduced,
                 target_date,
             )
         if volume_suppressed:
@@ -1528,7 +1597,8 @@ def generate_signals(
 
     # 8. signals テーブルへ日付単位の置換（トランザクション＋バルク挿入で原子性を保証）
     buy_params = [
-        (target_date, r["code"], r["score"], r["rank"], size_multiplier) for r in buy_signals
+        (target_date, r["code"], r["score"], r["rank"], r.get("size_multiplier", size_multiplier))
+        for r in buy_signals
     ]
     sell_params = [(target_date, r["code"], r["score"]) for r in sell_signals]
     conn.execute("BEGIN")
