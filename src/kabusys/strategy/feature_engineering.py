@@ -156,6 +156,8 @@ def build_features(
                 "mom_1m": m.get("mom_1m"),
                 "mom_3m": m.get("mom_3m"),
                 "ma200_dev": m.get("ma200_dev"),
+                "ma75_dev": m.get("ma75_dev"),
+                "ma25_dev": m.get("ma25_dev"),
                 "atr_pct": v.get("atr_pct"),
                 "volume_ratio": v.get("volume_ratio"),
                 "per": f.get("per"),
@@ -206,6 +208,8 @@ def build_features(
             r.get("pbr"),
             r.get("div_yield"),
             r.get("ma200_dev"),
+            r.get("ma25_dev"),
+            r.get("ma75_dev"),
             r.get("topix_rel_20"),
             r.get("topix_rel_60"),
             r.get("quality_score"),
@@ -221,9 +225,9 @@ def build_features(
                 """
                 INSERT INTO features
                     (date, code, momentum_20, momentum_60, volatility_20, volume_ratio,
-                     per, pbr, div_yield, ma200_dev,
+                     per, pbr, div_yield, ma200_dev, ma25_dev, ma75_dev,
                      topix_rel_20, topix_rel_60, quality_score, rsi_14, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
                 """,
                 params,
             )

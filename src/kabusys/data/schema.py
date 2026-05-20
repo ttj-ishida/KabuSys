@@ -202,6 +202,8 @@ CREATE TABLE IF NOT EXISTS features (
     pbr             DOUBLE,
     div_yield       DOUBLE,
     ma200_dev       DOUBLE,
+    ma25_dev        DOUBLE,
+    ma75_dev        DOUBLE,
     topix_rel_20    DOUBLE,
     topix_rel_60    DOUBLE,
     quality_score   DOUBLE,
@@ -500,6 +502,9 @@ _MIGRATIONS: list[str] = [
     "ALTER TABLE topix_daily ADD COLUMN IF NOT EXISTS ma25 DOUBLE",
     "ALTER TABLE topix_daily ADD COLUMN IF NOT EXISTS ma75 DOUBLE",
     "ALTER TABLE topix_daily ADD COLUMN IF NOT EXISTS ma200 DOUBLE",
+    # Issue #353: features に MA25/MA75 乖離率を追加
+    "ALTER TABLE features ADD COLUMN IF NOT EXISTS ma25_dev DOUBLE",
+    "ALTER TABLE features ADD COLUMN IF NOT EXISTS ma75_dev DOUBLE",
 ]
 
 # ---------------------------------------------------------------------------

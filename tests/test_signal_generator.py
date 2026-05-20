@@ -1086,12 +1086,14 @@ def _insert_feature_with_values(
     volume_ratio: float = 3.0,
     per: float = 5.0,
     ma200_dev: float = 3.0,
+    ma75_dev: float | None = None,
+    ma25_dev: float | None = None,
 ) -> None:
     conn.execute(
         "INSERT INTO features "
-        "(date, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [d, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev],
+        "(date, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev, ma75_dev, ma25_dev) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [d, code, momentum_20, momentum_60, volatility_20, volume_ratio, per, ma200_dev, ma75_dev, ma25_dev],
     )
 
 
@@ -1169,6 +1171,99 @@ class TestMa200Filter:
             ).fetchall()
         ]
         assert "8004" in buy_codes
+
+
+class TestStockMaCrossFilter:
+    """use_stock_ma_cross_filter=True のとき銘柄 MA クロスで BUY を制御する。"""
+
+    def test_below_ma75_suppressed(self, conn):
+        """ma75_dev < 0（株価が MA75 を下回る）→ BUY をスキップする（強ベア）。"""
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        _insert_feature_with_values(conn, "9001", TARGET_DATE, ma75_dev=-0.05, ma25_dev=-0.10)
+
+        generate_signals(conn, TARGET_DATE, use_stock_ma_cross_filter=True)
+
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "9001" not in buy_codes
+
+    def test_above_ma75_allowed(self, conn):
+        """ma75_dev >= 0（株価が MA75 を上回る）→ BUY を許可する。"""
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        _insert_feature_with_values(conn, "9002", TARGET_DATE, ma75_dev=0.05, ma25_dev=0.02)
+
+        generate_signals(conn, TARGET_DATE, use_stock_ma_cross_filter=True)
+
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "9002" in buy_codes
+
+    def test_below_ma25_size_reduced(self, conn):
+        """ma25_dev < 0 かつ ma75_dev >= 0 → BUY は通すが size_multiplier が 0.5 に縮小される（弱ベア）。"""
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        _insert_feature_with_values(conn, "9003", TARGET_DATE, ma75_dev=0.03, ma25_dev=-0.02)
+
+        generate_signals(conn, TARGET_DATE, use_stock_ma_cross_filter=True)
+
+        rows = conn.execute(
+            "SELECT code, size_multiplier FROM signals WHERE date = ? AND side = 'buy' AND code = '9003'",
+            [TARGET_DATE],
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0][1] == pytest.approx(0.5)
+
+    def test_filter_disabled_by_default(self, conn):
+        """use_stock_ma_cross_filter=False（デフォルト）→ ma75_dev < 0 でも BUY を許可する。"""
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        _insert_feature_with_values(conn, "9004", TARGET_DATE, ma75_dev=-0.05, ma25_dev=-0.10)
+
+        generate_signals(conn, TARGET_DATE)
+
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "9004" in buy_codes
+
+    def test_none_ma75_allowed(self, conn):
+        """ma75_dev が None（データ不足）→ 安全側で BUY を許可する。"""
+        from kabusys.strategy.signal_generator import generate_signals
+
+        _insert_regime(conn, TARGET_DATE, "bull")
+        _insert_breadth(conn, TARGET_DATE, breadth_stop=False)
+        _insert_feature_with_values(conn, "9005", TARGET_DATE, ma75_dev=None, ma25_dev=None)
+
+        generate_signals(conn, TARGET_DATE, use_stock_ma_cross_filter=True)
+
+        buy_codes = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM signals WHERE date = ? AND side = 'buy'", [TARGET_DATE]
+            ).fetchall()
+        ]
+        assert "9005" in buy_codes
 
 
 class TestVolumeBreakoutFilter:
