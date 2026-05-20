@@ -1105,6 +1105,7 @@ def generate_signals(
     topix_size_multiplier_strong_bear: float | None = None,
     use_ma200_filter: bool = False,
     use_stock_ma_cross_filter: bool = False,
+    stock_ma_cross_weak_bear_multiplier: float = 0.5,
     volume_breakout_threshold: float | None = None,
     *,
     regime_provider: RegimeProvider | None = None,
@@ -1138,9 +1139,12 @@ def generate_signals(
                            False（デフォルト）では無効。
         use_stock_ma_cross_filter: True のとき銘柄単位の MA クロスで BUY を段階制御する。
                            - ma75_dev < 0（株価が MA75 を下回る）→ BUY スキップ（強ベア）
-                           - ma25_dev < 0 かつ ma75_dev >= 0 → size_multiplier を 0.5 に縮小（弱ベア）
-                           ma75_dev / ma25_dev が None の場合は安全側で BUY 許可。
+                           - ma75_dev >= 0 かつ ma25_dev < 0 → size_multiplier を縮小（弱ベア）
+                           ma75_dev / ma25_dev のどちらかが None の場合は安全側で BUY 許可。
                            False（デフォルト）では無効。
+        stock_ma_cross_weak_bear_multiplier: 弱ベア時（ma75_dev >= 0 かつ ma25_dev < 0）の
+                           size_multiplier 縮小率（0 < x <= 1）。デフォルト 0.5。
+                           use_stock_ma_cross_filter=True のときのみ有効。
         volume_breakout_threshold: 指定した場合、volume_ratio（20日平均出来高比）が
                            この値を下回る銘柄の BUY を抑制する（例: 1.5 = 1.5倍未満を除外）。
                            volume_ratio が None の場合は安全側で BUY 許可。
@@ -1418,7 +1422,8 @@ def generate_signals(
                     continue
             # 銘柄単位 MA クロスフィルタ
             # - ma75_dev < 0（株価が MA75 を下回る）→ BUY スキップ（強ベア）
-            # - ma25_dev < 0 かつ ma75_dev >= 0 → size_multiplier を 0.5 に縮小（弱ベア）
+            # - ma75_dev >= 0 かつ ma25_dev < 0 → size_multiplier を縮小（弱ベア）
+            # - どちらかが None（データ不足）→ 安全側で制御しない
             stock_ma_cross_size_multiplier: float | None = None
             if use_stock_ma_cross_filter:
                 ma75_dev_val = r.get("ma75_dev")
@@ -1433,9 +1438,10 @@ def generate_signals(
                     stock_ma_cross_suppressed += 1
                     continue
                 if (
-                    ma25_dev_val is not None
+                    ma75_dev_val is not None
+                    and ma75_dev_val >= 0
+                    and ma25_dev_val is not None
                     and ma25_dev_val < 0
-                    and (ma75_dev_val is None or ma75_dev_val >= 0)
                 ):
                     logger.debug(
                         "stock ma cross filter: %s ma25_dev=%.4f — size 縮小 date=%s",
@@ -1443,7 +1449,7 @@ def generate_signals(
                         ma25_dev_val,
                         target_date,
                     )
-                    stock_ma_cross_size_multiplier = 0.5
+                    stock_ma_cross_size_multiplier = stock_ma_cross_weak_bear_multiplier
                     stock_ma_cross_reduced += 1
             # 出来高ブレイクアウトフィルタ（threshold 指定時に volume_ratio が閾値未満の銘柄を抑制）
             if volume_breakout_threshold is not None:
