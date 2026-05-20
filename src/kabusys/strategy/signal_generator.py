@@ -1104,10 +1104,10 @@ def generate_signals(
     topix_size_multiplier_weak_bear: float | None = None,
     topix_size_multiplier_strong_bear: float | None = None,
     use_ma200_filter: bool = False,
-    use_stock_ma_cross_filter: bool = False,
-    stock_ma_cross_weak_bear_multiplier: float = 0.5,
     volume_breakout_threshold: float | None = None,
     *,
+    use_stock_ma_cross_filter: bool = False,
+    stock_ma_cross_weak_bear_multiplier: float = 0.5,
     regime_provider: RegimeProvider | None = None,
     sqlite_conn: sqlite3.Connection | None = None,
 ) -> int:
