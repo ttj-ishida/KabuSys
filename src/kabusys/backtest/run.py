@@ -172,6 +172,23 @@ def main() -> None:
         help="When set, suppress BUY signals for stocks trading below their 200-day MA (ma200_dev < 0).",
     )
     parser.add_argument(
+        "--stock-ma-cross-filter",
+        action="store_true",
+        default=False,
+        help=(
+            "When set, apply per-stock MA25/MA75 cross filter: "
+            "suppress BUY when ma75_dev < 0 (strong bear); "
+            "reduce size when ma75_dev >= 0 and ma25_dev < 0 (weak bear)."
+        ),
+    )
+    parser.add_argument(
+        "--stock-ma-cross-weak-bear-multiplier",
+        type=float,
+        default=0.5,
+        dest="stock_ma_cross_weak_bear_multiplier",
+        help="size_multiplier for weak-bear stocks when --stock-ma-cross-filter is active (default: 0.5).",
+    )
+    parser.add_argument(
         "--volume-breakout-threshold",
         type=float,
         default=None,
@@ -266,6 +283,8 @@ def main() -> None:
             topix_size_multiplier_weak_bear=args.topix_size_multiplier_weak_bear,
             topix_size_multiplier_strong_bear=args.topix_size_multiplier_strong_bear,
             use_ma200_filter=args.ma200_filter,
+            use_stock_ma_cross_filter=args.stock_ma_cross_filter,
+            stock_ma_cross_weak_bear_multiplier=args.stock_ma_cross_weak_bear_multiplier,
             volume_breakout_threshold=args.volume_breakout_threshold,
             portfolio_drawdown_stop_pct=args.portfolio_drawdown_stop,
             portfolio_drawdown_stop_timeout_days=args.portfolio_drawdown_stop_timeout_days,
