@@ -395,6 +395,8 @@ def run_backtest(
     topix_size_multiplier_weak_bear: float | None = None,
     topix_size_multiplier_strong_bear: float | None = None,
     use_ma200_filter: bool = False,
+    use_stock_ma_cross_filter: bool = False,
+    stock_ma_cross_weak_bear_multiplier: float = 0.5,
     volume_breakout_threshold: float | None = None,
     portfolio_drawdown_stop_pct: float | None = None,
     portfolio_drawdown_stop_timeout_days: int | None = None,
@@ -435,6 +437,10 @@ def run_backtest(
                            0 <= x <= 1 の範囲で指定すること。
         use_ma200_filter:  True のとき株価が 200 日移動平均線を下回る銘柄の BUY を抑制する。
                            False（デフォルト）で無効。generate_signals() の同名引数に転送。
+        use_stock_ma_cross_filter: True のとき銘柄単位の MA クロスで BUY を段階制御する。
+                           False（デフォルト）で無効。generate_signals() の同名引数に転送。
+        stock_ma_cross_weak_bear_multiplier: 弱ベア時（ma75_dev >= 0 かつ ma25_dev < 0）の
+                           size_multiplier 縮小率。デフォルト 0.5。generate_signals() に転送。
         volume_breakout_threshold: 指定した場合、volume_ratio が閾値未満の銘柄の BUY を抑制する。
                            None（デフォルト）で無効。generate_signals() の同名引数に転送。
         portfolio_drawdown_stop_pct: ポートフォリオがピーク比でこの割合を超えて下落した場合、
@@ -605,6 +611,8 @@ def run_backtest(
                 target_date=trading_day,
                 threshold=threshold,
                 use_ma200_filter=use_ma200_filter,
+                use_stock_ma_cross_filter=use_stock_ma_cross_filter,
+                stock_ma_cross_weak_bear_multiplier=stock_ma_cross_weak_bear_multiplier,
                 volume_breakout_threshold=volume_breakout_threshold,
                 event_dates=event_dates or {},
                 scope=backtest_scope,
