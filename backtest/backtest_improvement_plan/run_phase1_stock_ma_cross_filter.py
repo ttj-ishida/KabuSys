@@ -43,6 +43,7 @@ import argparse
 import csv
 import json
 import locale
+import os
 import shutil
 import subprocess
 import sys
@@ -270,6 +271,11 @@ def _run_batch(args: tuple) -> list[dict]:
 
         cmd = _build_command(Path(snapshot_db), scenario, report_dir)
 
+        env = os.environ.copy()
+        src_path = str(repo_root / "src")
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = os.pathsep.join(filter(None, [src_path, existing]))
+
         completed = subprocess.run(
             cmd,
             cwd=str(repo_root),
@@ -277,6 +283,7 @@ def _run_batch(args: tuple) -> list[dict]:
             text=True,
             encoding=SUBPROCESS_ENCODING,
             errors="replace",
+            env=env,
         )
 
         (scenario_dir / "stdout.log").write_text(completed.stdout or "", encoding="utf-8")
