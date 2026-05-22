@@ -162,8 +162,11 @@ def _is_buy_blocked_by_regime(
 ) -> bool:
     """レジームフィルター: 市場全体が下降トレンドなら買いをブロック。
 
-    TOPIX または市場ブレッドスコアが弱気レジームを示す場合 True を返す。
-    regime_score テーブルが存在しない場合は False（フィルタなし）を返す。
+    以下のいずれかの条件が真なら True（買いブロック）を返す:
+      - market_breadth テーブルに対象日の行があり breadth_stop = True
+      - market_regime テーブルに対象日の行があり label = 'bear'
+
+    テーブルや行が存在しない場合は False（買い許可）を返す。
 
     Args:
         conn: DuckDB 接続
@@ -173,19 +176,21 @@ def _is_buy_blocked_by_regime(
         True = 買いブロック, False = 買い許可
     """
     try:
-        result = conn.execute(
-            """
-            SELECT regime
-            FROM regime_score
-            WHERE date = ?
-            LIMIT 1
-            """,
+        row = conn.execute(
+            "SELECT breadth_stop FROM market_breadth WHERE date = ?",
             [trading_day],
         ).fetchone()
-        if result is None:
-            return False
-        regime = result[0]
-        # "bear" または "down" を含む場合はブロック
-        return str(regime).lower() in ("bear", "down", "bearish")
+        if row is not None and row[0]:
+            return True
     except Exception:
-        return False
+        pass
+    try:
+        row = conn.execute(
+            "SELECT label FROM market_regime WHERE date = ?",
+            [trading_day],
+        ).fetchone()
+        if row is not None and row[0] == "bear":
+            return True
+    except Exception:
+        pass
+    return False

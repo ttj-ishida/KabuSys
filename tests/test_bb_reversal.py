@@ -154,3 +154,63 @@ def test_sell_on_max_holding_days():
         max_holding_days=20,
     )
     assert any(s["code"] == "1001" for s in signals)
+
+
+# ----- _is_buy_blocked_by_regime -----
+
+class TestIsBuyBlockedByRegime:
+    """_is_buy_blocked_by_regime の単体テスト。"""
+
+    _DAY = date(2024, 6, 1)
+
+    def test_no_regime_tables_returns_false(self):
+        """テーブルが存在しない空の DB → False（BUY 許可）。"""
+        conn = duckdb.connect(":memory:")
+        assert _is_buy_blocked_by_regime(conn, self._DAY) is False
+
+    def test_breadth_stop_true_blocks_buy(self):
+        """market_breadth.breadth_stop = True → True（BUY ブロック）。"""
+        conn = duckdb.connect(":memory:")
+        conn.execute("CREATE TABLE market_breadth (date DATE, breadth_stop BOOLEAN)")
+        conn.execute("INSERT INTO market_breadth VALUES (?, ?)", [self._DAY, True])
+        assert _is_buy_blocked_by_regime(conn, self._DAY) is True
+
+    def test_breadth_stop_false_allows_buy(self):
+        """market_breadth.breadth_stop = False → False（BUY 許可）。"""
+        conn = duckdb.connect(":memory:")
+        conn.execute("CREATE TABLE market_breadth (date DATE, breadth_stop BOOLEAN)")
+        conn.execute("INSERT INTO market_breadth VALUES (?, ?)", [self._DAY, False])
+        assert _is_buy_blocked_by_regime(conn, self._DAY) is False
+
+    def test_market_regime_bear_blocks_buy(self):
+        """market_regime.label = 'bear' → True（BUY ブロック）。"""
+        conn = duckdb.connect(":memory:")
+        conn.execute("CREATE TABLE market_regime (date DATE, label VARCHAR)")
+        conn.execute("INSERT INTO market_regime VALUES (?, ?)", [self._DAY, "bear"])
+        assert _is_buy_blocked_by_regime(conn, self._DAY) is True
+
+    def test_market_regime_bull_allows_buy(self):
+        """market_regime.label = 'bull' → False（BUY 許可）。"""
+        conn = duckdb.connect(":memory:")
+        conn.execute("CREATE TABLE market_regime (date DATE, label VARCHAR)")
+        conn.execute("INSERT INTO market_regime VALUES (?, ?)", [self._DAY, "bull"])
+        assert _is_buy_blocked_by_regime(conn, self._DAY) is False
+
+    def test_both_conditions_true_blocks_buy(self):
+        """breadth_stop=True かつ label='bear' → True（BUY ブロック）。"""
+        conn = duckdb.connect(":memory:")
+        conn.execute("CREATE TABLE market_breadth (date DATE, breadth_stop BOOLEAN)")
+        conn.execute("CREATE TABLE market_regime (date DATE, label VARCHAR)")
+        conn.execute("INSERT INTO market_breadth VALUES (?, ?)", [self._DAY, True])
+        conn.execute("INSERT INTO market_regime VALUES (?, ?)", [self._DAY, "bear"])
+        assert _is_buy_blocked_by_regime(conn, self._DAY) is True
+
+    def test_missing_date_returns_false(self):
+        """テーブルは存在するが対象日の行がない → False（BUY 許可）。"""
+        conn = duckdb.connect(":memory:")
+        conn.execute("CREATE TABLE market_breadth (date DATE, breadth_stop BOOLEAN)")
+        conn.execute("CREATE TABLE market_regime (date DATE, label VARCHAR)")
+        other_day = date(2024, 1, 1)
+        conn.execute("INSERT INTO market_breadth VALUES (?, ?)", [other_day, True])
+        conn.execute("INSERT INTO market_regime VALUES (?, ?)", [other_day, "bear"])
+        assert _is_buy_blocked_by_regime(conn, self._DAY) is False
