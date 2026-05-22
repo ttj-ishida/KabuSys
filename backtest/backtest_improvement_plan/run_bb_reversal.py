@@ -194,3 +194,144 @@ def _is_buy_blocked_by_regime(
     except Exception:
         pass
     return False
+
+
+def run_bb_scenario(
+    conn: duckdb.DuckDBPyConnection,
+    start_date: date,
+    end_date: date,
+    period: int,
+    sigma: float,
+    use_regime_filter: bool,
+    initial_cash: float = 10_000_000,
+    max_positions: int = 5,
+    max_position_pct: float = 0.20,
+    max_utilization: float = 0.70,
+    stop_loss_rate: float = 0.08,
+    max_holding_days: int = 20,
+    lot_size: int = 100,
+    slippage_rate: float = 0.001,
+    commission_rate: float = 0.00055,
+) -> "BacktestMetrics":
+    """BB 逆張りシナリオのシミュレーションループを実行し評価指標を返す。
+
+    Args:
+        conn:              DuckDB 接続。
+        start_date:        バックテスト開始日。
+        end_date:          バックテスト終了日。
+        period:            BB 計算期間（日数）。
+        sigma:             BB バンド幅（標準偏差の倍率）。
+        use_regime_filter: True の場合、下降トレンド時に BUY をブロックする。
+        initial_cash:      初期資金（円）。
+        max_positions:     最大保有銘柄数。
+        max_position_pct:  1 銘柄の最大配分比率（総資産比）。
+        max_utilization:   投下資金上限（総資産比）。
+        stop_loss_rate:    ストップロス率。
+        max_holding_days:  最大保有日数。
+        lot_size:          単元株数。
+        slippage_rate:     スリッページ率。
+        commission_rate:   手数料率。
+
+    Returns:
+        BacktestMetrics インスタンス。
+    """
+    sim = PortfolioSimulator(initial_cash=initial_cash)
+    held_trading_days: dict[str, int] = {}
+    next_day_orders: list[dict] = []
+
+    trading_days = get_trading_days(conn, start_date, end_date)
+    logger.info(
+        "run_bb_scenario: start=%s end=%s period=%d sigma=%.1f regime=%s days=%d",
+        start_date, end_date, period, sigma, use_regime_filter, len(trading_days),
+    )
+
+    for trading_day in trading_days:
+        # Step 1: Execute previous orders at today's open
+        open_rows = conn.execute(
+            "SELECT code, CAST(open AS DOUBLE) FROM prices_daily WHERE date = ?",
+            [trading_day],
+        ).fetchall()
+        open_prices = {code: p for code, p in open_rows if p is not None}
+
+        prev_positions = set(sim.positions)
+        sim.execute_orders(
+            next_day_orders, open_prices, slippage_rate, commission_rate,
+            trading_day, lot_size=lot_size,
+        )
+        new_holdings = set(sim.positions) - prev_positions
+        closed_holdings = prev_positions - set(sim.positions)
+        for code in new_holdings:
+            held_trading_days[code] = 1
+        for code in closed_holdings:
+            held_trading_days.pop(code, None)
+        for code in sim.positions:
+            if code not in new_holdings:
+                held_trading_days[code] = held_trading_days.get(code, 0) + 1
+
+        # Step 2: Mark to market with today's close
+        close_rows = conn.execute(
+            "SELECT code, CAST(close AS DOUBLE) FROM prices_daily WHERE date = ?",
+            [trading_day],
+        ).fetchall()
+        close_prices = {code: p for code, p in close_rows if p is not None}
+        sim.mark_to_market(trading_day, close_prices)
+
+        # Step 3: BB bands + universe
+        bb_rows = _compute_bb_rows(conn, trading_day, period, sigma)
+        universe_rows = conn.execute(
+            "SELECT DISTINCT code FROM features WHERE date = ?", [trading_day]
+        ).fetchall()
+        universe_codes = {r[0] for r in universe_rows}
+        middle_bands = {code: middle for code, close, lower, middle in bb_rows}
+
+        # Step 4: SELL signals
+        sell_signals = _generate_sell_signals(
+            close_prices=close_prices,
+            positions=dict(sim.positions),
+            cost_basis=dict(sim.cost_basis),
+            held_trading_days=held_trading_days,
+            middle_bands=middle_bands,
+            stop_loss_rate=stop_loss_rate,
+            max_holding_days=max_holding_days,
+        )
+        sell_codes = {s["code"] for s in sell_signals}
+
+        # Step 5: BUY signals
+        buy_blocked = use_regime_filter and _is_buy_blocked_by_regime(conn, trading_day)
+        if buy_blocked:
+            buy_signals: list[dict] = []
+        else:
+            held_codes = set(sim.positions) - sell_codes
+            buy_signals = _generate_buy_signals(bb_rows, universe_codes, held_codes)
+
+        # Step 6: Position sizing
+        current_pv = sim.history[-1].portfolio_value
+        candidates = select_candidates(buy_signals, max_positions=max_positions)
+        weights = calc_equal_weights(candidates)
+        available_cash = min(sim.cash, current_pv * max_utilization)
+        sized = calc_position_sizes(
+            weights=weights,
+            candidates=candidates,
+            portfolio_value=current_pv,
+            available_cash=available_cash,
+            current_positions=sim.positions,
+            open_prices=close_prices,
+            allocation_method="equal",
+            risk_pct=0.005,
+            stop_loss_pct=stop_loss_rate,
+            max_position_pct=max_position_pct,
+            max_utilization=max_utilization,
+            cost_buffer=slippage_rate + commission_rate,
+            lot_size=lot_size,
+        )
+
+        # Step 7: Queue next day's orders
+        next_day_orders = [
+            {"code": code, "side": "buy", "shares": (int(shares) // lot_size) * lot_size}
+            for code, shares in sized.items()
+            if shares > 0 and code not in sell_codes
+        ]
+        next_day_orders = [o for o in next_day_orders if o["shares"] > 0]
+        next_day_orders += [{"code": s["code"], "side": "sell"} for s in sell_signals]
+
+    return calc_metrics(sim.history, sim.trades)
