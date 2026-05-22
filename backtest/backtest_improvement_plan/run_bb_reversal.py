@@ -417,7 +417,7 @@ def main() -> None:
     try:
         results = []
         for scenario in SCENARIOS:
-            print(f"\n▶ Running {scenario['id']} ...")
+            print(f"\n>> Running {scenario['id']} ...")
             metrics = run_bb_scenario(
                 conn=conn,
                 start_date=start_date,
