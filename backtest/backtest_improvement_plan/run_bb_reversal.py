@@ -89,16 +89,28 @@ def _compute_bb_rows(
 
 def _generate_buy_signals(
     bb_rows: list[tuple[str, float, float, float]],
-) -> list[str]:
-    """BB ロワーバンド割れの銘柄コードリストを返す。
+    universe_codes: set[str],
+    held_codes: set[str],
+) -> list[dict]:
+    """BB 下バンド下抜けで BUY シグナルを生成する。
 
     Args:
-        bb_rows: [(code, close, lower_band, middle_band), ...]
+        bb_rows:       [(code, close, lower_band, middle_band), ...]
+        universe_codes: features テーブルに存在する銘柄コードセット。
+        held_codes:    現在保有中（SELL 対象除外後）の銘柄コードセット。
 
     Returns:
-        close < lower_band の銘柄コードリスト
+        [{"code", "score": 1.0, "signal_rank": int, "size_multiplier": 1.0}, ...]
     """
-    return [code for code, close, lower_band, _mid in bb_rows if close < lower_band]
+    candidates = [
+        code
+        for code, close, lower_band, _ in bb_rows
+        if close < lower_band and code in universe_codes and code not in held_codes
+    ]
+    return [
+        {"code": code, "score": 1.0, "signal_rank": rank, "size_multiplier": 1.0}
+        for rank, code in enumerate(candidates, 1)
+    ]
 
 
 def _generate_sell_signals(
