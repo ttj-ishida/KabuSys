@@ -1278,3 +1278,89 @@ Sharpe も 0.342 と I1（0.382）を下回るため I1 が優位。
 | 実績 CAGR（年換算） | > 5% |
 | 実績 Max DD | < 25% |
 | Phase 2 移行後の Sharpe 目標 | > 1.0 |
+
+---
+
+## 28. I1 弱点分析と Group K 実行計画（2026-05-23）
+
+### 28.1 I1 の構造的弱点
+
+Group A〜J 全体を通じて最優良設定と確定した I1 だが、以下の構造的弱点を持つ:
+
+| # | 弱点 | データ根拠 |
+|---|---|---|
+| 1 | **勝率 39.0% が低い** | 6割の取引が損失。Payoff 2.027 で辛うじて収益を確保しているが不安定 |
+| 2 | **Sharpe 0.382 が基準未達** | リターンのブレが大きい。9年間で年別収益の分散が高い可能性 |
+| 3 | **2017年に構造的に弱い** | 強気相場（日経 +19%）で CAGR -20.4%（A4設定）。threshold=0.58 では低精度シグナルが多発 |
+| 4 | **シグナル品質に上限がない** | threshold=0.58 以上すべてが対象。market_regime に関わらず同一精度要求 |
+
+### 28.2 試す価値のある改善アプローチ
+
+#### アプローチ A — シグナル品質フィルター（単体検証）
+
+| アプローチ | フィルター条件 | 狙い | 実装状況 |
+|---|---|---|---|
+| A-1 | RSI 売られすぎ確認（rsi_14 ≤ 40） | 上昇トレンド中に売られすぎた銘柄のみを選択。ノイズ削減 | **要追加** |
+| A-2 | 出来高ブレイクアウト確認（volume_ratio ≥ 1.2） | 資金流入を伴う動きのみ。薄商い銘柄を除外 | **既存** (`--volume-breakout-threshold`) |
+| A-3 | クオリティスコアフィルター（quality_score ≥ -0.5） | 財務健全性の低い銘柄を除外 | **要追加** |
+| A-4 | TOPIX 相対強度（topix_rel_20 ≥ -10%） | TOPIX に対して強い銘柄を選択。弱い銘柄の誤エントリーを防止 | **要追加** |
+
+#### アプローチ B — アダプティブ閾値（相場局面適応）
+
+2017年の損失原因（Group F より）: threshold=0.58 が強気相場で低精度シグナルを大量発生。threshold=0.62 への引き上げで CAGR -20.4% → -4.5% に改善。
+
+| アプローチ | 条件 | 狙い | 実装状況 |
+|---|---|---|---|
+| B-1 | アダプティブ閾値（TOPIX が MA200 +5% 超で 0.62 に引き上げ） | 強気相場でシグナル精度を自動引き上げ。2017年問題を修正 | **要追加** |
+
+#### アプローチ C — 複合フィルター（本命候補）
+
+単体フィルターの有効性確認後、組み合わせを検証:
+- RSI 売られすぎ + クオリティスコア → 勝率改善を狙う
+- RSI + クオリティ + 出来高 → シグナル品質の三重確認
+- アダプティブ閾値 + RSI → 局面適応 + 逆張り確認の複合
+
+### 28.3 Group K シナリオ定義
+
+**ベース設定（全シナリオ共通）**: I1 と同一（util=30%, MA200=ON, BG=OFF, threshold=0.58, max_holding=60d, atr=2.0, stop_loss=9%, DD stop=12%）
+
+| シナリオ | 新規フィルター | 狙い |
+|---|---|---|
+| K1_i1_ref | なし | I1 完全再現（参照） |
+| K2_rsi_oversold | RSI ≤ 40 | 売られすぎ確認の単体効果 |
+| K3_quality | quality_score ≥ -0.5 | クオリティフィルターの単体効果 |
+| K4_volume | volume_ratio ≥ 1.2 | 出来高ブレイクアウトの単体効果 |
+| K5_topix_rel | topix_rel_20 ≥ -10% | TOPIX 相対強度の単体効果 |
+| K6_adaptive_thr | TOPIX MA200 +5% 超で threshold=0.62 | アダプティブ閾値の単体効果 |
+| K7_rsi_quality | K2 + K3 | RSI + クオリティ複合 |
+| K8_rsi_quality_vol | K2 + K3 + K4 | RSI + クオリティ + 出来高 複合（最有力候補） |
+| K9_adaptive_rsi | K6 + K2 | アダプティブ閾値 + RSI 複合 |
+
+**採択判断ロジック**:
+
+```
+いずれかのシナリオが CAGR>5%, Max DD<25%, PF>1.1, Sharpe>0.5 を同時達成
+  → 当該設定を Phase 1 改良版として採用
+Sharpe>0.5 達成なしだが K1 より Sharpe が改善しつつ 3 指標を維持
+  → 最良シナリオを参考に Phase 2 設計に活用
+全シナリオで K1 以下の成績
+  → I1 を継続採用。Sharpe 改善は Phase 2 以降の課題
+```
+
+### 28.4 必要な実装変更（Group K 実行前に完了済み）
+
+| ファイル | 変更内容 |
+|---|---|
+| `src/kabusys/strategy/signal_generator.py` | `rsi_oversold_max`, `quality_score_min`, `topix_rel_min`, `adaptive_threshold` パラメータ追加。`topix_rel_20`, `quality_score` を `_FEATURES_SELECT_COLS` に追加 |
+| `src/kabusys/backtest/engine.py` | 新パラメータを `run_backtest()` シグネチャに追加し `generate_signals()` に転送 |
+| `src/kabusys/backtest/run.py` | `--rsi-oversold-max`, `--quality-score-min`, `--topix-rel-min`, `--adaptive-threshold` CLI フラグを追加 |
+
+### 28.5 実行スクリプト
+
+スクリプト: `backtest/backtest_improvement_plan/run_phase1_group_k.py`
+
+```powershell
+python backtest/backtest_improvement_plan/run_phase1_group_k.py --workers 4
+```
+
+出力先: `artifacts/backtest/backtest_phase1_group_k/{timestamp}/`

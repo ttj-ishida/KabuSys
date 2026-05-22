@@ -93,6 +93,8 @@ _FEATURES_SELECT_COLS: tuple[str, ...] = (
     "ma75_dev",
     "ma25_dev",
     "rsi_14",
+    "topix_rel_20",
+    "quality_score",
 )
 
 
@@ -1105,6 +1107,12 @@ def generate_signals(
     topix_size_multiplier_strong_bear: float | None = None,
     use_ma200_filter: bool = False,
     volume_breakout_threshold: float | None = None,
+    rsi_oversold_max: float | None = None,
+    quality_score_min: float | None = None,
+    topix_rel_min: float | None = None,
+    adaptive_threshold: bool = False,
+    adaptive_threshold_hi: float = 0.62,
+    topix_ma200_hi_trigger: float = 0.05,
     *,
     use_stock_ma_cross_filter: bool = False,
     stock_ma_cross_weak_bear_multiplier: float = 0.5,
@@ -1149,6 +1157,20 @@ def generate_signals(
                            この値を下回る銘柄の BUY を抑制する（例: 1.5 = 1.5倍未満を除外）。
                            volume_ratio が None の場合は安全側で BUY 許可。
                            None（デフォルト）で無効。
+        rsi_oversold_max:  指定した場合、rsi_14 がこの値を超える銘柄の BUY を抑制する
+                           （例: 40.0 → RSI が 40 超の銘柄は売られすぎでないとして除外）。
+                           rsi_14 が None の場合は安全側で BUY 許可。None（デフォルト）で無効。
+        quality_score_min: 指定した場合、quality_score がこの値未満の銘柄の BUY を抑制する
+                           （例: -0.5 → クオリティスコアが -0.5 未満を除外）。
+                           quality_score が None の場合は安全側で BUY 許可。None（デフォルト）で無効。
+        topix_rel_min:     指定した場合、topix_rel_20（20日 TOPIX 相対強度）がこの値未満の
+                           銘柄の BUY を抑制する（例: -0.1 → 相対強度 -10% 未満を除外）。
+                           topix_rel_20 が None の場合は安全側で BUY 許可。None（デフォルト）で無効。
+        adaptive_threshold: True のとき、TOPIX が MA200 を topix_ma200_hi_trigger 超過している
+                           場合に BUY 閾値を adaptive_threshold_hi に引き上げる（強気相場での
+                           シグナル品質向上）。False（デフォルト）で無効。
+        adaptive_threshold_hi: adaptive_threshold=True 時に使用する高い BUY 閾値。デフォルト 0.62。
+        topix_ma200_hi_trigger: TOPIX の MA200 乖離率がこの値を超えたとき閾値を引き上げる。デフォルト 0.05。
         regime_provider:   レジームラベルを返すプロバイダー。明示的に渡した場合は
                            ENABLE_AI_SENTIMENT の設定値より優先される。省略時は
                            ENABLE_AI_SENTIMENT フラグに基づいて自動生成する。
@@ -1361,6 +1383,8 @@ def generate_signals(
                 "ma75_dev": feat.get("ma75_dev"),
                 "ma25_dev": feat.get("ma25_dev"),
                 "volume_ratio": feat.get("volume_ratio"),
+                "topix_rel_20": feat.get("topix_rel_20"),
+                "quality_score": feat.get("quality_score"),
             }
         )
 
@@ -1379,6 +1403,25 @@ def generate_signals(
     _gap_up = _cfg["gap_up_threshold"]
     _gap_down = _cfg["gap_down_threshold"]
     _rsi_threshold = _cfg["rsi_overbought_threshold"]
+    if adaptive_threshold:
+        try:
+            row = conn.execute(
+                "SELECT close, ma200 FROM topix_daily WHERE date = (SELECT MAX(date) FROM topix_daily WHERE date <= ?)",
+                [target_date],
+            ).fetchone()
+            if row is not None and row[0] is not None and row[1] is not None and float(row[1]) > 0:
+                topix_ma200_dev_val = float(row[0]) / float(row[1]) - 1
+                if topix_ma200_dev_val > topix_ma200_hi_trigger:
+                    threshold = max(threshold, adaptive_threshold_hi)
+                    logger.debug(
+                        "adaptive threshold: topix_ma200_dev=%.4f > trigger=%.4f → threshold=%.2f date=%s",
+                        topix_ma200_dev_val,
+                        topix_ma200_hi_trigger,
+                        threshold,
+                        target_date,
+                    )
+        except Exception:
+            pass
     buy_signals: list[dict] = []
     if not regime_is_bear and not breadth_stop:
         # 3c. ギャップ比率を一括取得（BUY 生成が必要な場合のみ実行）
@@ -1387,10 +1430,13 @@ def generate_signals(
         )
         gap_suppressed = 0
         rsi_suppressed = 0
+        rsi_oversold_suppressed = 0
         ma200_suppressed = 0
         stock_ma_cross_suppressed = 0
         stock_ma_cross_reduced = 0
         volume_suppressed = 0
+        quality_suppressed = 0
+        topix_rel_suppressed = 0
         sector_suppressed = 0
         reentry_suppressed = 0
         earnings_suppressed = 0
@@ -1408,6 +1454,18 @@ def generate_signals(
                 )
                 rsi_suppressed += 1
                 continue
+            # RSI 売られすぎフィルタ（rsi_oversold_max 指定時: RSI が閾値超の銘柄は BUY 抑制）
+            if rsi_oversold_max is not None:
+                if rsi is not None and rsi > rsi_oversold_max:
+                    logger.debug(
+                        "rsi oversold filter: %s rsi=%.1f > max=%.1f — BUY を抑制 date=%s",
+                        r["code"],
+                        rsi,
+                        rsi_oversold_max,
+                        target_date,
+                    )
+                    rsi_oversold_suppressed += 1
+                    continue
             # 200MA バイナリフィルタ（use_ma200_filter=True のとき MA200 下の銘柄を抑制）
             if use_ma200_filter:
                 ma200_dev_val = r.get("ma200_dev")
@@ -1419,6 +1477,32 @@ def generate_signals(
                         target_date,
                     )
                     ma200_suppressed += 1
+                    continue
+            # クオリティスコアフィルタ
+            if quality_score_min is not None:
+                quality_val = r.get("quality_score")
+                if quality_val is not None and quality_val < quality_score_min:
+                    logger.debug(
+                        "quality filter: %s quality_score=%.4f < min=%.4f — BUY を抑制 date=%s",
+                        r["code"],
+                        quality_val,
+                        quality_score_min,
+                        target_date,
+                    )
+                    quality_suppressed += 1
+                    continue
+            # TOPIX 相対強度フィルタ
+            if topix_rel_min is not None:
+                topix_rel_val = r.get("topix_rel_20")
+                if topix_rel_val is not None and topix_rel_val < topix_rel_min:
+                    logger.debug(
+                        "topix rel filter: %s topix_rel_20=%.4f < min=%.4f — BUY を抑制 date=%s",
+                        r["code"],
+                        topix_rel_val,
+                        topix_rel_min,
+                        target_date,
+                    )
+                    topix_rel_suppressed += 1
                     continue
             # 銘柄単位 MA クロスフィルタ
             # - ma75_dev < 0（株価が MA75 を下回る）→ BUY スキップ（強ベア）
@@ -1525,6 +1609,13 @@ def generate_signals(
                 _rsi_threshold,
                 target_date,
             )
+        if rsi_oversold_suppressed:
+            logger.info(
+                "generate_signals: rsi oversold filter — %d 銘柄を RSI(>%.1f)で抑制 date=%s",
+                rsi_oversold_suppressed,
+                rsi_oversold_max,
+                target_date,
+            )
         if ma200_suppressed:
             logger.info(
                 "generate_signals: ma200 filter — %d 銘柄を MA200 下で抑制 date=%s",
@@ -1547,6 +1638,18 @@ def generate_signals(
             logger.info(
                 "generate_signals: volume breakout filter — %d 銘柄を出来高不足で抑制 date=%s",
                 volume_suppressed,
+                target_date,
+            )
+        if quality_suppressed:
+            logger.info(
+                "generate_signals: quality filter — %d 銘柄をクオリティスコア不足で抑制 date=%s",
+                quality_suppressed,
+                target_date,
+            )
+        if topix_rel_suppressed:
+            logger.info(
+                "generate_signals: topix rel filter — %d 銘柄を TOPIX 相対強度不足で抑制 date=%s",
+                topix_rel_suppressed,
                 target_date,
             )
         if gap_suppressed:

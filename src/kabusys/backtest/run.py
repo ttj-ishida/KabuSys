@@ -195,6 +195,42 @@ def main() -> None:
         help="Suppress BUY signals when volume_ratio is below this multiplier (e.g. 1.5 means volume must be >= 1.5x 20-day average).",
     )
     parser.add_argument(
+        "--rsi-oversold-max",
+        type=float,
+        default=None,
+        help="Suppress BUY signals when rsi_14 exceeds this value (e.g. 40.0 means only buy oversold stocks with RSI <= 40).",
+    )
+    parser.add_argument(
+        "--quality-score-min",
+        type=float,
+        default=None,
+        help="Suppress BUY signals when quality_score is below this value (e.g. -0.5).",
+    )
+    parser.add_argument(
+        "--topix-rel-min",
+        type=float,
+        default=None,
+        help="Suppress BUY signals when topix_rel_20 is below this value (e.g. -0.1 means exclude stocks underperforming TOPIX by more than 10%% over 20 days).",
+    )
+    parser.add_argument(
+        "--adaptive-threshold",
+        action="store_true",
+        default=False,
+        help="Raise BUY threshold to --adaptive-threshold-hi when TOPIX is more than --topix-ma200-hi-trigger above its MA200.",
+    )
+    parser.add_argument(
+        "--adaptive-threshold-hi",
+        type=float,
+        default=0.62,
+        help="High BUY threshold used when adaptive threshold is triggered. [default: 0.62]",
+    )
+    parser.add_argument(
+        "--topix-ma200-hi-trigger",
+        type=float,
+        default=0.05,
+        help="TOPIX MA200 deviation above which the adaptive threshold kicks in. [default: 0.05]",
+    )
+    parser.add_argument(
         "--portfolio-drawdown-stop",
         type=float,
         default=None,
@@ -286,6 +322,12 @@ def main() -> None:
             use_stock_ma_cross_filter=args.stock_ma_cross_filter,
             stock_ma_cross_weak_bear_multiplier=args.stock_ma_cross_weak_bear_multiplier,
             volume_breakout_threshold=args.volume_breakout_threshold,
+            rsi_oversold_max=args.rsi_oversold_max,
+            quality_score_min=args.quality_score_min,
+            topix_rel_min=args.topix_rel_min,
+            adaptive_threshold=args.adaptive_threshold,
+            adaptive_threshold_hi=args.adaptive_threshold_hi,
+            topix_ma200_hi_trigger=args.topix_ma200_hi_trigger,
             portfolio_drawdown_stop_pct=args.portfolio_drawdown_stop,
             portfolio_drawdown_stop_timeout_days=args.portfolio_drawdown_stop_timeout_days,
         )

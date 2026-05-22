@@ -16,7 +16,8 @@ def _make_db():
         CREATE TABLE features (
             date DATE, code VARCHAR, momentum_20 DOUBLE, momentum_60 DOUBLE,
             volatility_20 DOUBLE, volume_ratio DOUBLE, per DOUBLE, pbr DOUBLE,
-            div_yield DOUBLE, ma200_dev DOUBLE, ma75_dev DOUBLE, ma25_dev DOUBLE, rsi_14 DOUBLE
+            div_yield DOUBLE, ma200_dev DOUBLE, ma75_dev DOUBLE, ma25_dev DOUBLE, rsi_14 DOUBLE,
+            topix_rel_20 DOUBLE, quality_score DOUBLE
         )
     """)
     conn.execute("""
@@ -95,7 +96,7 @@ class TestGenerateSignalsConfigWeights:
         target = date(2025, 1, 6)
         # Insert one stock with high momentum
         conn.execute(
-            "INSERT INTO features VALUES (?, '1001', 3.0, 3.0, 0.0, 0.0, NULL, NULL, NULL, 0.0, NULL, NULL, NULL)",
+            "INSERT INTO features VALUES (?, '1001', 3.0, 3.0, 0.0, 0.0, NULL, NULL, NULL, 0.0, NULL, NULL, NULL, NULL, NULL)",
             [target],
         )
 
@@ -143,7 +144,7 @@ class TestGenerateSignalsConfigWeights:
         target = date(2025, 1, 6)
         # volatility_20 = -3.0 → low volatility (good) → _sigmoid(-(-3.0)) ≈ 0.95 > 0.50
         conn.execute(
-            "INSERT INTO features VALUES (?, '1001', 0.0, 0.0, -3.0, 0.0, NULL, NULL, NULL, 0.0, NULL, NULL, NULL)",
+            "INSERT INTO features VALUES (?, '1001', 0.0, 0.0, -3.0, 0.0, NULL, NULL, NULL, 0.0, NULL, NULL, NULL, NULL, NULL)",
             [target],
         )
 
@@ -205,7 +206,7 @@ class TestGenerateSignalsConfigThreshold:
         target = date(2025, 1, 6)
         # Insert stock with moderate score that would pass 0.60 but not 0.99
         conn.execute(
-            "INSERT INTO features VALUES (?, '1001', 0.5, 0.5, 0.0, 0.0, NULL, NULL, NULL, 0.0, NULL, NULL, NULL)",
+            "INSERT INTO features VALUES (?, '1001', 0.5, 0.5, 0.0, 0.0, NULL, NULL, NULL, 0.0, NULL, NULL, NULL, NULL, NULL)",
             [target],
         )
 
@@ -253,7 +254,7 @@ class TestGenerateSignalsConfigThreshold:
         conn = _make_db()
         target = date(2025, 1, 6)
         conn.execute(
-            "INSERT INTO features VALUES (?, '1001', 3.0, 3.0, 0.0, 0.0, NULL, NULL, NULL, 0.0, NULL, NULL, NULL)",
+            "INSERT INTO features VALUES (?, '1001', 3.0, 3.0, 0.0, 0.0, NULL, NULL, NULL, 0.0, NULL, NULL, NULL, NULL, NULL)",
             [target],
         )
 
