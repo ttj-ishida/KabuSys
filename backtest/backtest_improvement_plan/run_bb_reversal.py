@@ -8,6 +8,7 @@ Usage:
         --db data/kabusys.duckdb \
         --start 2017-01-01 --end 2025-12-31
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,19 +23,23 @@ import duckdb
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from kabusys.backtest.metrics import BacktestMetrics, calc_metrics
-from kabusys.backtest.simulator import PortfolioSimulator
-from kabusys.data.calendar_management import get_trading_days
-from kabusys.portfolio import calc_equal_weights, calc_position_sizes, select_candidates
+from kabusys.backtest.metrics import BacktestMetrics, calc_metrics  # noqa: E402
+from kabusys.backtest.simulator import PortfolioSimulator  # noqa: E402
+from kabusys.data.calendar_management import get_trading_days  # noqa: E402
+from kabusys.portfolio import (  # noqa: E402
+    calc_equal_weights,
+    calc_position_sizes,
+    select_candidates,
+)
 
 logger = logging.getLogger(__name__)
 
 SCENARIOS: list[dict] = [
-    {"id": "BB1_base",          "period": 20, "sigma": 2.0, "regime_filter": False},
-    {"id": "BB2_tight",         "period": 20, "sigma": 1.5, "regime_filter": False},
-    {"id": "BB3_wide",          "period": 20, "sigma": 2.5, "regime_filter": False},
-    {"id": "BB4_base_regime",   "period": 20, "sigma": 2.0, "regime_filter": True},
-    {"id": "BB5_tight_regime",  "period": 20, "sigma": 1.5, "regime_filter": True},
+    {"id": "BB1_base", "period": 20, "sigma": 2.0, "regime_filter": False},
+    {"id": "BB2_tight", "period": 20, "sigma": 1.5, "regime_filter": False},
+    {"id": "BB3_wide", "period": 20, "sigma": 2.5, "regime_filter": False},
+    {"id": "BB4_base_regime", "period": 20, "sigma": 2.0, "regime_filter": True},
+    {"id": "BB5_tight_regime", "period": 20, "sigma": 1.5, "regime_filter": True},
 ]
 
 
@@ -242,7 +247,12 @@ def run_bb_scenario(
     trading_days = get_trading_days(conn, start_date, end_date)
     logger.info(
         "run_bb_scenario: start=%s end=%s period=%d sigma=%.1f regime=%s days=%d",
-        start_date, end_date, period, sigma, use_regime_filter, len(trading_days),
+        start_date,
+        end_date,
+        period,
+        sigma,
+        use_regime_filter,
+        len(trading_days),
     )
 
     for trading_day in trading_days:
@@ -255,8 +265,12 @@ def run_bb_scenario(
 
         prev_positions = set(sim.positions)
         sim.execute_orders(
-            next_day_orders, open_prices, slippage_rate, commission_rate,
-            trading_day, lot_size=lot_size,
+            next_day_orders,
+            open_prices,
+            slippage_rate,
+            commission_rate,
+            trading_day,
+            lot_size=lot_size,
         )
         new_holdings = set(sim.positions) - prev_positions
         closed_holdings = prev_positions - set(sim.positions)
@@ -353,10 +367,10 @@ def _print_results_table(results: list[dict]) -> None:
         m: BacktestMetrics = r["metrics"]
         print(
             f"{r['id']:<22}"
-            f" {m.cagr*100:>+6.1f}%"
+            f" {m.cagr * 100:>+6.1f}%"
             f" {m.sharpe_ratio:>7.3f}"
-            f" {m.max_drawdown*100:>6.1f}%"
-            f" {m.win_rate*100:>7.1f}%"
+            f" {m.max_drawdown * 100:>6.1f}%"
+            f" {m.win_rate * 100:>7.1f}%"
             f" {m.profit_factor:>6.2f}"
             f" {m.total_trades:>7d}"
             f" {m.avg_holding_days:>7.1f}d"
@@ -370,32 +384,44 @@ def _save_csv(results: list[dict], output_dir: Path) -> Path:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = output_dir / f"bb_reversal_{ts}.csv"
     fieldnames = [
-        "scenario", "period", "sigma", "regime_filter",
-        "cagr", "sharpe_ratio", "max_drawdown", "win_rate",
-        "payoff_ratio", "profit_factor", "total_trades",
-        "annual_volatility", "calmar_ratio", "avg_holding_days",
+        "scenario",
+        "period",
+        "sigma",
+        "regime_filter",
+        "cagr",
+        "sharpe_ratio",
+        "max_drawdown",
+        "win_rate",
+        "payoff_ratio",
+        "profit_factor",
+        "total_trades",
+        "annual_volatility",
+        "calmar_ratio",
+        "avg_holding_days",
     ]
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for r in results:
             m: BacktestMetrics = r["metrics"]
-            writer.writerow({
-                "scenario": r["id"],
-                "period": r["period"],
-                "sigma": r["sigma"],
-                "regime_filter": r["regime_filter"],
-                "cagr": round(m.cagr, 6),
-                "sharpe_ratio": round(m.sharpe_ratio, 6),
-                "max_drawdown": round(m.max_drawdown, 6),
-                "win_rate": round(m.win_rate, 6),
-                "payoff_ratio": round(m.payoff_ratio, 6),
-                "profit_factor": round(m.profit_factor, 6),
-                "total_trades": m.total_trades,
-                "annual_volatility": round(m.annual_volatility, 6),
-                "calmar_ratio": round(m.calmar_ratio, 6),
-                "avg_holding_days": round(m.avg_holding_days, 2),
-            })
+            writer.writerow(
+                {
+                    "scenario": r["id"],
+                    "period": r["period"],
+                    "sigma": r["sigma"],
+                    "regime_filter": r["regime_filter"],
+                    "cagr": round(m.cagr, 6),
+                    "sharpe_ratio": round(m.sharpe_ratio, 6),
+                    "max_drawdown": round(m.max_drawdown, 6),
+                    "win_rate": round(m.win_rate, 6),
+                    "payoff_ratio": round(m.payoff_ratio, 6),
+                    "profit_factor": round(m.profit_factor, 6),
+                    "total_trades": m.total_trades,
+                    "annual_volatility": round(m.annual_volatility, 6),
+                    "calmar_ratio": round(m.calmar_ratio, 6),
+                    "avg_holding_days": round(m.avg_holding_days, 2),
+                }
+            )
     return path
 
 

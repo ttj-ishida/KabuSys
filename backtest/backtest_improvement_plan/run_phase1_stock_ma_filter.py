@@ -1,40 +1,40 @@
-"""Phase 1 Group K バックテスト（I1 弱点克服フィルター検証）
+"""Phase 1 銘柄単位 MA200 フィルター検証バックテスト（Group H）
 
-I1 設定（CAGR 7.72%、Max DD 24.96%、PF 1.297、Sharpe 0.382）の弱点を克服するため、
-以下の新規フィルターを単体・複合で検証する:
-  - RSI 売られすぎフィルター（rsi_14 <= 40）
-  - クオリティスコアフィルター（quality_score >= -0.5）
-  - 出来高ブレイクアウトフィルター（volume_ratio >= 1.2）
-  - TOPIX 相対強度フィルター（topix_rel_20 >= -0.10）
-  - アダプティブ閾値（TOPIX が MA200 +5% 超で threshold を 0.62 に引き上げ）
+Group E・F・G の結果から TOPIX 指数ベアガードの閾値最適化だけでは採択基準に届かないことが
+確認された（2026-05-20）。本スクリプトは TOPIX BG を完全 OFF とし、銘柄ごとの 200 日移動
+平均フィルターに置き換えた場合の 9 年通算パフォーマンスを定量化する。
+
+Group G・F の知見（util=30% が Max DD 最近接、threshold=0.62 が 2017 年問題を解消）を
+組み込んだ複合設定 H5 が採択基準（CAGR>5%, Max DD<25%, PF>1.1）を同時達成できるか検証する。
 
 固定設定（全シナリオ共通）:
-  max_utilization : 0.30
-  use_ma200_filter: True
-  stock_MA_cross  : OFF
-  max_positions   : 3
-  TOPIX BG        : OFF（weak=1.0 / strong=1.0）
-  DD stop         : 12%（dd_timeout=30日）
-  stop_loss       : 9%
-  max_holding_days: 60日
-  trailing_stop_atr: 2.0
-  threshold       : 0.58（一部シナリオはアダプティブで 0.62 に切り替わる）
-  期間            : 2017-01-01〜2025-12-31
+  max_positions  : 3
+  TOPIX BG       : OFF（weak=1.0 / strong=1.0）
+  DD stop        : 12%（dd_timeout=30日）
+  stop_loss      : 9%（Group F・G で変更の効果なしと判明）
+  期間           : 2017-01-01〜2025-12-31
 
-Group K シナリオ:
-  K1_i1_ref         : フィルターなし（I1 完全再現）
-  K2_rsi_oversold   : RSI <= 40 のみ（売られすぎ確認）
-  K3_quality        : quality_score >= -0.5
-  K4_volume         : volume_ratio >= 1.2（出来高ブレイクアウト）
-  K5_topix_rel      : topix_rel_20 >= -0.10（TOPIX 相対強度）
-  K6_adaptive_thr   : アダプティブ閾値（TOPIX MA200 +5% で 0.62）
-  K7_rsi_quality    : K2 + K3 複合
-  K8_rsi_quality_vol: K2 + K3 + K4 複合（最有力候補）
-  K9_adaptive_rsi   : K6 + K2 複合（強気相場でシグナル精度 + 逆張り確認）
+Group H シナリオ:
+  H1_a3_ref               : util=50%, thr=0.58, ma200=OFF  A3 参照（= G1）
+  H2_ma200_only           : util=50%, thr=0.58, ma200=ON   MA200 単体の寄与
+  H3_util30_ma200         : util=30%, thr=0.58, ma200=ON   G3 知見（Max DD 最近接）+ MA200
+  H4_thr62_ma200          : util=50%, thr=0.62, ma200=ON   F5 知見（2017年修正）+ MA200
+  H5_util30_thr62_ma200   : util=30%, thr=0.62, ma200=ON   最有力複合設定
+
+読み方:
+  H1 → H2: MA200 フィルター単体の効果（CAGR/MDD トレードオフ）
+  H2 → H3: util=30% との相乗効果（Max DD を 25% 以下に押し込めるか）
+  H2 → H4: threshold=0.62 の 9 年通算効果（2017 年改善 vs 他年トレード数減少）
+  H5 : CAGR>5% かつ Max DD<25% の同時達成を狙う最重要シナリオ
+
+採択判断ロジック:
+  H5 が採択基準を満たす → H5 設定を Phase 1 採用。Group I は不要
+  H5 が未達            → Group I（銘柄 MA25/75 クロス実装）へ進む
+  H2 で CAGR < 5%      → MA200 単体フィルターは効果薄。Group I へスキップ
 
 Usage:
-    python backtest/backtest_improvement_plan/run_phase1_group_k.py
-    python backtest/backtest_improvement_plan/run_phase1_group_k.py --workers 4
+    python backtest/backtest_improvement_plan/run_phase1_stock_ma_filter.py
+    python backtest/backtest_improvement_plan/run_phase1_stock_ma_filter.py --workers 5
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
+import locale
 import shutil
 import subprocess
 import sys
@@ -54,7 +54,8 @@ from pathlib import Path
 # 定数
 # ---------------------------------------------------------------------------
 
-DEFAULT_WORKERS = 4
+SUBPROCESS_ENCODING = locale.getpreferredencoding(False) or "cp932"
+DEFAULT_WORKERS = 5
 
 
 def _find_repo_root() -> Path:
@@ -67,7 +68,7 @@ def _find_repo_root() -> Path:
 
 REPO_ROOT = _find_repo_root()
 ENV_PATH = REPO_ROOT / ".env"
-ARTIFACTS_ROOT = REPO_ROOT / "artifacts" / "backtest" / "backtest_phase1_group_k"
+ARTIFACTS_ROOT = REPO_ROOT / "artifacts" / "backtest" / "backtest_phase1_ma200_filter"
 
 # ---------------------------------------------------------------------------
 # 共通パラメータ（全シナリオ固定）
@@ -76,17 +77,14 @@ ARTIFACTS_ROOT = REPO_ROOT / "artifacts" / "backtest" / "backtest_phase1_group_k
 _COM = {
     "cash": 1_000_000,
     "allocation_method": "equal",
+    "trailing_stop_atr": 2.0,
+    "max_holding_days": 60,
     "max_position_pct": 0.22,
     "risk_pct": 0.005,
     "max_positions": 3,
-    "max_utilization": 0.30,
-    "use_ma200_filter": True,
-    "stop_loss_pct": 0.09,
-    "max_holding_days": 60,
-    "trailing_stop_atr": 2.0,
-    "threshold": 0.58,
     "dd_stop": 0.12,
     "dd_timeout": 30,
+    "stop_loss_pct": 0.09,
     # TOPIX BG は全シナリオで OFF
     "weak_bear": 1.00,
     "strong_bear": 1.00,
@@ -95,70 +93,53 @@ _COM = {
 }
 
 # ---------------------------------------------------------------------------
-# Group K シナリオ定義
+# Group H シナリオ定義
 # ---------------------------------------------------------------------------
 
-_GROUP_K: list[dict] = [
+_GROUP_H: list[dict] = [
     {
-        "name": "K1_i1_ref",
-        "group": "K",
-        "desc": "I1 完全再現（参照）",
+        "name": "H1_a3_ref",
+        "group": "H",
+        "max_utilization": 0.50,
+        "threshold": 0.58,
+        "use_ma200_filter": False,
+        "desc": "A3 参照（= G1。MA200 なし）",
     },
     {
-        "name": "K2_rsi_oversold",
-        "group": "K",
-        "rsi_oversold_max": 40.0,
-        "desc": "RSI <= 40 フィルター（売られすぎ確認）",
+        "name": "H2_ma200_only",
+        "group": "H",
+        "max_utilization": 0.50,
+        "threshold": 0.58,
+        "use_ma200_filter": True,
+        "desc": "MA200 フィルター単体の寄与",
     },
     {
-        "name": "K3_quality",
-        "group": "K",
-        "quality_score_min": -0.5,
-        "desc": "クオリティスコア >= -0.5 フィルター",
+        "name": "H3_util30_ma200",
+        "group": "H",
+        "max_utilization": 0.30,
+        "threshold": 0.58,
+        "use_ma200_filter": True,
+        "desc": "util=30%（G3 知見）+ MA200",
     },
     {
-        "name": "K4_volume",
-        "group": "K",
-        "volume_breakout_threshold": 1.2,
-        "desc": "出来高ブレイクアウト >= 1.2x フィルター",
+        "name": "H4_thr62_ma200",
+        "group": "H",
+        "max_utilization": 0.50,
+        "threshold": 0.62,
+        "use_ma200_filter": True,
+        "desc": "threshold=0.62（F5 知見・2017年修正）+ MA200",
     },
     {
-        "name": "K5_topix_rel",
-        "group": "K",
-        "topix_rel_min": -0.10,
-        "desc": "TOPIX 20日相対強度 >= -10% フィルター",
-    },
-    {
-        "name": "K6_adaptive_thr",
-        "group": "K",
-        "adaptive_threshold": True,
-        "desc": "アダプティブ閾値（TOPIX MA200 +5% 超で 0.62）",
-    },
-    {
-        "name": "K7_rsi_quality",
-        "group": "K",
-        "rsi_oversold_max": 40.0,
-        "quality_score_min": -0.5,
-        "desc": "RSI + クオリティ複合",
-    },
-    {
-        "name": "K8_rsi_quality_vol",
-        "group": "K",
-        "rsi_oversold_max": 40.0,
-        "quality_score_min": -0.5,
-        "volume_breakout_threshold": 1.2,
-        "desc": "RSI + クオリティ + 出来高 複合（最有力候補）",
-    },
-    {
-        "name": "K9_adaptive_rsi",
-        "group": "K",
-        "adaptive_threshold": True,
-        "rsi_oversold_max": 40.0,
-        "desc": "アダプティブ閾値 + RSI 複合",
+        "name": "H5_util30_thr62_ma200",
+        "group": "H",
+        "max_utilization": 0.30,
+        "threshold": 0.62,
+        "use_ma200_filter": True,
+        "desc": "util=30% + threshold=0.62 + MA200（最有力複合）",
     },
 ]
 
-ALL_SCENARIOS: list[dict] = _GROUP_K
+ALL_SCENARIOS: list[dict] = _GROUP_H
 
 # ---------------------------------------------------------------------------
 # ユーティリティ
@@ -206,7 +187,7 @@ def _build_command(db_path: Path, scenario: dict, output_dir: Path) -> list[str]
         "--max-position-pct",
         str(_COM["max_position_pct"]),
         "--max-utilization",
-        str(_COM["max_utilization"]),
+        str(scenario["max_utilization"]),
         "--risk-pct",
         str(_COM["risk_pct"]),
         "--stop-loss-pct",
@@ -218,7 +199,7 @@ def _build_command(db_path: Path, scenario: dict, output_dir: Path) -> list[str]
         "--trailing-stop-atr",
         str(_COM["trailing_stop_atr"]),
         "--threshold",
-        str(_COM["threshold"]),
+        str(scenario["threshold"]),
         "--topix-size-multiplier-weak-bear",
         str(_COM["weak_bear"]),
         "--topix-size-multiplier-strong-bear",
@@ -232,21 +213,8 @@ def _build_command(db_path: Path, scenario: dict, output_dir: Path) -> list[str]
         "--output-dir",
         str(output_dir),
     ]
-    if _COM.get("use_ma200_filter"):
+    if scenario.get("use_ma200_filter"):
         cmd.append("--ma200-filter")
-
-    # シナリオ固有フィルター
-    if scenario.get("rsi_oversold_max") is not None:
-        cmd += ["--rsi-oversold-max", str(scenario["rsi_oversold_max"])]
-    if scenario.get("quality_score_min") is not None:
-        cmd += ["--quality-score-min", str(scenario["quality_score_min"])]
-    if scenario.get("volume_breakout_threshold") is not None:
-        cmd += ["--volume-breakout-threshold", str(scenario["volume_breakout_threshold"])]
-    if scenario.get("topix_rel_min") is not None:
-        cmd += ["--topix-rel-min", str(scenario["topix_rel_min"])]
-    if scenario.get("adaptive_threshold"):
-        cmd.append("--adaptive-threshold")
-
     return cmd
 
 
@@ -254,8 +222,7 @@ def _read_summary(report_dir: Path) -> dict:
     summaries = list(report_dir.glob("*/summary.json"))
     if not summaries:
         raise FileNotFoundError(f"summary.json が見つかりません: {report_dir}")
-    latest = max(summaries, key=lambda p: p.stat().st_mtime)
-    data = json.loads(latest.read_text(encoding="utf-8"))
+    data = json.loads(summaries[0].read_text(encoding="utf-8"))
     headline = data.get("headline", {})
     trades = data.get("trades", {})
     meta = data.get("meta", {})
@@ -300,20 +267,13 @@ def _run_batch(args: tuple) -> list[dict]:
 
         cmd = _build_command(Path(snapshot_db), scenario, report_dir)
 
-        env = os.environ.copy()
-        src_path = str(repo_root / "src")
-        existing = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = os.pathsep.join(filter(None, [src_path, existing]))
-        env["PYTHONIOENCODING"] = "utf-8"
-
         completed = subprocess.run(
             cmd,
             cwd=str(repo_root),
             capture_output=True,
             text=True,
-            encoding="utf-8",
+            encoding=SUBPROCESS_ENCODING,
             errors="replace",
-            env=env,
         )
 
         (scenario_dir / "stdout.log").write_text(completed.stdout or "", encoding="utf-8")
@@ -334,20 +294,20 @@ def _run_batch(args: tuple) -> list[dict]:
         record = {
             "name": name,
             "group": scenario["group"],
-            "rsi_oversold_max": scenario.get("rsi_oversold_max", ""),
-            "quality_score_min": scenario.get("quality_score_min", ""),
-            "volume_breakout_threshold": scenario.get("volume_breakout_threshold", ""),
-            "topix_rel_min": scenario.get("topix_rel_min", ""),
-            "adaptive_threshold": scenario.get("adaptive_threshold", False),
+            "max_utilization": scenario["max_utilization"],
+            "threshold": scenario["threshold"],
+            "use_ma200_filter": scenario["use_ma200_filter"],
             "desc": scenario.get("desc", ""),
             **metrics,
             "error": False,
         }
         results.append(record)
 
-        filters_str = _format_filters(scenario)
         print(
-            f"[DONE] {name:<25} {filters_str:<35}"
+            f"[DONE] {name}\t"
+            f"util={scenario['max_utilization']:.2f} "
+            f"thr={scenario['threshold']:.2f} "
+            f"ma200={scenario['use_ma200_filter']}\t"
             f"cagr={_fmt(metrics.get('cagr'), 4)}\t"
             f"sharpe={_fmt(metrics.get('sharpe'), 3)}\t"
             f"dd={_fmt(metrics.get('max_drawdown'), 4)}\t"
@@ -358,21 +318,6 @@ def _run_batch(args: tuple) -> list[dict]:
     return results
 
 
-def _format_filters(scenario: dict) -> str:
-    parts = []
-    if scenario.get("rsi_oversold_max") is not None:
-        parts.append(f"rsi<={scenario['rsi_oversold_max']:.0f}")
-    if scenario.get("quality_score_min") is not None:
-        parts.append(f"qual>={scenario['quality_score_min']}")
-    if scenario.get("volume_breakout_threshold") is not None:
-        parts.append(f"vol>={scenario['volume_breakout_threshold']}")
-    if scenario.get("topix_rel_min") is not None:
-        parts.append(f"trel>={scenario['topix_rel_min']}")
-    if scenario.get("adaptive_threshold"):
-        parts.append("adaptive")
-    return " ".join(parts) if parts else "none"
-
-
 # ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
@@ -380,11 +325,9 @@ def _format_filters(scenario: dict) -> str:
 CSV_FIELDNAMES = [
     "name",
     "group",
-    "rsi_oversold_max",
-    "quality_score_min",
-    "volume_breakout_threshold",
-    "topix_rel_min",
-    "adaptive_threshold",
+    "max_utilization",
+    "threshold",
+    "use_ma200_filter",
     "desc",
     "run_id",
     "created_at",
@@ -398,52 +341,16 @@ CSV_FIELDNAMES = [
     "total_trades",
 ]
 
-_CAGR_MIN = 0.05
-_DD_MAX = 0.25
-_PF_MIN = 1.1
-_SHARPE_MIN = 0.5
-
-
-def _all_criteria(r: dict) -> bool:
-    return (
-        r.get("cagr") is not None
-        and r["cagr"] > _CAGR_MIN
-        and r.get("max_drawdown") is not None
-        and r["max_drawdown"] < _DD_MAX
-        and r.get("profit_factor") is not None
-        and r["profit_factor"] > _PF_MIN
-        and r.get("sharpe") is not None
-        and r["sharpe"] > _SHARPE_MIN
-    )
-
-
-def _three_criteria(r: dict) -> bool:
-    """Sharpe を除く 3 指標が採用基準を満たすか"""
-    return (
-        r.get("cagr") is not None
-        and r["cagr"] > _CAGR_MIN
-        and r.get("max_drawdown") is not None
-        and r["max_drawdown"] < _DD_MAX
-        and r.get("profit_factor") is not None
-        and r["profit_factor"] > _PF_MIN
-    )
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Phase 1 Group K バックテスト（I1 弱点克服フィルター検証）"
+        description="Phase 1 銘柄単位 MA200 フィルター検証バックテスト（Group H）"
     )
     parser.add_argument(
         "--workers",
         type=int,
         default=DEFAULT_WORKERS,
         help=f"並列ワーカー数（デフォルト: {DEFAULT_WORKERS}）",
-    )
-    parser.add_argument(
-        "--keep-snapshots",
-        action="store_true",
-        default=False,
-        help="実行後もDBスナップショットを削除せず保持する（デフォルト: 削除）",
     )
     args = parser.parse_args()
 
@@ -455,10 +362,6 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     source_db = _get_db_path()
-    if not source_db.exists():
-        sys.exit(
-            f"[ERROR] DuckDB が見つかりません: {source_db}. .env の DUCKDB_PATH を確認してください"
-        )
     snapshots_dir = output_dir / "_snapshots"
     snapshots_dir.mkdir()
 
@@ -491,24 +394,17 @@ def main() -> None:
 
     all_results: list[dict] = []
     print(f"\n並列実行開始: {datetime.now().strftime('%H:%M:%S')}")
-    print("-" * 120)
+    print("-" * 100)
 
-    try:
-        with ProcessPoolExecutor(max_workers=n_workers) as executor:
-            futures = {executor.submit(_run_batch, ba): i for i, ba in enumerate(batch_args)}
-            for future in as_completed(futures):
-                worker_idx = futures[future]
-                try:
-                    batch_results = future.result()
-                    all_results.extend(batch_results)
-                except Exception as exc:
-                    print(f"[ERROR] worker {worker_idx} で例外: {exc}", file=sys.stderr)
-    finally:
-        if not args.keep_snapshots:
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        futures = {executor.submit(_run_batch, ba): i for i, ba in enumerate(batch_args)}
+        for future in as_completed(futures):
+            worker_idx = futures[future]
             try:
-                shutil.rmtree(snapshots_dir)
-            except Exception as e:
-                print(f"[WARN] スナップショット削除失敗: {e}", file=sys.stderr)
+                batch_results = future.result()
+                all_results.extend(batch_results)
+            except Exception as exc:
+                print(f"[ERROR] worker {worker_idx} で例外: {exc}", file=sys.stderr)
 
     all_results.sort(key=lambda r: r.get("name", ""))
 
@@ -524,25 +420,36 @@ def main() -> None:
         for r in all_results:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
-    print("-" * 120)
+    print("-" * 100)
     print(f"\n完了: {datetime.now().strftime('%H:%M:%S')}")
     print(f"成功: {len(success)} / {len(scenarios)}, 失敗: {len(failed)}")
     print(f"results_csv={results_csv}")
 
     if success:
-        print("\n--- Group K: I1 弱点克服フィルター検証結果 ---")
+        print("\n--- Group H: 銘柄単位 MA200 フィルター結果 ---")
         print(
-            f"{'name':<25} {'filters':<35}"
+            f"{'name':<28} {'util':>5} {'thr':>5} {'ma200':>6}"
             f" {'cagr':>8} {'sharpe':>7} {'max_dd':>8} {'pf':>6} {'trades':>7}  desc"
         )
-        print("-" * 120)
+        print("-" * 100)
         for r in success:
-            adopted = _all_criteria(r)
+            cagr_val = r.get("cagr")
+            dd_val = r.get("max_drawdown")
+            pf_val = r.get("profit_factor")
+            adopted = (
+                cagr_val is not None
+                and cagr_val > 0.05
+                and dd_val is not None
+                and dd_val < 0.25
+                and pf_val is not None
+                and pf_val > 1.1
+            )
             marker = " ★採択候補" if adopted else ""
-            filters_str = _format_filters(r)
             print(
-                f"{r['name']:<25}"
-                f" {filters_str:<35}"
+                f"{r['name']:<28}"
+                f" {_fmt(r.get('max_utilization'), 2):>5}"
+                f" {_fmt(r.get('threshold'), 2):>5}"
+                f" {str(r.get('use_ma200_filter', '')):>6}"
                 f" {_fmt(r.get('cagr'), 4):>8}"
                 f" {_fmt(r.get('sharpe'), 3):>7}"
                 f" {_fmt(r.get('max_drawdown'), 4):>8}"
@@ -551,41 +458,25 @@ def main() -> None:
                 f"  {r.get('desc', '')}{marker}"
             )
 
-        print("\n採択判断:")
-        adopted_scenarios = [r for r in success if _all_criteria(r)]
-        k1 = next((r for r in success if r["name"] == "K1_i1_ref"), None)
-        if adopted_scenarios:
-            best = max(adopted_scenarios, key=lambda r: r.get("sharpe") or 0.0)
-            print(
-                f"  → {best['name']} が全採用基準（CAGR>{_CAGR_MIN * 100:.0f}%, "
-                f"Max DD<{_DD_MAX * 100:.0f}%, PF>{_PF_MIN}, Sharpe>{_SHARPE_MIN}）を達成: 採用"
-            )
+        print("\n採択基準: CAGR>5%, Sharpe>0.5, Max DD<25%, PF>1.1")
+        adopted_list = [
+            r
+            for r in success
+            if (r.get("cagr") or 0) > 0.05
+            and (r.get("max_drawdown") or 1) < 0.25
+            and (r.get("profit_factor") or 0) > 1.1
+        ]
+        if adopted_list:
+            print(f"★ 採択基準（CAGR/Max DD/PF）通過: {[r['name'] for r in adopted_list]}")
+            print("  → Sharpe > 0.5 も確認して Phase 1 採用を検討してください")
         else:
-            improved_three = [
-                r
-                for r in success
-                if _three_criteria(r)
-                and r["name"] != "K1_i1_ref"
-                and (k1 is None or (r.get("sharpe") or 0) >= (k1.get("sharpe") or 0))
-            ]
-            if improved_three:
-                best3 = max(improved_three, key=lambda r: r.get("sharpe") or 0.0)
-                print(
-                    f"  → Sharpe>{_SHARPE_MIN} 達成なし。{best3['name']} が 3 指標を維持しつつ"
-                    f" Sharpe={_fmt(best3.get('sharpe'), 3)} を達成。詳細確認を推奨"
-                )
-            elif k1 and _three_criteria(k1):
-                print(
-                    f"  → 全フィルターで Sharpe>{_SHARPE_MIN} 達成なし。"
-                    "K1（I1 参照）の 3 指標維持を確認 → I1 設定を継続採用"
-                )
-            else:
-                print(
-                    "  → いずれのシナリオも採用基準を満たしていません。別アプローチを検討してください"
-                )
+            print("★ 採択基準（CAGR>5% かつ Max DD<25% かつ PF>1.1）を満たすシナリオなし")
+            print("  → Group I（銘柄単位 MA25/75 クロス実装）への移行を検討してください")
 
     if failed:
-        print(f"\n失敗したシナリオ: {[r['name'] for r in failed]}")
+        print("\n--- 失敗シナリオ ---")
+        for r in failed:
+            print(f"  {r['name']}")
 
 
 if __name__ == "__main__":

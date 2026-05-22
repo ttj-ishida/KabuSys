@@ -1,4 +1,5 @@
 """tests/test_bb_reversal.py - BB逆張り戦略ヘルパー単体テスト"""
+
 from __future__ import annotations
 
 import sys
@@ -6,9 +7,10 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import duckdb
-import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backtest" / "backtest_improvement_plan"))
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[1] / "backtest" / "backtest_improvement_plan")
+)
 from run_bb_reversal import (
     _compute_bb_rows,
     _generate_buy_signals,
@@ -38,6 +40,7 @@ def _dates(n: int, start: date = date(2024, 1, 2)) -> list[date]:
 
 # ----- _compute_bb_rows -----
 
+
 def test_bb_rows_basic_structure():
     prices = [(_dates(25)[i], "1001", 1000.0 + i * 2) for i in range(25)]
     conn = _price_db(prices)
@@ -64,6 +67,7 @@ def test_bb_rows_zero_std_excluded():
 
 
 # ----- _generate_buy_signals -----
+
 
 def test_buy_signal_when_close_below_lower_band():
     bb_rows = [("1001", 800.0, 900.0, 1000.0)]
@@ -100,6 +104,7 @@ def test_buy_signals_have_sequential_rank():
 
 # ----- _generate_sell_signals -----
 # held_trading_days: 保有営業日数カウンタ（BUY 約定日を1日目として毎営業日インクリメント）
+
 
 def test_sell_on_middle_band_return():
     signals = _generate_sell_signals(
@@ -157,6 +162,7 @@ def test_sell_on_max_holding_days():
 
 
 # ----- _is_buy_blocked_by_regime -----
+
 
 class TestIsBuyBlockedByRegime:
     """_is_buy_blocked_by_regime の単体テスト。"""
