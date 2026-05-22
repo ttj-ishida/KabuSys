@@ -114,26 +114,46 @@ def _generate_buy_signals(
 
 
 def _generate_sell_signals(
-    bb_rows: list[tuple[str, float, float, float]],
-    holdings: set[str],
-) -> list[str]:
-    """ミドルバンド以上に回復した保有銘柄コードリストを返す。
+    close_prices: dict[str, float],
+    positions: dict[str, int],
+    cost_basis: dict[str, float],
+    held_trading_days: dict[str, int],
+    middle_bands: dict[str, float],
+    stop_loss_rate: float,
+    max_holding_days: int,
+) -> list[dict]:
+    """保有ポジションに対してエグジット条件を判定し SELL シグナルを返す。
 
-    Args:
-        bb_rows: [(code, close, lower_band, middle_band), ...]
-        holdings: 現在保有中の銘柄コードセット
-
-    Returns:
-        close >= middle_band かつ holdings に含まれる銘柄コードリスト
+    優先順位:
+      1. ストップロス: pnl_rate <= -stop_loss_rate
+      2. 時間決済: held_trading_days >= max_holding_days
+      3. 利確（中心線回帰）: close >= middle_band
     """
-    bb_map = {code: (close, middle_band) for code, close, _lb, middle_band in bb_rows}
-    result: list[str] = []
-    for code in holdings:
-        if code in bb_map:
-            close, middle_band = bb_map[code]
-            if close >= middle_band:
-                result.append(code)
-    return result
+    sell_signals: list[dict] = []
+    for code, shares in positions.items():
+        if shares <= 0:
+            continue
+        close = close_prices.get(code)
+        if close is None:
+            continue
+        avg_price = cost_basis.get(code, 0.0)
+        if avg_price <= 0:
+            continue
+
+        pnl_rate = (close - avg_price) / avg_price
+        if pnl_rate <= -stop_loss_rate:
+            sell_signals.append({"code": code})
+            continue
+
+        if held_trading_days.get(code, 0) >= max_holding_days:
+            sell_signals.append({"code": code})
+            continue
+
+        middle = middle_bands.get(code)
+        if middle is not None and close >= middle:
+            sell_signals.append({"code": code})
+
+    return sell_signals
 
 
 def _is_buy_blocked_by_regime(

@@ -96,3 +96,61 @@ def test_buy_signals_have_sequential_rank():
     signals = _generate_buy_signals(bb_rows, {"1001", "1002"}, set())
     assert len(signals) == 2
     assert {s["signal_rank"] for s in signals} == {1, 2}
+
+
+# ----- _generate_sell_signals -----
+# held_trading_days: 保有営業日数カウンタ（BUY 約定日を1日目として毎営業日インクリメント）
+
+def test_sell_on_middle_band_return():
+    signals = _generate_sell_signals(
+        close_prices={"1001": 1010.0},
+        positions={"1001": 100},
+        cost_basis={"1001": 950.0},
+        held_trading_days={"1001": 5},
+        middle_bands={"1001": 1000.0},
+        stop_loss_rate=0.08,
+        max_holding_days=20,
+    )
+    assert any(s["code"] == "1001" for s in signals)
+
+
+def test_sell_on_stop_loss():
+    # pnl = (850 - 1000) / 1000 = -15% → -8% 超過
+    signals = _generate_sell_signals(
+        close_prices={"1001": 850.0},
+        positions={"1001": 100},
+        cost_basis={"1001": 1000.0},
+        held_trading_days={"1001": 3},
+        middle_bands={"1001": 1000.0},
+        stop_loss_rate=0.08,
+        max_holding_days=20,
+    )
+    assert any(s["code"] == "1001" for s in signals)
+
+
+def test_no_sell_when_below_middle_and_above_stop():
+    # close=950, middle=1000, cost=1000 → pnl=-5% (>-8%), close<middle → no SELL
+    signals = _generate_sell_signals(
+        close_prices={"1001": 950.0},
+        positions={"1001": 100},
+        cost_basis={"1001": 1000.0},
+        held_trading_days={"1001": 5},
+        middle_bands={"1001": 1000.0},
+        stop_loss_rate=0.08,
+        max_holding_days=20,
+    )
+    assert signals == []
+
+
+def test_sell_on_max_holding_days():
+    # 21 営業日 >= 20 → time_exit SELL
+    signals = _generate_sell_signals(
+        close_prices={"1001": 980.0},
+        positions={"1001": 100},
+        cost_basis={"1001": 1000.0},
+        held_trading_days={"1001": 21},
+        middle_bands={"1001": 1000.0},
+        stop_loss_rate=0.08,
+        max_holding_days=20,
+    )
+    assert any(s["code"] == "1001" for s in signals)
