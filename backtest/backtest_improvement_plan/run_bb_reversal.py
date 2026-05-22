@@ -335,3 +335,107 @@ def run_bb_scenario(
         next_day_orders += [{"code": s["code"], "side": "sell"} for s in sell_signals]
 
     return calc_metrics(sim.history, sim.trades)
+
+
+# ---------------------------------------------------------------------------
+# 出力・CLI
+# ---------------------------------------------------------------------------
+
+
+def _print_results_table(results: list[dict]) -> None:
+    header = (
+        f"{'scenario':<22} {'CAGR':>7} {'Sharpe':>7} {'MaxDD':>7}"
+        f" {'WinRate':>8} {'PF':>6} {'Trades':>7} {'AvgHold':>8}"
+    )
+    print(header)
+    print("-" * len(header))
+    for r in results:
+        m: BacktestMetrics = r["metrics"]
+        print(
+            f"{r['id']:<22}"
+            f" {m.cagr*100:>+6.1f}%"
+            f" {m.sharpe_ratio:>7.3f}"
+            f" {m.max_drawdown*100:>6.1f}%"
+            f" {m.win_rate*100:>7.1f}%"
+            f" {m.profit_factor:>6.2f}"
+            f" {m.total_trades:>7d}"
+            f" {m.avg_holding_days:>7.1f}d"
+        )
+
+
+def _save_csv(results: list[dict], output_dir: Path) -> Path:
+    from datetime import datetime
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = output_dir / f"bb_reversal_{ts}.csv"
+    fieldnames = [
+        "scenario", "period", "sigma", "regime_filter",
+        "cagr", "sharpe_ratio", "max_drawdown", "win_rate",
+        "payoff_ratio", "profit_factor", "total_trades",
+        "annual_volatility", "calmar_ratio", "avg_holding_days",
+    ]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for r in results:
+            m: BacktestMetrics = r["metrics"]
+            writer.writerow({
+                "scenario": r["id"],
+                "period": r["period"],
+                "sigma": r["sigma"],
+                "regime_filter": r["regime_filter"],
+                "cagr": round(m.cagr, 6),
+                "sharpe_ratio": round(m.sharpe_ratio, 6),
+                "max_drawdown": round(m.max_drawdown, 6),
+                "win_rate": round(m.win_rate, 6),
+                "payoff_ratio": round(m.payoff_ratio, 6),
+                "profit_factor": round(m.profit_factor, 6),
+                "total_trades": m.total_trades,
+                "annual_volatility": round(m.annual_volatility, 6),
+                "calmar_ratio": round(m.calmar_ratio, 6),
+                "avg_holding_days": round(m.avg_holding_days, 2),
+            })
+    return path
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    parser = argparse.ArgumentParser(description="BB逆張り戦略バックテスト調査")
+    parser.add_argument("--db", required=True, help="DuckDB ファイルパス")
+    parser.add_argument("--start", required=True, help="開始日 YYYY-MM-DD")
+    parser.add_argument("--end", required=True, help="終了日 YYYY-MM-DD")
+    parser.add_argument("--cash", type=float, default=10_000_000)
+    parser.add_argument("--max-positions", type=int, default=5)
+    parser.add_argument("--output-dir", default="artifacts")
+    args = parser.parse_args()
+
+    start_date = date.fromisoformat(args.start)
+    end_date = date.fromisoformat(args.end)
+
+    conn = duckdb.connect(args.db, read_only=True)
+    try:
+        results = []
+        for scenario in SCENARIOS:
+            print(f"\n▶ Running {scenario['id']} ...")
+            metrics = run_bb_scenario(
+                conn=conn,
+                start_date=start_date,
+                end_date=end_date,
+                period=scenario["period"],
+                sigma=scenario["sigma"],
+                use_regime_filter=scenario["regime_filter"],
+                initial_cash=args.cash,
+                max_positions=args.max_positions,
+            )
+            results.append({**scenario, "metrics": metrics})
+        print("\n" + "=" * 70)
+        _print_results_table(results)
+        csv_path = _save_csv(results, Path(args.output_dir))
+        print(f"\nCSV 保存: {csv_path}")
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    main()
