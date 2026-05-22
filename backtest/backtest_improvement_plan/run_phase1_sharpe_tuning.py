@@ -510,14 +510,13 @@ def main() -> None:
         if adopted_scenarios:
             best = max(adopted_scenarios, key=lambda r: r.get("sharpe") or 0.0)
             print(
-                f"  → {best['name']} が全採用基準（CAGR>{_CAGR_MIN*100:.0f}%, "
-                f"Max DD<{_DD_MAX*100:.0f}%, PF>{_PF_MIN}, Sharpe>{_SHARPE_MIN}）を達成: 採用"
+                f"  → {best['name']} が全採用基準（CAGR>{_CAGR_MIN * 100:.0f}%, "
+                f"Max DD<{_DD_MAX * 100:.0f}%, PF>{_PF_MIN}, Sharpe>{_SHARPE_MIN}）を達成: 採用"
             )
         else:
             j1 = next((r for r in success if r["name"] == "J1_i1_ref"), None)
             sharpe_improved = [
-                r for r in success
-                if r.get("sharpe") is not None and r["sharpe"] > _SHARPE_MIN
+                r for r in success if r.get("sharpe") is not None and r["sharpe"] > _SHARPE_MIN
             ]
             if sharpe_improved:
                 print(
