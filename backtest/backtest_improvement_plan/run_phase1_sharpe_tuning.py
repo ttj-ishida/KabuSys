@@ -425,6 +425,10 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     source_db = _get_db_path()
+    if not source_db.exists():
+        sys.exit(
+            f"[ERROR] DuckDB が見つかりません: {source_db}. .env の DUCKDB_PATH を確認してください"
+        )
     snapshots_dir = output_dir / "_snapshots"
     snapshots_dir.mkdir()
 
@@ -528,6 +532,19 @@ def main() -> None:
             )
         else:
             j1 = next((r for r in success if r["name"] == "J1_i1_ref"), None)
+            # Sharpe は J1 より改善したが Max DD が基準を超えたシナリオ（改悪判定）
+            worse_tradeoff = [
+                r
+                for r in success
+                if r.get("sharpe") is not None
+                and (j1 is None or r["sharpe"] > (j1.get("sharpe") or -1))
+                and (r.get("max_drawdown") or 1) >= _DD_MAX
+            ]
+            if worse_tradeoff:
+                names = [r["name"] for r in worse_tradeoff]
+                print(
+                    f"  → {names} は Sharpe が改善したが Max DD≥{_DD_MAX * 100:.0f}% のため改悪判定。I1 を維持"
+                )
             sharpe_improved = [
                 r for r in success if r.get("sharpe") is not None and r["sharpe"] > _SHARPE_MIN
             ]

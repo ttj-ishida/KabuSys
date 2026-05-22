@@ -1004,7 +1004,7 @@ Sharpe = CAGR / 年次リターンの標準偏差。改善のアプローチは2
 
 ### 22.3 Group J シナリオ定義
 
-**ベース設定（全シナリオ共通）**: util=30%, MA200=ON, TOPIX BG=OFF, DD stop=12%, threshold=0.58, stop_loss=9%, 期間 2017〜2025
+**ベース設定（全シナリオ共通）**: util=30%, MA200=ON, TOPIX BG=OFF, DD stop=12%, threshold=0.58, stop_loss=9%, min_holding_days=5, 期間 2017〜2025
 
 | シナリオ | max_holding_days | trailing_stop_atr | threshold | 狙い |
 |---|---|---|---|---|
