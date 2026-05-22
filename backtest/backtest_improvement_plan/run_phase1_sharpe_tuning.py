@@ -20,8 +20,8 @@ Group J シナリオ（可変パラメータ: max_holding_days / trailing_stop_a
   J4_atr15       : hold=60, atr=1.5, thr=0.58  ATR 係数を 1.5 に締める
   J5_atr12       : hold=60, atr=1.2, thr=0.58  ATR 係数を 1.2 に締める
   J6_hold45_atr15: hold=45, atr=1.5, thr=0.58  保有短縮 + ATR 締め（複合）
-  J7_thr059      : hold=60, atr=2.0, thr=0.59  スコア閾値を 0.59 に引き上げ
-  J8_thr060      : hold=60, atr=2.0, thr=0.60  スコア閾値を 0.60 に引き上げ
+  J7_thr059      : hold=45, atr=1.5, thr=0.59  J6 に閾値 0.59 を追加（三重複合）
+  J8_thr060      : hold=45, atr=1.5, thr=0.60  J6 に閾値 0.60 を追加（三重複合）
 
 採択判断ロジック:
   いずれかのシナリオが CAGR>5%, Max DD<25%, PF>1.1, Sharpe>0.5 をすべて満たす → 採用
@@ -38,7 +38,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import locale
 import os
 import shutil
 import subprocess
@@ -51,7 +50,6 @@ from pathlib import Path
 # 定数
 # ---------------------------------------------------------------------------
 
-SUBPROCESS_ENCODING = locale.getpreferredencoding(False) or "cp932"
 DEFAULT_WORKERS = 4
 
 
@@ -145,18 +143,18 @@ _GROUP_J: list[dict] = [
     {
         "name": "J7_thr059",
         "group": "J",
-        "max_holding_days": 60,
-        "trailing_stop_atr": 2.0,
+        "max_holding_days": 45,
+        "trailing_stop_atr": 1.5,
         "threshold": 0.59,
-        "desc": "スコア閾値を 0.59 に引き上げ",
+        "desc": "J6 に閾値 0.59 を追加（三重複合）",
     },
     {
         "name": "J8_thr060",
         "group": "J",
-        "max_holding_days": 60,
-        "trailing_stop_atr": 2.0,
+        "max_holding_days": 45,
+        "trailing_stop_atr": 1.5,
         "threshold": 0.60,
-        "desc": "スコア閾値を 0.60 に引き上げ",
+        "desc": "J6 に閾値 0.60 を追加（三重複合）",
     },
 ]
 
@@ -243,7 +241,8 @@ def _read_summary(report_dir: Path) -> dict:
     summaries = list(report_dir.glob("*/summary.json"))
     if not summaries:
         raise FileNotFoundError(f"summary.json が見つかりません: {report_dir}")
-    data = json.loads(summaries[0].read_text(encoding="utf-8"))
+    latest = max(summaries, key=lambda p: p.stat().st_mtime)
+    data = json.loads(latest.read_text(encoding="utf-8"))
     headline = data.get("headline", {})
     trades = data.get("trades", {})
     meta = data.get("meta", {})
@@ -292,13 +291,14 @@ def _run_batch(args: tuple) -> list[dict]:
         src_path = str(repo_root / "src")
         existing = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = os.pathsep.join(filter(None, [src_path, existing]))
+        env["PYTHONIOENCODING"] = "utf-8"
 
         completed = subprocess.run(
             cmd,
             cwd=str(repo_root),
             capture_output=True,
             text=True,
-            encoding=SUBPROCESS_ENCODING,
+            encoding="utf-8",
             errors="replace",
             env=env,
         )
@@ -409,6 +409,12 @@ def main() -> None:
         default=DEFAULT_WORKERS,
         help=f"並列ワーカー数（デフォルト: {DEFAULT_WORKERS}）",
     )
+    parser.add_argument(
+        "--keep-snapshots",
+        action="store_true",
+        default=False,
+        help="実行後もDBスナップショットを削除せず保持する（デフォルト: 削除）",
+    )
     args = parser.parse_args()
 
     scenarios = ALL_SCENARIOS
@@ -453,15 +459,22 @@ def main() -> None:
     print(f"\n並列実行開始: {datetime.now().strftime('%H:%M:%S')}")
     print("-" * 110)
 
-    with ProcessPoolExecutor(max_workers=n_workers) as executor:
-        futures = {executor.submit(_run_batch, ba): i for i, ba in enumerate(batch_args)}
-        for future in as_completed(futures):
-            worker_idx = futures[future]
+    try:
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            futures = {executor.submit(_run_batch, ba): i for i, ba in enumerate(batch_args)}
+            for future in as_completed(futures):
+                worker_idx = futures[future]
+                try:
+                    batch_results = future.result()
+                    all_results.extend(batch_results)
+                except Exception as exc:
+                    print(f"[ERROR] worker {worker_idx} で例外: {exc}", file=sys.stderr)
+    finally:
+        if not args.keep_snapshots:
             try:
-                batch_results = future.result()
-                all_results.extend(batch_results)
-            except Exception as exc:
-                print(f"[ERROR] worker {worker_idx} で例外: {exc}", file=sys.stderr)
+                shutil.rmtree(snapshots_dir)
+            except Exception as e:
+                print(f"[WARN] スナップショット削除失敗: {e}", file=sys.stderr)
 
     all_results.sort(key=lambda r: r.get("name", ""))
 
