@@ -75,6 +75,18 @@ def main() -> None:
         help="Max fraction of portfolio to deploy [default: 0.70]",
     )
     parser.add_argument(
+        "--vol-target",
+        type=float,
+        default=None,
+        help="動的utilization目標ボラティリティ（例: 0.15）。未指定で固定util [default: None]",
+    )
+    parser.add_argument(
+        "--vol-floor",
+        type=float,
+        default=0.10,
+        help="動的utilization下限 [default: 0.10]",
+    )
+    parser.add_argument(
         "--max-positions",
         type=int,
         default=10,
@@ -330,6 +342,8 @@ def main() -> None:
             topix_ma200_hi_trigger=args.topix_ma200_hi_trigger,
             portfolio_drawdown_stop_pct=args.portfolio_drawdown_stop,
             portfolio_drawdown_stop_timeout_days=args.portfolio_drawdown_stop_timeout_days,
+            vol_target=args.vol_target,
+            vol_floor=args.vol_floor,
         )
     finally:
         conn.close()
