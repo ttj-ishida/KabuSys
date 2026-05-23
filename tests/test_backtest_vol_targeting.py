@@ -62,3 +62,15 @@ def test_calc_realized_vol_uses_last_n_plus_1():
     tail = [big[-1]] * 6
     equity = big + tail
     assert _calc_realized_vol(equity, 5) == 0.0
+
+
+def test_run_backtest_vol_target_none_is_unchanged():
+    """vol_target=None のとき既存動作と同一シグネチャで呼び出せること"""
+    import inspect
+    from kabusys.backtest.engine import run_backtest
+
+    sig = inspect.signature(run_backtest)
+    assert "vol_target" in sig.parameters
+    assert "vol_floor" in sig.parameters
+    assert sig.parameters["vol_target"].default is None
+    assert sig.parameters["vol_floor"].default == 0.10

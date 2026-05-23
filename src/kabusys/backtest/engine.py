@@ -422,6 +422,8 @@ def run_backtest(
     topix_ma200_hi_trigger: float = 0.05,
     portfolio_drawdown_stop_pct: float | None = None,
     portfolio_drawdown_stop_timeout_days: int | None = None,
+    vol_target: float | None = None,
+    vol_floor: float = 0.10,
 ) -> BacktestResult:
     """バックテストを実行し結果を返す。
 
@@ -692,7 +694,24 @@ def run_backtest(
             else:
                 entry_blocked_since = None
             # max_utilization を全配分方式に一貫適用（risk_based 含む）
-            available_cash = min(simulator.cash * multiplier, current_pv * max_utilization)
+            # vol_target 指定時は実現ボラティリティに基づき動的調整
+            effective_util = max_utilization
+            if vol_target is not None and len(simulator.history) >= 20:
+                equity_history = [s.portfolio_value for s in simulator.history]
+                vol_20 = _calc_realized_vol(equity_history, 20)
+                vol_60 = (
+                    _calc_realized_vol(equity_history, 60)
+                    if len(equity_history) >= 60
+                    else vol_20
+                )
+                realized_vol = max(vol_20, vol_60)
+                if realized_vol > 0:
+                    effective_util = float(np.clip(
+                        max_utilization * vol_target / realized_vol,
+                        vol_floor,
+                        max_utilization,
+                    ))
+            available_cash = min(simulator.cash * multiplier, current_pv * effective_util)
 
             # セクター制限を全候補に先行適用し、除外後に上位 max_positions を選ぶ
             # （従来の select → filter では除外後の補充がなかった）
@@ -729,7 +748,7 @@ def run_backtest(
                 risk_pct=risk_pct,
                 stop_loss_pct=stop_loss_pct,
                 max_position_pct=max_position_pct,
-                max_utilization=max_utilization,
+                max_utilization=effective_util,
                 cost_buffer=slippage_rate + commission_rate,
                 lot_size=lot_size,
             )
