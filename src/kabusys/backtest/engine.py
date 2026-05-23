@@ -13,6 +13,7 @@ from datetime import date, timedelta
 from typing import Any, Literal
 
 import duckdb
+import numpy as np
 
 from kabusys.backtest.metrics import BacktestMetrics, calc_metrics
 from kabusys.backtest.simulator import DailySnapshot, PortfolioSimulator, TradeRecord
@@ -370,6 +371,21 @@ def _is_entry_blocked(
 # ---------------------------------------------------------------------------
 # パブリック API
 # ---------------------------------------------------------------------------
+
+
+def _calc_realized_vol(equity_curve: list[float], window: int) -> float:
+    """直近 window 日の日次リターン標準偏差を年次換算して返す。
+
+    look-ahead bias なし: equity_curve には当日までの値のみ含まれる。
+    """
+    vals = equity_curve[-(window + 1):]
+    if len(vals) < 2:
+        return 0.0
+    rets = [(vals[i] - vals[i - 1]) / vals[i - 1] for i in range(1, len(vals))]
+    std = float(np.std(rets, ddof=1))
+    if std < 1e-12:
+        return 0.0
+    return std * float(np.sqrt(252))
 
 
 def run_backtest(
