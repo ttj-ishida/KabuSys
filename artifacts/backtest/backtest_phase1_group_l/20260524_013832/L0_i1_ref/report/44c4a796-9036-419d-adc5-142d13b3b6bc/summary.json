@@ -1,0 +1,589 @@
+{
+  "meta": {
+    "run_id": "44c4a796-9036-419d-adc5-142d13b3b6bc",
+    "generated_at": "2026-05-23T19:47:18+00:00",
+    "start_date": "2017-01-01",
+    "end_date": "2025-12-31",
+    "initial_cash": 1000000.0,
+    "slippage_rate": 0.001,
+    "commission_rate": 0.00055,
+    "allocation_method": "equal",
+    "max_position_pct": 0.22,
+    "max_utilization": 0.3,
+    "max_positions": 3,
+    "risk_pct": 0.005,
+    "stop_loss_pct": 0.09,
+    "lot_size": 100,
+    "report_type": "portfolio_backtest",
+    "min_holding_days": 5,
+    "max_holding_days": 60,
+    "trailing_stop_atr": 2.0,
+    "portfolio_drawdown_stop_pct": 0.12,
+    "portfolio_drawdown_stop_timeout_days": 30,
+    "scope_mode": "default_universe",
+    "scope_codes": null,
+    "effective_universe_size": null,
+    "excluded_codes": []
+  },
+  "headline": {
+    "initial_cash": 1000000.0,
+    "final_value": 1952148.727415012,
+    "total_return": 0.952148727415012,
+    "cagr": 0.07723068792797982,
+    "realized_pnl": 972506.1540525096,
+    "total_commission": 103595.472585,
+    "sharpe_ratio": 0.3823046327287577,
+    "max_drawdown": 0.24964874425676387,
+    "annual_volatility": 0.2809554898832691,
+    "calmar_ratio": 0.3093574059741635
+  },
+  "trades": {
+    "total_trades": 697,
+    "win_rate": 0.3902439024390244,
+    "payoff_ratio": 2.0269947337179346,
+    "profit_factor": 1.2972766295794782,
+    "avg_profit": 15602.53911778862,
+    "avg_loss": -7697.375261143516,
+    "avg_holding_days": 13.93687230989957
+  },
+  "performance": {
+    "monthly_returns": [
+      {
+        "year": 2017,
+        "month": 2,
+        "return_pct": -0.3569448869947679
+      },
+      {
+        "year": 2017,
+        "month": 3,
+        "return_pct": -0.1890341845506262
+      },
+      {
+        "year": 2017,
+        "month": 4,
+        "return_pct": -1.9384468343864818
+      },
+      {
+        "year": 2017,
+        "month": 5,
+        "return_pct": -0.010462332105363948
+      },
+      {
+        "year": 2017,
+        "month": 6,
+        "return_pct": 0.22557355206699747
+      },
+      {
+        "year": 2017,
+        "month": 7,
+        "return_pct": -1.0446585755492315
+      },
+      {
+        "year": 2017,
+        "month": 8,
+        "return_pct": -0.8253214995608963
+      },
+      {
+        "year": 2017,
+        "month": 9,
+        "return_pct": -1.2878028108111534
+      },
+      {
+        "year": 2017,
+        "month": 10,
+        "return_pct": 0.0
+      },
+      {
+        "year": 2017,
+        "month": 11,
+        "return_pct": -0.9756947171098139
+      },
+      {
+        "year": 2017,
+        "month": 12,
+        "return_pct": -0.28909710645518927
+      },
+      {
+        "year": 2018,
+        "month": 1,
+        "return_pct": 0.3442231040066477
+      },
+      {
+        "year": 2018,
+        "month": 2,
+        "return_pct": -0.996959269388579
+      },
+      {
+        "year": 2018,
+        "month": 3,
+        "return_pct": -2.131695341228083
+      },
+      {
+        "year": 2018,
+        "month": 4,
+        "return_pct": -0.6713883896747811
+      },
+      {
+        "year": 2018,
+        "month": 5,
+        "return_pct": -1.0454512676034045
+      },
+      {
+        "year": 2018,
+        "month": 6,
+        "return_pct": -2.778529024039059
+      },
+      {
+        "year": 2018,
+        "month": 7,
+        "return_pct": 1.8103920239582862
+      },
+      {
+        "year": 2018,
+        "month": 8,
+        "return_pct": -2.3893852586460036
+      },
+      {
+        "year": 2018,
+        "month": 9,
+        "return_pct": 63.31855798998358
+      },
+      {
+        "year": 2018,
+        "month": 10,
+        "return_pct": 6.644611836737495
+      },
+      {
+        "year": 2018,
+        "month": 11,
+        "return_pct": 2.575191852048693
+      },
+      {
+        "year": 2018,
+        "month": 12,
+        "return_pct": -0.40924985852379864
+      },
+      {
+        "year": 2019,
+        "month": 1,
+        "return_pct": -3.8433308838611566
+      },
+      {
+        "year": 2019,
+        "month": 2,
+        "return_pct": -0.054415343684251875
+      },
+      {
+        "year": 2019,
+        "month": 3,
+        "return_pct": 2.03441990637725
+      },
+      {
+        "year": 2019,
+        "month": 4,
+        "return_pct": -2.3689341547012397
+      },
+      {
+        "year": 2019,
+        "month": 5,
+        "return_pct": -2.0159339396369007
+      },
+      {
+        "year": 2019,
+        "month": 6,
+        "return_pct": 1.4215750380750225
+      },
+      {
+        "year": 2019,
+        "month": 7,
+        "return_pct": 0.35517226720764083
+      },
+      {
+        "year": 2019,
+        "month": 8,
+        "return_pct": -0.9024917549327158
+      },
+      {
+        "year": 2019,
+        "month": 9,
+        "return_pct": 0.8668943662290441
+      },
+      {
+        "year": 2019,
+        "month": 10,
+        "return_pct": 3.2741193671772852
+      },
+      {
+        "year": 2019,
+        "month": 11,
+        "return_pct": 1.166426893374235
+      },
+      {
+        "year": 2019,
+        "month": 12,
+        "return_pct": 1.1274490292797212
+      },
+      {
+        "year": 2020,
+        "month": 1,
+        "return_pct": -3.999771746330443
+      },
+      {
+        "year": 2020,
+        "month": 2,
+        "return_pct": 0.5319393398439931
+      },
+      {
+        "year": 2020,
+        "month": 3,
+        "return_pct": -0.06676285391972007
+      },
+      {
+        "year": 2020,
+        "month": 4,
+        "return_pct": 1.672619910084442
+      },
+      {
+        "year": 2020,
+        "month": 5,
+        "return_pct": 6.434425935942981
+      },
+      {
+        "year": 2020,
+        "month": 6,
+        "return_pct": 3.0931313372404223
+      },
+      {
+        "year": 2020,
+        "month": 7,
+        "return_pct": -4.526529047326258
+      },
+      {
+        "year": 2020,
+        "month": 8,
+        "return_pct": 1.2582796574603456
+      },
+      {
+        "year": 2020,
+        "month": 9,
+        "return_pct": 0.3440342420502287
+      },
+      {
+        "year": 2020,
+        "month": 10,
+        "return_pct": -1.442344427870063
+      },
+      {
+        "year": 2020,
+        "month": 11,
+        "return_pct": 2.4922635485138787
+      },
+      {
+        "year": 2020,
+        "month": 12,
+        "return_pct": -1.1649512722958535
+      },
+      {
+        "year": 2021,
+        "month": 1,
+        "return_pct": -0.8525791942519593
+      },
+      {
+        "year": 2021,
+        "month": 2,
+        "return_pct": 7.333940755802261
+      },
+      {
+        "year": 2021,
+        "month": 3,
+        "return_pct": -2.789396014040164
+      },
+      {
+        "year": 2021,
+        "month": 4,
+        "return_pct": -2.9933418846103366
+      },
+      {
+        "year": 2021,
+        "month": 5,
+        "return_pct": 0.5456688349486112
+      },
+      {
+        "year": 2021,
+        "month": 6,
+        "return_pct": 0.7006952182729607
+      },
+      {
+        "year": 2021,
+        "month": 7,
+        "return_pct": 3.5595695056116075
+      },
+      {
+        "year": 2021,
+        "month": 8,
+        "return_pct": -0.16872526300432197
+      },
+      {
+        "year": 2021,
+        "month": 9,
+        "return_pct": -3.5438978391572986
+      },
+      {
+        "year": 2021,
+        "month": 10,
+        "return_pct": -3.2970642451051426
+      },
+      {
+        "year": 2021,
+        "month": 11,
+        "return_pct": -1.2829509785029356
+      },
+      {
+        "year": 2021,
+        "month": 12,
+        "return_pct": -0.08796693549417083
+      },
+      {
+        "year": 2022,
+        "month": 1,
+        "return_pct": -3.4938319987133197
+      },
+      {
+        "year": 2022,
+        "month": 2,
+        "return_pct": -1.6215884551152167
+      },
+      {
+        "year": 2022,
+        "month": 3,
+        "return_pct": 1.6803424773959414
+      },
+      {
+        "year": 2022,
+        "month": 4,
+        "return_pct": 0.7389823585642461
+      },
+      {
+        "year": 2022,
+        "month": 5,
+        "return_pct": -1.2197271597803216
+      },
+      {
+        "year": 2022,
+        "month": 6,
+        "return_pct": -0.8190720217995077
+      },
+      {
+        "year": 2022,
+        "month": 7,
+        "return_pct": -1.9968011859697716
+      },
+      {
+        "year": 2022,
+        "month": 8,
+        "return_pct": 2.422416366287181
+      },
+      {
+        "year": 2022,
+        "month": 9,
+        "return_pct": -0.21082719794762375
+      },
+      {
+        "year": 2022,
+        "month": 10,
+        "return_pct": 1.1900141451425699
+      },
+      {
+        "year": 2022,
+        "month": 11,
+        "return_pct": 2.495891941323248
+      },
+      {
+        "year": 2022,
+        "month": 12,
+        "return_pct": -1.208356478728609
+      },
+      {
+        "year": 2023,
+        "month": 1,
+        "return_pct": 1.5148082335087192
+      },
+      {
+        "year": 2023,
+        "month": 2,
+        "return_pct": 0.5357266992149737
+      },
+      {
+        "year": 2023,
+        "month": 3,
+        "return_pct": -2.228760620503879
+      },
+      {
+        "year": 2023,
+        "month": 4,
+        "return_pct": -5.3361580310430545
+      },
+      {
+        "year": 2023,
+        "month": 5,
+        "return_pct": -1.6323577413028791
+      },
+      {
+        "year": 2023,
+        "month": 6,
+        "return_pct": 2.672221610523324
+      },
+      {
+        "year": 2023,
+        "month": 7,
+        "return_pct": 1.295696256558228
+      },
+      {
+        "year": 2023,
+        "month": 8,
+        "return_pct": 3.6880640146042745
+      },
+      {
+        "year": 2023,
+        "month": 9,
+        "return_pct": -1.0687286713205841
+      },
+      {
+        "year": 2023,
+        "month": 10,
+        "return_pct": 0.41503081032563177
+      },
+      {
+        "year": 2023,
+        "month": 11,
+        "return_pct": -0.8111186552304432
+      },
+      {
+        "year": 2023,
+        "month": 12,
+        "return_pct": 0.4882706434872162
+      },
+      {
+        "year": 2024,
+        "month": 1,
+        "return_pct": 7.378751234747955
+      },
+      {
+        "year": 2024,
+        "month": 2,
+        "return_pct": 12.967309971752606
+      },
+      {
+        "year": 2024,
+        "month": 3,
+        "return_pct": 1.8549006921744777
+      },
+      {
+        "year": 2024,
+        "month": 4,
+        "return_pct": -3.9824530245359577
+      },
+      {
+        "year": 2024,
+        "month": 5,
+        "return_pct": 9.092614626772924
+      },
+      {
+        "year": 2024,
+        "month": 6,
+        "return_pct": -0.9963988986860741
+      },
+      {
+        "year": 2024,
+        "month": 7,
+        "return_pct": -3.52904223280947
+      },
+      {
+        "year": 2024,
+        "month": 8,
+        "return_pct": -3.519395320011922
+      },
+      {
+        "year": 2024,
+        "month": 9,
+        "return_pct": -1.1200686711194474
+      },
+      {
+        "year": 2024,
+        "month": 10,
+        "return_pct": 1.1989944635636507
+      },
+      {
+        "year": 2024,
+        "month": 11,
+        "return_pct": 2.580721352514082
+      },
+      {
+        "year": 2024,
+        "month": 12,
+        "return_pct": 4.279223818982989
+      },
+      {
+        "year": 2025,
+        "month": 1,
+        "return_pct": -0.9264807662907918
+      },
+      {
+        "year": 2025,
+        "month": 2,
+        "return_pct": 2.3670603020158385
+      },
+      {
+        "year": 2025,
+        "month": 3,
+        "return_pct": 0.194257439682861
+      },
+      {
+        "year": 2025,
+        "month": 4,
+        "return_pct": -3.5869513818112377
+      },
+      {
+        "year": 2025,
+        "month": 5,
+        "return_pct": 5.975656728558403
+      },
+      {
+        "year": 2025,
+        "month": 6,
+        "return_pct": -0.8727040762617266
+      },
+      {
+        "year": 2025,
+        "month": 7,
+        "return_pct": -1.4301873511431813
+      },
+      {
+        "year": 2025,
+        "month": 8,
+        "return_pct": 5.271925205111025
+      },
+      {
+        "year": 2025,
+        "month": 9,
+        "return_pct": -3.3295118213023653
+      },
+      {
+        "year": 2025,
+        "month": 10,
+        "return_pct": 0.598858461448453
+      },
+      {
+        "year": 2025,
+        "month": 11,
+        "return_pct": -1.848835150542117
+      },
+      {
+        "year": 2025,
+        "month": 12,
+        "return_pct": 0.14921722147055266
+      }
+    ]
+  },
+  "warnings": []
+}

@@ -1,0 +1,51 @@
+[
+  {
+    "name": "L0_i1_ref",
+    "group": "L",
+    "vol_target": null,
+    "vol_floor": null,
+    "desc": "I1 完全再現（参照・動的 util なし）"
+  },
+  {
+    "name": "L1",
+    "group": "L",
+    "vol_target": 0.1,
+    "vol_floor": 0.1,
+    "desc": "vol_target=10%, vol_floor=10%（最積極的縮小）"
+  },
+  {
+    "name": "L2",
+    "group": "L",
+    "vol_target": 0.1,
+    "vol_floor": 0.15,
+    "desc": "vol_target=10%, vol_floor=15%"
+  },
+  {
+    "name": "L3",
+    "group": "L",
+    "vol_target": 0.15,
+    "vol_floor": 0.1,
+    "desc": "vol_target=15%, vol_floor=10%（中程度の縮小）"
+  },
+  {
+    "name": "L4",
+    "group": "L",
+    "vol_target": 0.15,
+    "vol_floor": 0.15,
+    "desc": "vol_target=15%, vol_floor=15%"
+  },
+  {
+    "name": "L5",
+    "group": "L",
+    "vol_target": 0.2,
+    "vol_floor": 0.1,
+    "desc": "vol_target=20%, vol_floor=10%（穏やかな縮小）"
+  },
+  {
+    "name": "L6",
+    "group": "L",
+    "vol_target": 0.2,
+    "vol_floor": 0.15,
+    "desc": "vol_target=20%, vol_floor=15%（最保守的調整）"
+  }
+]
