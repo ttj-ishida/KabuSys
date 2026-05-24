@@ -1546,3 +1546,61 @@ I1 の高リターン年（2018: +64%、2024: +28%）はいずれも高ボラ年
 → I1 設定を継続採用
 → 次のステップ: Group M（シグナル強度ベースサイジング）へ進む
 ```
+
+---
+
+## 33. Group M 設計（シグナル強度ベースサイジング）（2026-05-25）
+
+設計書: `docs/superpowers/specs/2026-05-25-group-m-score-sizing-design.md`
+
+### 33.1 検証目的
+
+現在の I1 は `allocation_method=equal`（最大3銘柄に均等配分）。シグナルの `score` に比例してポジションサイズを変え、高スコア銘柄に多く投資することで Sharpe の改善を図る。また銘柄集中（`max_positions=2`）の効果も同時に検証する。
+
+### 33.2 スコア重み付け計算（既存実装）
+
+```
+weight_i = score_i / Σ(score_j)
+```
+
+I1 候補（スコア ≥ 0.58）の例：
+```
+スコア 0.58, 0.70, 0.90 → 重み 26.6%, 32.1%, 41.3%
+（最高スコアが最低スコアの約 1.6 倍）
+```
+
+### 33.3 シナリオ定義
+
+**共通ベース設定（全シナリオ I1 固定）:**
+
+```
+base_util=30%, MA200=ON, threshold=0.58,
+max_holding=60d, atr=2.0, stop_loss=9%, dd_stop=12%
+```
+
+| シナリオ | allocation | max_positions | 目的 |
+|---|---|---|---|
+| M0_i1_ref | equal | 3 | I1 完全再現（参照） |
+| M1_score | score | 3 | スコア重み付けの効果を分離 |
+| M2_equal_pos2 | equal | 2 | 銘柄集中の効果を分離 |
+| M3_score_pos2 | score | 2 | スコア重み × 集中の相乗効果 |
+
+### 33.4 採択判断ロジック
+
+```
+Sharpe > 0.5
+  → Phase 1 改良版として採用（CAGR>5%, MaxDD<25%, PF>1.1 も確認）
+
+0.382 < Sharpe ≤ 0.5
+  → 最良シナリオを Phase 2 設計の参考として記録 → I1 継続採用
+
+全シナリオで Sharpe ≤ 0.382
+  → Group N へ進む
+```
+
+実行コマンド:
+```powershell
+python backtest/backtest_improvement_plan/run_phase1_group_m.py --workers 4
+```
+
+出力先: `artifacts/backtest/backtest_phase1_group_m/{timestamp}/`
