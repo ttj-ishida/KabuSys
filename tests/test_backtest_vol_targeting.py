@@ -2,6 +2,7 @@
 
 Unit tests for _calc_realized_vol() volatility helper.
 """
+
 import inspect
 
 
@@ -27,7 +28,7 @@ def test_calc_realized_vol_known_value():
 
     # 日次リターン 1% 固定 × 21 日 → 20 リターン
     base = 1_000_000.0
-    equity = [base * (1.01 ** i) for i in range(21)]
+    equity = [base * (1.01**i) for i in range(21)]
     vol = _calc_realized_vol(equity, 20)
     # 全リターンが同値なら std(ddof=1) = 0 → 0.0
     assert vol == 0.0
@@ -54,7 +55,7 @@ def test_calc_realized_vol_uses_last_n_plus_1():
     from kabusys.backtest.engine import _calc_realized_vol
 
     # 先頭 20 要素は大変動（無視されるべき）
-    big = [1_000_000.0 * (1.5 ** i) for i in range(20)]
+    big = [1_000_000.0 * (1.5**i) for i in range(20)]
     # 末尾 6 要素は定常（std=0）
     tail = [big[-1]] * 6
     equity = big + tail

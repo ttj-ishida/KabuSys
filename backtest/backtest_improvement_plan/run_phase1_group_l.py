@@ -573,8 +573,7 @@ def main() -> None:
             improved = [
                 r
                 for r in non_l0
-                if r.get("sharpe") not in (None, "")
-                and float(r["sharpe"]) > i1_sharpe
+                if r.get("sharpe") not in (None, "") and float(r["sharpe"]) > i1_sharpe
             ]
             if improved:
                 best = max(improved, key=lambda r: float(r["sharpe"]))
