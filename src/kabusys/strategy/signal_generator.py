@@ -1046,25 +1046,39 @@ def _generate_sell_signals(
         peak = _peak_close(conn, code, target_date, sqlite_conn=sqlite_conn)
         if peak is not None and peak > avg_price:
             atr = _atr_20d(conn, code, target_date)
-            if atr is not None and close < peak - trailing_stop_atr * atr:
-                logger.debug(
-                    "_generate_sell_signals: %s trailing_stop"
-                    " close=%.2f peak=%.2f atr=%.2f mult=%.1f date=%s",
-                    code,
-                    close,
-                    peak,
-                    atr,
-                    trailing_stop_atr,
-                    target_date,
-                )
-                sell_signals.append(
-                    {
-                        "code": code,
-                        "score": final_score,
-                        "reason": "trailing_stop",
-                    }
-                )
-                continue
+            if atr is not None:
+                # 多段階トレーリングストップ: 保有日数と含み益に応じて乗数を段階的に縮小
+                effective_mult = trailing_stop_atr
+                if dynamic_trailing_stop:
+                    held_for_trail = _held_days(conn, code, target_date, sqlite_conn=sqlite_conn)
+                    if held_for_trail is not None:
+                        if held_for_trail >= 21:  # Stage 3: 時間減衰（無条件タイト化）
+                            effective_mult = trail_stage3_mult
+                        elif (
+                            held_for_trail >= 6
+                            and (close - avg_price) >= trail_profit_gate_atr * atr
+                        ):
+                            # Stage 2: 含み益が profit_gate_atr×ATR 以上のときのみタイト化
+                            effective_mult = trail_stage2_mult
+                if close < peak - effective_mult * atr:
+                    logger.debug(
+                        "_generate_sell_signals: %s trailing_stop"
+                        " close=%.2f peak=%.2f atr=%.2f mult=%.2f date=%s",
+                        code,
+                        close,
+                        peak,
+                        atr,
+                        effective_mult,
+                        target_date,
+                    )
+                    sell_signals.append(
+                        {
+                            "code": code,
+                            "score": final_score,
+                            "reason": "trailing_stop",
+                        }
+                    )
+                    continue
 
         # 時間決済（最大保有期間超過）: min_holding_days を無視して発火
         held = _held_days(conn, code, target_date, sqlite_conn=sqlite_conn)
