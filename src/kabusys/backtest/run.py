@@ -243,6 +243,24 @@ def main() -> None:
         help="TOPIX MA200 deviation above which the adaptive threshold kicks in. [default: 0.05]",
     )
     parser.add_argument(
+        "--adaptive-threshold-vol-regime",
+        action="store_true",
+        default=False,
+        help="低ボラ局面（TOPIX年次換算ボラ < --topix-vol-low-threshold）でBUY閾値を --adaptive-threshold-hi に引き上げる。",
+    )
+    parser.add_argument(
+        "--topix-vol-window",
+        type=int,
+        default=20,
+        help="TOPIX実現ボラティリティ計算の営業日ウィンドウ。[default: 20]",
+    )
+    parser.add_argument(
+        "--topix-vol-low-threshold",
+        type=float,
+        default=0.15,
+        help="低ボラ局面判定の年次換算ボラティリティ閾値（例: 0.15 = 15%%）。[default: 0.15]",
+    )
+    parser.add_argument(
         "--portfolio-drawdown-stop",
         type=float,
         default=None,
@@ -340,6 +358,9 @@ def main() -> None:
             adaptive_threshold=args.adaptive_threshold,
             adaptive_threshold_hi=args.adaptive_threshold_hi,
             topix_ma200_hi_trigger=args.topix_ma200_hi_trigger,
+            adaptive_threshold_vol_regime=args.adaptive_threshold_vol_regime,
+            topix_vol_window=args.topix_vol_window,
+            topix_vol_low_threshold=args.topix_vol_low_threshold,
             portfolio_drawdown_stop_pct=args.portfolio_drawdown_stop,
             portfolio_drawdown_stop_timeout_days=args.portfolio_drawdown_stop_timeout_days,
             vol_target=args.vol_target,

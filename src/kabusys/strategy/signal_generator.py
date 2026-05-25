@@ -568,6 +568,31 @@ def _get_topix_size_multiplier(
     return 1.0
 
 
+def _calc_topix_vol(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+    window: int = 20,
+) -> float | None:
+    """直近 window 日の TOPIX 日次リターン標準偏差を年次換算して返す。
+
+    データ不足（< window+1 本）の場合は None を返す。look-ahead bias なし。
+    """
+    try:
+        rows = conn.execute(
+            "SELECT close FROM topix_daily WHERE date <= ? ORDER BY date DESC LIMIT ?",
+            [target_date, window + 1],
+        ).fetchall()
+    except Exception:
+        return None
+    if len(rows) < window + 1:
+        return None
+    closes = [float(r[0]) for r in rows]
+    rets = [(closes[i] - closes[i + 1]) / closes[i + 1] for i in range(window)]
+    mean_r = sum(rets) / window
+    var = sum((r - mean_r) ** 2 for r in rets) / (window - 1)
+    return math.sqrt(var) * math.sqrt(252)
+
+
 def _fetch_gap_ratios(
     conn: duckdb.DuckDBPyConnection,
     codes: list[str],
@@ -1113,6 +1138,9 @@ def generate_signals(
     adaptive_threshold: bool = False,
     adaptive_threshold_hi: float = 0.62,
     topix_ma200_hi_trigger: float = 0.05,
+    adaptive_threshold_vol_regime: bool = False,
+    topix_vol_window: int = 20,
+    topix_vol_low_threshold: float = 0.15,
     *,
     use_stock_ma_cross_filter: bool = False,
     stock_ma_cross_weak_bear_multiplier: float = 0.5,
@@ -1171,6 +1199,11 @@ def generate_signals(
                            シグナル品質向上）。False（デフォルト）で無効。
         adaptive_threshold_hi: adaptive_threshold=True 時に使用する高い BUY 閾値。デフォルト 0.62。
         topix_ma200_hi_trigger: TOPIX の MA200 乖離率がこの値を超えたとき閾値を引き上げる。デフォルト 0.05。
+        adaptive_threshold_vol_regime: True のとき、TOPIX の実現ボラティリティ（年次換算）が
+                           topix_vol_low_threshold を下回る低ボラ局面で BUY 閾値を
+                           adaptive_threshold_hi に引き上げる。False（デフォルト）で無効。
+        topix_vol_window:  TOPIX 実現ボラティリティ計算の営業日ウィンドウ（デフォルト: 20）。
+        topix_vol_low_threshold: この年次換算ボラティリティを下回ると低ボラ局面と判定する（デフォルト: 0.15 = 15%）。
         regime_provider:   レジームラベルを返すプロバイダー。明示的に渡した場合は
                            ENABLE_AI_SENTIMENT の設定値より優先される。省略時は
                            ENABLE_AI_SENTIMENT フラグに基づいて自動生成する。
@@ -1422,6 +1455,17 @@ def generate_signals(
                     )
         except Exception:
             pass
+    if adaptive_threshold_vol_regime:
+        topix_vol = _calc_topix_vol(conn, target_date, topix_vol_window)
+        if topix_vol is not None and topix_vol < topix_vol_low_threshold:
+            threshold = max(threshold, adaptive_threshold_hi)
+            logger.debug(
+                "adaptive threshold vol regime: topix_vol=%.4f < low_thr=%.4f → threshold=%.2f date=%s",
+                topix_vol,
+                topix_vol_low_threshold,
+                threshold,
+                target_date,
+            )
     buy_signals: list[dict] = []
     if not regime_is_bear and not breadth_stop:
         # 3c. ギャップ比率を一括取得（BUY 生成が必要な場合のみ実行）

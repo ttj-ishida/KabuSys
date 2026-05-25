@@ -378,7 +378,7 @@ def _calc_realized_vol(equity_curve: list[float], window: int) -> float:
 
     look-ahead bias なし: equity_curve には当日までの値のみ含まれる。
     """
-    vals = equity_curve[-(window + 1):]
+    vals = equity_curve[-(window + 1) :]
     if len(vals) < 2:
         return 0.0
     rets = [(vals[i] - vals[i - 1]) / vals[i - 1] for i in range(1, len(vals))]
@@ -420,6 +420,9 @@ def run_backtest(
     adaptive_threshold: bool = False,
     adaptive_threshold_hi: float = 0.62,
     topix_ma200_hi_trigger: float = 0.05,
+    adaptive_threshold_vol_regime: bool = False,
+    topix_vol_window: int = 20,
+    topix_vol_low_threshold: float = 0.15,
     portfolio_drawdown_stop_pct: float | None = None,
     portfolio_drawdown_stop_timeout_days: int | None = None,
     vol_target: float | None = None,
@@ -644,6 +647,9 @@ def run_backtest(
                 adaptive_threshold=adaptive_threshold,
                 adaptive_threshold_hi=adaptive_threshold_hi,
                 topix_ma200_hi_trigger=topix_ma200_hi_trigger,
+                adaptive_threshold_vol_regime=adaptive_threshold_vol_regime,
+                topix_vol_window=topix_vol_window,
+                topix_vol_low_threshold=topix_vol_low_threshold,
                 event_dates=event_dates or {},
                 scope=backtest_scope,
                 min_holding_days=min_holding_days,
@@ -700,17 +706,17 @@ def run_backtest(
                 equity_history = [s.portfolio_value for s in simulator.history]
                 vol_20 = _calc_realized_vol(equity_history, 20)
                 vol_60 = (
-                    _calc_realized_vol(equity_history, 60)
-                    if len(equity_history) >= 60
-                    else vol_20
+                    _calc_realized_vol(equity_history, 60) if len(equity_history) >= 60 else vol_20
                 )
                 realized_vol = max(vol_20, vol_60)
                 if realized_vol > 0:
-                    effective_util = float(np.clip(
-                        max_utilization * vol_target / realized_vol,
-                        vol_floor,
-                        max_utilization,
-                    ))
+                    effective_util = float(
+                        np.clip(
+                            max_utilization * vol_target / realized_vol,
+                            vol_floor,
+                            max_utilization,
+                        )
+                    )
             available_cash = min(simulator.cash * multiplier, current_pv * effective_util)
 
             # セクター制限を全候補に先行適用し、除外後に上位 max_positions を選ぶ
