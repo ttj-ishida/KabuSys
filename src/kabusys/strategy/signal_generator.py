@@ -935,6 +935,10 @@ def _generate_sell_signals(
     trailing_stop_atr: float = _TRAILING_STOP_ATR_MULT,
     stop_loss_rate: float = _STOP_LOSS_RATE,
     sqlite_conn: sqlite3.Connection | None = None,
+    dynamic_trailing_stop: bool = False,
+    trail_profit_gate_atr: float = 1.5,
+    trail_stage2_mult: float = 1.5,
+    trail_stage3_mult: float = 1.0,
 ) -> list[dict[str, Any]]:
     """保有ポジションに対してエグジット条件を判定し、SELL シグナルを返す。
 
@@ -1141,6 +1145,10 @@ def generate_signals(
     adaptive_threshold_vol_regime: bool = False,
     topix_vol_window: int = 20,
     topix_vol_low_threshold: float = 0.15,
+    dynamic_trailing_stop: bool = False,
+    trail_profit_gate_atr: float = 1.5,
+    trail_stage2_mult: float = 1.5,
+    trail_stage3_mult: float = 1.0,
     *,
     use_stock_ma_cross_filter: bool = False,
     stock_ma_cross_weak_bear_multiplier: float = 0.5,
@@ -1733,6 +1741,10 @@ def generate_signals(
         trailing_stop_atr=trailing_stop_atr,
         stop_loss_rate=_cfg["stop_loss_rate"],
         sqlite_conn=sqlite_conn,
+        dynamic_trailing_stop=dynamic_trailing_stop,
+        trail_profit_gate_atr=trail_profit_gate_atr,
+        trail_stage2_mult=trail_stage2_mult,
+        trail_stage3_mult=trail_stage3_mult,
     )
 
     # SELL 対象銘柄は BUY から除外し、ランクを連番で再付与（SELL 優先ポリシー）

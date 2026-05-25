@@ -261,6 +261,30 @@ def main() -> None:
         help="低ボラ局面判定の年次換算ボラティリティ閾値（例: 0.15 = 15%%）。[default: 0.15]",
     )
     parser.add_argument(
+        "--dynamic-trailing-stop",
+        action="store_true",
+        default=False,
+        help="多段階トレーリングストップを有効化する。保有日数と含み益に応じて ATR 乗数を段階縮小。",
+    )
+    parser.add_argument(
+        "--trail-profit-gate-atr",
+        type=float,
+        default=1.5,
+        help="Stage 2 移行の含み益閾値（ATR 単位）。含み益 >= gate×ATR のとき Stage 2 乗数に切替。[default: %(default)s]",
+    )
+    parser.add_argument(
+        "--trail-stage2-mult",
+        type=float,
+        default=1.5,
+        help="Stage 2（保有 6〜20 日・含み益条件充足時）の ATR 乗数。[default: %(default)s]",
+    )
+    parser.add_argument(
+        "--trail-stage3-mult",
+        type=float,
+        default=1.0,
+        help="Stage 3（保有 21 日以降）の ATR 乗数（無条件タイト化）。[default: %(default)s]",
+    )
+    parser.add_argument(
         "--portfolio-drawdown-stop",
         type=float,
         default=None,
@@ -361,6 +385,10 @@ def main() -> None:
             adaptive_threshold_vol_regime=args.adaptive_threshold_vol_regime,
             topix_vol_window=args.topix_vol_window,
             topix_vol_low_threshold=args.topix_vol_low_threshold,
+            dynamic_trailing_stop=args.dynamic_trailing_stop,
+            trail_profit_gate_atr=args.trail_profit_gate_atr,
+            trail_stage2_mult=args.trail_stage2_mult,
+            trail_stage3_mult=args.trail_stage3_mult,
             portfolio_drawdown_stop_pct=args.portfolio_drawdown_stop,
             portfolio_drawdown_stop_timeout_days=args.portfolio_drawdown_stop_timeout_days,
             vol_target=args.vol_target,
