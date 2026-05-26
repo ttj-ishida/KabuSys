@@ -40,6 +40,7 @@ import argparse
 import csv
 import json
 import os
+import shutil
 import subprocess
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -364,29 +365,43 @@ def main() -> None:
 
     scenarios = ALL_SCENARIOS
     n_workers = min(args.workers, len(scenarios))
-    chunk_size = max(1, len(scenarios) // n_workers)
-    batches = [scenarios[i : i + chunk_size] for i in range(0, len(scenarios), chunk_size)]
+
+    # ワーカーごとに DuckDB スナップショットを作成（排他ロック競合を回避）
+    snapshots_dir = output_dir / "_snapshots"
+    snapshots_dir.mkdir()
+    snapshot_paths: list[str] = []
+    for i in range(n_workers):
+        snap = snapshots_dir / f"worker_{i:02d}.duckdb"
+        shutil.copy2(str(db_path), str(snap))
+        snapshot_paths.append(str(snap))
+
+    batches: list[list[dict]] = [[] for _ in range(n_workers)]
+    for idx, scenario in enumerate(scenarios):
+        batches[idx % n_workers].append(scenario)
+
+    batch_args = [
+        (snapshot_paths[i], batches[i], str(output_dir), str(REPO_ROOT)) for i in range(n_workers)
+    ]
 
     print(f"Group O: {len(scenarios)} シナリオを {n_workers} ワーカーで実行")
     print(f"出力先: {output_dir}")
     print("-" * 90)
 
     all_results: list[dict] = []
-    snapshot_db = str(db_path)
 
-    with ProcessPoolExecutor(max_workers=n_workers) as executor:
-        futures = {
-            executor.submit(
-                _run_batch,
-                (snapshot_db, batch, str(output_dir), str(REPO_ROOT)),
-            ): batch
-            for batch in batches
-        }
-        for future in as_completed(futures):
-            try:
-                all_results.extend(future.result())
-            except Exception as exc:
-                print(f"[ERROR] バッチ実行エラー: {exc}", file=sys.stderr)
+    try:
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            futures = {executor.submit(_run_batch, ba): i for i, ba in enumerate(batch_args)}
+            for future in as_completed(futures):
+                try:
+                    all_results.extend(future.result())
+                except Exception as exc:
+                    print(f"[ERROR] バッチ実行エラー: {exc}", file=sys.stderr)
+    finally:
+        try:
+            shutil.rmtree(snapshots_dir)
+        except Exception as e:
+            print(f"[WARN] スナップショット削除失敗: {e}", file=sys.stderr)
 
     all_results.sort(
         key=lambda r: next(
