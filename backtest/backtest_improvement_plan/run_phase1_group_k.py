@@ -360,14 +360,14 @@ def _run_batch(args: tuple) -> list[dict]:
 
 def _format_filters(scenario: dict) -> str:
     parts = []
-    if scenario.get("rsi_oversold_max") is not None:
-        parts.append(f"rsi<={scenario['rsi_oversold_max']:.0f}")
-    if scenario.get("quality_score_min") is not None:
-        parts.append(f"qual>={scenario['quality_score_min']}")
-    if scenario.get("volume_breakout_threshold") is not None:
-        parts.append(f"vol>={scenario['volume_breakout_threshold']}")
-    if scenario.get("topix_rel_min") is not None:
-        parts.append(f"trel>={scenario['topix_rel_min']}")
+    if scenario.get("rsi_oversold_max") not in (None, ""):
+        parts.append(f"rsi<={float(scenario['rsi_oversold_max']):.0f}")
+    if scenario.get("quality_score_min") not in (None, ""):
+        parts.append(f"qual>={float(scenario['quality_score_min'])}")
+    if scenario.get("volume_breakout_threshold") not in (None, ""):
+        parts.append(f"vol>={float(scenario['volume_breakout_threshold'])}")
+    if scenario.get("topix_rel_min") not in (None, ""):
+        parts.append(f"trel>={float(scenario['topix_rel_min'])}")
     if scenario.get("adaptive_threshold"):
         parts.append("adaptive")
     return " ".join(parts) if parts else "none"
@@ -405,28 +405,34 @@ _SHARPE_MIN = 0.5
 
 
 def _all_criteria(r: dict) -> bool:
-    return (
-        r.get("cagr") is not None
-        and r["cagr"] > _CAGR_MIN
-        and r.get("max_drawdown") is not None
-        and r["max_drawdown"] < _DD_MAX
-        and r.get("profit_factor") is not None
-        and r["profit_factor"] > _PF_MIN
-        and r.get("sharpe") is not None
-        and r["sharpe"] > _SHARPE_MIN
-    )
+    try:
+        return (
+            r.get("cagr") not in (None, "")
+            and float(r["cagr"]) > _CAGR_MIN
+            and r.get("max_drawdown") not in (None, "")
+            and float(r["max_drawdown"]) < _DD_MAX
+            and r.get("profit_factor") not in (None, "")
+            and float(r["profit_factor"]) > _PF_MIN
+            and r.get("sharpe") not in (None, "")
+            and float(r["sharpe"]) > _SHARPE_MIN
+        )
+    except (ValueError, TypeError):
+        return False
 
 
 def _three_criteria(r: dict) -> bool:
     """Sharpe を除く 3 指標が採用基準を満たすか"""
-    return (
-        r.get("cagr") is not None
-        and r["cagr"] > _CAGR_MIN
-        and r.get("max_drawdown") is not None
-        and r["max_drawdown"] < _DD_MAX
-        and r.get("profit_factor") is not None
-        and r["profit_factor"] > _PF_MIN
-    )
+    try:
+        return (
+            r.get("cagr") not in (None, "")
+            and float(r["cagr"]) > _CAGR_MIN
+            and r.get("max_drawdown") not in (None, "")
+            and float(r["max_drawdown"]) < _DD_MAX
+            and r.get("profit_factor") not in (None, "")
+            and float(r["profit_factor"]) > _PF_MIN
+        )
+    except (ValueError, TypeError):
+        return False
 
 
 def main() -> None:
@@ -555,7 +561,7 @@ def main() -> None:
         adopted_scenarios = [r for r in success if _all_criteria(r)]
         k1 = next((r for r in success if r["name"] == "K1_i1_ref"), None)
         if adopted_scenarios:
-            best = max(adopted_scenarios, key=lambda r: r.get("sharpe") or 0.0)
+            best = max(adopted_scenarios, key=lambda r: float(r["sharpe"]) if r.get("sharpe") not in (None, "") else 0.0)
             print(
                 f"  → {best['name']} が全採用基準（CAGR>{_CAGR_MIN * 100:.0f}%, "
                 f"Max DD<{_DD_MAX * 100:.0f}%, PF>{_PF_MIN}, Sharpe>{_SHARPE_MIN}）を達成: 採用"
@@ -566,10 +572,10 @@ def main() -> None:
                 for r in success
                 if _three_criteria(r)
                 and r["name"] != "K1_i1_ref"
-                and (k1 is None or (r.get("sharpe") or 0) >= (k1.get("sharpe") or 0))
+                and (k1 is None or (float(r["sharpe"]) if r.get("sharpe") not in (None, "") else 0) >= (float(k1["sharpe"]) if k1.get("sharpe") not in (None, "") else 0))
             ]
             if improved_three:
-                best3 = max(improved_three, key=lambda r: r.get("sharpe") or 0.0)
+                best3 = max(improved_three, key=lambda r: float(r["sharpe"]) if r.get("sharpe") not in (None, "") else 0.0)
                 print(
                     f"  → Sharpe>{_SHARPE_MIN} 達成なし。{best3['name']} が 3 指標を維持しつつ"
                     f" Sharpe={_fmt(best3.get('sharpe'), 3)} を達成。詳細確認を推奨"
