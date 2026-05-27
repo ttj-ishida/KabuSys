@@ -200,38 +200,51 @@ class TestBrokerClientFactoryInitialCash:
         assert len(positions) == 1
         assert positions[0].code == "1234"
 
-    def test_sandbox_mode_returns_kabu_client(self, monkeypatch):
-        from kabusys.execution.kabu_client import KabuStationClient
+    def test_sandbox_mode_returns_paper_sandbox_broker(self, monkeypatch):
+        from kabusys.execution.paper_sandbox_broker import PaperSandboxBroker
 
         monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
         monkeypatch.setenv("KABU_USE_SANDBOX", "true")
         monkeypatch.setenv("KABU_API_PASSWORD", "api_pass")
         monkeypatch.setenv("KABU_SANDBOX_API_PASSWORD", "sandbox_pass")
+        broker = BrokerClientFactory.create(Settings(), available_cash=5_000_000.0)
+        assert isinstance(broker, PaperSandboxBroker)
+        assert broker.get_available_cash() == 5_000_000.0
+        broker.close()
+
+    def test_sandbox_mode_uses_initial_cash_from_settings(self, monkeypatch):
+        from kabusys.execution.paper_sandbox_broker import PaperSandboxBroker
+
+        monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+        monkeypatch.setenv("KABU_USE_SANDBOX", "true")
+        monkeypatch.setenv("KABU_API_PASSWORD", "api_pass")
+        monkeypatch.setenv("PAPER_TRADING_INITIAL_CASH", "3000000")
         broker = BrokerClientFactory.create(Settings())
-        assert isinstance(broker, KabuStationClient)
+        assert isinstance(broker, PaperSandboxBroker)
+        assert broker.get_available_cash() == 3_000_000.0
         broker.close()
 
     def test_sandbox_falls_back_to_api_password(self, monkeypatch):
-        from kabusys.execution.kabu_client import KabuStationClient
+        from kabusys.execution.paper_sandbox_broker import PaperSandboxBroker
 
         monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
         monkeypatch.setenv("KABU_USE_SANDBOX", "true")
         monkeypatch.setenv("KABU_API_PASSWORD", "api_pass")
         monkeypatch.delenv("KABU_SANDBOX_API_PASSWORD", raising=False)
         broker = BrokerClientFactory.create(Settings())
-        assert isinstance(broker, KabuStationClient)
+        assert isinstance(broker, PaperSandboxBroker)
         broker.close()
 
-    def test_sandbox_uses_port_18081(self, monkeypatch):
+    def test_sandbox_real_broker_uses_port_18081(self, monkeypatch):
         from kabusys.execution.broker_factory import _SANDBOX_BASE_URL
-        from kabusys.execution.kabu_client import KabuStationClient
+        from kabusys.execution.paper_sandbox_broker import PaperSandboxBroker
 
         monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
         monkeypatch.setenv("KABU_USE_SANDBOX", "true")
         monkeypatch.setenv("KABU_API_PASSWORD", "api_pass")
         monkeypatch.delenv("KABU_SANDBOX_API_PASSWORD", raising=False)
         broker = BrokerClientFactory.create(Settings())
-        assert isinstance(broker, KabuStationClient)
+        assert isinstance(broker, PaperSandboxBroker)
         assert "18081" in _SANDBOX_BASE_URL
         broker.close()
 

@@ -32,7 +32,7 @@ from kabusys.execution.order_repository import (  # noqa: E402
 )
 from kabusys.execution.reconciler import Reconciler  # noqa: E402
 from kabusys.execution.risk_manager import RiskConfig, RiskManager  # noqa: E402
-from kabusys.monitoring.monitoring_db import init_monitoring_db  # noqa: E402
+from kabusys.monitoring.monitoring_db import MonitoringDB, init_monitoring_db  # noqa: E402
 from kabusys.operations.execution_startup_report import (  # noqa: E402
     build_report,
     format_cli_summary,
@@ -260,10 +260,12 @@ def main() -> None:
     duckdb_conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
 
     try:
-        # 3. ブローカークライアント（paper mode かつ非サンドボックスは前回状態を復元）
+        # 3. ブローカークライアント（paper mode は前回状態を復元）
+        # sandbox モードでは restored_cash → PaperSandboxBroker.paper_cash に使用。
+        # restored_positions は sandbox 分岐では利用しない（ポジションは検証環境 API から取得）。
         restored_cash: float | None = None
         restored_positions: list[Position] | None = None
-        if settings.is_paper and not settings.kabu_use_sandbox:
+        if settings.is_paper:
             restored_cash, restored_positions = _restore_paper_state(
                 settings.paper_sqlite_path, settings.paper_trading_initial_cash
             )
@@ -325,6 +327,7 @@ def main() -> None:
             logger.warning("朝の LINE 通知に失敗しました（起動を続行します）", exc_info=True)
 
         # 5. ExecutionEngine 起動（reconciliation は上で完了済みのため reconciler=None）
+        monitoring_db = MonitoringDB(sqlite_conn)
         engine = ExecutionEngine(
             broker=broker,
             repo=repo,
@@ -335,6 +338,7 @@ def main() -> None:
             config=EngineConfig(target_date=today),
             reconciler=None,
             pid_file=_EXECUTION_PID,
+            monitoring_db=monitoring_db,
         )
         # 停止フラグが既に立っている場合は起動せず終了
         if _STOP_FLAG.exists():
