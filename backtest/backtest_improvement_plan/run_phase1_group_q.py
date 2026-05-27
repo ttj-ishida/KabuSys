@@ -389,7 +389,7 @@ def main() -> None:
 
     print(f"Group Q: {len(scenarios)} シナリオを {n_workers} ワーカーで実行")
     print(f"出力先: {output_dir}")
-    print(f"固定: 施策A ON（vol<12%, hi=0.62）, 施策B ON, gate=1.5×ATR")
+    print("固定: 施策A ON（vol<12%, hi=0.62）, 施策B ON, gate=1.5×ATR")
     print("-" * 100)
 
     all_results: list[dict] = []

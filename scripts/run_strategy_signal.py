@@ -63,7 +63,6 @@ def main() -> None:
         entry_blocked = False
         if dashboard is not None:
             drawdown_pct = float(dashboard["drawdown_pct"])
-            peak_value = float(dashboard["peak_value"]) if dashboard["peak_value"] else 0.0
             blocked_since_str = dashboard["dd_stop_blocked_since"]
             blocked_since = date.fromisoformat(blocked_since_str) if blocked_since_str else None
 
