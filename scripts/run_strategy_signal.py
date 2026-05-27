@@ -24,7 +24,7 @@ from kabusys.operations.process_registry import register_process, update_process
 from kabusys.strategy.signal_generator import generate_signals
 from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
 
-_DD_STOP_PCT = 0.12        # ポートフォリオが peak 比 12% 以上下落したら BUY を停止
+_DD_STOP_PCT = 0.12  # ポートフォリオが peak 比 12% 以上下落したら BUY を停止
 _DD_STOP_TIMEOUT_DAYS = 30  # 停止発動から 30 カレンダー日後に自動解除
 
 _run_log = setup_logging(app_name="strategy_signal", capture_stdio=True)

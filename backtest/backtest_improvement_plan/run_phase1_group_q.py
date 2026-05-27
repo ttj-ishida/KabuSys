@@ -116,6 +116,7 @@ _COM = {
 # Group Q シナリオ定義（Stage2 × Stage3 グリッド）
 # ---------------------------------------------------------------------------
 
+
 def _scenario(name: str, s2: float, s3: float, desc: str) -> dict:
     return {
         "name": name,
@@ -127,7 +128,7 @@ def _scenario(name: str, s2: float, s3: float, desc: str) -> dict:
 
 
 _GROUP_Q: list[dict] = [
-    _scenario("Q0_p2_ref",  1.8, 1.5, "P2 完全再現（参照ベースライン）Stage2=1.8×, Stage3=1.5×"),
+    _scenario("Q0_p2_ref", 1.8, 1.5, "P2 完全再現（参照ベースライン）Stage2=1.8×, Stage3=1.5×"),
     _scenario("Q1_s14_s10", 1.4, 1.0, "Stage2=1.4×, Stage3=1.0× 最も積極的なタイト化"),
     _scenario("Q2_s14_s12", 1.4, 1.2, "Stage2=1.4×, Stage3=1.2×"),
     _scenario("Q3_s16_s10", 1.6, 1.0, "Stage2=1.6×, Stage3=1.0×"),
@@ -175,32 +176,58 @@ def _build_command(db_path: Path, scenario: dict, output_dir: Path) -> list[str]
         sys.executable,
         "-m",
         "kabusys.backtest.run",
-        "--db", str(db_path),
-        "--start", _COM["start"],
-        "--end", _COM["end"],
-        "--cash", str(_COM["cash"]),
-        "--allocation-method", _COM["allocation_method"],
-        "--max-positions", str(_COM["max_positions"]),
-        "--max-position-pct", str(_COM["max_position_pct"]),
-        "--max-utilization", str(_COM["max_utilization"]),
-        "--risk-pct", str(_COM["risk_pct"]),
-        "--stop-loss-pct", str(_COM["stop_loss_pct"]),
-        "--min-holding-days", "5",
-        "--max-holding-days", str(_COM["max_holding_days"]),
-        "--trailing-stop-atr", str(_COM["trailing_stop_atr"]),
-        "--threshold", str(_COM["threshold"]),
-        "--topix-size-multiplier-weak-bear", str(_COM["weak_bear"]),
-        "--topix-size-multiplier-strong-bear", str(_COM["strong_bear"]),
-        "--portfolio-drawdown-stop", str(_COM["dd_stop"]),
-        "--portfolio-drawdown-stop-timeout", str(_COM["dd_timeout"]),
-        "--topix-vol-window", str(_COM["topix_vol_window"]),
-        "--topix-vol-low-threshold", str(_COM["topix_vol_low_threshold"]),
-        "--adaptive-threshold-hi", str(_COM["adaptive_threshold_hi"]),
-        "--trail-profit-gate-atr", str(_COM["trail_profit_gate_atr"]),
-        "--trail-stage2-mult", str(scenario["trail_stage2_mult"]),
-        "--trail-stage3-mult", str(scenario["trail_stage3_mult"]),
-        "--output-format", "all",
-        "--output-dir", str(output_dir),
+        "--db",
+        str(db_path),
+        "--start",
+        _COM["start"],
+        "--end",
+        _COM["end"],
+        "--cash",
+        str(_COM["cash"]),
+        "--allocation-method",
+        _COM["allocation_method"],
+        "--max-positions",
+        str(_COM["max_positions"]),
+        "--max-position-pct",
+        str(_COM["max_position_pct"]),
+        "--max-utilization",
+        str(_COM["max_utilization"]),
+        "--risk-pct",
+        str(_COM["risk_pct"]),
+        "--stop-loss-pct",
+        str(_COM["stop_loss_pct"]),
+        "--min-holding-days",
+        "5",
+        "--max-holding-days",
+        str(_COM["max_holding_days"]),
+        "--trailing-stop-atr",
+        str(_COM["trailing_stop_atr"]),
+        "--threshold",
+        str(_COM["threshold"]),
+        "--topix-size-multiplier-weak-bear",
+        str(_COM["weak_bear"]),
+        "--topix-size-multiplier-strong-bear",
+        str(_COM["strong_bear"]),
+        "--portfolio-drawdown-stop",
+        str(_COM["dd_stop"]),
+        "--portfolio-drawdown-stop-timeout",
+        str(_COM["dd_timeout"]),
+        "--topix-vol-window",
+        str(_COM["topix_vol_window"]),
+        "--topix-vol-low-threshold",
+        str(_COM["topix_vol_low_threshold"]),
+        "--adaptive-threshold-hi",
+        str(_COM["adaptive_threshold_hi"]),
+        "--trail-profit-gate-atr",
+        str(_COM["trail_profit_gate_atr"]),
+        "--trail-stage2-mult",
+        str(scenario["trail_stage2_mult"]),
+        "--trail-stage3-mult",
+        str(scenario["trail_stage3_mult"]),
+        "--output-format",
+        "all",
+        "--output-dir",
+        str(output_dir),
     ]
     if _COM.get("use_ma200_filter"):
         cmd.append("--ma200-filter")
@@ -457,7 +484,9 @@ def main() -> None:
 
     print(f"\n最良シナリオ: {best['name']}")
     print(f"  Stage2={best.get('trail_stage2_mult')}×  Stage3={best.get('trail_stage3_mult')}×")
-    print(f"  Sharpe={_fmt(best['sharpe'])}  CAGR={_fmt(best.get('cagr'))}  MaxDD={_fmt(best.get('max_drawdown'))}")
+    print(
+        f"  Sharpe={_fmt(best['sharpe'])}  CAGR={_fmt(best.get('cagr'))}  MaxDD={_fmt(best.get('max_drawdown'))}"
+    )
 
     sharpe = best["sharpe"]
     if sharpe > 0.5:
