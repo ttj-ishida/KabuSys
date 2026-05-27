@@ -210,7 +210,7 @@ class TestBrokerClientFactoryInitialCash:
         broker = BrokerClientFactory.create(Settings(), available_cash=5_000_000.0)
         assert isinstance(broker, PaperSandboxBroker)
         assert broker.get_available_cash() == 5_000_000.0
-        broker._real.close()
+        broker.close()
 
     def test_sandbox_mode_uses_initial_cash_from_settings(self, monkeypatch):
         from kabusys.execution.paper_sandbox_broker import PaperSandboxBroker
@@ -222,7 +222,7 @@ class TestBrokerClientFactoryInitialCash:
         broker = BrokerClientFactory.create(Settings())
         assert isinstance(broker, PaperSandboxBroker)
         assert broker.get_available_cash() == 3_000_000.0
-        broker._real.close()
+        broker.close()
 
     def test_sandbox_falls_back_to_api_password(self, monkeypatch):
         from kabusys.execution.paper_sandbox_broker import PaperSandboxBroker
@@ -233,7 +233,7 @@ class TestBrokerClientFactoryInitialCash:
         monkeypatch.delenv("KABU_SANDBOX_API_PASSWORD", raising=False)
         broker = BrokerClientFactory.create(Settings())
         assert isinstance(broker, PaperSandboxBroker)
-        broker._real.close()
+        broker.close()
 
     def test_sandbox_real_broker_uses_port_18081(self, monkeypatch):
         from kabusys.execution.broker_factory import _SANDBOX_BASE_URL
@@ -246,7 +246,7 @@ class TestBrokerClientFactoryInitialCash:
         broker = BrokerClientFactory.create(Settings())
         assert isinstance(broker, PaperSandboxBroker)
         assert "18081" in _SANDBOX_BASE_URL
-        broker._real.close()
+        broker.close()
 
 
 class TestKabuTradePassword:

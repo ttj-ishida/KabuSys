@@ -261,6 +261,8 @@ def main() -> None:
 
     try:
         # 3. ブローカークライアント（paper mode は前回状態を復元）
+        # sandbox モードでは restored_cash → PaperSandboxBroker.paper_cash に使用。
+        # restored_positions は sandbox 分岐では利用しない（ポジションは検証環境 API から取得）。
         restored_cash: float | None = None
         restored_positions: list[Position] | None = None
         if settings.is_paper:

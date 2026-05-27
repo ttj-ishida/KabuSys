@@ -71,6 +71,20 @@ class TestPaperSandboxBrokerDelegation:
         real_broker.get_positions.assert_called_once()
 
 
+class TestPaperSandboxBrokerClose:
+    def test_close_delegates_to_real(self, real_broker):
+        broker = PaperSandboxBroker(real_broker=real_broker, paper_cash=10_000_000.0)
+        broker.close()
+        real_broker.close.assert_called_once()
+
+
+class TestPaperSandboxBrokerGetattr:
+    def test_getattr_falls_back_to_real(self, real_broker):
+        real_broker.some_future_method = lambda: "future"
+        broker = PaperSandboxBroker(real_broker=real_broker, paper_cash=10_000_000.0)
+        assert broker.some_future_method() == "future"
+
+
 class TestPaperSandboxBrokerProtocol:
     def test_implements_broker_protocol(self, real_broker):
         from kabusys.execution.broker_api import BrokerAPIProtocol

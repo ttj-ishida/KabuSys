@@ -18,9 +18,14 @@ class PaperSandboxBroker:
 
     - send_order / cancel_order / get_order_status / get_positions → 検証環境 API に委譲
     - get_available_cash → paper_trading.db 復元値 or PAPER_TRADING_INITIAL_CASH を返す
+    - close → 検証環境 API クライアントのリソース解放を委譲
 
     kabuステーション検証環境の /wallet/cash は常に 0 を返すため（Issue #317）、
     get_available_cash() だけ paper_cash を返すことで RiskManager の余力チェックを正常化する。
+
+    paper_cash は起動時の復元値または PAPER_TRADING_INITIAL_CASH で固定される。
+    実行中の約定による動的更新は行わない（Paper Trading の検証用途として許容）。
+    将来的に動的更新が必要になった場合は ExecutionEngine 側から set_paper_cash() を呼ぶこと。
     """
 
     def __init__(self, real_broker: BrokerAPIProtocol, paper_cash: float) -> None:
@@ -31,7 +36,7 @@ class PaperSandboxBroker:
         return self._real.send_order(order)
 
     def cancel_order(self, order_id: str) -> None:
-        return self._real.cancel_order(order_id)
+        self._real.cancel_order(order_id)
 
     def get_order_status(self, order_id: str) -> OrderStatus | None:
         return self._real.get_order_status(order_id)
@@ -41,3 +46,11 @@ class PaperSandboxBroker:
 
     def get_available_cash(self) -> float:
         return self._paper_cash
+
+    def close(self) -> None:
+        """検証環境 API クライアント（KabuStationClient）のリソースを解放する。"""
+        self._real.close()
+
+    def __getattr__(self, name: str) -> object:
+        """BrokerAPIProtocol に将来メソッドが追加された場合のフォールバック委譲。"""
+        return getattr(self._real, name)
