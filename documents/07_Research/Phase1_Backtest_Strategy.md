@@ -2316,3 +2316,152 @@ Phase 1 の現行最良設定（P2_n1b_o2）における残課題と今後の方
 | Sharpe 0.5 突破 | 0.428 で頭打ち。グリッドサーチでも改善せず | Phase 2（資産規模拡大後）の課題として保留 |
 | Phase 1 正式採用 | P2_n1b_o2 が 3/4 基準を充足。MaxDD 19.10% | 実運用移行の判断をユーザーに委ねる |
 | OOS 検証 | P2 設定の 2022〜2025 抜き出し評価は未実施 | ロバスト性確認として推奨 |
+
+---
+
+## Section 46 — Phase 1 完了: 最終採用パラメータ一覧
+
+> **ステータス: Phase 1 完了（2026-05-27 本番反映・PR #362 マージ済み）**
+
+Group A〜Q の系統的なバックテスト検証を経て、P2_n1b_o2 を Phase 1 の最終採用設定として確定した。
+以下に本番コード（`config/strategy_config.yaml`・`config/risk_config.yaml`・`scripts/run_strategy_signal.py`）に反映されたすべてのパラメータを記録する。
+
+---
+
+### 46.1 売買戦略パラメータ（strategy_config.yaml）
+
+#### ファクター重み
+
+| ファクター | 重み |
+|---|---:|
+| momentum | 0.40 |
+| value | 0.20 |
+| volatility | 0.15 |
+| liquidity | 0.15 |
+| news | 0.10 |
+
+#### エントリー・エグジット
+
+| パラメータ | 採用値 | 採用根拠 |
+|---|---:|---|
+| threshold（BUY 閾値） | 0.58 | Group N/P 検証: 施策A（動的閾値）の低 vol 時ベース閾値 |
+| stop_loss_rate | −0.09（−9%） | Group P 検証: −8% から緩和し CAGR 向上 |
+| min_holding_days | 5 | 初期設定より継続 |
+| max_holding_days | 60 | 初期設定より継続 |
+| trailing_stop_atr_mult | 2.0（Stage1） | Group O/P 検証: 多段階TS の Stage1 基準 |
+| reentry_cooldown_days | 5 | 初期設定より継続 |
+| gap_up_threshold | 0.05 | 初期設定より継続 |
+| gap_down_threshold | −0.03 | 初期設定より継続 |
+| rsi_overbought_threshold | 65.0 | 初期設定より継続 |
+
+#### 施策A: 適応的シグナル閾値（adaptive_threshold_vol_regime）
+
+| パラメータ | 採用値 | 内容 |
+|---|---:|---|
+| 有効フラグ | True | TOPIX 20日ボラ < 閾値のとき threshold を引き上げ |
+| topix_vol_low_threshold | 0.12（12%） | 低ボラ判定閾値 |
+| adaptive_threshold_hi | 0.62 | 低ボラ局面での引き上げ後 BUY 閾値 |
+
+#### 施策B: 多段階トレーリングストップ（dynamic_trailing_stop）
+
+| パラメータ | 採用値 | 内容 |
+|---|---:|---|
+| 有効フラグ | True | |
+| trail_profit_gate_atr | 1.5× | Stage2 に移行するための含み益ゲート |
+| trail_stage2_mult | 1.8× | Stage2（保有 6 日目〜）の ATR 乗数 |
+| trail_stage3_mult | 1.5× | Stage3（保有 21 日目〜）の ATR 乗数 |
+
+#### ポートフォリオ構成
+
+| パラメータ | 採用値 | 採用根拠 |
+|---|---:|---|
+| max_positions | 3 | Group P 検証: 集中投資でリターン・リスク効率が最良 |
+
+#### レジーム設定（Bear Guard OFF）
+
+| パラメータ | 採用値 | 採用根拠 |
+|---|---:|---|
+| topix_size_multiplier_weak_bear | 1.0 | Group E/P 検証: TOPIX MA クロスフィルターは機能せず OFF |
+| topix_size_multiplier_strong_bear | 1.0 | 同上 |
+
+#### バリュースコア
+
+| パラメータ | 採用値 |
+|---|---:|
+| per 重み | 0.50 |
+| pbr 重み | 0.30 |
+| div_yield 重み | 0.00（J-Quants Standard プラン制限） |
+| per_mid | 20.0 |
+| pbr_mid | 1.5 |
+| div_yield_max | 3.0 |
+
+#### セクターブースト
+
+| パラメータ | 採用値 |
+|---|---:|
+| boost | 0.03 |
+| quartile | 0.25 |
+
+---
+
+### 46.2 リスク管理パラメータ（risk_config.yaml）
+
+| パラメータ | 採用値 | 採用根拠 |
+|---|---:|---|
+| max_position_pct | 0.10（10%） | 初期設定より継続 |
+| max_utilization | 0.30（30%） | Group G/H 検証: 投下上限 30% が MaxDD 抑制に最有効 |
+| rate_limit_per_sec | 5 | 初期設定より継続 |
+| circuit_breaker_errors | 10 | 初期設定より継続 |
+| circuit_breaker_window_sec | 60 | 初期設定より継続 |
+| max_drawdown | 0.20（20%） | キルスイッチ閾値 |
+
+---
+
+### 46.3 ポートフォリオ DD ストップ（run_strategy_signal.py）
+
+BUY シグナル生成をポートフォリオ全体のドローダウンで制御する保護機構。
+
+| パラメータ | 採用値 | 内容 |
+|---|---:|---|
+| _DD_STOP_PCT | 0.12（12%） | peak 比 12% 以上の下落で BUY を停止 |
+| _DD_STOP_TIMEOUT_DAYS | 30 日 | 停止発動から 30 カレンダー日後に自動解除 |
+| 解除時動作 | peak を portfolio_value にリセット、drawdown_pct を 0.0 にリセット | 解除直後の即時再発動を防止 |
+
+**DD ストップ状態機械:**
+
+```
+通常 → [drawdown > 12%] → 停止中（BUY スキップ）
+停止中 → [30日経過] → 解除（peak リセット、drawdown=0）→ 通常
+停止中 → [30日未満] → 停止継続
+```
+
+---
+
+### 46.4 銘柄フィルター（run_strategy_signal.py 経由）
+
+| フィルター | 採用値 | 内容 |
+|---|---:|---|
+| use_ma200_filter | True | 株価が 200 日 MA を下回る銘柄の BUY を抑制 |
+| block_entries_by_regime | False | Bear Guard OFF のため regime_is_bear による BUY 停止を無効化 |
+
+---
+
+### 46.5 最終バックテスト成績（P2_n1b_o2、2017–2025）
+
+| 指標 | 値 | 採用基準 | 充足 |
+|---|---:|---:|:---:|
+| CAGR | 8.31% | > 5% | ✅ |
+| Sharpe | 0.428 | > 0.5 | ❌（継続課題） |
+| MaxDD | 19.10% | < 25% | ✅ |
+| Profit Factor | 1.321 | > 1.1 | ✅ |
+
+3/4 基準を充足。Sharpe 0.5 突破は Phase 1 の制約（初期資本 100 万円・max_positions=3）の中では困難と判断し、Phase 2 への課題として引き継ぐ。
+
+---
+
+### 46.6 Phase 1 完了宣言
+
+- **検証期間**: Group A〜Q（18 グループ、延べ 100+ シナリオ）
+- **採用設定**: P2_n1b_o2（施策A + 施策B + Bear Guard OFF + MA200 + DD Stop）
+- **本番反映**: 2026-05-27、PR #362 にてマージ完了
+- **次フェーズ**: Phase 2 では資本規模拡大・ポジション上限緩和・Sharpe 改善を主目標とする
