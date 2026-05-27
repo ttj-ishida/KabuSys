@@ -40,7 +40,11 @@ class BrokerClientFactory:
                 trade_password=settings.kabu_trade_password,
                 base_url=_SANDBOX_BASE_URL,
             )
-            cash = available_cash if available_cash is not None else settings.paper_trading_initial_cash
+            cash = (
+                available_cash
+                if available_cash is not None
+                else settings.paper_trading_initial_cash
+            )
             return PaperSandboxBroker(real_broker=real_broker, paper_cash=cash)
         if settings.is_paper or settings.is_dev:
             cash = (
