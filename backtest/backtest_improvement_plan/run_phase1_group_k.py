@@ -561,7 +561,10 @@ def main() -> None:
         adopted_scenarios = [r for r in success if _all_criteria(r)]
         k1 = next((r for r in success if r["name"] == "K1_i1_ref"), None)
         if adopted_scenarios:
-            best = max(adopted_scenarios, key=lambda r: float(r["sharpe"]) if r.get("sharpe") not in (None, "") else 0.0)
+            best = max(
+                adopted_scenarios,
+                key=lambda r: float(r["sharpe"]) if r.get("sharpe") not in (None, "") else 0.0,
+            )
             print(
                 f"  → {best['name']} が全採用基準（CAGR>{_CAGR_MIN * 100:.0f}%, "
                 f"Max DD<{_DD_MAX * 100:.0f}%, PF>{_PF_MIN}, Sharpe>{_SHARPE_MIN}）を達成: 採用"
@@ -572,10 +575,17 @@ def main() -> None:
                 for r in success
                 if _three_criteria(r)
                 and r["name"] != "K1_i1_ref"
-                and (k1 is None or (float(r["sharpe"]) if r.get("sharpe") not in (None, "") else 0) >= (float(k1["sharpe"]) if k1.get("sharpe") not in (None, "") else 0))
+                and (
+                    k1 is None
+                    or (float(r["sharpe"]) if r.get("sharpe") not in (None, "") else 0)
+                    >= (float(k1["sharpe"]) if k1.get("sharpe") not in (None, "") else 0)
+                )
             ]
             if improved_three:
-                best3 = max(improved_three, key=lambda r: float(r["sharpe"]) if r.get("sharpe") not in (None, "") else 0.0)
+                best3 = max(
+                    improved_three,
+                    key=lambda r: float(r["sharpe"]) if r.get("sharpe") not in (None, "") else 0.0,
+                )
                 print(
                     f"  → Sharpe>{_SHARPE_MIN} 達成なし。{best3['name']} が 3 指標を維持しつつ"
                     f" Sharpe={_fmt(best3.get('sharpe'), 3)} を達成。詳細確認を推奨"

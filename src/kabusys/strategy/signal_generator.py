@@ -1163,6 +1163,8 @@ def generate_signals(
     trail_profit_gate_atr: float = 1.5,
     trail_stage2_mult: float = 1.5,
     trail_stage3_mult: float = 1.0,
+    entry_blocked: bool = False,
+    block_entries_by_regime: bool = True,
     *,
     use_stock_ma_cross_filter: bool = False,
     stock_ma_cross_weak_bear_multiplier: float = 0.5,
@@ -1362,11 +1364,18 @@ def generate_signals(
 
     # 3. Bear レジーム判定
     regime_is_bear = regime_provider.get_regime(target_date) == "bear"
+    _regime_blocks_entry = regime_is_bear and block_entries_by_regime
     if regime_is_bear:
-        logger.info(
-            "generate_signals: Bear レジーム検知 — BUY シグナル抑制 date=%s",
-            target_date,
-        )
+        if block_entries_by_regime:
+            logger.info(
+                "generate_signals: Bear レジーム検知 — BUY シグナル抑制 date=%s",
+                target_date,
+            )
+        else:
+            logger.info(
+                "generate_signals: Bear レジーム検知（BG OFF のためエントリー継続） date=%s",
+                target_date,
+            )
 
     # 3b. breadth_stop 判定（25日MA上銘柄比率 < 35% で BUY 全件停止）
     breadth_stop = _is_breadth_stop(conn, target_date)
@@ -1381,7 +1390,7 @@ def generate_signals(
     bottom_sectors: frozenset[str] = frozenset()
     sector_map: dict[str, str] = {}
     boosted_count = 0
-    if not regime_is_bear and not breadth_stop:
+    if not _regime_blocks_entry and not breadth_stop:
         top_sectors, bottom_sectors, sector_map = _calc_sector_strengths(
             conn, target_date, sector_quartile=_cfg["sector_quartile"]
         )
@@ -1443,7 +1452,7 @@ def generate_signals(
             }
         )
 
-    if not regime_is_bear and not breadth_stop and boosted_count:
+    if not _regime_blocks_entry and not breadth_stop and boosted_count:
         logger.info(
             "generate_signals: sector boost — %d 銘柄をスコアブースト date=%s",
             boosted_count,
@@ -1489,7 +1498,7 @@ def generate_signals(
                 target_date,
             )
     buy_signals: list[dict] = []
-    if not regime_is_bear and not breadth_stop:
+    if not _regime_blocks_entry and not breadth_stop and not entry_blocked:
         # 3c. ギャップ比率を一括取得（BUY 生成が必要な場合のみ実行）
         gap_ratios = _fetch_gap_ratios(
             conn, [r["code"] for r in scored if r["score"] >= threshold], target_date

@@ -10,9 +10,9 @@ strategy:
     liquidity: 0.15
     news: 0.10
   # BUY シグナル生成の final_score 閾値
-  threshold: 0.60
+  threshold: 0.58
   # ストップロス閾値（終値 / avg_price - 1 がこれ以下で SELL）
-  stop_loss_rate: -0.08
+  stop_loss_rate: -0.09
   # 最低保有営業日数（スコア低下による SELL を抑制する日数）
   min_holding_days: 5
   # 最大保有営業日数（これを超えると time_exit SELL を発動）
@@ -48,10 +48,11 @@ sector:
 
 regime:
   # MA25 < MA75（弱いベア）時の size_multiplier（0 ≤ x ≤ 1）
-  topix_size_multiplier_weak_bear: 0.5
+  # Phase 1 採用設定: Bear Guard OFF（Group E/P 検証で TOPIX 一律フィルターが機能しないと確認）
+  topix_size_multiplier_weak_bear: 1.0
   # MA75 < MA200（強いベア）時の size_multiplier（0 ≤ x ≤ 1、0.0 でエントリー停止）
-  topix_size_multiplier_strong_bear: 0.0
+  topix_size_multiplier_strong_bear: 1.0
 
 portfolio:
   # 最大保有銘柄数（select_candidates() に渡される上限値、1 以上の整数）
-  max_positions: 8
+  max_positions: 3

@@ -17,11 +17,15 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
 from kabusys.execution.order_repository import init_position_entries_db
+from kabusys.monitoring.monitoring_db import MonitoringDB, init_monitoring_db
 from kabusys.operations.job_run_recorder import write_job_result
 from kabusys.operations.night_batch_report import JobRunResult
 from kabusys.operations.process_registry import register_process, update_process
 from kabusys.strategy.signal_generator import generate_signals
 from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_logging
+
+_DD_STOP_PCT = 0.12  # ポートフォリオが peak 比 12% 以上下落したら BUY を停止
+_DD_STOP_TIMEOUT_DAYS = 30  # 停止発動から 30 カレンダー日後に自動解除
 
 _run_log = setup_logging(app_name="strategy_signal", capture_stdio=True)
 logger = logging.getLogger(__name__)
@@ -48,9 +52,80 @@ def main() -> None:
         settings = Settings()
         conn = duckdb.connect(str(settings.duckdb_path))
         sqlite_conn = sqlite3.connect(str(settings.sqlite_path), timeout=30.0)
+        sqlite_conn.row_factory = sqlite3.Row
         init_position_entries_db(sqlite_conn)
+        init_monitoring_db(sqlite_conn)
         target_date = date.today()
-        n = generate_signals(conn, target_date, sqlite_conn=sqlite_conn)
+
+        # --- ポートフォリオ DD 停止チェック ---
+        mdb = MonitoringDB(sqlite_conn)
+        dashboard = mdb.get_dashboard()
+        entry_blocked = False
+        if dashboard is not None:
+            drawdown_pct = float(dashboard["drawdown_pct"])
+            blocked_since_str = dashboard["dd_stop_blocked_since"]
+            blocked_since = date.fromisoformat(blocked_since_str) if blocked_since_str else None
+
+            # タイムアウト解除チェック
+            if blocked_since is not None:
+                elapsed = (target_date - blocked_since).days
+                if elapsed >= _DD_STOP_TIMEOUT_DAYS:
+                    logger.info(
+                        "DD 停止タイムアウト解除: blocked_since=%s elapsed=%d日",
+                        blocked_since_str,
+                        elapsed,
+                    )
+                    mdb.upsert_dashboard(
+                        portfolio_value=float(dashboard["portfolio_value"]),
+                        cash=float(dashboard["cash"]),
+                        drawdown_pct=0.0,
+                        open_order_count=int(dashboard["open_order_count"]),
+                        position_count=int(dashboard["position_count"]),
+                        peak_value=float(dashboard["portfolio_value"]),
+                        clear_dd_stop=True,
+                    )
+                    blocked_since = None
+                    drawdown_pct = 0.0
+
+            # DD 停止判定
+            if blocked_since is None and drawdown_pct > _DD_STOP_PCT:
+                entry_blocked = True
+                mdb.upsert_dashboard(
+                    portfolio_value=float(dashboard["portfolio_value"]),
+                    cash=float(dashboard["cash"]),
+                    drawdown_pct=drawdown_pct,
+                    open_order_count=int(dashboard["open_order_count"]),
+                    position_count=int(dashboard["position_count"]),
+                    dd_stop_blocked_since=target_date.isoformat(),
+                )
+                logger.warning(
+                    "DD 停止発動: drawdown=%.1f%% > %.0f%% → BUY シグナル生成をスキップ",
+                    drawdown_pct * 100,
+                    _DD_STOP_PCT * 100,
+                )
+            elif blocked_since is not None:
+                entry_blocked = True
+                logger.info(
+                    "DD 停止継続中: blocked_since=%s drawdown=%.1f%%",
+                    blocked_since_str,
+                    drawdown_pct * 100,
+                )
+
+        if entry_blocked:
+            logger.info("DD Stop により BUY をスキップします（SELL は継続）date=%s", target_date)
+        n = generate_signals(
+            conn,
+            target_date,
+            use_ma200_filter=True,
+            adaptive_threshold_vol_regime=True,
+            topix_vol_low_threshold=0.12,
+            dynamic_trailing_stop=True,
+            trail_stage2_mult=1.8,
+            trail_stage3_mult=1.5,
+            entry_blocked=entry_blocked,
+            block_entries_by_regime=False,
+            sqlite_conn=sqlite_conn,
+        )
         _updated_rows["signals"] = n
         logger.info("シグナル生成完了: %d 件 (date=%s)", n, target_date)
     except Exception as exc:
