@@ -25,19 +25,23 @@ class BrokerClientFactory:
     ) -> BrokerAPIProtocol:
         """設定に応じたブローカークライアントを返す。
 
-        - is_paper かつ kabu_use_sandbox → KabuStationClient（検証 URL: port 18081）
+        - is_paper かつ kabu_use_sandbox → PaperSandboxBroker（API は検証環境、資金は paper_cash）
         - is_paper または is_dev         → MockBrokerClient（available_cash / initial_positions を注入）
         - is_live                        → KabuStationClient（本番）
         - それ以外                       → ValueError（settings.env の評価で確定）
         """
         if settings.is_paper and settings.kabu_use_sandbox:
+            from kabusys.execution.paper_sandbox_broker import PaperSandboxBroker
+
             password = settings.kabu_sandbox_api_password or settings.kabu_api_password
-            return create_broker_api(
+            real_broker = create_broker_api(
                 mock=False,
                 api_password=password,
                 trade_password=settings.kabu_trade_password,
                 base_url=_SANDBOX_BASE_URL,
             )
+            cash = available_cash if available_cash is not None else settings.paper_trading_initial_cash
+            return PaperSandboxBroker(real_broker=real_broker, paper_cash=cash)
         if settings.is_paper or settings.is_dev:
             cash = (
                 available_cash
