@@ -1,5 +1,6 @@
 # tests/test_paper_sandbox_broker.py
 """PaperSandboxBroker のユニットテスト。"""
+
 from unittest.mock import MagicMock
 
 import pytest
