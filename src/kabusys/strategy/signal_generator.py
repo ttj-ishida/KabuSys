@@ -1163,6 +1163,7 @@ def generate_signals(
     trail_profit_gate_atr: float = 1.5,
     trail_stage2_mult: float = 1.5,
     trail_stage3_mult: float = 1.0,
+    entry_blocked: bool = False,
     *,
     use_stock_ma_cross_filter: bool = False,
     stock_ma_cross_weak_bear_multiplier: float = 0.5,
@@ -1489,7 +1490,7 @@ def generate_signals(
                 target_date,
             )
     buy_signals: list[dict] = []
-    if not regime_is_bear and not breadth_stop:
+    if not regime_is_bear and not breadth_stop and not entry_blocked:
         # 3c. ギャップ比率を一括取得（BUY 生成が必要な場合のみ実行）
         gap_ratios = _fetch_gap_ratios(
             conn, [r["code"] for r in scored if r["score"] >= threshold], target_date

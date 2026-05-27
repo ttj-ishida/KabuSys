@@ -71,14 +71,15 @@ def init_monitoring_db(conn: sqlite3.Connection) -> None:
             ON risk_logs (event_type, detail, logged_at);
 
         CREATE TABLE IF NOT EXISTS dashboard (
-            id               INTEGER PRIMARY KEY CHECK (id = 1),
-            updated_at       TEXT    NOT NULL,
-            portfolio_value  REAL    NOT NULL,
-            cash             REAL    NOT NULL,
-            drawdown_pct     REAL    NOT NULL,
-            open_order_count INTEGER NOT NULL,
-            position_count   INTEGER NOT NULL,
-            peak_value       REAL
+            id                    INTEGER PRIMARY KEY CHECK (id = 1),
+            updated_at            TEXT    NOT NULL,
+            portfolio_value       REAL    NOT NULL,
+            cash                  REAL    NOT NULL,
+            drawdown_pct          REAL    NOT NULL,
+            open_order_count      INTEGER NOT NULL,
+            position_count        INTEGER NOT NULL,
+            peak_value            REAL,
+            dd_stop_blocked_since TEXT
         );
 
         CREATE TABLE IF NOT EXISTS ai_wizard_messages (
@@ -110,10 +111,13 @@ def init_monitoring_db(conn: sqlite3.Connection) -> None:
     """)
     conn.commit()
 
-    # 既存 DB に peak_value カラムがない場合のマイグレーション
+    # 既存 DB に peak_value / dd_stop_blocked_since カラムがない場合のマイグレーション
     existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(dashboard)")}
     if "peak_value" not in existing_cols:
         conn.execute("ALTER TABLE dashboard ADD COLUMN peak_value REAL")
+        conn.commit()
+    if "dd_stop_blocked_since" not in existing_cols:
+        conn.execute("ALTER TABLE dashboard ADD COLUMN dd_stop_blocked_since TEXT")
         conn.commit()
 
     # 既存 DB に latency_ms カラムがない場合のマイグレーション
@@ -294,28 +298,37 @@ class MonitoringDB:
         position_count: int,
         updated_at: datetime | None = None,
         peak_value: float | None = None,
+        dd_stop_blocked_since: str | None = None,
+        clear_dd_stop: bool = False,
     ) -> None:
         """ダッシュボード集計を更新する（常に id=1 の1行のみ保持）。
 
         peak_value=None の場合、既存の peak_value を上書きしない。
+        dd_stop_blocked_since=None かつ clear_dd_stop=False の場合、既存値を上書きしない。
+        clear_dd_stop=True の場合、dd_stop_blocked_since を NULL にリセットする。
         INSERT ... ON CONFLICT DO UPDATE SET + COALESCE を使用することで、
         INSERT OR REPLACE の DELETE→INSERT 問題を回避する。
         """
         ts = updated_at.isoformat() if updated_at else self._now()
+        dd_stop_val = None if clear_dd_stop else dd_stop_blocked_since
         self._conn.execute(
             """
             INSERT INTO dashboard
                 (id, updated_at, portfolio_value, cash, drawdown_pct,
-                 open_order_count, position_count, peak_value)
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                 open_order_count, position_count, peak_value, dd_stop_blocked_since)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
-                updated_at       = excluded.updated_at,
-                portfolio_value  = excluded.portfolio_value,
-                cash             = excluded.cash,
-                drawdown_pct     = excluded.drawdown_pct,
-                open_order_count = excluded.open_order_count,
-                position_count   = excluded.position_count,
-                peak_value       = COALESCE(excluded.peak_value, dashboard.peak_value)
+                updated_at            = excluded.updated_at,
+                portfolio_value       = excluded.portfolio_value,
+                cash                  = excluded.cash,
+                drawdown_pct          = excluded.drawdown_pct,
+                open_order_count      = excluded.open_order_count,
+                position_count        = excluded.position_count,
+                peak_value            = COALESCE(excluded.peak_value, dashboard.peak_value),
+                dd_stop_blocked_since = CASE
+                    WHEN ? THEN NULL
+                    ELSE COALESCE(excluded.dd_stop_blocked_since, dashboard.dd_stop_blocked_since)
+                END
             """,
             (
                 ts,
@@ -325,6 +338,8 @@ class MonitoringDB:
                 open_order_count,
                 position_count,
                 peak_value,
+                dd_stop_val,
+                clear_dd_stop,
             ),
         )
         self._conn.commit()
