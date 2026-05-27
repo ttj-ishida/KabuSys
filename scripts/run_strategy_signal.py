@@ -78,13 +78,14 @@ def main() -> None:
                     mdb.upsert_dashboard(
                         portfolio_value=float(dashboard["portfolio_value"]),
                         cash=float(dashboard["cash"]),
-                        drawdown_pct=drawdown_pct,
+                        drawdown_pct=0.0,
                         open_order_count=int(dashboard["open_order_count"]),
                         position_count=int(dashboard["position_count"]),
-                        peak_value=float(dashboard["portfolio_value"]),  # ピークをリセット
+                        peak_value=float(dashboard["portfolio_value"]),
                         clear_dd_stop=True,
                     )
                     blocked_since = None
+                    drawdown_pct = 0.0
 
             # DD 停止判定
             if blocked_since is None and drawdown_pct > _DD_STOP_PCT:
@@ -110,6 +111,8 @@ def main() -> None:
                     drawdown_pct * 100,
                 )
 
+        if entry_blocked:
+            logger.info("DD Stop により BUY をスキップします（SELL は継続）date=%s", target_date)
         n = generate_signals(
             conn,
             target_date,
@@ -120,6 +123,7 @@ def main() -> None:
             trail_stage2_mult=1.8,
             trail_stage3_mult=1.5,
             entry_blocked=entry_blocked,
+            block_entries_by_regime=False,
             sqlite_conn=sqlite_conn,
         )
         _updated_rows["signals"] = n
