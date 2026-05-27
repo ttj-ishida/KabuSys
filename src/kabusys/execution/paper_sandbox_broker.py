@@ -25,7 +25,7 @@ class PaperSandboxBroker:
 
     paper_cash は起動時の復元値または PAPER_TRADING_INITIAL_CASH で固定される。
     実行中の約定による動的更新は行わない（Paper Trading の検証用途として許容）。
-    将来的に動的更新が必要になった場合は ExecutionEngine 側から set_paper_cash() を呼ぶこと。
+    動的更新が必要になった場合は別途 setter を追加すること（現状は未実装）。
     """
 
     def __init__(self, real_broker: BrokerAPIProtocol, paper_cash: float) -> None:
