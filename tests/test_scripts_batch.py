@@ -93,10 +93,13 @@ def test_run_strategy_signal_calls_generate_signals():
         patch("run_strategy_signal.duckdb.connect"),
         patch("run_strategy_signal.sqlite3.connect"),
         patch("run_strategy_signal.init_position_entries_db"),
+        patch("run_strategy_signal.init_monitoring_db"),
+        patch("run_strategy_signal.MonitoringDB") as mock_mdb,
         patch("run_strategy_signal.generate_signals", return_value=10) as mock_fn,
     ):
         mock_settings.return_value.duckdb_path = Path("/fake.duckdb")
         mock_settings.return_value.sqlite_path = Path("/fake.db")
+        mock_mdb.return_value.get_dashboard.return_value = None
         run_strategy_signal.main()
 
     mock_fn.assert_called_once()

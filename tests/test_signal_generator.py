@@ -1334,6 +1334,7 @@ class TestStockMaCrossFilter:
             TARGET_DATE,
             use_stock_ma_cross_filter=True,
             topix_size_multiplier_weak_bear=0.4,
+            topix_size_multiplier_strong_bear=0.0,
             stock_ma_cross_weak_bear_multiplier=0.5,
         )
 
@@ -1363,6 +1364,7 @@ class TestStockMaCrossFilter:
             TARGET_DATE,
             use_stock_ma_cross_filter=True,
             topix_size_multiplier_weak_bear=0.7,
+            topix_size_multiplier_strong_bear=0.0,
             stock_ma_cross_weak_bear_multiplier=0.5,
         )
 
