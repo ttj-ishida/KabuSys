@@ -150,6 +150,7 @@ class KabuStationClient:
             "FrontOrderType": front_order_type,
             # 成行の場合は Price=0 を強制（呼び出し元が price を誤指定してもサーバー拒否を防ぐ）
             "Price": 0 if order.order_type == "market" else order.price,
+            "ExpireDay": 0,  # 当日中（0 = 当日限り）
         }
 
         resp = self._request("post", "/sendorder", json=payload)
