@@ -17,10 +17,10 @@
 API 接続も確認したい  →  ② 検証環境モード（kabu ステーション検証版が必要）
 ```
 
-| モード | kabu ステーション | 何をテストできるか |
-|---|---|---|
-| **① Pure Mock** | 不要 | 発注ロジック・Risk Manager の動作 |
-| **② 検証環境** | 必要（検証用ログイン） | API 接続・認証・約定フローの E2E |
+| モード | kabu ステーション | 何をテストできるか | `PAPER_FILL_MODE` | `PAPER_TRADING_INITIAL_CASH` |
+|---|---|---|---|---|
+| **① Pure Mock** | 不要 | 発注ロジック・Risk Manager の動作 | 有効（即時・部分・未約定・拒否） | 有効（仮想資金） |
+| **② 検証環境** | 必要（検証用ログイン） | API 接続・認証・約定フローの E2E | **無効**（実 API に委譲） | 有効（仮想資金として資金チェックに使用） |
 
 > **迷ったら ① Pure Mock モードから始めてください。** このマニュアルの手順は① をベースに書いています。
 
@@ -36,7 +36,7 @@ API 接続も確認したい  →  ② 検証環境モード（kabu ステーシ
 # ペーパートレードモードで起動
 KABUSYS_ENV=paper_trading
 
-# 約定シミュレーション方式
+# 約定シミュレーション方式（① Pure Mock モードのみ有効。② 検証環境モードでは無視される）
 # instant : 即時全数量約定（まずはこれ）
 # partial : 半分だけ約定
 # never   : 約定しない（未約定テスト用）
@@ -262,7 +262,7 @@ python scripts/run_streamlit_dashboard.py
 python -m kabusys.run_execution
 ```
 
-> **検証環境の注意**: 検証環境では資金残高（`/wallet/cash`）が常に `null` を返すため、資金チェックで発注がスキップされます（Issue #317 の既知の動作）。発注フロー・認証・API 接続の確認は正常にできます。
+> **検証環境の注意**: `PAPER_FILL_MODE` は検証環境モードでは無効です（実際の kabu ステーション検証 API に発注が委譲されます）。資金残高は `PAPER_TRADING_INITIAL_CASH`（またはペーパー DB 復元値）を仮想値として使用するため、BUY 発注が資金チェックでスキップされることはありません（Issue #363 で修正済み）。
 
 ### 引け後（15:00〜）
 
@@ -342,6 +342,26 @@ python scripts/setup_db.py --paper-reset
             paper_trading.db (SQLite) に注文・約定を記録
 ```
 
+### 検証環境（Sandbox E2E）モードの内部フロー
+
+```
+夜間バッチ → Signal Queue (DuckDB)
+                     ↓
+              ExecutionEngine
+                     ↓
+            PaperSandboxBroker（ラッパー）
+            ・get_available_cash() → paper_trading.db 復元値
+            │                        または PAPER_TRADING_INITIAL_CASH を返す
+            │                        ※ /wallet/cash API には問い合わせない
+            └→ KabuStationClient（検証環境 ポート 18081）
+               ・send_order()  → kabu ステーション検証 API に実発注
+               ・get_positions() → 検証環境のポジションを返す
+                     ↓
+            paper_trading.db (SQLite) に注文・約定を記録
+```
+
+> **PAPER_FILL_MODE の扱い**: 検証環境モードでは `PAPER_FILL_MODE` は参照されません。約定は kabu ステーション検証環境の応答に依存します。
+
 ### 主な制約
 
 | 制約 | 詳細 |
@@ -361,6 +381,7 @@ python scripts/setup_db.py --paper-reset
 | テスト DB リセット機能 | #255 | `--paper-reset` でワンコマンド初期化 |
 | kabuステーション検証環境対応 | #255 | `KABU_USE_SANDBOX=true` でポート 18081 に接続 |
 | 検証環境の null 余力に対応 | #317 | `/wallet/cash` が `null` の場合のクラッシュ防止 |
+| PaperSandboxBroker | #363 | 検証環境でも `PAPER_TRADING_INITIAL_CASH` を仮想資金として使用（BUY がスキップされない） |
 
 ---
 
