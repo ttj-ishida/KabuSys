@@ -140,6 +140,7 @@ class OrderManager:
         except OrderRejectedError as exc:
             record.transition_to(OrderState.Rejected, error_message=str(exc))
             self._repo.update(record)
+            raise
 
         except OrderSentPendingError as exc:
             # broker は注文番号を発行したが約定しない（タイムアウト/never fill 等）。
