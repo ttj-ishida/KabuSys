@@ -1,6 +1,6 @@
 # tests/test_run_execution.py
-from pathlib import Path
 from datetime import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
