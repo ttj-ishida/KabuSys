@@ -20,9 +20,24 @@ API 接続も確認したい  →  ② 検証環境モード（kabu ステーシ
 | モード | kabu ステーション | 何をテストできるか | `PAPER_FILL_MODE` | `PAPER_TRADING_INITIAL_CASH` |
 |---|---|---|---|---|
 | **① Pure Mock** | 不要 | 発注ロジック・Risk Manager の動作 | 有効（即時・部分・未約定・拒否） | 有効（仮想資金） |
-| **② 検証環境** | 必要（検証用ログイン） | API 接続・認証・約定フローの E2E | **無効**（実 API に委譲） | 有効（仮想資金として資金チェックに使用） |
+| **② 検証環境** | 必要（検証用ログイン） | API 接続・認証・約定フローの E2E | **無効**（実 API に委譲） | 有効（資金チェックにのみ使用。約定・残高は実 API 応答に依存） |
 
 > **迷ったら ① Pure Mock モードから始めてください。** このマニュアルの手順は① をベースに書いています。
+
+### モードの切替方法
+
+```env
+# ① Pure Mock モード（kabu ステーション不要）
+KABUSYS_ENV=paper_trading
+# KABU_USE_SANDBOX は未設定または false
+
+# ② 検証環境モード（kabu ステーション検証版が必要）
+KABUSYS_ENV=paper_trading
+KABU_USE_SANDBOX=true
+KABU_SANDBOX_API_PASSWORD=（検証環境用 API パスワード）
+```
+
+> ② を使う場合は、kabu ステーションを検証用アカウントでログインし、ポート 18081 で起動してから `python -m kabusys.run_execution` を実行してください。
 
 ---
 
@@ -49,6 +64,8 @@ PAPER_TRADING_SQLITE_PATH=data/paper_trading.db
 # 仮想初期資金（デフォルト: 1,000 万円）
 PAPER_TRADING_INITIAL_CASH=10000000
 ```
+
+> **仮想資金の計算ロジック**: 起動時に `paper_trading.db` が存在する場合は、`PAPER_TRADING_INITIAL_CASH` を起点として DB 上の約定履歴（BUY コスト差し引き・SELL 収入加算）から現在の残高を復元します。DB が存在しない場合は `PAPER_TRADING_INITIAL_CASH` をそのまま初期残高として使用します。`PAPER_TRADING_INITIAL_CASH` 未設定時のデフォルトは **10,000,000 円**です。`--paper-reset` を実行すると DB が初期化され、次回起動時に `PAPER_TRADING_INITIAL_CASH` が再び初期残高になります。
 
 > ② 検証環境モードを使う場合は、さらに以下を追加します。
 > ```env
@@ -350,8 +367,7 @@ python scripts/setup_db.py --paper-reset
               ExecutionEngine
                      ↓
             PaperSandboxBroker（ラッパー）
-            ・get_available_cash() → paper_trading.db 復元値
-            │                        または PAPER_TRADING_INITIAL_CASH を返す
+            ・get_available_cash() → DB 復元値 or PAPER_TRADING_INITIAL_CASH
             │                        ※ /wallet/cash API には問い合わせない
             └→ KabuStationClient（検証環境 ポート 18081）
                ・send_order()  → kabu ステーション検証 API に実発注
@@ -360,7 +376,7 @@ python scripts/setup_db.py --paper-reset
             paper_trading.db (SQLite) に注文・約定を記録
 ```
 
-> **PAPER_FILL_MODE の扱い**: 検証環境モードでは `PAPER_FILL_MODE` は参照されません。約定は kabu ステーション検証環境の応答に依存します。
+> **部分約定・未約定を強制再現したい場合**: 検証環境モードでは `PAPER_FILL_MODE` は無効なため、約定シミュレーションは再現できません。その場合は Pure Mock モード（`KABU_USE_SANDBOX` 未設定/false）を使用してください。
 
 ### 主な制約
 
@@ -379,7 +395,7 @@ python scripts/setup_db.py --paper-reset
 | 仮想資金の設定化 | #255 | `PAPER_TRADING_INITIAL_CASH` 環境変数で初期資金を設定 |
 | モック口座の状態復元 | #255 | 再起動後もポジション・現金残高を自動復元 |
 | テスト DB リセット機能 | #255 | `--paper-reset` でワンコマンド初期化 |
-| kabuステーション検証環境対応 | #255 | `KABU_USE_SANDBOX=true` でポート 18081 に接続 |
+| kabu ステーション検証環境対応 | #255 | `KABU_USE_SANDBOX=true` でポート 18081 に接続 |
 | 検証環境の null 余力に対応 | #317 | `/wallet/cash` が `null` の場合のクラッシュ防止 |
 | PaperSandboxBroker | #363 | 検証環境でも `PAPER_TRADING_INITIAL_CASH` を仮想資金として使用（BUY がスキップされない） |
 
@@ -387,7 +403,7 @@ python scripts/setup_db.py --paper-reset
 
 ## 参考リンク
 
-- [kabuステーション API ドキュメント](https://kabucom.github.io/kabusapi/ptal/add-in.html) — 検証用ポート（18081）の説明あり
+- [kabu ステーション API ドキュメント](https://kabucom.github.io/kabusapi/ptal/add-in.html) — 検証用ポート（18081）の説明あり
 - `documents/08_Operations/TradingRunbook.md` — 日次運用の詳細手順（本番・ペーパー共通）
 - `documents/08_Operations/TODO_PaperTradingE2E.md` — ペーパートレード機能の実装要件一覧
 - `documents/08_Operations/FailureRecovery.md` — 異常時の対応手順
