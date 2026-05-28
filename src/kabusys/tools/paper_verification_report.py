@@ -212,6 +212,7 @@ def generate_report(
     db_path: str,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
+    monitoring_db_path: Optional[str] = None,
 ) -> None:
     """検証レポートを生成して標準出力に印字する。
 
@@ -236,13 +237,22 @@ def generate_report(
         )
         return
 
+    stability_db_path = monitoring_db_path or db_path
+    if not Path(stability_db_path).exists():
+        stability_db_path = db_path
+
+    stability_conn = sqlite3.connect(stability_db_path)
+    try:
+        try:
+            stability = _query_system_stability(stability_conn, from_dt, to_dt)
+        except sqlite3.OperationalError:
+            stability = {"total_polls": 0, "error_count": 0, "uptime_pct": None}
+    finally:
+        stability_conn.close()
+
     # DB 接続
     conn = sqlite3.connect(db_path)
     try:
-        try:
-            stability = _query_system_stability(conn, from_dt, to_dt)
-        except sqlite3.OperationalError:
-            stability = {"total_polls": 0, "error_count": 0, "uptime_pct": None}
         try:
             orders = _query_order_stats(conn, from_dt, to_dt)
         except sqlite3.OperationalError:
@@ -346,15 +356,25 @@ def main() -> None:
         metavar="PATH",
         help="SQLite DBファイルパス (環境変数 PAPER_TRADING_SQLITE_PATH でも指定可能)",
     )
+    parser.add_argument(
+        "--monitoring-db",
+        dest="monitoring_db_path",
+        metavar="PATH",
+        help="system_status を読む SQLite DB パス (既定: SQLITE_PATH または data/monitoring.db)",
+    )
     args = parser.parse_args()
 
     # DB パスの解決: --db > 環境変数 > デフォルト
     db_path = args.db_path or os.environ.get("PAPER_TRADING_SQLITE_PATH") or "data/paper_trading.db"
+    monitoring_db_path = (
+        args.monitoring_db_path or os.environ.get("SQLITE_PATH") or "data/monitoring.db"
+    )
 
     generate_report(
         db_path=db_path,
         from_date=args.from_date,
         to_date=args.to_date,
+        monitoring_db_path=monitoring_db_path,
     )
 
 

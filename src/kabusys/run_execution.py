@@ -8,9 +8,10 @@ data/paper_trading.db に記録する（本番 DB と完全分離）。
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import threading
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 
 import duckdb
@@ -45,6 +46,16 @@ from kabusys.utils.logging_setup import log_run_end, log_run_start, setup_loggin
 from kabusys.utils.process_priority import set_process_priority  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+
+def _env_time(name: str, default: time) -> time:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        return time.fromisoformat(raw.strip())
+    except ValueError as exc:
+        raise ValueError(f"{name} must be HH:MM or HH:MM:SS, got {raw!r}") from exc
 
 
 def _count_pending_signals(conn: duckdb.DuckDBPyConnection, target_date: date) -> int:
@@ -335,7 +346,12 @@ def main() -> None:
             order_manager=order_manager,
             duckdb_conn=duckdb_conn,
             sqlite_conn=sqlite_conn,
-            config=EngineConfig(target_date=today),
+            config=EngineConfig(
+                target_date=today,
+                signal_send_start=_env_time("KABUSYS_SIGNAL_SEND_START", time(8, 50)),
+                signal_send_end=_env_time("KABUSYS_SIGNAL_SEND_END", time(9, 10)),
+                market_close=_env_time("KABUSYS_MARKET_CLOSE", time(15, 30)),
+            ),
             reconciler=None,
             pid_file=_EXECUTION_PID,
             monitoring_db=monitoring_db,

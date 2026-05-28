@@ -169,6 +169,24 @@ class TestProcessSignals:
         assert row["latency_ms"] is not None
         assert row["latency_ms"] >= 0.0
 
+    def test_created_and_filled_events_recorded_for_instant_fill(
+        self, sqlite_conn, duckdb_conn, monitoring_conn
+    ):
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        mdb = MonitoringDB(monitoring_conn)
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn, monitoring_db=mdb)
+        engine._process_signals()
+
+        rows = monitoring_conn.execute(
+            "SELECT event_type, filled_qty, state FROM trade_logs ORDER BY id"
+        ).fetchall()
+        events = [row[0] for row in rows]
+        assert "Created" in events
+        assert "Sent" in events
+        assert "Filled" in events
+
     def test_latency_ms_recorded_for_pending_order(self, sqlite_conn, duckdb_conn, monitoring_conn):
         """fill_mode=never (OrderSentPendingError) でも latency_ms が記録される"""
         _insert_signal(duckdb_conn, "1234")

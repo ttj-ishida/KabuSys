@@ -67,6 +67,33 @@ class ExecutionEngine:
         self._stop_event = threading.Event()
         self._push_queue: queue.Queue[dict] = queue.Queue()
 
+    def _log_trade_event(
+        self,
+        event_type: str,
+        record,
+        *,
+        filled_qty: int | None = None,
+        latency_ms: float | None = None,
+        state: str | None = None,
+    ) -> None:
+        if self._monitoring_db is None:
+            return
+        try:
+            updated = self._repo.get(record.client_order_id) or record
+            self._monitoring_db.log_trade_event(
+                event_type,
+                updated.client_order_id,
+                updated.code,
+                updated.side,
+                updated.qty,
+                updated.price,
+                updated.filled_qty if filled_qty is None else filled_qty,
+                updated.state.value if state is None else state,
+                latency_ms=latency_ms,
+            )
+        except Exception as exc:
+            logger.warning("monitoring DB write failed; order flow continues: %s", exc)
+
     def _process_signals(self) -> None:
         """今日のシグナルを読み込み、Gate 1/2 を通して発注する。"""
         from kabusys.execution.broker_api import OrderRequest
@@ -149,6 +176,7 @@ class ExecutionEngine:
                         price=price,
                     ),
                 )
+                self._log_trade_event("Created", record)
             except DuplicateOrderError:
                 logger.info("DuplicateOrderError - skip: signal_id=%s", signal_id)
                 continue
@@ -158,7 +186,7 @@ class ExecutionEngine:
             _order_sent = False
             _order_pending = False
             try:
-                self._order_manager.send_order(record.client_order_id)
+                record = self._order_manager.send_order(record.client_order_id)
                 latency_ms = (_time_module.perf_counter() - t0) * 1000
                 self._risk_manager.record_api_success()
                 _order_sent = True
@@ -220,6 +248,20 @@ class ExecutionEngine:
                     )
                 except Exception as _mon_exc:
                     logger.warning("監視DB書き込み失敗（発注フローは継続）: %s", _mon_exc)
+
+            if latency_ms is not None and record.broker_order_id:
+                try:
+                    status = self._broker.get_order_status(record.broker_order_id)
+                    if status is not None and status.status == "filled":
+                        self._log_trade_event(
+                            "Filled",
+                            record,
+                            filled_qty=status.filled_qty,
+                            latency_ms=latency_ms,
+                            state="filled",
+                        )
+                except Exception as exc:
+                    logger.debug("post-send status check skipped: %s", exc)
 
     def _drain_push_queue(self) -> None:
         """_push_queue を全件処理する（sync_order + Gate 3 チェック）。"""
@@ -363,8 +405,15 @@ class ExecutionEngine:
 
             # シグナル処理ループ（8:50 ～ 9:10）
             # 現在時刻が signal_send_end を超えている場合はシグナル処理をスキップ
-            if not self._stop_event.is_set() and _now_time() < self._config.signal_send_end:
+            current_time = _now_time()
+            if not self._stop_event.is_set() and current_time < self._config.signal_send_end:
                 self._process_signals()
+            elif not self._stop_event.is_set():
+                logger.warning(
+                    "Signal processing skipped: now=%s is at or after signal_send_end=%s",
+                    current_time,
+                    self._config.signal_send_end,
+                )
 
             # push drain ループ（9:10 ～ 15:30）
             while _now_time() < self._config.market_close and not self._stop_event.is_set():
