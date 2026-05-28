@@ -1,5 +1,6 @@
 # tests/test_run_execution.py
 from pathlib import Path
+from datetime import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -56,6 +57,10 @@ def _run_main(is_paper: bool = False):
 
 
 class TestRunExecutionMain:
+    def test_env_time_override(self, monkeypatch):
+        monkeypatch.setenv("KABUSYS_SIGNAL_SEND_END", "15:30")
+        assert re_mod._env_time("KABUSYS_SIGNAL_SEND_END", time(9, 10)) == time(15, 30)
+
     def test_sets_high_priority_first(self):
         mock_priority, _, _, _ = _run_main()
         mock_priority.assert_called_once_with("high")
