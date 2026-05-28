@@ -93,7 +93,21 @@ def duckdb_conn():
         CREATE TABLE signals (date DATE, code VARCHAR, side VARCHAR, score FLOAT, signal_rank INTEGER, size_multiplier DOUBLE NOT NULL DEFAULT 1.0)
     """)
     conn.execute("""
-        CREATE TABLE portfolio_targets (date DATE, code VARCHAR, target_size INTEGER, entry_price FLOAT)
+        CREATE TABLE portfolio_targets (date DATE, code VARCHAR, target_weight DOUBLE, target_size BIGINT)
+    """)
+    conn.execute("""
+        CREATE TABLE signal_queue (
+            signal_id VARCHAR PRIMARY KEY,
+            date DATE NOT NULL,
+            code VARCHAR NOT NULL,
+            side VARCHAR NOT NULL,
+            size BIGINT NOT NULL,
+            order_type VARCHAR NOT NULL,
+            price DECIMAL(18,4),
+            status VARCHAR NOT NULL DEFAULT 'pending',
+            created_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+            processed_at TIMESTAMP
+        )
     """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS position_entries (

@@ -59,7 +59,7 @@ def mon_conn():
 
 @pytest.fixture
 def duck_conn():
-    """Execution テスト用 in-memory DuckDB（signals + portfolio_targets）"""
+    """Execution テスト用 in-memory DuckDB（本番相当の signal_queue schema）"""
     conn = duckdb.connect(":memory:")
     conn.execute(
         "CREATE TABLE signals "
@@ -67,7 +67,23 @@ def duck_conn():
     )
     conn.execute(
         "CREATE TABLE portfolio_targets "
-        "(date DATE, code VARCHAR, target_size INTEGER, entry_price FLOAT)"
+        "(date DATE, code VARCHAR, target_weight DOUBLE, target_size BIGINT)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE signal_queue (
+            signal_id VARCHAR PRIMARY KEY,
+            date DATE NOT NULL,
+            code VARCHAR NOT NULL,
+            side VARCHAR NOT NULL,
+            size BIGINT NOT NULL,
+            order_type VARCHAR NOT NULL,
+            price DECIMAL(18,4),
+            status VARCHAR NOT NULL DEFAULT 'pending',
+            created_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+            processed_at TIMESTAMP
+        )
+        """
     )
     yield conn
     conn.close()
@@ -85,9 +101,22 @@ def _insert_signal(
 def _insert_target(
     conn: duckdb.DuckDBPyConnection, code: str, qty: int = 100, price: float = 1500.0
 ):
+    side_row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = ? ORDER BY signal_rank ASC NULLS LAST LIMIT 1",
+        [TARGET_DATE, code],
+    ).fetchone()
+    side = side_row[0] if side_row else "buy"
     conn.execute(
-        "INSERT INTO portfolio_targets VALUES (?, ?, ?, ?)",
-        [TARGET_DATE, code, qty, price],
+        "INSERT INTO portfolio_targets (date, code, target_weight, target_size) VALUES (?, ?, ?, ?)",
+        [TARGET_DATE, code, None, qty],
+    )
+    conn.execute(
+        """
+        INSERT INTO signal_queue
+            (signal_id, date, code, side, size, order_type, price, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [f"{TARGET_DATE}_{code}_{side}", TARGET_DATE, code, side, qty, "limit", price, "pending"],
     )
 
 
@@ -196,7 +225,7 @@ class TestSignalQueueExecution:
         return [r[0] for r in rows]
 
     def test_signals_processed_and_orders_created(self, orders_conn, duck_conn):
-        """signals + portfolio_targets から発注レコードが作成されること"""
+        """signal_queue から発注レコードが作成されること"""
         _insert_signal(duck_conn, "7203")
         _insert_target(duck_conn, "7203", qty=100, price=2500.0)
 

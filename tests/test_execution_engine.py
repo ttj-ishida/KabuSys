@@ -6,6 +6,7 @@ import sqlite3
 from datetime import date, time
 from unittest.mock import patch
 
+import duckdb
 import pytest
 
 from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine
@@ -48,14 +49,27 @@ def _insert_signal(conn, code: str, side: str = "buy", score: float = 0.8):
 
 
 def _insert_target(conn, code: str, qty: int = 100, price: float = 1500.0):
+    side_row = conn.execute(
+        "SELECT side FROM signals WHERE date = ? AND code = ? ORDER BY signal_rank ASC NULLS LAST LIMIT 1",
+        [TARGET_DATE, code],
+    ).fetchone()
+    side = side_row[0] if side_row else "buy"
     conn.execute(
-        "INSERT INTO portfolio_targets VALUES (?, ?, ?, ?)",
-        [TARGET_DATE, code, qty, price],
+        "INSERT INTO portfolio_targets (date, code, target_weight, target_size) VALUES (?, ?, ?, ?)",
+        [TARGET_DATE, code, None, qty],
+    )
+    conn.execute(
+        """
+        INSERT INTO signal_queue
+            (signal_id, date, code, side, size, order_type, price, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [f"{TARGET_DATE}_{code}_{side}", TARGET_DATE, code, side, qty, "limit", price, "pending"],
     )
 
 
 class TestReadSignals:
-    def test_reads_signals_joined_with_portfolio_targets(self, sqlite_conn, duckdb_conn):
+    def test_reads_pending_signal_queue(self, sqlite_conn, duckdb_conn):
         _insert_signal(duckdb_conn, "1234")
         _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
         broker = MockBrokerClient(available_cash=5_000_000.0)
@@ -67,13 +81,112 @@ class TestReadSignals:
         assert signals[0]["qty"] == 100
         assert signals[0]["price"] == 1500.0
 
-    def test_excludes_signals_without_portfolio_targets(self, sqlite_conn, duckdb_conn):
+    def test_empty_signal_queue_does_not_read_targets(self, sqlite_conn, duckdb_conn):
         _insert_signal(duckdb_conn, "1234")
-        # portfolio_targets なし → JOIN で除外される
+        duckdb_conn.execute(
+            "INSERT INTO portfolio_targets (date, code, target_weight, target_size) VALUES (?, ?, ?, ?)",
+            [TARGET_DATE, "1234", None, 100],
+        )
+        broker = MockBrokerClient(available_cash=5_000_000.0)
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        signals = engine._read_signals()
+
+        assert signals == []
+
+    def test_excludes_signals_without_pending_queue(self, sqlite_conn, duckdb_conn):
+        _insert_signal(duckdb_conn, "1234")
         broker = MockBrokerClient(available_cash=5_000_000.0)
         engine = _make_engine(broker, sqlite_conn, duckdb_conn)
         signals = engine._read_signals()
         assert len(signals) == 0
+
+    def test_reads_queue_without_joinable_signals_table(self, sqlite_conn):
+        conn = duckdb.connect(":memory:")
+        conn.execute("""
+            CREATE TABLE signal_queue (
+                signal_id VARCHAR PRIMARY KEY,
+                date DATE NOT NULL,
+                code VARCHAR NOT NULL,
+                side VARCHAR NOT NULL,
+                size BIGINT NOT NULL,
+                price DECIMAL(18,4),
+                status VARCHAR NOT NULL DEFAULT 'pending'
+            )
+        """)
+        conn.execute("CREATE TABLE signals (signal_rank INTEGER, size_multiplier DOUBLE)")
+        conn.execute(
+            """
+            INSERT INTO signal_queue
+                (signal_id, date, code, side, size, price, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ["sig-joinless", TARGET_DATE, "7203", "buy", 100, 2500.0, "pending"],
+        )
+        broker = MockBrokerClient(available_cash=5_000_000.0)
+        engine = _make_engine(broker, sqlite_conn, conn)
+
+        signals = engine._read_signals()
+
+        assert signals == [
+            {
+                "code": "7203",
+                "side": "buy",
+                "qty": 100,
+                "price": 2500.0,
+                "size_multiplier": 1.0,
+            }
+        ]
+
+    def test_reads_queue_without_price_column_as_market_order(self, sqlite_conn):
+        conn = duckdb.connect(":memory:")
+        conn.execute("""
+            CREATE TABLE signal_queue (
+                signal_id VARCHAR PRIMARY KEY,
+                date DATE NOT NULL,
+                code VARCHAR NOT NULL,
+                side VARCHAR NOT NULL,
+                size BIGINT NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'pending'
+            )
+        """)
+        conn.execute(
+            """
+            CREATE TABLE signals (
+                date DATE NOT NULL,
+                code VARCHAR NOT NULL,
+                side VARCHAR NOT NULL,
+                signal_rank INTEGER,
+                size_multiplier DOUBLE NOT NULL DEFAULT 1.0
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO signal_queue
+                (signal_id, date, code, side, size, status)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ["sig-market", TARGET_DATE, "7203", "buy", 100, "pending"],
+        )
+        conn.execute(
+            "INSERT INTO signals VALUES (?, ?, ?, ?, ?)",
+            [TARGET_DATE, "7203", "buy", 1, 0.5],
+        )
+        broker = MockBrokerClient(available_cash=5_000_000.0)
+        engine = _make_engine(broker, sqlite_conn, conn)
+
+        signals = engine._read_signals()
+
+        assert signals == [
+            {
+                "code": "7203",
+                "side": "buy",
+                "qty": 100,
+                "price": 0.0,
+                "size_multiplier": 0.5,
+            }
+        ]
 
 
 class TestProcessSignals:
