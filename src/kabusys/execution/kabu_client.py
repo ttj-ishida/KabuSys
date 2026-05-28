@@ -147,6 +147,7 @@ class KabuStationClient:
             "DelivType": 2,
             "AccountType": order.account_type,
             "Qty": order.qty,
+            "FundType": "AA",  # 現物保護預かり
             "FrontOrderType": front_order_type,
             # 成行の場合は Price=0 を強制（呼び出し元が price を誤指定してもサーバー拒否を防ぐ）
             "Price": 0 if order.order_type == "market" else order.price,
