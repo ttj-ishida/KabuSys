@@ -24,7 +24,6 @@ from kabusys.execution.broker_api import BrokerAPIProtocol, OrderSentPendingErro
 
 # DuplicateOrderError は _process_signals() (Task 7) で使用
 from kabusys.execution.order_manager import DuplicateOrderError, OrderManager
-from kabusys.execution.order_record import OrderState
 from kabusys.execution.order_repository import OrderRepository
 from kabusys.execution.reconciler import Reconciler
 from kabusys.execution.risk_manager import RiskManager, RiskRejectReason
@@ -73,7 +72,9 @@ class ExecutionEngine:
         event_type: str,
         record,
         *,
+        filled_qty: int | None = None,
         latency_ms: float | None = None,
+        state: str | None = None,
     ) -> None:
         if self._monitoring_db is None:
             return
@@ -86,8 +87,8 @@ class ExecutionEngine:
                 updated.side,
                 updated.qty,
                 updated.price,
-                updated.filled_qty,
-                updated.state.value,
+                updated.filled_qty if filled_qty is None else filled_qty,
+                updated.state.value if state is None else state,
                 latency_ms=latency_ms,
             )
         except Exception as exc:
@@ -210,12 +211,6 @@ class ExecutionEngine:
             # SELL pending は記録しない（保有中のポジションのクローズ確定前のため）
             # NOTE: _process_signals はメインスレッドからのみ呼び出される。
             #       sqlite_conn は check_same_thread=True（デフォルト）のため他スレッドからアクセス不可。
-            if _order_sent and record.broker_order_id:
-                try:
-                    record = self._order_manager.sync_order(record.client_order_id)
-                except Exception as exc:
-                    logger.debug("post-send sync_order skipped: %s", exc)
-
             if _order_sent and self._sqlite_conn is not None:
                 try:
                     fill_date = next_trading_day(self._duckdb_conn, self._config.target_date)
@@ -254,10 +249,19 @@ class ExecutionEngine:
                 except Exception as _mon_exc:
                     logger.warning("監視DB書き込み失敗（発注フローは継続）: %s", _mon_exc)
 
-            if latency_ms is not None:
-                updated = self._repo.get(record.client_order_id)
-                if updated is not None and updated.state == OrderState.Filled:
-                    self._log_trade_event("Filled", updated, latency_ms=latency_ms)
+            if latency_ms is not None and record.broker_order_id:
+                try:
+                    status = self._broker.get_order_status(record.broker_order_id)
+                    if status is not None and status.status == "filled":
+                        self._log_trade_event(
+                            "Filled",
+                            record,
+                            filled_qty=status.filled_qty,
+                            latency_ms=latency_ms,
+                            state="filled",
+                        )
+                except Exception as exc:
+                    logger.debug("post-send status check skipped: %s", exc)
 
     def _drain_push_queue(self) -> None:
         """_push_queue を全件処理する（sync_order + Gate 3 チェック）。"""
