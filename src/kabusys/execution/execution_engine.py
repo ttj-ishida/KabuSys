@@ -210,8 +210,6 @@ class ExecutionEngine:
             # fill_date: 発注当日の翌営業日（バックテストと整合させるため）
             # BUY pending も記録する（発注確約済みとして扱う。キャンセル時はリコンシリエーションで回収）
             # SELL pending は記録しない（保有中のポジションのクローズ確定前のため）
-            # NOTE: _process_signals はメインスレッドからのみ呼び出される。
-            #       sqlite_conn は check_same_thread=True（デフォルト）のため他スレッドからアクセス不可。
             if _order_sent and self._sqlite_conn is not None:
                 try:
                     fill_date = next_trading_day(self._duckdb_conn, self._config.target_date)
