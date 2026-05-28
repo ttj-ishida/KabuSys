@@ -64,6 +64,7 @@ class ExecutionEngine:
         self._reconciler = reconciler
         self._pid_file: Path | None = pid_file
         self._monitoring_db = monitoring_db
+        self._columns_cache: dict[str, set[str]] = {}
         self._stop_event = threading.Event()
         self._push_queue: queue.Queue[dict] = queue.Queue()
 
@@ -427,19 +428,27 @@ class ExecutionEngine:
         finally:
             _active_pid_file.unlink(missing_ok=True)
 
-    def _read_signals(self) -> list[dict]:
-        """DuckDB から今日のシグナルを portfolio_targets と JOIN して返す。"""
+    def _duckdb_columns(self, table_name: str) -> set[str]:
+        """DuckDB のカレントスキーマから列名を小文字で返す。"""
+        if table_name in self._columns_cache:
+            return self._columns_cache[table_name]
+
         rows = self._duckdb_conn.execute(
             """
-            SELECT s.code, s.side, pt.target_size AS qty, pt.entry_price AS price,
-                   COALESCE(s.size_multiplier, 1.0) AS size_multiplier
-            FROM signals s
-            JOIN portfolio_targets pt ON s.date = pt.date AND s.code = pt.code
-            WHERE s.date = ?
-            ORDER BY s.signal_rank ASC NULLS LAST
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE lower(table_name) = lower(?)
+              AND table_schema = current_schema()
             """,
-            [self._config.target_date],
+            [table_name],
         ).fetchall()
+        columns = {str(row[0]).lower() for row in rows}
+        self._columns_cache[table_name] = columns
+        return columns
+
+    def _read_signals(self) -> list[dict]:
+        """DuckDB から今日の発注対象シグナルを返す。"""
+        rows = self._read_signal_queue_rows()
         return [
             {
                 "code": r[0],
@@ -450,3 +459,50 @@ class ExecutionEngine:
             }
             for r in rows
         ]
+
+    def _read_signal_queue_rows(self) -> list[tuple]:
+        queue_columns = self._duckdb_columns("signal_queue")
+        required_columns = {"date", "code", "side", "size", "status"}
+        if not required_columns.issubset(queue_columns):
+            missing = sorted(required_columns - queue_columns)
+            raise RuntimeError(f"signal_queue schema missing required columns: {missing}")
+
+        signals_columns = self._duckdb_columns("signals")
+        can_join_signals = {"date", "code", "side"}.issubset(signals_columns)
+        multiplier_expr = (
+            "COALESCE(s.size_multiplier, 1.0)"
+            if can_join_signals and "size_multiplier" in signals_columns
+            else "1.0"
+        )
+        rank_expr = (
+            "s.signal_rank ASC NULLS LAST, "
+            if can_join_signals and "signal_rank" in signals_columns
+            else ""
+        )
+        price_expr = "COALESCE(q.price, 0.0)" if "price" in queue_columns else "0.0"
+        signal_join = (
+            """
+            LEFT JOIN signals s
+              ON q.date = s.date
+             AND q.code = s.code
+             AND q.side = s.side
+            """
+            if can_join_signals
+            else ""
+        )
+
+        try:
+            return self._duckdb_conn.execute(
+                f"""
+                SELECT q.code, q.side, q.size AS qty, {price_expr} AS price,
+                       {multiplier_expr} AS size_multiplier
+                FROM signal_queue q
+                {signal_join}
+                WHERE q.date = ? AND q.status = 'pending'
+                ORDER BY {rank_expr}q.code ASC
+                """,
+                [self._config.target_date],
+            ).fetchall()
+        except duckdb.Error as exc:
+            logger.warning("signal_queue read failed for %s: %s", self._config.target_date, exc)
+            raise RuntimeError("signal_queue read failed") from exc
