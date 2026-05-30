@@ -95,6 +95,7 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
 その他:
 - MONITOR_POLL_INTERVAL（run_monitoring のポーリング間隔、秒; デフォルト 60）
+- EXCLUSIVE_DB_STOP_WAIT_SEC（スケジューラーデーモンが execution 停止を待つ上限秒数; デフォルト 20）
 - PAPER_FILL_MODE（paper_trading の fill 動作: `instant`/`partial`/`never`/`reject`）
 - PAPER_TRADING_INITIAL_CASH（MockBrokerClient の初期仮想資金（円）; Execution 起動時に `paper_trading.db` の約定履歴で上書きされる; portfolio_construction のフォールバック値; デフォルト `10000000`）
 - PORTFOLIO_VALUE（portfolio_construction が使う総資産前提値（円）; **Live 時のフォールバック専用** — 通常はカブステーション余力 API / DuckDB 実績値から自動取得; 両方が取得不可の場合のみ参照; デフォルト `10000000`; Issue #335）
@@ -213,17 +214,32 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
    python -m kabusys.run_monitoring
    ```
 
-10. Windows タスクスケジューラへの登録（本番運用時）
+10. 夜間バッチの自動化設定（本番運用時）
 
-    夜間バッチの自動実行を設定します。Core ジョブは常時登録、Addon ジョブは `.env` フラグが `true` のときのみ登録されます:
+    夜間バッチの自動実行には **2 つの方式**があります。
 
+    **方式 A: スケジューラーデーモン（推奨）**
+
+    `run_execution` による DuckDB ロック競合を自動解消。土日・祝日はジョブをスキップ。
+    Task Scheduler への登録は 1 エントリのみ（ログオン時起動）。
+
+    ```powershell
+    powershell -ExecutionPolicy Bypass -File scripts/setup_scheduler_daemon.ps1
+
+    # 動作確認
+    python scripts/run_scheduler.py --list
+    python scripts/run_scheduler.py --once
     ```
+
+    **方式 B: 個別タスク登録（従来方式）**
+
+    ```powershell
     powershell -ExecutionPolicy Bypass -File scripts/setup_task_scheduler.ps1
     ```
 
     登録済みタスクをすべて削除する場合:
 
-    ```
+    ```powershell
     powershell -ExecutionPolicy Bypass -File scripts/remove_task_scheduler.ps1
     ```
 

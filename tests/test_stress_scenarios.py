@@ -349,7 +349,9 @@ class TestLiquidityExhaustionScenario:
     """発注拒否・未約定継続・部分約定・現金枯渇による発注停止を検証する。"""
 
     def test_all_orders_rejected_by_broker(self, repo):
-        """ブローカーが全発注を拒否する場合、send_order は Rejected 状態を返す。"""
+        """ブローカーが全発注を拒否する場合、send_order は Rejected を DB 保存して再 raise する。"""
+        from kabusys.execution.broker_api import OrderRejectedError
+
         broker = MockBrokerClient(fill_mode="reject")
         om = OrderManager(broker=broker, repo=repo)
         request = OrderRequest(code="1234", side="buy", qty=100, order_type="market", price=0.0)
@@ -357,9 +359,12 @@ class TestLiquidityExhaustionScenario:
         record = om.create_order("2026-04-18_1234_buy_001", request)
         assert record.state == OrderState.OrderCreated
 
-        # send_order: OrderRejectedError は内部でキャッチされ Rejected 状態を返す
-        result = om.send_order(record.client_order_id)
-        assert result.state == OrderState.Rejected
+        # send_order: OrderRejectedError は再 raise される（execution_engine が except Exception で受け取る設計）
+        with pytest.raises(OrderRejectedError):
+            om.send_order(record.client_order_id)
+        # Rejected 状態が DB に保存されていることを確認
+        saved = repo.get(record.client_order_id)
+        assert saved.state == OrderState.Rejected
 
     def test_pending_order_blocks_duplicate_creation(self, repo):
         """未約定保留中の注文がある場合、同一 signal_id での再作成が DuplicateOrderError になる。

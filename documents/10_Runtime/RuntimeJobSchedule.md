@@ -231,9 +231,58 @@ python -m kabusys.run_performance_report --type daily --save
 
 ---
 
-## 7. Task Scheduler
+## 7. Task Scheduler / スケジューラーデーモン
 
-スクリプト:
+ジョブ自動実行の方式は **2 通り**あります。運用環境に合わせて選択してください。
+
+### 方式 A: スケジューラーデーモン（推奨）
+
+単一の Python プロセス（`scripts/run_scheduler.py`）が常駐し、すべてのジョブを一元管理する方式です。
+
+**メリット:**
+
+- `run_execution` が DuckDB 接続を保持したまま市場終了後も生存し続ける問題（DB ロック競合）を自動解消する。夜間バッチ実行前に execution を自動停止し、完了後に再起動する。
+- `market_calendar` テーブルを参照して**土日・祝日・年末年始をスキップ**する（DB 未初期化時は土日フォールバック）。
+- Task Scheduler へは **「ログオン時に起動」の 1 エントリのみ**登録する。
+
+**登録スクリプト:**
+
+```powershell
+powershell -File scripts\setup_scheduler_daemon.ps1
+```
+
+**動作確認コマンド:**
+
+```powershell
+# スケジュール一覧の表示
+python scripts\run_scheduler.py --list
+
+# 1 回チェックして終了（テスト用）
+python scripts\run_scheduler.py --once
+```
+
+**ログ・データファイル:**
+
+| ファイル | 内容 |
+|---|---|
+| `logs/scheduler.log` | スケジューラー本体のログ |
+| `logs/<job_name>.log` | 各ジョブの stdout/stderr |
+| `data/scheduler_ran_today.json` | 当日実行済みジョブ（重複防止・再起動耐性） |
+| `data/scheduler.pid` | 多重起動防止用 PID ロック |
+
+**`.env` 設定（任意）:**
+
+| キー | デフォルト | 説明 |
+|---|---|---|
+| `EXCLUSIVE_DB_STOP_WAIT_SEC` | `20` | execution 停止後の追加待機上限（秒） |
+
+---
+
+### 方式 B: 個別タスク登録
+
+従来の方式。個別ジョブを Task Scheduler に直接登録します。DB ロック問題が発生する環境では方式 A を推奨します。
+
+**登録スクリプト:**
 
 - `scripts/setup_task_scheduler.ps1` — 登録（Core は常時、Addon は `.env` フラグが `true` のときのみ）
 - `scripts/remove_task_scheduler.ps1` — `KabuSys_*` タスクを一括削除
