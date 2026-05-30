@@ -328,7 +328,7 @@ def test_send_order_normal_flow(manager):
 
 
 def test_send_order_rejected(repo):
-    """send_order で broker が OrderRejectedError → Rejected に遷移"""
+    """send_order で broker が OrderRejectedError → Rejected を DB 保存して再 raise する"""
     from kabusys.execution.broker_api import OrderRejectedError
 
     class RejectingBroker:
@@ -350,9 +350,13 @@ def test_send_order_rejected(repo):
     m = OrderManager(broker=RejectingBroker(), repo=repo)
     request = OrderRequest(code="1234", side="buy", qty=100, order_type="market")
     record = m.create_order("sig-rejected", request)
-    result = m.send_order(record.client_order_id)
-    assert result.state == OrderState.Rejected
-    assert result.error_message is not None
+    # OrderRejectedError は再 raise される（execution_engine が except Exception で受け取る設計）
+    with pytest.raises(OrderRejectedError):
+        m.send_order(record.client_order_id)
+    # Rejected 状態と error_message が DB に保存されていることを確認
+    saved = repo.get(record.client_order_id)
+    assert saved.state == OrderState.Rejected
+    assert saved.error_message is not None
 
 
 def test_send_order_persists_sent_state_before_broker_call(repo):
