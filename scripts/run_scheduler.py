@@ -52,7 +52,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from utils import (
     EXECUTION_PID_PATH,
-    STOP_FLAG_PATH,
     is_process_running,
     read_pid,
 )
@@ -68,13 +67,14 @@ _RAN_TODAY_FILE = _PROJECT_ROOT / "data" / "scheduler_ran_today.json"
 _EXECUTION_START_TIME = dtime(8, 30)
 _MARKET_CLOSE_TIME = dtime(15, 35)
 
-_STOP_WAIT_SEC = 20   # execution 停止の追加待機上限（stop_system.py の後）
+_STOP_WAIT_SEC = 20  # execution 停止の追加待機上限（stop_system.py の後）
 _POLL_INTERVAL_SEC = 30
 
 
 # ---------------------------------------------------------------------------
 # ログ設定
 # ---------------------------------------------------------------------------
+
 
 def _setup_logging() -> None:
     _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -93,6 +93,7 @@ logger = logging.getLogger("scheduler")
 # 取引カレンダー判定
 # ---------------------------------------------------------------------------
 
+
 def _check_is_trading_day(today: date) -> bool:
     """今日が取引日（JPX 営業日）かどうかを返す。
 
@@ -101,9 +102,10 @@ def _check_is_trading_day(today: date) -> bool:
     read-only 接続は即座にクローズするため、バッチジョブと競合しない。
     """
     try:
+        import duckdb
+
         from kabusys.config import Settings
         from kabusys.data.calendar_management import is_trading_day
-        import duckdb
 
         settings = Settings()
         if not settings.duckdb_path.exists():
@@ -123,7 +125,9 @@ def _check_is_trading_day(today: date) -> bool:
         is_weekday = today.weekday() < 5
         logger.warning(
             "取引カレンダー取得失敗 (%s)。土日フォールバック: %s → %s",
-            exc, today, "営業日" if is_weekday else "休日",
+            exc,
+            today,
+            "営業日" if is_weekday else "休日",
         )
         return is_weekday
 
@@ -132,11 +136,12 @@ def _check_is_trading_day(today: date) -> bool:
 # ジョブ定義
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class JobSpec:
-    name: str                # 識別子 (ran_today・ログファイル名に使用)
-    script: str              # scripts/ 以下のファイル名
-    args: list[str]          # 追加引数
+    name: str  # 識別子 (ran_today・ログファイル名に使用)
+    script: str  # scripts/ 以下のファイル名
+    args: list[str]  # 追加引数
     trigger_hour: int
     trigger_minute: int
     needs_exclusive_db: bool  # True → 実行前に run_execution を停止する
@@ -163,46 +168,50 @@ def _build_job_schedule() -> list[JobSpec]:
 
     return [
         # --- 朝のレポート (execution 起動前なので DB 競合なし) ---
-        JobSpec("pre_market_report",
-                "run_pre_market_report.py",            [],  8,  0, False),
-        JobSpec("signal_queue_report",
-                "run_signal_queue_report.py",          [],  8,  2, False),
-        JobSpec("position_reconciliation_report",
-                "run_position_reconciliation_report.py", [], 8, 5, False),
-
+        JobSpec("pre_market_report", "run_pre_market_report.py", [], 8, 0, False),
+        JobSpec("signal_queue_report", "run_signal_queue_report.py", [], 8, 2, False),
+        JobSpec(
+            "position_reconciliation_report",
+            "run_position_reconciliation_report.py",
+            [],
+            8,
+            5,
+            False,
+        ),
         # --- システム起動 ---
-        JobSpec("execution_start",
-                "start_system.py",
-                ["--component", "execution", "--clear-stop-flag"],
-                8, 30, False),
-        JobSpec("monitoring_start",
-                "start_system.py",
-                ["--component", "monitoring"],
-                9,  0, False),
-
+        JobSpec(
+            "execution_start",
+            "start_system.py",
+            ["--component", "execution", "--clear-stop-flag"],
+            8,
+            30,
+            False,
+        ),
+        JobSpec("monitoring_start", "start_system.py", ["--component", "monitoring"], 9, 0, False),
         # --- 夜間バッチ (DuckDB 書き込みが必要 → execution を事前停止) ---
-        JobSpec("tdnet_collection",
-                "run_tdnet_collection.py",      [], 15, 35, True,  enable_tdnet),
-        JobSpec("data_update",
-                "run_data_update.py",           [], 17, 30, True),
-        JobSpec("yahoonews_collection",
-                "run_yahoonews_collection.py",  [], 17, 33, True,  enable_yahoonews),
-        JobSpec("feature_gen",
-                "run_feature_gen.py",           [], 18, 30, True),
-        JobSpec("ai_analysis",
-                "run_ai_analysis.py",           [], 19,  0, True,  enable_ai),
-        JobSpec("strategy_signal",
-                "run_strategy_signal.py",       [], 20,  0, True),
-        JobSpec("portfolio_construction",
-                "run_portfolio_construction.py",[], 21,  0, True),
-        JobSpec("night_batch_report",
-                "run_night_batch_report.py",    [], 21, 15, True),
+        JobSpec("tdnet_collection", "run_tdnet_collection.py", [], 15, 35, True, enable_tdnet),
+        JobSpec("data_update", "run_data_update.py", [], 17, 30, True),
+        JobSpec(
+            "yahoonews_collection",
+            "run_yahoonews_collection.py",
+            [],
+            17,
+            33,
+            True,
+            enable_yahoonews,
+        ),
+        JobSpec("feature_gen", "run_feature_gen.py", [], 18, 30, True),
+        JobSpec("ai_analysis", "run_ai_analysis.py", [], 19, 0, True, enable_ai),
+        JobSpec("strategy_signal", "run_strategy_signal.py", [], 20, 0, True),
+        JobSpec("portfolio_construction", "run_portfolio_construction.py", [], 21, 0, True),
+        JobSpec("night_batch_report", "run_night_batch_report.py", [], 21, 15, True),
     ]
 
 
 # ---------------------------------------------------------------------------
 # プロセス管理
 # ---------------------------------------------------------------------------
+
 
 def _is_execution_running() -> bool:
     pid = read_pid(EXECUTION_PID_PATH)
@@ -223,8 +232,9 @@ def _stop_execution_if_running() -> bool:
         encoding="utf-8",
     )
     if result.returncode != 0:
-        logger.warning("stop_system.py が rc=%d で終了しました:\n%s",
-                       result.returncode, result.stderr.strip())
+        logger.warning(
+            "stop_system.py が rc=%d で終了しました:\n%s", result.returncode, result.stderr.strip()
+        )
 
     # stop_system.py のタイムアウト後も念のため追加待機
     deadline = time.monotonic() + _STOP_WAIT_SEC
@@ -232,8 +242,9 @@ def _stop_execution_if_running() -> bool:
         time.sleep(0.5)
 
     if _is_execution_running():
-        logger.warning("execution プロセスが %d 秒後もまだ起動中です。バッチを続行します。",
-                       _STOP_WAIT_SEC)
+        logger.warning(
+            "execution プロセスが %d 秒後もまだ起動中です。バッチを続行します。", _STOP_WAIT_SEC
+        )
     else:
         logger.info("execution エンジンが停止しました。")
     return True
@@ -246,8 +257,13 @@ def _start_execution() -> None:
         return
     logger.info("execution エンジンを再起動します...")
     subprocess.Popen(
-        [_PYTHON, str(_SCRIPTS_DIR / "start_system.py"),
-         "--component", "execution", "--clear-stop-flag"],
+        [
+            _PYTHON,
+            str(_SCRIPTS_DIR / "start_system.py"),
+            "--component",
+            "execution",
+            "--clear-stop-flag",
+        ],
         cwd=str(_PROJECT_ROOT),
     )
 
@@ -255,6 +271,7 @@ def _start_execution() -> None:
 # ---------------------------------------------------------------------------
 # ジョブ実行
 # ---------------------------------------------------------------------------
+
 
 def _run_job(job: JobSpec) -> int:
     """ジョブを同期実行してリターンコードを返す。"""
@@ -270,8 +287,7 @@ def _run_job(job: JobSpec) -> int:
         result = subprocess.run(cmd, cwd=str(_PROJECT_ROOT), stdout=lf, stderr=lf)
 
     if result.returncode != 0:
-        logger.warning("ジョブ失敗: %s (rc=%d) → ログ: %s",
-                       job.name, result.returncode, log_file)
+        logger.warning("ジョブ失敗: %s (rc=%d) → ログ: %s", job.name, result.returncode, log_file)
     else:
         logger.info("ジョブ完了: %s (rc=0)", job.name)
     return result.returncode
@@ -280,6 +296,7 @@ def _run_job(job: JobSpec) -> int:
 # ---------------------------------------------------------------------------
 # 実行済みジョブの永続化
 # ---------------------------------------------------------------------------
+
 
 def _load_ran_today() -> set[str]:
     """data/scheduler_ran_today.json から本日分の実行済みジョブを復元する。"""
@@ -304,6 +321,7 @@ def _save_ran_today(today: date, ran_today: set[str]) -> None:
 # メインループ
 # ---------------------------------------------------------------------------
 
+
 def _in_execution_window(t: dtime) -> bool:
     """取引時間帯なら True（この時間帯のみ exclusive_db 後に execution を再起動する）。"""
     return _EXECUTION_START_TIME <= t <= _MARKET_CLOSE_TIME
@@ -320,10 +338,8 @@ def _print_schedule(jobs: list[JobSpec]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="KabuSys スケジューラーデーモン")
-    parser.add_argument("--once", action="store_true",
-                        help="1 回チェックして終了（動作確認用）")
-    parser.add_argument("--list", action="store_true",
-                        help="スケジュールを表示して終了")
+    parser.add_argument("--once", action="store_true", help="1 回チェックして終了（動作確認用）")
+    parser.add_argument("--list", action="store_true", help="スケジュールを表示して終了")
     args = parser.parse_args()
 
     _setup_logging()
@@ -339,7 +355,11 @@ def main() -> None:
     ran_today = _load_ran_today()
     last_date = date.today()
     today_is_trading: bool = _check_is_trading_day(last_date)
-    logger.info("本日 %s は%s", last_date, "営業日です。" if today_is_trading else "非営業日です。ジョブをスキップします。")
+    logger.info(
+        "本日 %s は%s",
+        last_date,
+        "営業日です。" if today_is_trading else "非営業日です。ジョブをスキップします。",
+    )
 
     while True:
         now = datetime.now()
@@ -354,7 +374,8 @@ def main() -> None:
             jobs = _build_job_schedule()
             today_is_trading = _check_is_trading_day(today)
             logger.info(
-                "本日 %s は%s", today,
+                "本日 %s は%s",
+                today,
                 "営業日です。" if today_is_trading else "非営業日です。ジョブをスキップします。",
             )
 
@@ -378,7 +399,10 @@ def main() -> None:
             # トリガー時刻到達
             logger.info(
                 "トリガー: %s (予定 %02d:%02d、現在 %s)",
-                job.name, job.trigger_hour, job.trigger_minute, now.strftime("%H:%M:%S"),
+                job.name,
+                job.trigger_hour,
+                job.trigger_minute,
+                now.strftime("%H:%M:%S"),
             )
             ran_today.add(job.name)
             _save_ran_today(today, ran_today)
