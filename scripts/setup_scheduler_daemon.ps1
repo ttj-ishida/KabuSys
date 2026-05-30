@@ -16,16 +16,17 @@ param(
 $ErrorActionPreference = "Stop"
 
 $TaskName = "KabuSys_Scheduler"
-$LogFile  = Join-Path $WorkDir "logs\scheduler.log"
 
 $LogsDir = Join-Path $WorkDir "logs"
 if (-not (Test-Path $LogsDir)) {
     New-Item -ItemType Directory -Path $LogsDir | Out-Null
 }
 
+# ログは Python 側の FileHandler (logs/scheduler.log) のみで出力する。
+# cmd.exe リダイレクトを使わないことで二重書き込みを防ぐ。
 $action = New-ScheduledTaskAction `
-    -Execute "cmd.exe" `
-    -Argument "/c `"$PythonPath`" scripts\run_scheduler.py >> `"$LogFile`" 2>&1" `
+    -Execute $PythonPath `
+    -Argument "scripts\run_scheduler.py" `
     -WorkingDirectory $WorkDir
 
 # ログオン時に起動（クラッシュ時は 5 分後に最大 3 回リトライ）
@@ -45,7 +46,7 @@ Register-ScheduledTask `
     -Force | Out-Null
 
 Write-Host "登録完了: $TaskName"
-Write-Host "  ログ   : $LogFile"
+Write-Host "  ログ   : $(Join-Path $WorkDir 'logs\scheduler.log') (Python FileHandler)"
 Write-Host ""
 Write-Host "--- 既存の個別タスクを削除する場合 ---"
 Write-Host "  Get-ScheduledTask -TaskName 'KabuSys_*' | Where-Object TaskName -ne 'KabuSys_Scheduler' | Unregister-ScheduledTask -Confirm:`$false"

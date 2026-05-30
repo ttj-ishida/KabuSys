@@ -62,12 +62,13 @@ _PYTHON = sys.executable
 
 _LOG_FILE = _PROJECT_ROOT / "logs" / "scheduler.log"
 _RAN_TODAY_FILE = _PROJECT_ROOT / "data" / "scheduler_ran_today.json"
+_SCHEDULER_PID_FILE = _PROJECT_ROOT / "data" / "scheduler.pid"
 
 # 取引時間帯: この範囲内に exclusive_db ジョブが完了した場合のみ execution を再起動する
 _EXECUTION_START_TIME = dtime(8, 30)
 _MARKET_CLOSE_TIME = dtime(15, 35)
 
-_STOP_WAIT_SEC = 20  # execution 停止の追加待機上限（stop_system.py の後）
+_DEFAULT_STOP_WAIT_SEC = 20  # execution 停止の追加待機上限デフォルト値（.env の EXCLUSIVE_DB_STOP_WAIT_SEC で上書き可能）
 _POLL_INTERVAL_SEC = 30
 
 
@@ -160,6 +161,28 @@ def _parse_env_flag(key: str, default: bool = False) -> bool:
     return default
 
 
+def _parse_env_int(key: str, default: int) -> int:
+    """プロジェクトルートの .env から int 値を読む。パース失敗時はデフォルト値を使用する。"""
+    env_file = _PROJECT_ROOT / ".env"
+    if not env_file.exists():
+        return default
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.startswith(f"{key}="):
+            val = line.split("=", 1)[1].strip()
+            try:
+                return int(val)
+            except ValueError:
+                logger.warning(
+                    ".env の %s=%r は整数ではありません。デフォルト値 %d を使用します。",
+                    key,
+                    val,
+                    default,
+                )
+                return default
+    return default
+
+
 def _build_job_schedule() -> list[JobSpec]:
     """ジョブリストを構築する。起動時と日付変更時に呼ばれる。"""
     enable_yahoonews = _parse_env_flag("ENABLE_YAHOONEWS")
@@ -218,8 +241,13 @@ def _is_execution_running() -> bool:
     return pid is not None and is_process_running(pid)
 
 
-def _stop_execution_if_running() -> bool:
-    """execution が起動中なら stop_system.py で停止し、True を返す。"""
+def _stop_execution_if_running(stop_wait_sec: int) -> bool:
+    """execution が起動中なら stop_system.py で停止し、True を返す。
+
+    Args:
+        stop_wait_sec: stop_system.py 実行後の追加待機上限秒数。
+                       .env の EXCLUSIVE_DB_STOP_WAIT_SEC で設定可能。
+    """
     if not _is_execution_running():
         return False
 
@@ -237,13 +265,13 @@ def _stop_execution_if_running() -> bool:
         )
 
     # stop_system.py のタイムアウト後も念のため追加待機
-    deadline = time.monotonic() + _STOP_WAIT_SEC
+    deadline = time.monotonic() + stop_wait_sec
     while time.monotonic() < deadline and _is_execution_running():
         time.sleep(0.5)
 
     if _is_execution_running():
         logger.warning(
-            "execution プロセスが %d 秒後もまだ起動中です。バッチを続行します。", _STOP_WAIT_SEC
+            "execution プロセスが %d 秒後もまだ起動中です。バッチを続行します。", stop_wait_sec
         )
     else:
         logger.info("execution エンジンが停止しました。")
@@ -287,7 +315,12 @@ def _run_job(job: JobSpec) -> int:
         result = subprocess.run(cmd, cwd=str(_PROJECT_ROOT), stdout=lf, stderr=lf)
 
     if result.returncode != 0:
-        logger.warning("ジョブ失敗: %s (rc=%d) → ログ: %s", job.name, result.returncode, log_file)
+        logger.error(
+            "REQUIRES ATTENTION: ジョブ失敗: %s (rc=%d) → ログを確認してください: %s",
+            job.name,
+            result.returncode,
+            log_file,
+        )
     else:
         logger.info("ジョブ完了: %s (rc=0)", job.name)
     return result.returncode
@@ -315,6 +348,41 @@ def _save_ran_today(today: date, ran_today: set[str]) -> None:
         json.dumps({today.isoformat(): sorted(ran_today)}, ensure_ascii=False),
         encoding="utf-8",
     )
+
+
+# ---------------------------------------------------------------------------
+# 多重起動防止
+# ---------------------------------------------------------------------------
+
+
+def _acquire_pid_lock() -> bool:
+    """スケジューラーの PID ロックを取得する。
+
+    既に別インスタンスが稼働中なら False を返す（起動拒否）。
+    成功時は data/scheduler.pid に自 PID を書き込み True を返す。
+    """
+    _SCHEDULER_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if _SCHEDULER_PID_FILE.exists():
+        try:
+            existing_pid = int(_SCHEDULER_PID_FILE.read_text(encoding="utf-8").strip())
+            if is_process_running(existing_pid):
+                logger.error(
+                    "スケジューラーは既に起動中です (PID=%d)。二重起動を防止して終了します。",
+                    existing_pid,
+                )
+                return False
+            # PID ファイルは残っているが該当プロセスは存在しない（前回の異常終了）
+            logger.warning("古い PID ファイルを検出 (PID=%d)。上書きして起動します。", existing_pid)
+        except (ValueError, OSError):
+            logger.warning("PID ファイルの読み取りに失敗しました。上書きして起動します。")
+
+    _SCHEDULER_PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
+    return True
+
+
+def _release_pid_lock() -> None:
+    """スケジューラーの PID ロックを解放する（終了時に呼ぶ）。"""
+    _SCHEDULER_PID_FILE.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -349,8 +417,18 @@ def main() -> None:
         _print_schedule(jobs)
         return
 
+    if not _acquire_pid_lock():
+        sys.exit(1)
+
+    stop_wait_sec = _parse_env_int("EXCLUSIVE_DB_STOP_WAIT_SEC", _DEFAULT_STOP_WAIT_SEC)
+
     logger.info("KabuSys スケジューラーデーモン起動 (PID=%d)", os.getpid())
-    logger.info("ポーリング間隔: %d 秒 / ログ: %s", _POLL_INTERVAL_SEC, _LOG_FILE)
+    logger.info(
+        "ポーリング間隔: %d 秒 / execution 停止待機: %d 秒 / ログ: %s",
+        _POLL_INTERVAL_SEC,
+        stop_wait_sec,
+        _LOG_FILE,
+    )
 
     ran_today = _load_ran_today()
     last_date = date.today()
@@ -361,68 +439,78 @@ def main() -> None:
         "営業日です。" if today_is_trading else "非営業日です。ジョブをスキップします。",
     )
 
-    while True:
-        now = datetime.now()
-        today = now.date()
+    try:
+        while True:
+            now = datetime.now()
+            today = now.date()
 
-        # 日付が変わったらスケジュールをリセット (.env 再読み込みも兼ねる)
-        if today != last_date:
-            logger.info("日付変更 (%s → %s)。スケジュールをリセットします。", last_date, today)
-            ran_today.clear()
-            _save_ran_today(today, ran_today)
-            last_date = today
-            jobs = _build_job_schedule()
-            today_is_trading = _check_is_trading_day(today)
-            logger.info(
-                "本日 %s は%s",
-                today,
-                "営業日です。" if today_is_trading else "非営業日です。ジョブをスキップします。",
-            )
+            # 日付が変わったらスケジュールをリセット (.env 再読み込みも兼ねる)
+            if today != last_date:
+                logger.info("日付変更 (%s → %s)。スケジュールをリセットします。", last_date, today)
+                ran_today.clear()
+                _save_ran_today(today, ran_today)
+                last_date = today
+                jobs = _build_job_schedule()
+                stop_wait_sec = _parse_env_int("EXCLUSIVE_DB_STOP_WAIT_SEC", _DEFAULT_STOP_WAIT_SEC)
+                today_is_trading = _check_is_trading_day(today)
+                logger.info(
+                    "本日 %s は%s",
+                    today,
+                    "営業日です。"
+                    if today_is_trading
+                    else "非営業日です。ジョブをスキップします。",
+                )
 
-        # 非営業日はすべてのジョブをスキップ
-        if not today_is_trading:
+            # 非営業日はすべてのジョブをスキップ
+            if not today_is_trading:
+                if args.once:
+                    logger.info("--once モード: 非営業日のためスキップして終了します。")
+                    break
+                time.sleep(_POLL_INTERVAL_SEC)
+                continue
+
+            for job in jobs:
+                if not job.enabled:
+                    continue
+                if job.name in ran_today:
+                    continue
+                trigger_dt = datetime.combine(today, dtime(job.trigger_hour, job.trigger_minute))
+                if now < trigger_dt:
+                    continue
+
+                # トリガー時刻到達
+                logger.info(
+                    "トリガー: %s (予定 %02d:%02d、現在 %s)",
+                    job.name,
+                    job.trigger_hour,
+                    job.trigger_minute,
+                    now.strftime("%H:%M:%S"),
+                )
+                ran_today.add(job.name)
+                _save_ran_today(today, ran_today)
+
+                was_running = False
+                if job.needs_exclusive_db:
+                    was_running = _stop_execution_if_running(stop_wait_sec)
+
+                _run_job(job)
+
+                # execution 停止していた場合: ジョブ完了後の現在時刻で判定（長時間ジョブ対応）
+                if was_running:
+                    end_time = datetime.now().time()
+                    if _in_execution_window(end_time):
+                        logger.info("取引時間帯のため execution エンジンを再起動します。")
+                        _start_execution()
+
             if args.once:
-                logger.info("--once モード: 非営業日のためスキップして終了します。")
+                logger.info("--once モード: チェック完了。終了します。")
                 break
+
             time.sleep(_POLL_INTERVAL_SEC)
-            continue
 
-        for job in jobs:
-            if not job.enabled:
-                continue
-            if job.name in ran_today:
-                continue
-            trigger_dt = datetime.combine(today, dtime(job.trigger_hour, job.trigger_minute))
-            if now < trigger_dt:
-                continue
-
-            # トリガー時刻到達
-            logger.info(
-                "トリガー: %s (予定 %02d:%02d、現在 %s)",
-                job.name,
-                job.trigger_hour,
-                job.trigger_minute,
-                now.strftime("%H:%M:%S"),
-            )
-            ran_today.add(job.name)
-            _save_ran_today(today, ran_today)
-
-            was_running = False
-            if job.needs_exclusive_db:
-                was_running = _stop_execution_if_running()
-
-            _run_job(job)
-
-            # execution 停止していた場合: 取引時間内なら再起動
-            if was_running and _in_execution_window(now.time()):
-                logger.info("取引時間帯のため execution エンジンを再起動します。")
-                _start_execution()
-
-        if args.once:
-            logger.info("--once モード: チェック完了。終了します。")
-            break
-
-        time.sleep(_POLL_INTERVAL_SEC)
+    finally:
+        _release_pid_lock()
+        logger.info("スケジューラーデーモン終了 (PID=%d)", os.getpid())
 
 
 if __name__ == "__main__":
