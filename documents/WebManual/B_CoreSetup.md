@@ -193,13 +193,55 @@ python scripts/run_portfolio_construction.py
 # python scripts/run_ai_analysis.py
 ```
 
-### B-1-7. Task Scheduler の設定（夜間バッチの自動化）
+### B-1-7. スケジュール自動化の設定（夜間バッチ）
 
 KabuSys は引け後〜翌朝にかけて複数のバッチ処理を自動実行します。
-Windows タスクスケジューラに登録することで、毎日自動で動きます。
+自動化の方式は **2 種類**あります。
+
+---
+
+#### 方式 A: スケジューラーデーモン（推奨）
+
+1 つの Python プロセスが常駐してすべてのジョブを一元管理します。
+
+**選ぶ理由:**
+- `run_execution` が DuckDB 接続を保持したまま市場終了後も動き続けることで夜間バッチが **DB ロックエラーで失敗する問題**を自動解消します。各バッチ実行前に execution を自動停止し、完了後（取引時間内であれば）再起動します。
+- `market_calendar` テーブルを参照して**土日・祝日・年末年始は全ジョブをスキップ**します。
+- Task Scheduler への登録は **「ログオン時起動」の 1 エントリのみ**。管理が簡単です。
 
 ```powershell
-# Task Scheduler への自動登録
+# スケジューラーデーモンを Task Scheduler に登録
+powershell -File scripts\setup_scheduler_daemon.ps1
+
+# 動作確認（スケジュール一覧表示）
+python scripts\run_scheduler.py --list
+
+# 動作確認（1 回チェックして終了）
+python scripts\run_scheduler.py --once
+```
+
+**ログ・状態ファイル:**
+
+| ファイル | 内容 |
+|---|---|
+| `logs/scheduler.log` | スケジューラー本体のログ |
+| `logs/<job_name>.log` | 各ジョブの stdout/stderr |
+| `data/scheduler_ran_today.json` | 当日実行済みジョブ（重複防止） |
+| `data/scheduler.pid` | 多重起動防止用 PID ロック |
+
+**`.env` 設定（任意）:**
+
+| キー | デフォルト | 説明 |
+|---|---|---|
+| `EXCLUSIVE_DB_STOP_WAIT_SEC` | `20` | execution 停止後の追加待機上限（秒）。環境に合わせて調整可能。 |
+
+---
+
+#### 方式 B: 個別タスク登録（従来方式）
+
+各ジョブを個別に Task Scheduler へ登録します。DB ロック問題が発生する場合は方式 A を推奨します。
+
+```powershell
 # Core ジョブは常時登録。Addon ジョブは .env フラグが true のときのみ登録される。
 powershell -File scripts\setup_task_scheduler.ps1
 
@@ -207,38 +249,31 @@ powershell -File scripts\setup_task_scheduler.ps1
 powershell -File scripts\remove_task_scheduler.ps1
 ```
 
-**Core 標準ジョブ一覧（常時登録）:**
+---
 
-| 時刻 | 処理 | スクリプト |
-|---|---|---|
-| 17:30 | 市場データ更新 | `scripts/run_data_update.py` |
-| 18:30 | 特徴量計算 | `scripts/run_feature_gen.py` |
-| 20:00 | 売買シグナル生成 | `scripts/run_strategy_signal.py` |
-| 21:00 | ポートフォリオ構築 | `scripts/run_portfolio_construction.py` |
-| 21:15 | 夜間バッチ結果レポート | `scripts/run_night_batch_report.py` |
-| 08:00 | Pre-Market レポート | `scripts/run_pre_market_report.py` |
-| 08:02 | Signal Queue レポート | `scripts/run_signal_queue_report.py` |
-| 08:05 | Position Reconciliation レポート | `scripts/run_position_reconciliation_report.py` |
-| 08:30 | Execution Engine 起動 | `scripts/start_system.py --component execution` |
-| 09:00 | Monitoring 起動 | `scripts/start_system.py --component monitoring` |
+**ジョブスケジュール一覧（方式 A・B 共通）:**
+
+| 時刻 | 処理 | スクリプト | 区分 |
+|---|---|---|---|
+| 08:00 | Pre-Market レポート | `scripts/run_pre_market_report.py` | Core |
+| 08:02 | Signal Queue レポート | `scripts/run_signal_queue_report.py` | Core |
+| 08:05 | Position Reconciliation レポート | `scripts/run_position_reconciliation_report.py` | Core |
+| 08:30 | Execution Engine 起動 | `scripts/start_system.py --component execution` | Core |
+| 09:00 | Monitoring 起動 | `scripts/start_system.py --component monitoring` | Core |
+| 15:35 | TDnet 適時開示収集 | `scripts/run_tdnet_collection.py` | Addon（`ENABLE_TDNET=true`） |
+| 17:30 | 市場データ更新 | `scripts/run_data_update.py` | Core |
+| 17:33 | Yahoo News RSS 収集 | `scripts/run_yahoonews_collection.py` | Addon（`ENABLE_YAHOONEWS=true`） |
+| 18:30 | 特徴量計算 | `scripts/run_feature_gen.py` | Core |
+| 19:00 | AI 分析 | `scripts/run_ai_analysis.py` | Addon（`ENABLE_AI_SENTIMENT=true`） |
+| 20:00 | 売買シグナル生成 | `scripts/run_strategy_signal.py` | Core |
+| 21:00 | ポートフォリオ構築 | `scripts/run_portfolio_construction.py` | Core |
+| 21:15 | 夜間バッチ結果レポート | `scripts/run_night_batch_report.py` | Core |
 
 > ℹ️ **スケジュール設計の根拠**: J-Quants の日足データは東証引け（15:30）直後ではなく 16:30〜17:00 頃に公開されます。17:30 に data_update を実行することで当日データを確実に取得してから feature_gen（18:30）を起動できます。
 
-**Addon 有効時のみ動くジョブ一覧:**（`.env` フラグが `true` のときのみ登録。未設定でも Core の売買フローには影響しません）
-
-| 時刻 | 処理 | Addon | スクリプト | 条件 |
-|---|---|---|---|---|
-| 15:35 | TDnet 適時開示収集 | Disclosure Addon | `scripts/run_tdnet_collection.py` | `ENABLE_TDNET=true` |
-| 15:40 | EDINET 法定開示収集 | Disclosure Addon | `scripts/run_edinet_collection.py` | `ENABLE_EDINET=true` |
-| 17:00 | 開示イベント分類 | Disclosure Addon | `scripts/run_disclosure_classification.py` | `ENABLE_TDNET=true` |
-| 17:33 | Yahoo News RSS 収集 | News Addon | `scripts/run_yahoonews_collection.py` | `ENABLE_YAHOONEWS=true` |
-| 19:00 | AI 分析 | AI Addon | `scripts/run_ai_analysis.py` | `ENABLE_AI_SENTIMENT=true` |
-
-> Addon ジョブの登録状況は `setup_task_scheduler.ps1` 実行時のコンソール出力（`[REGISTERED]` / `[SKIPPED]`）で確認できます。
+> **補足:** `market_close_report`（15:00）はオペレーターが手動で実行するコマンドです（`python -m kabusys.run_market_close_report`）。詳細は [D_LiveOperation.md](./D_LiveOperation.md) を参照してください。
 
 > 詳細は `documents/10_Runtime/RuntimeJobSchedule.md` を参照してください。
-
-> **補足:** `pre_market_report`（08:00）・`signal_queue_report`（08:02）・`position_reconciliation_report`（08:05）は Task Scheduler の Core 標準ジョブとして自動実行されます。`market_close_report`（15:00）はオペレーターが手動で実行するコマンドです（`python -m kabusys.run_market_close_report`）。詳細は [D_LiveOperation.md](./D_LiveOperation.md) を参照してください。
 
 ---
 

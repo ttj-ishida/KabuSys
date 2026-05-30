@@ -157,32 +157,28 @@ monitoring_service は常時稼働する。
 
 # 8. スケジューラ
 
-ジョブ管理には Windows Task Scheduler を使用する。
+ジョブ自動実行の方式は 2 通りある。
+
+## 方式 A: スケジューラーデーモン（推奨）
+
+単一の Python プロセスが常駐してすべてのジョブを一元管理する。
+`run_execution` が DuckDB 接続を保持したまま市場終了後も生存し続けることで
+夜間バッチが DB ロックで失敗する問題を自動解消する。
+取引カレンダーを参照し、非営業日（土日・祝日）は全ジョブをスキップする。
+
+  スクリプト                                用途
+  ----------------------------------------- ------------------------------------------------
+  scripts\run_scheduler.py                  スケジューラーデーモン本体（常駐）
+  scripts\setup_scheduler_daemon.ps1        Task Scheduler に「ログオン時起動」で 1 エントリ登録
+
+## 方式 B: 個別タスク登録
+
+従来方式。DB ロック問題が発生する場合は方式 A を推奨する。
 
   スクリプト                              用途
   --------------------------------------- -----------------------------------------------
   scripts\setup_task_scheduler.ps1        登録（Core 常時 / Addon は .env フラグ依存）
   scripts\remove_task_scheduler.ps1       KabuSys_* タスクを一括削除
-
-Core ジョブ（常時登録）:
-
-  時刻    タスク名                       実行スクリプト
-  ------- ------------------------------ -----------------------------------------------
-  17:30   KabuSys_DataUpdate             scripts\run_data_update.py
-  18:30   KabuSys_FeatureGen             scripts\run_feature_gen.py
-  20:00   KabuSys_StrategySignal         scripts\run_strategy_signal.py
-  21:00   KabuSys_PortfolioConstruction  scripts\run_portfolio_construction.py
-  21:15   KabuSys_NightBatchReport       scripts\run_night_batch_report.py
-  08:30   KabuSys_ExecutionStart         scripts\start_system.py --component execution
-  09:00   KabuSys_MonitoringStart        scripts\start_system.py --component monitoring
-
-Addon ジョブ（.env フラグが true のときのみ登録）:
-
-  時刻    タスク名                       実行スクリプト                          条件
-  ------- ------------------------------ --------------------------------------- -----------------------
-  15:35   KabuSys_TdnetCollection        scripts\run_tdnet_collection.py         ENABLE_TDNET=true
-  17:33   KabuSys_YahooNewsCollection    scripts\run_yahoonews_collection.py     ENABLE_YAHOONEWS=true
-  19:00   KabuSys_AiAnalysis             scripts\run_ai_analysis.py              ENABLE_AI_SENTIMENT=true
 
 詳細: `documents/10_Runtime/RuntimeJobSchedule.md`（セクション7）
 

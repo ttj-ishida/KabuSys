@@ -199,6 +199,8 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 
 > **スケジュール設計の根拠**: J-Quants の日足データは東証引け（15:30）直後ではなく 16:30〜17:00 頃に公開されるため、data_update を 17:30 に設定しています。
 
+> ℹ️ **スケジューラーデーモン使用時**: 夜間バッチ開始前に run_execution が自動停止されます（DuckDB ロック解消）。バッチ完了後も取引時間外のため execution は再起動しません。土日・祝日は全バッチがスキップされます。
+
 #### 17:30 `data_update_job`
 
 システムが行うこと:
