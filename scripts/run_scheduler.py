@@ -10,6 +10,10 @@ Task Scheduler には「ログオン時にこのスクリプトを起動」の1�
   本デーモンは exclusive_db ジョブの実行前に run_execution を自動停止し、
   取引時間内なら完了後に再起動する。
 
+取引カレンダー:
+  市場が休みの日（土日・祝日・年末年始）はすべてのジョブをスキップする。
+  判定は market_calendar テーブルを read-only で参照し、取得不能時は土日チェックにフォールバック。
+
 使用方法:
   python scripts/run_scheduler.py          # デーモンモード（常駐）
   python scripts/run_scheduler.py --once   # 1 回チェックして終了（動作確認用）
@@ -45,6 +49,7 @@ from datetime import time as dtime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from utils import (
     EXECUTION_PID_PATH,
     STOP_FLAG_PATH,
@@ -82,6 +87,45 @@ def _setup_logging() -> None:
 
 
 logger = logging.getLogger("scheduler")
+
+
+# ---------------------------------------------------------------------------
+# 取引カレンダー判定
+# ---------------------------------------------------------------------------
+
+def _check_is_trading_day(today: date) -> bool:
+    """今日が取引日（JPX 営業日）かどうかを返す。
+
+    market_calendar テーブルを read-only で参照する。
+    DuckDB が利用不能（DB 未初期化・ロック等）な場合は土日チェックにフォールバック。
+    read-only 接続は即座にクローズするため、バッチジョブと競合しない。
+    """
+    try:
+        from kabusys.config import Settings
+        from kabusys.data.calendar_management import is_trading_day
+        import duckdb
+
+        settings = Settings()
+        if not settings.duckdb_path.exists():
+            raise FileNotFoundError(f"DuckDB が見つかりません: {settings.duckdb_path}")
+
+        conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
+        try:
+            result = is_trading_day(conn, today)
+        finally:
+            conn.close()
+
+        logger.debug("取引カレンダー: %s → is_trading_day=%s (DB参照)", today, result)
+        return result
+
+    except Exception as exc:
+        # DB 未初期化・接続失敗時は土日フォールバック
+        is_weekday = today.weekday() < 5
+        logger.warning(
+            "取引カレンダー取得失敗 (%s)。土日フォールバック: %s → %s",
+            exc, today, "営業日" if is_weekday else "休日",
+        )
+        return is_weekday
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +338,8 @@ def main() -> None:
 
     ran_today = _load_ran_today()
     last_date = date.today()
+    today_is_trading: bool = _check_is_trading_day(last_date)
+    logger.info("本日 %s は%s", last_date, "営業日です。" if today_is_trading else "非営業日です。ジョブをスキップします。")
 
     while True:
         now = datetime.now()
@@ -306,6 +352,19 @@ def main() -> None:
             _save_ran_today(today, ran_today)
             last_date = today
             jobs = _build_job_schedule()
+            today_is_trading = _check_is_trading_day(today)
+            logger.info(
+                "本日 %s は%s", today,
+                "営業日です。" if today_is_trading else "非営業日です。ジョブをスキップします。",
+            )
+
+        # 非営業日はすべてのジョブをスキップ
+        if not today_is_trading:
+            if args.once:
+                logger.info("--once モード: 非営業日のためスキップして終了します。")
+                break
+            time.sleep(_POLL_INTERVAL_SEC)
+            continue
 
         for job in jobs:
             if not job.enabled:
