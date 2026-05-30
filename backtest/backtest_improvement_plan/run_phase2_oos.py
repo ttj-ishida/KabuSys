@@ -220,7 +220,11 @@ def _load_env(path: Path) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, val = line.split("=", 1)
-        result[key.strip()] = val.strip()
+        val = val.strip()
+        # KEY="value" や KEY='value' 形式のクォートを除去
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+            val = val[1:-1]
+        result[key.strip()] = val
     return result
 
 
@@ -451,8 +455,8 @@ def main() -> None:
     parser.add_argument(
         "--workers",
         type=int,
-        default=DEFAULT_WORKERS,
-        help=f"並列ワーカー数（デフォルト: {DEFAULT_WORKERS}）",
+        default=None,
+        help="並列ワーカー数（デフォルト: CPU コア数とシナリオ数の小さい方）",
     )
     parser.add_argument(
         "--keep-snapshots",
@@ -463,7 +467,7 @@ def main() -> None:
     args = parser.parse_args()
 
     scenarios = _SCENARIOS
-    n_workers = min(args.workers, len(scenarios))
+    n_workers = min(args.workers or os.cpu_count() or DEFAULT_WORKERS, len(scenarios))
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = ARTIFACTS_ROOT / stamp
@@ -474,7 +478,7 @@ def main() -> None:
         sys.exit(f"[ERROR] DuckDB が見つかりません: {source_db}")
 
     snapshots_dir = output_dir / "_snapshots"
-    snapshots_dir.mkdir()
+    snapshots_dir.mkdir(exist_ok=True)
 
     print(f"output_dir  = {output_dir}")
     print(f"scenarios   = {len(scenarios)}, workers = {n_workers}")
@@ -501,6 +505,9 @@ def main() -> None:
 
     (output_dir / "scenarios.json").write_text(
         json.dumps(scenarios, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (output_dir / "config.json").write_text(
+        json.dumps(_COM, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
     results_csv = output_dir / "results.csv"
@@ -555,6 +562,12 @@ def main() -> None:
     # 結果表示
     # -----------------------------------------------------------------------
 
+    def _pct(v: object) -> str:
+        """float を % 表示に変換（None は NA）"""
+        if v is None:
+            return "NA"
+        return f"{float(v) * 100:.2f}%"
+
     ref = next((r for r in success if r.get("is_reference")), None)
     actual_is_sharpe = ref["sharpe"] if ref and ref.get("sharpe") is not None else _IS_SHARPE
 
@@ -581,9 +594,9 @@ def main() -> None:
             mark = "[GO]" if passed else "[NG]"
             print(
                 f"  {r['name']:<20} {r['start']}~{r['end']}"
-                f"  {_fmt(r.get('cagr')):>8}"
+                f"  {_pct(r.get('cagr')):>8}"
                 f"  {_fmt(r.get('sharpe'), 3):>7}"
-                f"  {_fmt(r.get('max_drawdown')):>8}"
+                f"  {_pct(r.get('max_drawdown')):>8}"
                 f"  {_fmt(r.get('profit_factor'), 3):>6}"
                 f"  {str(r.get('total_trades', '')):>7}"
                 f"  {div_str:>10}"
@@ -605,9 +618,9 @@ def main() -> None:
             if cagr is not None and cagr > 0:
                 profitable += 1
             print(
-                f"  {year:>6}  {_fmt(cagr):>8}"
+                f"  {year:>6}  {_pct(cagr):>8}"
                 f"  {_fmt(r.get('sharpe'), 3):>7}"
-                f"  {_fmt(r.get('max_drawdown')):>8}"
+                f"  {_pct(r.get('max_drawdown')):>8}"
                 f"  {_fmt(r.get('profit_factor'), 3):>6}"
                 f"  {str(r.get('total_trades', '')):>7}"
                 f"  {mark}  {desc}"
@@ -618,32 +631,52 @@ def main() -> None:
     print("\n" + "=" * 110)
     print("【採択判断】")
     oos_main = next((r for r in oos_group if r["name"] == "OOS_2022_2025"), None)
-    if oos_main:
+    decision: dict = {}
+    if oos_main is None:
+        print("  [WARNING] OOS_2022_2025 が失敗または未取得のため採択判定不可")
+        decision = {"verdict": "UNKNOWN", "reason": "OOS_2022_2025 not available"}
+    else:
         passed = _oos_pass(oos_main, actual_is_sharpe)
         oos_sharpe = oos_main.get("sharpe")
         div = abs(actual_is_sharpe - oos_sharpe) if oos_sharpe is not None else None
-        print("  OOS_2022_2025:")
         cagr_ok = (oos_main.get("cagr") or 0) > _OOS_CAGR_MIN
         dd_ok = (oos_main.get("max_drawdown") or 1) < _OOS_DD_MAX
         div_ok = div is not None and div < _OOS_SHARPE_DIVERGENCE_MAX
+        print("  OOS_2022_2025:")
         print(
-            f"    CAGR > 5%              : {'[OK]' if cagr_ok else '[NG]'} {_fmt(oos_main.get('cagr'))}"
+            f"    CAGR > {_OOS_CAGR_MIN * 100:.0f}%           : {'[OK]' if cagr_ok else '[NG]'} {_pct(oos_main.get('cagr'))}"
         )
         print(
-            f"    MaxDD < 25%            : {'[OK]' if dd_ok else '[NG]'} {_fmt(oos_main.get('max_drawdown'))}"
+            f"    MaxDD < {_OOS_DD_MAX * 100:.0f}%          : {'[OK]' if dd_ok else '[NG]'} {_pct(oos_main.get('max_drawdown'))}"
         )
         print(
-            f"    Sharpe 乖離 < 0.15     : {'[OK]' if div_ok else '[NG]'} {_fmt(div, 3) if div is not None else 'NA'}"
+            f"    Sharpe 乖離 < {_OOS_SHARPE_DIVERGENCE_MAX:.2f} : {'[OK]' if div_ok else '[NG]'} {_fmt(div, 3) if div is not None else 'NA'}"
         )
         print()
         if passed:
             print("  → OOS 基準クリア: Phase 2 設定探索 Go（#375 Group R へ）")
         else:
             print("  → OOS 基準未達: P2 設定を OOS データで再調整してから #375 へ")
+        decision = {
+            "verdict": "GO" if passed else "NG",
+            "oos_cagr": oos_main.get("cagr"),
+            "oos_max_drawdown": oos_main.get("max_drawdown"),
+            "oos_sharpe": oos_sharpe,
+            "is_sharpe": actual_is_sharpe,
+            "sharpe_divergence": div,
+            "cagr_ok": cagr_ok,
+            "dd_ok": dd_ok,
+            "divergence_ok": div_ok,
+        }
+    (output_dir / "decision.json").write_text(
+        json.dumps(decision, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print("=" * 110)
+    print(f"decision.json = {output_dir / 'decision.json'}")
 
     if failed:
         print(f"\n失敗したシナリオ: {[r['name'] for r in failed]}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
