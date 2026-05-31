@@ -5,7 +5,7 @@ P2_n1b_o2 の設定を固定し、max_positions と max_utilization を変化さ
 
 追加実装ゼロ。パラメータ変更のみ。
 
-IS 参照値（P2_n1b_o2、Phase1_Backtest_Strategy.md Section 46）:
+IS 参照値（P2_n1b_o2、Phase2_Backtest_Strategy.md Section 48 参照）:
   CAGR 8.31%、Sharpe 0.428、MaxDD 19.10%、PF 1.321
 
 シナリオ:
@@ -37,6 +37,7 @@ import os
 import shutil
 import subprocess
 import sys
+import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -96,7 +97,7 @@ _COM_BASE = {
     "end": "2025-12-31",
 }
 
-# IS 参照値（Phase 1 Section 46）
+# IS 参照値（Phase2_Backtest_Strategy.md Section 48 / Phase1_Backtest_Strategy.md Section 46）
 _IS_CAGR = 0.0831
 _IS_SHARPE = 0.428
 _IS_MAX_DD = 0.1910
@@ -526,6 +527,7 @@ def main() -> None:
                     all_results.extend(batch_results)
                 except Exception as exc:
                     print(f"[ERROR] worker {worker_idx} で例外: {exc}", file=sys.stderr)
+                    traceback.print_exc(file=sys.stderr)
     finally:
         if not args.keep_snapshots:
             try:
@@ -616,7 +618,8 @@ def main() -> None:
         best = max(adopted, key=lambda r: r.get("sharpe") or 0)
         print(f"  全採択基準達成: {[r['name'] for r in adopted]}")
         print(
-            f"  → 最良設定 {best['name']} を Phase 2 採用候補として選択（Section 49 のベースとする）"
+            f"  → 最良設定 {best['name']} を Phase 2 採用候補として選択"
+            f"（Phase2_Backtest_Strategy.md Section 49 のベースとする）"
         )
         decision = {
             "verdict": "ADOPTED",
