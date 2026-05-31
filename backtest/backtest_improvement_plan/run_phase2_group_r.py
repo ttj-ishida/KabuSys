@@ -5,7 +5,7 @@ P2_n1b_o2 の設定を固定し、max_positions と max_utilization を変化さ
 
 追加実装ゼロ。パラメータ変更のみ。
 
-IS 参照値（P2_n1b_o2、Phase 1 Section 46）:
+IS 参照値（P2_n1b_o2、Phase1_Backtest_Strategy.md Section 46）:
   CAGR 8.31%、Sharpe 0.428、MaxDD 19.10%、PF 1.321
 
 シナリオ:
@@ -267,7 +267,12 @@ def _build_command(db_path: Path, scenario: dict, output_dir: Path) -> list[str]
 
 
 def _read_summary(report_dir: Path) -> dict:
+    # サブディレクトリ配下を優先、なければ直下もフォールバック
     summaries = list(report_dir.glob("*/summary.json"))
+    if not summaries:
+        direct = report_dir / "summary.json"
+        if direct.exists():
+            summaries = [direct]
     if not summaries:
         raise FileNotFoundError(f"summary.json が見つかりません: {report_dir}")
     latest = max(summaries, key=lambda p: p.stat().st_mtime)
@@ -331,21 +336,34 @@ def _run_batch(args: tuple) -> list[dict]:
         env["PYTHONPATH"] = os.pathsep.join(filter(None, [src_path, existing]))
         env["PYTHONIOENCODING"] = "utf-8"
 
-        completed = subprocess.run(
-            cmd,
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-        )
-
-        (scenario_dir / "stdout.log").write_text(completed.stdout or "", encoding="utf-8")
-        (scenario_dir / "stderr.log").write_text(completed.stderr or "", encoding="utf-8")
+        stdout_path = scenario_dir / "stdout.log"
+        stderr_path = scenario_dir / "stderr.log"
+        with (
+            stdout_path.open("w", encoding="utf-8", errors="replace") as fo,
+            stderr_path.open("w", encoding="utf-8", errors="replace") as fe,
+        ):
+            completed = subprocess.run(
+                cmd,
+                cwd=str(repo_root),
+                stdout=fo,
+                stderr=fe,
+                env=env,
+            )
 
         if completed.returncode != 0:
-            print(f"[ERROR] {name}: exit code {completed.returncode}", file=sys.stderr, flush=True)
+            # CI デバッグ支援: stderr の末尾 10 行をエコー
+            try:
+                tail = stderr_path.read_text(encoding="utf-8", errors="replace").splitlines()[-10:]
+                print(
+                    f"[ERROR] {name}: exit code {completed.returncode}\n"
+                    + "\n".join(f"  {line}" for line in tail),
+                    file=sys.stderr,
+                    flush=True,
+                )
+            except Exception:
+                print(
+                    f"[ERROR] {name}: exit code {completed.returncode}", file=sys.stderr, flush=True
+                )
             results.append({"name": name, "group": scenario["group"], "error": True})
             continue
 
@@ -361,7 +379,7 @@ def _run_batch(args: tuple) -> list[dict]:
             "group": scenario["group"],
             "max_positions": scenario["max_positions"],
             "max_utilization": scenario["max_utilization"],
-            "risk_per_pos_pct": scenario["max_utilization"] / scenario["max_positions"] * 100,
+            "alloc_per_pos_pct": scenario["max_utilization"] / scenario["max_positions"] * 100,
             "desc": scenario.get("desc", ""),
             "is_reference": scenario.get("is_reference", False),
             **{k: v for k, v in metrics.items()},
@@ -392,7 +410,7 @@ CSV_FIELDNAMES = [
     "group",
     "max_positions",
     "max_utilization",
-    "risk_per_pos_pct",
+    "alloc_per_pos_pct",
     "desc",
     "cagr",
     "sharpe",
@@ -445,7 +463,7 @@ def main() -> None:
     args = parser.parse_args()
 
     scenarios = _SCENARIOS
-    n_workers = min(args.workers or os.cpu_count() or DEFAULT_WORKERS, len(scenarios))
+    n_workers = max(1, min(args.workers or os.cpu_count() or DEFAULT_WORKERS, len(scenarios)))
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = ARTIFACTS_ROOT / stamp
@@ -533,7 +551,8 @@ def main() -> None:
     print("-" * 110)
     print(f"\n完了: {datetime.now().strftime('%H:%M:%S')}")
     print(f"成功: {len(success)} / {len(scenarios)}, 失敗: {len(failed)}")
-    print(f"results_csv = {results_csv}")
+    print(f"results_csv   = {results_csv}")
+    print(f"results_jsonl = {results_jsonl}")
 
     if not success:
         if failed:
@@ -554,7 +573,7 @@ def main() -> None:
     )
     print("=" * 120)
     print(
-        f"  {'シナリオ':<14} {'pos':>4} {'util':>6} {'1銘柄%':>7}"
+        f"  {'シナリオ':<14} {'pos':>4} {'util':>6} {'配分%':>7}"
         f"  {'CAGR':>8} {'Sharpe':>7} {'MaxDD':>8} {'Calmar':>7}"
         f"  {'PF':>6} {'Trades':>7}  採択"
     )
@@ -572,7 +591,7 @@ def main() -> None:
             f"  {r['name']:<14}"
             f"  {r.get('max_positions', ''):>4}"
             f"  {r.get('max_utilization', 0):.0%}".rjust(7)
-            + f"  {r.get('risk_per_pos_pct', 0):.1f}%".rjust(7)
+            + f"  {r.get('alloc_per_pos_pct', 0):.1f}%".rjust(7)
             + f"  {_pct(r.get('cagr')):>8}"
             f"  {_fmt(r.get('sharpe'), 3):>7}"
             f"  {_pct(r.get('max_drawdown')):>8}"
