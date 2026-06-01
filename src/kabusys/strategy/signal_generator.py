@@ -94,6 +94,7 @@ _FEATURES_SELECT_COLS: tuple[str, ...] = (
     "ma25_dev",
     "rsi_14",
     "topix_rel_20",
+    "sector_rel_20",
     "quality_score",
 )
 
@@ -1153,6 +1154,7 @@ def generate_signals(
     rsi_oversold_max: float | None = None,
     quality_score_min: float | None = None,
     topix_rel_min: float | None = None,
+    sector_rel_min: float | None = None,
     adaptive_threshold: bool = False,
     adaptive_threshold_hi: float = 0.62,
     topix_ma200_hi_trigger: float = 0.05,
@@ -1448,6 +1450,7 @@ def generate_signals(
                 "ma25_dev": feat.get("ma25_dev"),
                 "volume_ratio": feat.get("volume_ratio"),
                 "topix_rel_20": feat.get("topix_rel_20"),
+                "sector_rel_20": feat.get("sector_rel_20"),
                 "quality_score": feat.get("quality_score"),
             }
         )
@@ -1512,6 +1515,7 @@ def generate_signals(
         volume_suppressed = 0
         quality_suppressed = 0
         topix_rel_suppressed = 0
+        sector_rel_suppressed = 0
         sector_suppressed = 0
         reentry_suppressed = 0
         earnings_suppressed = 0
@@ -1578,6 +1582,19 @@ def generate_signals(
                         target_date,
                     )
                     topix_rel_suppressed += 1
+                    continue
+            # セクター内相対強度フィルタ（sector_rel_20 が min 未満の銘柄の BUY を抑制）
+            if sector_rel_min is not None:
+                sr_val = r.get("sector_rel_20")
+                if sr_val is not None and sr_val < sector_rel_min:
+                    logger.debug(
+                        "sector rel filter: %s sector_rel_20=%.4f < min=%.4f — BUY を抑制 date=%s",
+                        r["code"],
+                        sr_val,
+                        sector_rel_min,
+                        target_date,
+                    )
+                    sector_rel_suppressed += 1
                     continue
             # 銘柄単位 MA クロスフィルタ
             # - ma75_dev < 0（株価が MA75 を下回る）→ BUY スキップ（強ベア）
@@ -1725,6 +1742,12 @@ def generate_signals(
             logger.info(
                 "generate_signals: topix rel filter — %d 銘柄を TOPIX 相対強度不足で抑制 date=%s",
                 topix_rel_suppressed,
+                target_date,
+            )
+        if sector_rel_suppressed:
+            logger.info(
+                "generate_signals: sector rel filter — %d 銘柄をセクター内相対強度不足で抑制 date=%s",
+                sector_rel_suppressed,
                 target_date,
             )
         if gap_suppressed:

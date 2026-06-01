@@ -208,6 +208,7 @@ CREATE TABLE IF NOT EXISTS features (
     topix_rel_60    DOUBLE,
     quality_score   DOUBLE,
     rsi_14          DOUBLE,
+    sector_rel_20   DOUBLE,
     created_at      TIMESTAMP   NOT NULL DEFAULT current_timestamp,
     PRIMARY KEY (date, code)
 )
@@ -505,6 +506,8 @@ _MIGRATIONS: list[str] = [
     # Issue #353: features に MA25/MA75 乖離率を追加
     "ALTER TABLE features ADD COLUMN IF NOT EXISTS ma25_dev DOUBLE",
     "ALTER TABLE features ADD COLUMN IF NOT EXISTS ma75_dev DOUBLE",
+    # Issue #379: features に sector_rel_20（セクター内相対強度）を追加
+    "ALTER TABLE features ADD COLUMN IF NOT EXISTS sector_rel_20 DOUBLE",
 ]
 
 # ---------------------------------------------------------------------------

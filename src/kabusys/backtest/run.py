@@ -225,6 +225,13 @@ def main() -> None:
         help="Suppress BUY signals when topix_rel_20 is below this value (e.g. -0.1 means exclude stocks underperforming TOPIX by more than 10%% over 20 days).",
     )
     parser.add_argument(
+        "--sector-rel-min",
+        type=float,
+        default=None,
+        dest="sector_rel_min",
+        help="Suppress BUY signals when sector_rel_20 is below this value (0–1). セクター内相対強度（sector_rel_20）の最小値フィルター（0〜1）。指定値未満の銘柄の BUY を抑制する。[default: None = 無効]",
+    )
+    parser.add_argument(
         "--adaptive-threshold",
         action="store_true",
         default=False,
@@ -379,6 +386,7 @@ def main() -> None:
             rsi_oversold_max=args.rsi_oversold_max,
             quality_score_min=args.quality_score_min,
             topix_rel_min=args.topix_rel_min,
+            sector_rel_min=args.sector_rel_min,
             adaptive_threshold=args.adaptive_threshold,
             adaptive_threshold_hi=args.adaptive_threshold_hi,
             topix_ma200_hi_trigger=args.topix_ma200_hi_trigger,
