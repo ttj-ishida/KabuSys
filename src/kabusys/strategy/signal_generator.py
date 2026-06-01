@@ -1159,6 +1159,8 @@ def generate_signals(
     adaptive_threshold_vol_regime: bool = False,
     topix_vol_window: int = 20,
     topix_vol_low_threshold: float = 0.15,
+    topix_vol_high_threshold: float | None = None,
+    adaptive_threshold_lo: float = 0.55,
     dynamic_trailing_stop: bool = False,
     trail_profit_gate_atr: float = 1.5,
     trail_stage2_mult: float = 1.5,
@@ -1488,15 +1490,25 @@ def generate_signals(
             pass
     if adaptive_threshold_vol_regime:
         topix_vol = _calc_topix_vol(conn, target_date, topix_vol_window)
-        if topix_vol is not None and topix_vol < topix_vol_low_threshold:
-            threshold = max(threshold, adaptive_threshold_hi)
-            logger.debug(
-                "adaptive threshold vol regime: topix_vol=%.4f < low_thr=%.4f → threshold=%.2f date=%s",
-                topix_vol,
-                topix_vol_low_threshold,
-                threshold,
-                target_date,
-            )
+        if topix_vol is not None:
+            if topix_vol < topix_vol_low_threshold:
+                threshold = max(threshold, adaptive_threshold_hi)
+                logger.debug(
+                    "vol regime LOW: topix_vol=%.4f < low_thr=%.4f → threshold=%.2f date=%s",
+                    topix_vol,
+                    topix_vol_low_threshold,
+                    threshold,
+                    target_date,
+                )
+            elif topix_vol_high_threshold is not None and topix_vol >= topix_vol_high_threshold:
+                threshold = min(threshold, adaptive_threshold_lo)
+                logger.debug(
+                    "vol regime HIGH: topix_vol=%.4f >= high_thr=%.4f → threshold=%.2f date=%s",
+                    topix_vol,
+                    topix_vol_high_threshold,
+                    threshold,
+                    target_date,
+                )
     buy_signals: list[dict] = []
     if not _regime_blocks_entry and not breadth_stop and not entry_blocked:
         # 3c. ギャップ比率を一括取得（BUY 生成が必要な場合のみ実行）
