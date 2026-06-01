@@ -525,6 +525,15 @@ def main() -> None:
     success = [r for r in all_results if not r.get("error")]
     failed = [r for r in all_results if r.get("error")]
 
+    # Check if T0 (reference scenario) succeeded
+    if not any(r.get("name") == "T0_r3_ref" for r in success):
+        print(
+            "[ERROR] T0_r3_ref（参照シナリオ）が失敗しました。"
+            "比較対象がないため、結果分析を続行できません。",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     with results_csv.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES, extrasaction="ignore")
         writer.writeheader()
@@ -609,6 +618,8 @@ def main() -> None:
             "best_sharpe": best.get("sharpe"),
             "best_max_drawdown": best.get("max_drawdown"),
             "best_profit_factor": best.get("profit_factor"),
+            "best_win_rate": best.get("win_rate"),
+            "best_total_trades": best.get("total_trades"),
         }
     elif improved:
         best = max(improved, key=lambda r: r.get("sharpe") or 0)
@@ -625,6 +636,8 @@ def main() -> None:
             "best_sharpe": best.get("sharpe"),
             "best_max_drawdown": best.get("max_drawdown"),
             "best_profit_factor": best.get("profit_factor"),
+            "best_win_rate": best.get("win_rate"),
+            "best_total_trades": best.get("total_trades"),
         }
     else:
         print("  全シナリオで T0（R3 参照）以下")
