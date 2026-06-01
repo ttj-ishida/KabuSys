@@ -1153,6 +1153,7 @@ def generate_signals(
     rsi_oversold_max: float | None = None,
     quality_score_min: float | None = None,
     topix_rel_min: float | None = None,
+    sector_rel_min: float | None = None,
     adaptive_threshold: bool = False,
     adaptive_threshold_hi: float = 0.62,
     topix_ma200_hi_trigger: float = 0.05,
@@ -1578,6 +1579,18 @@ def generate_signals(
                         target_date,
                     )
                     topix_rel_suppressed += 1
+                    continue
+            # セクター内相対強度フィルタ（sector_rel_20 が min 未満の銘柄の BUY を抑制）
+            if sector_rel_min is not None:
+                sr_val = r.get("sector_rel_20")
+                if sr_val is not None and sr_val < sector_rel_min:
+                    logger.debug(
+                        "sector rel filter: %s sector_rel_20=%.4f < min=%.4f — BUY を抑制 date=%s",
+                        r["code"],
+                        sr_val,
+                        sector_rel_min,
+                        target_date,
+                    )
                     continue
             # 銘柄単位 MA クロスフィルタ
             # - ma75_dev < 0（株価が MA75 を下回る）→ BUY スキップ（強ベア）

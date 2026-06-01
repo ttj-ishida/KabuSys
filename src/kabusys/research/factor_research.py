@@ -572,3 +572,75 @@ def calc_rsi(
     result = [{"code": code, "rsi_14": rsi} for code, rsi in rows]
     logger.debug("calc_rsi: %d 銘柄 date=%s", len(result), target_date)
     return result
+
+
+# ---------------------------------------------------------------------------
+# セクター内相対強度
+# ---------------------------------------------------------------------------
+
+_SECTOR_REL_DAYS = 20  # 相対強度計算期間（営業日）
+_SECTOR_REL_SCAN = _SECTOR_REL_DAYS * 3  # データスキャン範囲（カレンダー日）
+
+
+def calc_sector_relative(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+) -> list[dict[str, Any]]:
+    """セクター内 20 日相対強度（パーセンタイル 0〜1）を計算する。
+
+    銘柄ごとの直近 20 営業日リターンをセクター内で PERCENT_RANK() し、
+    0（最弱）〜1（最強）のパーセンタイル値を返す。
+
+    セクター情報が stocks テーブルに存在しない銘柄は結果に含めない。
+    data 不足で 20 日リターンが計算できない銘柄も結果に含めない。
+
+    Args:
+        conn:        DuckDB 接続。prices_daily / stocks テーブルを参照する。
+        target_date: 計算基準日。
+
+    Returns:
+        [{"code": str, "sector_rel_20": float}] のリスト。
+    """
+    scan_from = target_date - timedelta(days=_SECTOR_REL_SCAN)
+    rows = conn.execute(
+        """
+        WITH price_window AS (
+            SELECT code, date, CAST(close AS DOUBLE) AS close,
+                   ROW_NUMBER() OVER (PARTITION BY code ORDER BY date DESC) AS rn
+            FROM prices_daily
+            WHERE date <= ? AND date >= ? AND close IS NOT NULL
+        ),
+        latest AS (
+            SELECT code, close AS close_now
+            FROM price_window
+            WHERE rn = 1
+        ),
+        base AS (
+            SELECT code, close AS close_base
+            FROM price_window
+            WHERE rn = ?
+        ),
+        returns AS (
+            SELECT l.code,
+                   (l.close_now - b.close_base) / b.close_base AS ret_20d
+            FROM latest l
+            JOIN base b ON l.code = b.code
+            WHERE b.close_base > 0
+        ),
+        with_sector AS (
+            SELECT r.code, r.ret_20d, NULLIF(TRIM(s.sector), '') AS sector
+            FROM returns r
+            JOIN stocks s ON r.code = s.code
+            WHERE NULLIF(TRIM(s.sector), '') IS NOT NULL
+        )
+        SELECT code,
+               PERCENT_RANK() OVER (PARTITION BY sector ORDER BY ret_20d) AS sector_rel_20
+        FROM with_sector
+        ORDER BY code
+        """,
+        [target_date, scan_from, _SECTOR_REL_DAYS + 1],
+    ).fetchall()
+
+    result = [{"code": code, "sector_rel_20": sr} for code, sr in rows if sr is not None]
+    logger.debug("calc_sector_relative: %d 銘柄 date=%s", len(result), target_date)
+    return result
