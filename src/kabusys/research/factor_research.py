@@ -634,7 +634,10 @@ def calc_sector_relative(
             WHERE NULLIF(TRIM(s.sector), '') IS NOT NULL
         )
         SELECT code,
-               PERCENT_RANK() OVER (PARTITION BY sector ORDER BY ret_20d) AS sector_rel_20
+               CASE
+                   WHEN COUNT(*) OVER (PARTITION BY sector) = 1 THEN 0.5
+                   ELSE PERCENT_RANK() OVER (PARTITION BY sector ORDER BY ret_20d)
+               END AS sector_rel_20
         FROM with_sector
         ORDER BY code
         """,
