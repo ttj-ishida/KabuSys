@@ -229,7 +229,7 @@ def main() -> None:
         type=float,
         default=None,
         dest="sector_rel_min",
-        help="セクター内相対強度（sector_rel_20）の最小値フィルター（0〜1）。指定値未満の銘柄の BUY を抑制する。[default: None = 無効]",
+        help="Suppress BUY signals when sector_rel_20 is below this value (0–1). セクター内相対強度（sector_rel_20）の最小値フィルター（0〜1）。指定値未満の銘柄の BUY を抑制する。[default: None = 無効]",
     )
     parser.add_argument(
         "--adaptive-threshold",
