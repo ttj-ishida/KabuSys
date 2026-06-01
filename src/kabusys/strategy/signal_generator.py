@@ -94,6 +94,7 @@ _FEATURES_SELECT_COLS: tuple[str, ...] = (
     "ma25_dev",
     "rsi_14",
     "topix_rel_20",
+    "sector_rel_20",
     "quality_score",
 )
 
@@ -1449,6 +1450,7 @@ def generate_signals(
                 "ma25_dev": feat.get("ma25_dev"),
                 "volume_ratio": feat.get("volume_ratio"),
                 "topix_rel_20": feat.get("topix_rel_20"),
+                "sector_rel_20": feat.get("sector_rel_20"),
                 "quality_score": feat.get("quality_score"),
             }
         )
@@ -1513,6 +1515,7 @@ def generate_signals(
         volume_suppressed = 0
         quality_suppressed = 0
         topix_rel_suppressed = 0
+        sector_rel_suppressed = 0
         sector_suppressed = 0
         reentry_suppressed = 0
         earnings_suppressed = 0
@@ -1591,6 +1594,7 @@ def generate_signals(
                         sector_rel_min,
                         target_date,
                     )
+                    sector_rel_suppressed += 1
                     continue
             # 銘柄単位 MA クロスフィルタ
             # - ma75_dev < 0（株価が MA75 を下回る）→ BUY スキップ（強ベア）
@@ -1738,6 +1742,12 @@ def generate_signals(
             logger.info(
                 "generate_signals: topix rel filter — %d 銘柄を TOPIX 相対強度不足で抑制 date=%s",
                 topix_rel_suppressed,
+                target_date,
+            )
+        if sector_rel_suppressed:
+            logger.info(
+                "generate_signals: sector rel filter — %d 銘柄をセクター内相対強度不足で抑制 date=%s",
+                sector_rel_suppressed,
                 target_date,
             )
         if gap_suppressed:
