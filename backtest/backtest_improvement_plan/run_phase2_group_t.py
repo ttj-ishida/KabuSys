@@ -581,8 +581,8 @@ def main() -> None:
         marker = " [ALL]" if all_ok else (" [>T0]" if better else "")
         print(
             f"  {r['name']:<14}"
-            f"  {str(r.get('sector_rel_min') or '—'):>8}"
-            f"  {str(r.get('quality_score_min') or '—'):>7}"
+            f"  {'—' if r.get('sector_rel_min') is None else str(r.get('sector_rel_min')):>8}"
+            f"  {'—' if r.get('quality_score_min') is None else str(r.get('quality_score_min')):>7}"
             f"  {_pct(r.get('cagr')):>8}"
             f"  {_fmt(r.get('sharpe'), 3):>7}"
             f"  {_pct(r.get('max_drawdown')):>8}"
