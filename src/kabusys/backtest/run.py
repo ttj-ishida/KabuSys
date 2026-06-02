@@ -261,6 +261,20 @@ def main() -> None:
         help="低ボラ局面判定の年次換算ボラティリティ閾値（例: 0.15 = 15%%）。[default: 0.15]",
     )
     parser.add_argument(
+        "--topix-vol-high-threshold",
+        type=float,
+        default=None,
+        dest="topix_vol_high_threshold",
+        help="High volatility regime threshold (annualized). Enables 3-value regime when set. 高ボラ局面判定の年次換算ボラ閾値。設定時に 3 値レジームが有効化される。[default: None = 2 値モード]",
+    )
+    parser.add_argument(
+        "--adaptive-threshold-lo",
+        type=float,
+        default=0.55,
+        dest="adaptive_threshold_lo",
+        help="BUY threshold used in high-volatility regime (lower = more aggressive). 高ボラ局面の BUY 閾値。低い値ほど積極的エントリー。[default: 0.55]",
+    )
+    parser.add_argument(
         "--dynamic-trailing-stop",
         action="store_true",
         default=False,
@@ -385,6 +399,8 @@ def main() -> None:
             adaptive_threshold_vol_regime=args.adaptive_threshold_vol_regime,
             topix_vol_window=args.topix_vol_window,
             topix_vol_low_threshold=args.topix_vol_low_threshold,
+            topix_vol_high_threshold=args.topix_vol_high_threshold,
+            adaptive_threshold_lo=args.adaptive_threshold_lo,
             dynamic_trailing_stop=args.dynamic_trailing_stop,
             trail_profit_gate_atr=args.trail_profit_gate_atr,
             trail_stage2_mult=args.trail_stage2_mult,
