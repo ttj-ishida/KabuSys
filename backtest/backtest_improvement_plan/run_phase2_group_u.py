@@ -341,7 +341,7 @@ def _run_batch(args: tuple) -> list[dict]:
             metrics = _read_summary(report_dir)
         except Exception as exc:
             print(
-                f"[ERROR] {name}: summary.json 読み込み失敗 — {exc}",
+                f"[ERROR] {name}: summary.json 読み込み失敗: {exc}",
                 file=sys.stderr,
                 flush=True,
             )
@@ -365,8 +365,8 @@ def _run_batch(args: tuple) -> list[dict]:
 
         print(
             f"[DONE] {name:<12}"
-            f"  qual={'—' if scenario.get('quality_score_min') is None else str(scenario.get('quality_score_min')):>5}"
-            f"  vol_hi={'—' if scenario.get('topix_vol_high_threshold') is None else str(scenario.get('topix_vol_high_threshold')):>5}"
+            f"  qual={'-' if scenario.get('quality_score_min') is None else str(scenario.get('quality_score_min')):>5}"
+            f"  vol_hi={'-' if scenario.get('topix_vol_high_threshold') is None else str(scenario.get('topix_vol_high_threshold')):>5}"
             f"  cagr={_pct(metrics.get('cagr')):>8}"
             f"  sharpe={_fmt(metrics.get('sharpe'), 3):>6}"
             f"  dd={_pct(metrics.get('max_drawdown')):>8}"
@@ -548,9 +548,9 @@ def main() -> None:
         marker = " [ALL]" if all_ok else (" [>U0]" if better else "")
         print(
             f"  {r['name']:<12}"
-            f"  {'—' if r.get('topix_vol_high_threshold') is None else str(r.get('topix_vol_high_threshold')):>6}"
-            f"  {'—' if r.get('adaptive_threshold_lo') is None else str(r.get('adaptive_threshold_lo')):>6}"
-            f"  {'—' if r.get('quality_score_min') is None else str(r.get('quality_score_min')):>7}"
+            f"  {'-' if r.get('topix_vol_high_threshold') is None else str(r.get('topix_vol_high_threshold')):>6}"
+            f"  {'-' if r.get('adaptive_threshold_lo') is None else str(r.get('adaptive_threshold_lo')):>6}"
+            f"  {'-' if r.get('quality_score_min') is None else str(r.get('quality_score_min')):>7}"
             f"  {_pct(r.get('cagr')):>8}"
             f"  {_fmt(r.get('sharpe'), 3):>7}"
             f"  {_pct(r.get('max_drawdown')):>8}"
