@@ -23,14 +23,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="特徴量を手動で再計算します。")
     parser.add_argument(
         "--date",
         dest="target_date",
         help="再計算対象日 (YYYY-MM-DD)。省略時は本日、データ未着なら最新 prices_daily 日。",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _parse_date(value: str) -> date:
@@ -51,11 +51,11 @@ def _latest_price_date(conn: duckdb.DuckDBPyConnection, upper_bound: date) -> da
         "SELECT MAX(date) FROM prices_daily WHERE date <= ?",
         [upper_bound],
     ).fetchone()
-    return row[0] if row else None
+    return row[0] if row and row[0] else None
 
 
-def main() -> None:
-    args = _parse_args()
+def main(argv: list[str] | None = None) -> None:
+    args = _parse_args(argv or [])
     settings = Settings()
     conn = duckdb.connect(str(settings.duckdb_path))
     today = date.today()
@@ -98,4 +98,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
