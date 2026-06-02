@@ -176,36 +176,63 @@ def _build_command(db_path: Path, scenario: dict, output_dir: Path) -> list[str]
     com = _COM_BASE
     cmd = [
         sys.executable,
-        "-m", "kabusys.backtest.run",
-        "--db", str(db_path),
-        "--start", com["start"],
-        "--end", com["end"],
-        "--cash", str(com["cash"]),
-        "--allocation-method", com["allocation_method"],
-        "--max-positions", str(com["max_positions"]),
-        "--max-position-pct", str(com["max_position_pct"]),
-        "--max-utilization", str(com["max_utilization"]),
-        "--risk-pct", str(com["risk_pct"]),
-        "--stop-loss-pct", str(com["stop_loss_pct"]),
-        "--min-holding-days", str(com["min_holding_days"]),
-        "--max-holding-days", str(com["max_holding_days"]),
-        "--trailing-stop-atr", str(com["trailing_stop_atr"]),
-        "--threshold", str(com["threshold"]),
-        "--topix-size-multiplier-weak-bear", str(com["weak_bear"]),
-        "--topix-size-multiplier-strong-bear", str(com["strong_bear"]),
-        "--portfolio-drawdown-stop", str(com["dd_stop"]),
-        "--portfolio-drawdown-stop-timeout", str(com["dd_timeout"]),
+        "-m",
+        "kabusys.backtest.run",
+        "--db",
+        str(db_path),
+        "--start",
+        com["start"],
+        "--end",
+        com["end"],
+        "--cash",
+        str(com["cash"]),
+        "--allocation-method",
+        com["allocation_method"],
+        "--max-positions",
+        str(com["max_positions"]),
+        "--max-position-pct",
+        str(com["max_position_pct"]),
+        "--max-utilization",
+        str(com["max_utilization"]),
+        "--risk-pct",
+        str(com["risk_pct"]),
+        "--stop-loss-pct",
+        str(com["stop_loss_pct"]),
+        "--min-holding-days",
+        str(com["min_holding_days"]),
+        "--max-holding-days",
+        str(com["max_holding_days"]),
+        "--trailing-stop-atr",
+        str(com["trailing_stop_atr"]),
+        "--threshold",
+        str(com["threshold"]),
+        "--topix-size-multiplier-weak-bear",
+        str(com["weak_bear"]),
+        "--topix-size-multiplier-strong-bear",
+        str(com["strong_bear"]),
+        "--portfolio-drawdown-stop",
+        str(com["dd_stop"]),
+        "--portfolio-drawdown-stop-timeout",
+        str(com["dd_timeout"]),
         "--adaptive-threshold-vol-regime",
-        "--topix-vol-window", str(com["topix_vol_window"]),
-        "--topix-vol-low-threshold", str(scenario["topix_vol_low_threshold"]),
-        "--adaptive-threshold-hi", str(scenario["adaptive_threshold_hi"]),
+        "--topix-vol-window",
+        str(com["topix_vol_window"]),
+        "--topix-vol-low-threshold",
+        str(scenario["topix_vol_low_threshold"]),
+        "--adaptive-threshold-hi",
+        str(scenario["adaptive_threshold_hi"]),
         "--dynamic-trailing-stop",
-        "--trail-profit-gate-atr", str(com["trail_profit_gate_atr"]),
-        "--trail-stage2-mult", str(com["trail_stage2_mult"]),
-        "--trail-stage3-mult", str(com["trail_stage3_mult"]),
+        "--trail-profit-gate-atr",
+        str(com["trail_profit_gate_atr"]),
+        "--trail-stage2-mult",
+        str(com["trail_stage2_mult"]),
+        "--trail-stage3-mult",
+        str(com["trail_stage3_mult"]),
         "--ma200-filter",
-        "--output-format", "all",
-        "--output-dir", str(output_dir),
+        "--output-format",
+        "all",
+        "--output-dir",
+        str(output_dir),
     ]
     if scenario.get("topix_vol_high_threshold") is not None:
         cmd += ["--topix-vol-high-threshold", str(scenario["topix_vol_high_threshold"])]
@@ -290,15 +317,11 @@ def _run_batch(args: tuple) -> list[dict]:
             stdout_path.open("w", encoding="utf-8", errors="replace") as fo,
             stderr_path.open("w", encoding="utf-8", errors="replace") as fe,
         ):
-            completed = subprocess.run(
-                cmd, cwd=str(repo_root), stdout=fo, stderr=fe, env=env
-            )
+            completed = subprocess.run(cmd, cwd=str(repo_root), stdout=fo, stderr=fe, env=env)
 
         if completed.returncode != 0:
             try:
-                tail = stderr_path.read_text(
-                    encoding="utf-8", errors="replace"
-                ).splitlines()[-10:]
+                tail = stderr_path.read_text(encoding="utf-8", errors="replace").splitlines()[-10:]
                 print(
                     f"[ERROR] {name}: exit code {completed.returncode}\n"
                     + "\n".join(f"  {line}" for line in tail),
@@ -360,13 +383,25 @@ def _run_batch(args: tuple) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 CSV_FIELDNAMES = [
-    "name", "group",
-    "topix_vol_low_threshold", "topix_vol_high_threshold",
-    "adaptive_threshold_hi", "adaptive_threshold_lo",
-    "quality_score_min", "desc",
-    "cagr", "sharpe", "max_drawdown", "calmar", "annual_volatility",
-    "win_rate", "payoff_ratio", "profit_factor", "avg_holding_days",
-    "total_trades", "final_value",
+    "name",
+    "group",
+    "topix_vol_low_threshold",
+    "topix_vol_high_threshold",
+    "adaptive_threshold_hi",
+    "adaptive_threshold_lo",
+    "quality_score_min",
+    "desc",
+    "cagr",
+    "sharpe",
+    "max_drawdown",
+    "calmar",
+    "annual_volatility",
+    "win_rate",
+    "payoff_ratio",
+    "profit_factor",
+    "avg_holding_days",
+    "total_trades",
+    "final_value",
 ]
 
 
@@ -425,8 +460,7 @@ def main() -> None:
         batches[idx % n_workers].append(scenario)
 
     batch_args = [
-        (snapshot_paths[i], batches[i], str(output_dir), str(REPO_ROOT))
-        for i in range(n_workers)
+        (snapshot_paths[i], batches[i], str(output_dir), str(REPO_ROOT)) for i in range(n_workers)
     ]
 
     (output_dir / "scenarios.json").write_text(
@@ -530,7 +564,8 @@ def main() -> None:
     print("【採択判断】")
     adopted = [r for r in success if _meets_all(r)]
     improved = [
-        r for r in success
+        r
+        for r in success
         if (r.get("sharpe") or 0) > (ref["sharpe"] if ref else 0) and r["name"] != "U0_ref"
     ]
 
@@ -538,7 +573,9 @@ def main() -> None:
     if adopted:
         best = max(adopted, key=lambda r: r.get("sharpe") or 0)
         print(f"  全採択基準達成: {[r['name'] for r in adopted]}")
-        print(f"  → 最良設定 {best['name']} を Phase 2 最終採用（Phase2_Backtest_Strategy.md Section 51 に記録）")
+        print(
+            f"  → 最良設定 {best['name']} を Phase 2 最終採用（Phase2_Backtest_Strategy.md Section 51 に記録）"
+        )
         decision = {
             "verdict": "ADOPTED",
             "best_scenario": best["name"],

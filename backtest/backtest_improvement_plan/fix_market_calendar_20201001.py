@@ -93,9 +93,7 @@ def main() -> None:
     cnt_oct01 = con.execute(
         "SELECT COUNT(*) FROM prices_daily WHERE date = '2020-10-01'"
     ).fetchone()[0]
-    print(
-        f"prices_daily: 2020-09-30={cnt_sep30} 銘柄, 2020-10-01={cnt_oct01} 銘柄（欠損確認）"
-    )
+    print(f"prices_daily: 2020-09-30={cnt_sep30} 銘柄, 2020-10-01={cnt_oct01} 銘柄（欠損確認）")
 
     con.close()
     print("[DONE] market_calendar の修正が完了しました。")
