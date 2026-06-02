@@ -127,11 +127,13 @@ def _make_schtasks_result(status: str, rc: int = 0, task: str = "KabuSys_Schedul
 
 def _daemon_fails_individual_ok(daemon_status: str, individual_status: str):
     """デーモンが daemon_status、個別タスクが individual_status を返す side_effect。"""
+
     def side_effect(cmd, **kwargs):
         task_name = cmd[3]  # schtasks /query /tn <task_name> ...
         if task_name == "KabuSys_Scheduler":
             return _make_schtasks_result(daemon_status, task="KabuSys_Scheduler")
         return _make_schtasks_result(individual_status, task="KabuSys_ExecutionStart")
+
     return side_effect
 
 
