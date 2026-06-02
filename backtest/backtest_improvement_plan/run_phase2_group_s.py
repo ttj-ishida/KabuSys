@@ -380,6 +380,7 @@ def _run_batch(args: tuple) -> list[dict]:
 CSV_FIELDNAMES = [
     "name",
     "group",
+    "is_reference",
     "topix_vol_low_threshold",
     "topix_vol_high_threshold",
     "adaptive_threshold_hi",

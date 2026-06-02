@@ -265,7 +265,12 @@ def main() -> None:
         type=float,
         default=None,
         dest="topix_vol_high_threshold",
-        help="High volatility regime threshold (annualized). Enables 3-value regime when set. 高ボラ局面判定の年次換算ボラ閾値。設定時に 3 値レジームが有効化される。[default: None = 2 値モード]",
+        help=(
+            "High volatility regime threshold (annualized). Enables 3-value regime when set."
+            " 高ボラ局面判定の年次換算ボラ閾値。設定時に 3 値レジームが有効化される。"
+            " 境界: LOW = vol < low_threshold, MID = low_threshold <= vol < high_threshold,"
+            " HIGH = vol >= high_threshold。must be > --topix-vol-low-threshold。[default: None = 2 値モード]"
+        ),
     )
     parser.add_argument(
         "--adaptive-threshold-lo",
@@ -341,6 +346,15 @@ def main() -> None:
     if start_date >= end_date:
         logger.error("--start must be before --end")
         sys.exit(1)
+
+    if (
+        args.topix_vol_high_threshold is not None
+        and args.topix_vol_high_threshold <= args.topix_vol_low_threshold
+    ):
+        parser.error(
+            f"--topix-vol-high-threshold ({args.topix_vol_high_threshold}) must be"
+            f" > --topix-vol-low-threshold ({args.topix_vol_low_threshold})"
+        )
 
     from kabusys.backtest.engine import BacktestScope, run_backtest
     from kabusys.backtest.report import (

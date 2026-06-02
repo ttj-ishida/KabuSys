@@ -215,3 +215,43 @@ class TestThreeValueRegime:
             adaptive_threshold_lo=0.55,
         )
         assert _buy_count(conn, self.TARGET_DATE) == 0
+
+    def test_boundary_at_low_threshold_is_mid(self):
+        """vol == low_threshold（0.12）は MID 扱い（LOW は vol < low_threshold の厳密不等号）。
+        d=0.0076 → vol≈0.124 ≥ 0.12 → MID。閾値はベース（0.58）のまま。
+        score≈0.60 > 0.58 → BUY あり。LOW 扱いなら閾値=0.62 で 0.60 < 0.62 → BUY なし。
+        """
+        conn = _make_db(_topix_series_with_vol(0.0076))  # vol≈0.124 > low_threshold=0.12
+        _insert_feature(conn, self.TARGET_DATE, momentum=_MOM_SCORE_060)
+
+        generate_signals(
+            conn=conn,
+            target_date=self.TARGET_DATE,
+            threshold=0.58,
+            adaptive_threshold_vol_regime=True,
+            topix_vol_low_threshold=0.12,
+            adaptive_threshold_hi=0.62,
+            topix_vol_high_threshold=0.25,
+            adaptive_threshold_lo=0.55,
+        )
+        assert _buy_count(conn, self.TARGET_DATE) == 1, "MID: 閾値0.58, score≈0.60 → BUY"
+
+    def test_boundary_at_high_threshold_is_high(self):
+        """vol == high_threshold（0.25）は HIGH 扱い（HIGH は vol >= high_threshold の包含不等号）。
+        d=0.0154 → vol≈0.251 ≥ 0.25 → HIGH。閾値が adaptive_threshold_lo（0.55）に引き下げ。
+        score≈0.57 > 0.55 → BUY あり。MID 扱いなら閾値=0.58 で 0.57 < 0.58 → BUY なし。
+        """
+        conn = _make_db(_topix_series_with_vol(0.0154))  # vol≈0.251 ≥ high_threshold=0.25
+        _insert_feature(conn, self.TARGET_DATE, momentum=_MOM_SCORE_057)
+
+        generate_signals(
+            conn=conn,
+            target_date=self.TARGET_DATE,
+            threshold=0.58,
+            adaptive_threshold_vol_regime=True,
+            topix_vol_low_threshold=0.12,
+            adaptive_threshold_hi=0.62,
+            topix_vol_high_threshold=0.25,
+            adaptive_threshold_lo=0.55,
+        )
+        assert _buy_count(conn, self.TARGET_DATE) == 1, "HIGH: 閾値0.55, score≈0.57 → BUY"
