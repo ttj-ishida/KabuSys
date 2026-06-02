@@ -1,11 +1,9 @@
 """3 値レジーム適応閾値のテスト (Issue #376)"""
 from __future__ import annotations
 
-import math
 from datetime import date, timedelta
 
 import duckdb
-import pytest
 
 from kabusys.data.schema import init_schema
 from kabusys.strategy.signal_generator import generate_signals
