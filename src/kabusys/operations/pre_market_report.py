@@ -84,7 +84,9 @@ def _generate_warnings(
     if stop_flag_exists:
         warnings.append("停止フラグ（stop_requested.flag）が存在します（自動執行不可）")
     if not task_scheduler_ready:
-        warnings.append("スケジューラーが正常動作していません（KabuSys_Scheduler: Running または KabuSys_ExecutionStart: Ready を確認してください）")
+        warnings.append(
+            "スケジューラーが正常動作していません（KabuSys_Scheduler: Running または KabuSys_ExecutionStart: Ready を確認してください）"
+        )
     if not data_freshness_ok:
         warnings.append("prices_daily の最終更新日が直近営業日と一致しません（データが古い可能性）")
 
@@ -127,9 +129,7 @@ def _build_check_items(
         CheckItem(
             name="task_scheduler",
             status="ok" if task_scheduler_ready else "failed",
-            detail="scheduler: OK"
-            if task_scheduler_ready
-            else "scheduler: 異常（要確認）",
+            detail="scheduler: OK" if task_scheduler_ready else "scheduler: 異常（要確認）",
         ),
     ]
 
