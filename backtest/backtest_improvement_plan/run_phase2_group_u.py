@@ -1,4 +1,4 @@
-"""Phase 2 Group U — market_calendar 修正後 S2+T4 複合検証 (Issue #380)
+"""Phase 2 Group U — market_calendar 修正後 S2+T4 複合検証 (Issue #382)
 
 2020-10-01 market_calendar 修正後に、クオリティフィルター（T4）・S2 適応閾値・
 両者の複合（U3）を独立・組み合わせで検証する。
