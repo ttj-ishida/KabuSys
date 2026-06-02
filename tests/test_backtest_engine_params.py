@@ -76,7 +76,7 @@ def test_run_backtest_accepts_topix_params():
 
 
 def test_run_backtest_accepts_factor_filter_params():
-    """run_backtest() が use_ma200_filter / volume_breakout_threshold を受け取れること。"""
+    """run_backtest() が factor filter パラメータを受け取れること。"""
     import inspect
 
     from kabusys.backtest.engine import run_backtest
@@ -87,6 +87,9 @@ def test_run_backtest_accepts_factor_filter_params():
     )
     assert "volume_breakout_threshold" in sig.parameters, (
         "run_backtest() に volume_breakout_threshold パラメータが存在しない"
+    )
+    assert "sector_rel_min" in sig.parameters, (
+        "run_backtest() に sector_rel_min パラメータが存在しない"
     )
 
 

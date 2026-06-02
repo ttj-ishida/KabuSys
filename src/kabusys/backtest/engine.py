@@ -417,6 +417,7 @@ def run_backtest(
     rsi_oversold_max: float | None = None,
     quality_score_min: float | None = None,
     topix_rel_min: float | None = None,
+    sector_rel_min: float | None = None,
     adaptive_threshold: bool = False,
     adaptive_threshold_hi: float = 0.62,
     topix_ma200_hi_trigger: float = 0.05,
@@ -473,6 +474,8 @@ def run_backtest(
         stock_ma_cross_weak_bear_multiplier: 弱ベア時（ma75_dev >= 0 かつ ma25_dev < 0）の
                            size_multiplier 縮小率。デフォルト 0.5。generate_signals() に転送。
         volume_breakout_threshold: 指定した場合、volume_ratio が閾値未満の銘柄の BUY を抑制する。
+                           None（デフォルト）で無効。generate_signals() の同名引数に転送。
+        sector_rel_min:    指定した場合、sector_rel_20 が閾値未満の銘柄の BUY を抑制する。
                            None（デフォルト）で無効。generate_signals() の同名引数に転送。
         portfolio_drawdown_stop_pct: ポートフォリオがピーク比でこの割合を超えて下落した場合、
                            新規 BUY エントリーを停止する（既存ポジションの SELL は継続）。
@@ -648,6 +651,7 @@ def run_backtest(
                 rsi_oversold_max=rsi_oversold_max,
                 quality_score_min=quality_score_min,
                 topix_rel_min=topix_rel_min,
+                sector_rel_min=sector_rel_min,
                 adaptive_threshold=adaptive_threshold,
                 adaptive_threshold_hi=adaptive_threshold_hi,
                 topix_ma200_hi_trigger=topix_ma200_hi_trigger,
