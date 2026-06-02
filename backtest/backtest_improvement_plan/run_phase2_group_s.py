@@ -206,34 +206,60 @@ def _build_command(db_path: Path, scenario: dict, output_dir: Path) -> list[str]
         sys.executable,
         "-m",
         "kabusys.backtest.run",
-        "--db", str(db_path),
-        "--start", com["start"],
-        "--end", com["end"],
-        "--cash", str(com["cash"]),
-        "--allocation-method", com["allocation_method"],
-        "--max-positions", str(com["max_positions"]),
-        "--max-position-pct", str(com["max_position_pct"]),
-        "--max-utilization", str(com["max_utilization"]),
-        "--risk-pct", str(com["risk_pct"]),
-        "--stop-loss-pct", str(com["stop_loss_pct"]),
-        "--min-holding-days", str(com["min_holding_days"]),
-        "--max-holding-days", str(com["max_holding_days"]),
-        "--trailing-stop-atr", str(com["trailing_stop_atr"]),
-        "--threshold", str(com["threshold"]),
-        "--topix-size-multiplier-weak-bear", str(com["weak_bear"]),
-        "--topix-size-multiplier-strong-bear", str(com["strong_bear"]),
-        "--portfolio-drawdown-stop", str(com["dd_stop"]),
-        "--portfolio-drawdown-stop-timeout", str(com["dd_timeout"]),
+        "--db",
+        str(db_path),
+        "--start",
+        com["start"],
+        "--end",
+        com["end"],
+        "--cash",
+        str(com["cash"]),
+        "--allocation-method",
+        com["allocation_method"],
+        "--max-positions",
+        str(com["max_positions"]),
+        "--max-position-pct",
+        str(com["max_position_pct"]),
+        "--max-utilization",
+        str(com["max_utilization"]),
+        "--risk-pct",
+        str(com["risk_pct"]),
+        "--stop-loss-pct",
+        str(com["stop_loss_pct"]),
+        "--min-holding-days",
+        str(com["min_holding_days"]),
+        "--max-holding-days",
+        str(com["max_holding_days"]),
+        "--trailing-stop-atr",
+        str(com["trailing_stop_atr"]),
+        "--threshold",
+        str(com["threshold"]),
+        "--topix-size-multiplier-weak-bear",
+        str(com["weak_bear"]),
+        "--topix-size-multiplier-strong-bear",
+        str(com["strong_bear"]),
+        "--portfolio-drawdown-stop",
+        str(com["dd_stop"]),
+        "--portfolio-drawdown-stop-timeout",
+        str(com["dd_timeout"]),
         "--adaptive-threshold-vol-regime",
-        "--topix-vol-window", str(com["topix_vol_window"]),
-        "--topix-vol-low-threshold", str(scenario["topix_vol_low_threshold"]),
-        "--adaptive-threshold-hi", str(scenario["adaptive_threshold_hi"]),
+        "--topix-vol-window",
+        str(com["topix_vol_window"]),
+        "--topix-vol-low-threshold",
+        str(scenario["topix_vol_low_threshold"]),
+        "--adaptive-threshold-hi",
+        str(scenario["adaptive_threshold_hi"]),
         "--dynamic-trailing-stop",
-        "--trail-profit-gate-atr", str(com["trail_profit_gate_atr"]),
-        "--trail-stage2-mult", str(com["trail_stage2_mult"]),
-        "--trail-stage3-mult", str(com["trail_stage3_mult"]),
-        "--output-format", "all",
-        "--output-dir", str(output_dir),
+        "--trail-profit-gate-atr",
+        str(com["trail_profit_gate_atr"]),
+        "--trail-stage2-mult",
+        str(com["trail_stage2_mult"]),
+        "--trail-stage3-mult",
+        str(com["trail_stage3_mult"]),
+        "--output-format",
+        "all",
+        "--output-dir",
+        str(output_dir),
     ]
     if com.get("use_ma200_filter"):
         cmd.append("--ma200-filter")
@@ -331,7 +357,9 @@ def _run_batch(args: tuple) -> list[dict]:
                     flush=True,
                 )
             except Exception:
-                print(f"[ERROR] {name}: exit code {completed.returncode}", file=sys.stderr, flush=True)
+                print(
+                    f"[ERROR] {name}: exit code {completed.returncode}", file=sys.stderr, flush=True
+                )
             results.append({"name": name, "group": scenario["group"], "error": True})
             continue
 
@@ -507,7 +535,9 @@ def main() -> None:
     failed = [r for r in all_results if r.get("error")]
 
     if not any(r.get("name") == "S0_p2_ref" for r in success):
-        print("[ERROR] 参照シナリオ S0_p2_ref が失敗しました。採択判断を中断します。", file=sys.stderr)
+        print(
+            "[ERROR] 参照シナリオ S0_p2_ref が失敗しました。採択判断を中断します。", file=sys.stderr
+        )
         sys.exit(1)
 
     with results_csv.open("w", newline="", encoding="utf-8") as f:

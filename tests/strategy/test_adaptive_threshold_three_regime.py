@@ -1,4 +1,5 @@
 """3 値レジーム適応閾値のテスト (Issue #376)"""
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -42,20 +43,25 @@ def _insert_feature(conn, target_date, code: str = "1234", momentum: float = 0.0
              rsi_14, topix_rel_20, quality_score)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [target_date, code,
-         momentum, momentum,    # momentum_20, momentum_60
-         -0.1,                  # volatility_20 (slight negative = low vol = good)
-         0.5,                   # volume_ratio
-         15.0, 1.0, 0.02,      # per, pbr, div_yield
-         momentum,              # ma200_dev (same as momentum for simplicity)
-         0.01, 0.01,           # ma75_dev, ma25_dev
-         40.0,                  # rsi_14 (below overbought)
-         0.05,                  # topix_rel_20
-         0.5],                  # quality_score
+        [
+            target_date,
+            code,
+            momentum,
+            momentum,  # momentum_20, momentum_60
+            -0.1,  # volatility_20 (slight negative = low vol = good)
+            0.5,  # volume_ratio
+            15.0,
+            1.0,
+            0.02,  # per, pbr, div_yield
+            momentum,  # ma200_dev (same as momentum for simplicity)
+            0.01,
+            0.01,  # ma75_dev, ma25_dev
+            40.0,  # rsi_14 (below overbought)
+            0.05,  # topix_rel_20
+            0.5,
+        ],  # quality_score
     )
-    conn.execute(
-        "INSERT INTO stocks (code, sector) VALUES (?, 'T') ON CONFLICT DO NOTHING", [code]
-    )
+    conn.execute("INSERT INTO stocks (code, sector) VALUES (?, 'T') ON CONFLICT DO NOTHING", [code])
 
 
 def _topix_series_with_vol(daily_move: float, n: int = 22) -> list[float]:
@@ -87,10 +93,10 @@ def _topix_series_with_vol(daily_move: float, n: int = 22) -> list[float]:
 # score ≈ 0.61 → momentum ≈  0.748
 # score ≈ 0.63 → momentum ≈  0.988
 _MOM_SCORE_053 = -0.0855  # final_score ≈ 0.530
-_MOM_SCORE_057 = 0.3172   # final_score ≈ 0.570
-_MOM_SCORE_060 = 0.6355   # final_score ≈ 0.600
-_MOM_SCORE_061 = 0.7475   # final_score ≈ 0.610
-_MOM_SCORE_063 = 0.9877   # final_score ≈ 0.630
+_MOM_SCORE_057 = 0.3172  # final_score ≈ 0.570
+_MOM_SCORE_060 = 0.6355  # final_score ≈ 0.600
+_MOM_SCORE_061 = 0.7475  # final_score ≈ 0.610
+_MOM_SCORE_063 = 0.9877  # final_score ≈ 0.630
 
 
 def _buy_count(conn: duckdb.DuckDBPyConnection, target_date: date) -> int:
