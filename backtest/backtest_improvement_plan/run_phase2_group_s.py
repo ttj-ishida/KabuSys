@@ -232,10 +232,11 @@ def _build_command(db_path: Path, scenario: dict, output_dir: Path) -> list[str]
         "--trail-profit-gate-atr", str(com["trail_profit_gate_atr"]),
         "--trail-stage2-mult", str(com["trail_stage2_mult"]),
         "--trail-stage3-mult", str(com["trail_stage3_mult"]),
-        "--ma200-filter",
         "--output-format", "all",
         "--output-dir", str(output_dir),
     ]
+    if com.get("use_ma200_filter"):
+        cmd.append("--ma200-filter")
     if scenario.get("topix_vol_high_threshold") is not None:
         cmd += ["--topix-vol-high-threshold", str(scenario["topix_vol_high_threshold"])]
     if scenario.get("adaptive_threshold_lo") is not None:
