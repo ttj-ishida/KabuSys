@@ -193,14 +193,6 @@ def _build_job_schedule() -> list[JobSpec]:
         # --- 朝のレポート (execution 起動前なので DB 競合なし) ---
         JobSpec("pre_market_report", "run_pre_market_report.py", [], 8, 0, False),
         JobSpec("signal_queue_report", "run_signal_queue_report.py", [], 8, 2, False),
-        JobSpec(
-            "position_reconciliation_report",
-            "run_position_reconciliation_report.py",
-            [],
-            8,
-            5,
-            False,
-        ),
         # --- システム起動 ---
         JobSpec(
             "execution_start",
@@ -208,6 +200,15 @@ def _build_job_schedule() -> list[JobSpec]:
             ["--component", "execution", "--clear-stop-flag"],
             8,
             30,
+            False,
+        ),
+        # --- execution 起動後レポート (かぶステ API が必要) ---
+        JobSpec(
+            "position_reconciliation_report",
+            "run_position_reconciliation_report.py",
+            [],
+            8,
+            35,
             False,
         ),
         JobSpec("monitoring_start", "start_system.py", ["--component", "monitoring"], 9, 0, False),

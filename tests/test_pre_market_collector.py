@@ -117,50 +117,76 @@ def test_stop_flag_not_exists(tmp_path):
 # --- check_task_scheduler ---
 
 
-def test_task_scheduler_ready():
-    mock_result = MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = '"\\\\KabuSys_ExecutionStart","4/28/2026 8:30:00 AM","Ready"\r\n'
-    with patch(
-        "kabusys.operations.pre_market_collector.subprocess.run",
-        return_value=mock_result,
-    ):
-        assert check_task_scheduler("KabuSys_ExecutionStart") is True
+def _make_schtasks_result(status: str, rc: int = 0, task: str = "KabuSys_Scheduler") -> MagicMock:
+    r = MagicMock()
+    r.returncode = rc
+    r.stdout = f'"\\\\{task}","N/A","{status}"\r\n' if rc == 0 else ""
+    r.stderr = "" if rc == 0 else "error"
+    return r
 
 
-def test_task_scheduler_not_ready():
-    mock_result = MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = '"\\\\KabuSys_ExecutionStart","N/A","Disabled"\r\n'
+def _daemon_fails_individual_ok(daemon_status: str, individual_status: str):
+    """デーモンが daemon_status、個別タスクが individual_status を返す side_effect。"""
+    def side_effect(cmd, **kwargs):
+        task_name = cmd[3]  # schtasks /query /tn <task_name> ...
+        if task_name == "KabuSys_Scheduler":
+            return _make_schtasks_result(daemon_status, task="KabuSys_Scheduler")
+        return _make_schtasks_result(individual_status, task="KabuSys_ExecutionStart")
+    return side_effect
+
+
+def test_task_scheduler_daemon_running():
+    """デーモン方式: KabuSys_Scheduler が Running なら True。"""
     with patch(
         "kabusys.operations.pre_market_collector.subprocess.run",
-        return_value=mock_result,
+        return_value=_make_schtasks_result("Running"),
     ):
-        assert check_task_scheduler("KabuSys_ExecutionStart") is False
+        assert check_task_scheduler() is True
+
+
+def test_task_scheduler_daemon_running_japanese_locale():
+    """日本語 OS: KabuSys_Scheduler が "実行中" なら True。"""
+    with patch(
+        "kabusys.operations.pre_market_collector.subprocess.run",
+        return_value=_make_schtasks_result("実行中"),
+    ):
+        assert check_task_scheduler() is True
+
+
+def test_task_scheduler_individual_ready():
+    """個別タスク方式: デーモンが不在でも KabuSys_ExecutionStart が Ready なら True。"""
+    with patch(
+        "kabusys.operations.pre_market_collector.subprocess.run",
+        side_effect=_daemon_fails_individual_ok("Disabled", "Ready"),
+    ):
+        assert check_task_scheduler() is True
+
+
+def test_task_scheduler_individual_ready_japanese_locale():
+    """日本語 OS の個別タスク方式: KabuSys_ExecutionStart が "準備完了" なら True。"""
+    with patch(
+        "kabusys.operations.pre_market_collector.subprocess.run",
+        side_effect=_daemon_fails_individual_ok("Disabled", "準備完了"),
+    ):
+        assert check_task_scheduler() is True
+
+
+def test_task_scheduler_both_fail():
+    """両方式ともに不正状態（Disabled 等）なら False。"""
+    with patch(
+        "kabusys.operations.pre_market_collector.subprocess.run",
+        return_value=_make_schtasks_result("Disabled"),
+    ):
+        assert check_task_scheduler() is False
 
 
 def test_task_scheduler_error():
     """schtasks が失敗した場合は False を返す（タスクが存在しない等）。"""
-    mock_result = MagicMock()
-    mock_result.returncode = 1
-    mock_result.stdout = ""
     with patch(
         "kabusys.operations.pre_market_collector.subprocess.run",
-        return_value=mock_result,
+        return_value=_make_schtasks_result("", rc=1),
     ):
-        assert check_task_scheduler("KabuSys_ExecutionStart") is False
-
-
-def test_task_scheduler_ready_japanese_locale():
-    """日本語 OS で "準備完了" が返った場合も True になる。"""
-    mock_result = MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = '"\\\\KabuSys_ExecutionStart","2026/04/28 8:30:00","準備完了"\r\n'
-    with patch(
-        "kabusys.operations.pre_market_collector.subprocess.run",
-        return_value=mock_result,
-    ):
-        assert check_task_scheduler("KabuSys_ExecutionStart") is True
+        assert check_task_scheduler() is False
 
 
 # --- collect ---
@@ -187,7 +213,6 @@ def test_collect_returns_pre_market_data(tmp_path):
             duckdb_conn=mock_duckdb,
             sqlite_conn=mock_sqlite,
             stop_flag_path=stop_flag,
-            task_name="KabuSys_ExecutionStart",
             today=date(2026, 4, 27),
         )
 

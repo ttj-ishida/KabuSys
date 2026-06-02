@@ -100,8 +100,8 @@ Register-KabuSysTask -TaskName "KabuSys_PortfolioConstruction" -Script "run_port
 Register-KabuSysTask -TaskName "KabuSys_NightBatchReport"      -Script "run_night_batch_report.py"     -TriggerTime "21:15"
 Register-KabuSysTask -TaskName "KabuSys_PreMarketReport"       -Script "run_pre_market_report.py"      -TriggerTime "08:00"
 Register-KabuSysTask -TaskName "KabuSys_SignalQueueReport"              -Script "run_signal_queue_report.py"             -TriggerTime "08:02"
-Register-KabuSysTask -TaskName "KabuSys_PositionReconciliationReport"   -Script "run_position_reconciliation_report.py"  -TriggerTime "08:05"
-Register-KabuSysTask -TaskName "KabuSys_ExecutionStart"                 -Script "start_system.py" -Arguments "--component execution"  -TriggerTime "08:30"
+Register-KabuSysTask -TaskName "KabuSys_ExecutionStart"                 -Script "start_system.py" -Arguments "--component execution --clear-stop-flag"  -TriggerTime "08:30"
+Register-KabuSysTask -TaskName "KabuSys_PositionReconciliationReport"   -Script "run_position_reconciliation_report.py"  -TriggerTime "08:35"
 Register-KabuSysTask -TaskName "KabuSys_MonitoringStart"       -Script "start_system.py" -Arguments "--component monitoring" -TriggerTime "09:00"
 
 # ---------------------------------------------------------------------------

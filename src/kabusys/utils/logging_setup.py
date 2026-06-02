@@ -73,7 +73,12 @@ class _TeeWriter:
             self._local.active = False
 
     def write(self, msg: str) -> int:
-        n = self._orig.write(msg)
+        try:
+            n = self._orig.write(msg)
+        except UnicodeEncodeError:
+            enc = getattr(self._orig, "encoding", None) or "utf-8"
+            safe = msg.encode(enc, errors="replace").decode(enc)
+            n = self._orig.write(safe)
         self._buf += msg
         parts = _LINE_SEP_RE.split(self._buf)
         for line in parts[:-1]:

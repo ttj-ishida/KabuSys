@@ -52,7 +52,7 @@ def _determine_status(
     BLOCKED 条件（いずれかが真）:
       - signal_queue_pending == 0（本日の pending シグナルがない）
       - stop_flag_exists == True（停止フラグが立っている）
-      - task_scheduler_ready == False（KabuSys_ExecutionStart が Ready でない）
+      - task_scheduler_ready == False（スケジューラーが正常動作していない）
 
     READY_WITH_WARNINGS 条件（BLOCKED でなく、いずれかが真）:
       - data_freshness_ok == False（prices_daily が古い）
@@ -84,7 +84,7 @@ def _generate_warnings(
     if stop_flag_exists:
         warnings.append("停止フラグ（stop_requested.flag）が存在します（自動執行不可）")
     if not task_scheduler_ready:
-        warnings.append("Task Scheduler の KabuSys_ExecutionStart が Ready 状態ではありません")
+        warnings.append("スケジューラーが正常動作していません（KabuSys_Scheduler: Running または KabuSys_ExecutionStart: Ready を確認してください）")
     if not data_freshness_ok:
         warnings.append("prices_daily の最終更新日が直近営業日と一致しません（データが古い可能性）")
 
@@ -127,9 +127,9 @@ def _build_check_items(
         CheckItem(
             name="task_scheduler",
             status="ok" if task_scheduler_ready else "failed",
-            detail="KabuSys_ExecutionStart: Ready"
+            detail="scheduler: OK"
             if task_scheduler_ready
-            else "KabuSys_ExecutionStart: Ready でない（要確認）",
+            else "scheduler: 異常（要確認）",
         ),
     ]
 

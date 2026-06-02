@@ -87,11 +87,14 @@ def check_stop_flag(stop_flag_path: Path) -> bool:
     return stop_flag_path.exists()
 
 
-def check_task_scheduler(task_name: str) -> bool:
-    """Windows Task Scheduler で task_name の状態が Ready なら True。
+_DAEMON_TASK = "KabuSys_Scheduler"
+_DAEMON_STATUSES = frozenset({"running", "実行中"})
+_INDIVIDUAL_TASK = "KabuSys_ExecutionStart"
+_INDIVIDUAL_STATUSES = frozenset({"ready", "準備完了"})
 
-    schtasks が利用できない環境（Linux CI 等）では False を返す。
-    """
+
+def _query_task_status(task_name: str, valid_statuses: frozenset[str]) -> bool:
+    """schtasks でタスク状態を問い合わせ、valid_statuses に含まれれば True。"""
     try:
         result = subprocess.run(
             ["schtasks", "/query", "/tn", task_name, "/fo", "csv", "/nh"],
@@ -100,26 +103,35 @@ def check_task_scheduler(task_name: str) -> bool:
             timeout=10,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-        logger.warning("schtasks 実行失敗: %s", e)
+        logger.warning("schtasks 実行失敗 (%s): %s", task_name, e)
         return False
 
     if result.returncode != 0:
-        logger.warning(
-            "schtasks 戻り値 %d: stdout=%s stderr=%s",
+        logger.debug(
+            "schtasks 戻り値 %d (%s): stdout=%s stderr=%s",
             result.returncode,
+            task_name,
             result.stdout,
             result.stderr,
         )
         return False
 
-    # CSV 出力の 3 列目がステータス（例: "Ready", "Disabled", "Running"）
-    # csv.reader を使い引用符内カンマを正しく処理する。
-    # 日本語 OS では "準備完了" が返る場合があるため、受理語彙セットで判定する。
-    _READY_STATUSES = {"ready", "準備完了"}
     for row in csv.reader(StringIO(result.stdout)):
-        if len(row) >= 3 and row[2].strip().lower() in _READY_STATUSES:
+        if len(row) >= 3 and row[2].strip().lower() in valid_statuses:
             return True
     return False
+
+
+def check_task_scheduler() -> bool:
+    """スケジューラーが正常動作しているか確認する。
+
+    デーモン方式（KabuSys_Scheduler が Running）と
+    個別タスク方式（KabuSys_ExecutionStart が Ready）を自動判別する。
+    schtasks が利用できない環境（Linux CI 等）では False を返す。
+    """
+    if _query_task_status(_DAEMON_TASK, _DAEMON_STATUSES):
+        return True
+    return _query_task_status(_INDIVIDUAL_TASK, _INDIVIDUAL_STATUSES)
 
 
 def collect(
@@ -127,7 +139,6 @@ def collect(
     duckdb_conn: object,
     sqlite_conn: object,
     stop_flag_path: Path,
-    task_name: str = "KabuSys_ExecutionStart",
     today: date | None = None,
 ) -> PreMarketData:
     """全チェック項目を収集して PreMarketData を返す。"""
@@ -137,5 +148,5 @@ def collect(
         signal_queue_pending=check_signal_queue(duckdb_conn, today),
         position_count=check_position_count(duckdb_conn),
         stop_flag_exists=check_stop_flag(stop_flag_path),
-        task_scheduler_ready=check_task_scheduler(task_name),
+        task_scheduler_ready=check_task_scheduler(),
     )

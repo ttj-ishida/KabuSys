@@ -97,7 +97,7 @@ def test_warning_stop_flag():
 
 def test_warning_task_not_ready():
     ws = _generate_warnings(**_make_checks(task_scheduler_ready=False))
-    assert any("Task Scheduler" in w for w in ws)
+    assert any("スケジューラー" in w for w in ws)
 
 
 def test_warning_stale_data():

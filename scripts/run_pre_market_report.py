@@ -36,7 +36,6 @@ _APP_NAME = "pre_market_report"
 _BASE = Path(__file__).resolve().parent.parent
 _STOP_FLAG = _BASE / "data" / "stop_requested.flag"
 # Pre-Market チェックで「08:30 の ExecutionStart タスクが Ready 状態か」を確認するために使用
-_TASK_NAME = "KabuSys_ExecutionStart"
 
 
 def main() -> None:
@@ -61,7 +60,6 @@ def main() -> None:
             duckdb_conn=duckdb_conn,
             sqlite_conn=sqlite_conn,
             stop_flag_path=_STOP_FLAG,
-            task_name=_TASK_NAME,
             today=today,
         )
 
