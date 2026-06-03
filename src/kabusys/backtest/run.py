@@ -311,6 +311,41 @@ def main() -> None:
         help="Stage 3（保有 21 日以降）の ATR 乗数（無条件タイト化）。[default: %(default)s]",
     )
     parser.add_argument(
+        "--trail-stage4-days",
+        type=int,
+        default=None,
+        dest="trail_stage4_days",
+        help="Stage 4 移行の最低保有営業日数（trail_stage4_days > 21 を推奨）。[default: None=無効]",
+    )
+    parser.add_argument(
+        "--trail-stage4-profit-gate",
+        type=float,
+        default=None,
+        dest="trail_stage4_profit_gate",
+        help="Stage 4 移行の最低含み益率（0.10 = 10%%）。[default: None=無効]",
+    )
+    parser.add_argument(
+        "--trail-stage4-mult",
+        type=float,
+        default=None,
+        dest="trail_stage4_mult",
+        help="Stage 4 の ATR 乗数（最タイト）。[default: None=無効]",
+    )
+    parser.add_argument(
+        "--score-drop-atr-gate",
+        type=float,
+        default=None,
+        dest="score_drop_atr_gate",
+        help="score_drop 抑制ゲート（含み益 > N×ATR のとき score_drop SELL を抑制）。[default: None=無効]",
+    )
+    parser.add_argument(
+        "--entry-3d-max-abs-return",
+        type=float,
+        default=None,
+        dest="entry_3d_max_abs_return",
+        help="エントリー安定フィルター（直近 3 営業日騰落率の絶対値がこの値を超える銘柄の BUY を抑制）。[default: None=無効]",
+    )
+    parser.add_argument(
         "--portfolio-drawdown-stop",
         type=float,
         default=None,
@@ -427,6 +462,11 @@ def main() -> None:
             trail_profit_gate_atr=args.trail_profit_gate_atr,
             trail_stage2_mult=args.trail_stage2_mult,
             trail_stage3_mult=args.trail_stage3_mult,
+            trail_stage4_days=args.trail_stage4_days,
+            trail_stage4_profit_gate=args.trail_stage4_profit_gate,
+            trail_stage4_mult=args.trail_stage4_mult,
+            score_drop_atr_gate=args.score_drop_atr_gate,
+            entry_3d_max_abs_return=args.entry_3d_max_abs_return,
             portfolio_drawdown_stop_pct=args.portfolio_drawdown_stop,
             portfolio_drawdown_stop_timeout_days=args.portfolio_drawdown_stop_timeout_days,
             vol_target=args.vol_target,
