@@ -1050,23 +1050,165 @@ S2 の厳格なフィルタリング（高ボラ時のみ積極化・低ボラ�
 
 ---
 
-## 10. 今後の研究課題（Group R/S/T/U 以降）
+## 10. Section 52 — Group V: エグジットロジック改善（Issue #384, #385, #386）
 
-Group R・S・T・U の検証完了。Sharpe 0.5 を初めて達成（U1_t4: 0.552）。Phase 2 最終移行前の確認課題。
+### 10.1 背景・分析
+
+Group U（U1_t4）の全 841 トレードを保有期間別に分析した結果、以下の構造が判明した：
+
+```
+保有期間別パフォーマンス（U1_t4 / 2017-2025）:
+
+  0〜7日  : 127件（15%）  勝率  4.7%  平均 −9.1%  ← ほぼ全件ストップロス
+  8〜14日 : 548件（65%）  勝率 46.4%  平均 +1.2%  ← スコア低下離脱（score_drop）
+  15〜30日:  94件（11%）  勝率 69.1%  平均+12.9%  ← 正常なトレンド保有
+  31〜60日:  37件（4%）   勝率 64.9%  平均+34.9%  ← 大型勝者
+  61日超  :  31件（4%）   勝率 25.8%  平均+42.9%  ← 時間切れ（保有しすぎ）
+```
+
+**負けは買った時点で決まっているか？**
+- 0-7日（ストップ）: **概ね YES** — エントリー直後に逆行。エグジット改善では救えない
+- 8-14日（score_drop）: **NOT 決定的** — 含み益があれば継続できた可能性がある
+- 61日超（時間切れ）: **エグジット改善で対応可能** — 含み益のある銘柄はより早くタイト化
+
+**改善方針:** エントリー精度向上（0-7日対策）と保有ルール精緻化（8-14日・61日超対策）を並行検証する。
+
+### 10.2 改善施策定義
+
+#### 施策V1: score_drop 抑制（含み益保護）（Issue #384）
+
+**現状:** `final_score < threshold（0.58）` かつ最低保有日数（5日）を経過 → 無条件に score_drop SELL
+
+**改善:** 含み益が N×ATR を超えている場合は score_drop を抑制し、トレーリングストップに委ねる
+
+```python
+# 現状
+if final_score < threshold:
+    → score_drop SELL
+
+# 改善後
+if final_score < threshold:
+    if score_drop_atr_gate is not None:
+        unrealized = (close - avg_price) / avg_price
+        atr = _atr_20d(...)
+        if atr and close - avg_price > score_drop_atr_gate * atr:
+            → 抑制（トレーリングストップに委ねる）
+    → score_drop SELL
+```
+
+新パラメータ: `score_drop_atr_gate: float | None = None`（例: 1.0 → 含み益 > 1×ATR で抑制）
+
+**期待効果:** 8-14日の勝者（15-30日に移行できる可能性のある銘柄）を保持。取引コスト削減。
+
+#### 施策V2: Stage4 トレーリングストップ（30 営業日超タイト化）（Issue #385）
+
+**現状:**
+- Stage1: peak > avg_price → ATR × 2.0
+- Stage2: 保有 ≥ 6日 かつ 含み益 ≥ 1.5×ATR → ATR × 1.8
+- Stage3: 保有 ≥ 21日（無条件） → ATR × 1.5
+
+**改善:** Stage4 を追加し、長期保有かつ大きな含み益を持つ銘柄をよりタイトに管理
+
+```
+Stage4: 保有 ≥ 30 営業日 かつ 含み益率 ≥ trail_stage4_profit_gate(10%)
+         → ATR × trail_stage4_mult(1.2)
+```
+
+新パラメータ: `trail_stage4_days: int = 30`、`trail_stage4_profit_gate: float = 0.10`、`trail_stage4_mult: float = 1.2`
+
+**期待効果:** 61日超の時間切れ前にタイト化し、含み益を保護。time_exit での損失を削減。
+
+#### 施策V3: エントリー安定フィルター（急騰・急落回避）（Issue #386）
+
+**現状:** BUY シグナルは `final_score ≥ threshold` を満たせば発動（直近の価格動向を問わない）
+
+**改善:** エントリー直前 3 営業日の騰落率の絶対値が N% 超の銘柄を除外
+
+```python
+# 追加フィルター
+if entry_3d_max_abs_return is not None:
+    ret_3d = (close_today / close_3d_ago) - 1
+    if abs(ret_3d) > entry_3d_max_abs_return:
+        → BUY シグナル抑制（急騰・急落銘柄は見送り）
+```
+
+新パラメータ: `entry_3d_max_abs_return: float | None = None`（例: 0.05 → ±5% 超で見送り）
+
+**期待効果:** ストップロス（0-7日）に至る「エントリー直後の逆行」を事前に回避。
+
+### 10.3 シナリオ定義
+
+ベース設定: U1_t4 採択設定（R3 ＋ 施策A 2値 ＋ quality_score_min=−0.30 ＋ 施策B）  
+期間: 2017〜2025
+
+| シナリオ | V1 score_drop 抑制 | V2 Stage4 | V3 エントリーフィルター | 目的 |
+| -------- | :-----------------: | :--------: | :---------------------: | ---- |
+| V0_ref | — | — | — | U1_t4 参照（ベースライン） |
+| V1_score | `gate=1.0×ATR` | — | — | score_drop 抑制単体効果 |
+| V2_trail | — | `30d / 10% / 1.2×` | — | Stage4 単体効果 |
+| V3_entry | — | — | `±5%` | エントリーフィルター単体効果 |
+| V4_v1v2 | `gate=1.0×ATR` | `30d / 10% / 1.2×` | — | V1＋V2 複合（エグジット改善） |
+| V5_all | `gate=1.0×ATR` | `30d / 10% / 1.2×` | `±5%` | 3施策全複合（最終候補） |
+
+Phase 2 採択基準: CAGR > 8%、Sharpe > 0.5、MaxDD < 25%、PF > 1.1
+
+### 10.4 必要な実装変更
+
+| ファイル | 変更内容 | Issue |
+| -------- | -------- | ----- |
+| `src/kabusys/strategy/signal_generator.py` | `_generate_sell_signals` に `score_drop_atr_gate` パラメータ追加 | #384 |
+| `src/kabusys/strategy/signal_generator.py` | `dynamic_trailing_stop` に Stage4 パラメータ追加（`trail_stage4_days` / `trail_stage4_profit_gate` / `trail_stage4_mult`） | #385 |
+| `src/kabusys/strategy/signal_generator.py` | `generate_signals` に `entry_3d_max_abs_return` フィルター追加 | #386 |
+| `src/kabusys/backtest/engine.py` | 上記 3 パラメータを `generate_signals` / `_generate_sell_signals` に転送 | #384〜#386 |
+| `src/kabusys/backtest/run.py` | `--score-drop-atr-gate` / `--trail-stage4-days` / `--trail-stage4-profit-gate` / `--trail-stage4-mult` / `--entry-3d-max-abs-return` CLI フラグ追加 | #384〜#386 |
+| `backtest/backtest_improvement_plan/run_phase2_group_v.py` | 6 シナリオ並列バックテストスクリプト新規作成 | #384〜#386 |
+| `tests/strategy/test_exit_logic_v.py` | 各施策の単体テスト（TDD） | #384〜#386 |
+
+### 10.5 採択判断ロジック
+
+```
+いずれかのシナリオで 4 指標同時達成（ADOPTED）
+  → Phase 2 最終設定として U1_t4 を上書き採用
+
+Sharpe が V0_ref を上回るが 0.5 達成のみ（IMPROVED）
+  → 改善施策を組み込んだ設定を継続ベースとして採用
+
+全シナリオで V0_ref 以下（NO_IMPROVEMENT）
+  → エグジット改善は現状維持、別アプローチを検討
+```
+
+### 10.6 実行スクリプト
+
+```
+backtest/backtest_improvement_plan/run_phase2_group_v.py
+```
+
+```powershell
+python backtest/backtest_improvement_plan/run_phase2_group_v.py --workers 4
+```
+
+出力先: `artifacts/backtest/backtest_phase2_group_v/{timestamp}/`
+
+---
+
+## 11. 今後の研究課題（Group R/S/T/U/V 以降）
+
+Group R〜U の検証完了。Sharpe 0.5 を初めて達成（U1_t4: 0.552）。Group V でエグジット改善を検証中。
 
 | 課題 | 概要 | 優先度 |
 | ---- | ---- | ------ |
-| **U1_t4 の OOS 検証** | 採択設定（quality_score_min=−0.30）の 2022〜2025 OOS 成績確認 | 最高 |
+| **Group V 実装・バックテスト実行** | 3 施策（score_drop 抑制 / Stage4 / エントリーフィルター）の効果検証 | 最高 |
+| **U1_t4 の OOS 検証** | 採択設定の 2022〜2025 OOS 成績確認 | 高 |
 | **U1_t4 ウォークフォワード詳細分析** | 2021〜2023 年の 3 年連続マイナスの構造・原因分析 | 高 |
 | マルチ戦略化 | 第二戦略（例: クオリティ安定配当）との組み合わせで収益の年次偏中を解消 | 高（長期） |
-| ATR リスク均等化サイジング | 個別銘柄 ATR 逆数でポジションサイズを調整。K8（PF 1.428）の MaxDD を改善 | 中 |
+| ATR リスク均等化サイジング | 個別銘柄 ATR 逆数でポジションサイズを調整 | 中 |
 | OOS ウォークフォワード継続評価 | 実運用 6ヶ月ごとに IS/OOS の乖離をモニタリング | 継続 |
 | Phase 3 移行設計 | 500万円超での max_positions・utilization・戦略の再設計 | 低（先行） |
 
 ---
 
-## 11. 参考
+## 12. 参考
 
 - `documents/07_Research/Phase1_Backtest_Strategy.md`（Section 27〜46: Phase 1 全検証結果）
 - `documents/10_Runtime/RuntimeJobSchedule.md`
-- GitHub Issues: #374（OOS検証）、#375（Group R）、#376（Group S）、#379（Group T）、#382（Group U）
+- GitHub Issues: #374（OOS検証）、#375（Group R）、#376（Group S）、#379（Group T）、#382（Group U）、#384（V1 score_drop 抑制）、#385（V2 Stage4）、#386（V3 エントリーフィルター）
