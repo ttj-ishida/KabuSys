@@ -992,6 +992,18 @@ def _generate_sell_signals(
                              ストップロス・決算回避より低優先。min_holding_days は無視して発火する。
         trailing_stop_atr:   ATR 乗数。peak_close − N×ATR を下回ったら trailing_stop SELL（含み益ありの場合のみ）。
         stop_loss_rate:      ストップロス閾値（デフォルト: _STOP_LOSS_RATE）。pnl_rate がこの値以下で SELL。
+        sqlite_conn:         Sqlite3 接続（オプション）。
+        dynamic_trailing_stop: True のとき Dynamic Trailing Stop を有効化（4-stage 対応）。
+        trail_profit_gate_atr: Stage 1 移行の含み益ゲート（ATR 単位、デフォルト 1.5）。
+        trail_stage2_mult:   Stage 2 の ATR 乗数（デフォルト 1.5）。
+        trail_stage3_mult:   Stage 3 の ATR 乗数（デフォルト 1.0）。
+        trail_stage4_days:   Stage 4 移行の最低保有営業日数（デフォルト 30）。
+                             Stage 3 より優先されるため trail_stage4_days > 21 を推奨。
+        trail_stage4_profit_gate: Stage 4 移行の最低含み益率（デフォルト 0.10 = 10%）。
+        trail_stage4_mult:   Stage 4 の ATR 乗数（デフォルト 1.2、Stage 3 より tight）。
+        score_drop_atr_gate: 指定した場合、スコア低下 SELL を抑制する含み益ゲート（ATR 単位）。
+                             含み益 > gate × ATR のとき score_drop SELL を抑制する。
+                             None（デフォルト）で無効。
 
     Returns:
         [{"code": str, "score": float, "reason": str}, ...] のリスト。
@@ -1671,7 +1683,7 @@ def generate_signals(
                     ret_3d = (close_now - close_3d) / close_3d
                     if abs(ret_3d) > entry_3d_max_abs_return:
                         logger.debug(
-                            "entry 3d filter: %s 3d_return=%.4f > gate=%.4f -- BUY を抑制 date=%s",
+                            "entry 3d filter: %s 3d_return=%.4f > gate=%.4f — BUY を抑制 date=%s",
                             r["code"],
                             ret_3d,
                             entry_3d_max_abs_return,
@@ -1859,7 +1871,7 @@ def generate_signals(
             )
         if entry_3d_suppressed:
             logger.info(
-                "generate_signals: entry 3d filter -- %d 銘柄を安定性フィルターで抑制 date=%s",
+                "generate_signals: entry 3d filter — %d 銘柄を安定性フィルターで抑制 date=%s",
                 entry_3d_suppressed,
                 target_date,
             )
