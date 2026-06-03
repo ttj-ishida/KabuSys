@@ -729,6 +729,32 @@ def _calc_sector_strengths(
 # ---------------------------------------------------------------------------
 
 
+def _price_n_days_ago(
+    conn: duckdb.DuckDBPyConnection,
+    code: str,
+    target_date: date,
+    n: int,
+) -> float | None:
+    """target_date 以前の直近から n 番目の営業日の終値を返す。
+
+    n=0 → target_date 以前の最新終値
+    n=3 → 3 営業日前の終値
+    データ不足時は None（安全側: BUY 許可）。
+    """
+    row = conn.execute(
+        """
+        SELECT CAST(close AS DOUBLE)
+        FROM prices_daily
+        WHERE code = ? AND date <= ?
+        ORDER BY date DESC
+        LIMIT 1
+        OFFSET ?
+        """,
+        [code, target_date, n],
+    ).fetchone()
+    return float(row[0]) if row is not None and row[0] is not None else None
+
+
 def _atr_20d(
     conn: duckdb.DuckDBPyConnection,
     code: str,
@@ -940,6 +966,10 @@ def _generate_sell_signals(
     trail_profit_gate_atr: float = 1.5,
     trail_stage2_mult: float = 1.5,
     trail_stage3_mult: float = 1.0,
+    trail_stage4_days: int = 30,
+    trail_stage4_profit_gate: float = 0.10,
+    trail_stage4_mult: float = 1.2,
+    score_drop_atr_gate: float | None = None,
 ) -> list[dict[str, Any]]:
     """保有ポジションに対してエグジット条件を判定し、SELL シグナルを返す。
 
@@ -1053,7 +1083,13 @@ def _generate_sell_signals(
                 if dynamic_trailing_stop:
                     held_for_trail = _held_days(conn, code, target_date, sqlite_conn=sqlite_conn)
                     if held_for_trail is not None:
-                        if held_for_trail >= 21:  # Stage 3: 時間減衰（無条件タイト化）
+                        pnl_rate_trail = (close - avg_price) / avg_price
+                        if (
+                            held_for_trail >= trail_stage4_days
+                            and pnl_rate_trail >= trail_stage4_profit_gate
+                        ):  # Stage 4: 長期保有かつ大きな含み益 → 最タイト化
+                            effective_mult = trail_stage4_mult
+                        elif held_for_trail >= 21:  # Stage 3: 時間減衰（無条件タイト化）
                             effective_mult = trail_stage3_mult
                         elif (
                             held_for_trail >= 6
@@ -1120,6 +1156,19 @@ def _generate_sell_signals(
 
         # 2. スコア低下
         if final_score < threshold:
+            if score_drop_atr_gate is not None:
+                gate_atr = _atr_20d(conn, code, target_date)
+                if gate_atr is not None and (close - avg_price) > score_drop_atr_gate * gate_atr:
+                    logger.debug(
+                        "_generate_sell_signals: %s score_drop 抑制"
+                        " (含み益 %.2f > gate %.2f x ATR %.2f) date=%s",
+                        code,
+                        close - avg_price,
+                        score_drop_atr_gate,
+                        gate_atr,
+                        target_date,
+                    )
+                    continue
             sell_signals.append(
                 {
                     "code": code,
@@ -1167,6 +1216,11 @@ def generate_signals(
     trail_profit_gate_atr: float = 1.5,
     trail_stage2_mult: float = 1.5,
     trail_stage3_mult: float = 1.0,
+    trail_stage4_days: int = 30,
+    trail_stage4_profit_gate: float = 0.10,
+    trail_stage4_mult: float = 1.2,
+    score_drop_atr_gate: float | None = None,
+    entry_3d_max_abs_return: float | None = None,
     entry_blocked: bool = False,
     block_entries_by_regime: bool = True,
     *,
@@ -1531,6 +1585,7 @@ def generate_signals(
         sector_suppressed = 0
         reentry_suppressed = 0
         earnings_suppressed = 0
+        entry_3d_suppressed = 0
         for rank, r in enumerate(scored, 1):
             if r["score"] < threshold:
                 continue
@@ -1608,6 +1663,22 @@ def generate_signals(
                     )
                     sector_rel_suppressed += 1
                     continue
+            # エントリー安定フィルター（直近 3 営業日の急騰・急落を回避）
+            if entry_3d_max_abs_return is not None:
+                close_now = _price_n_days_ago(conn, r["code"], target_date, n=0)
+                close_3d = _price_n_days_ago(conn, r["code"], target_date, n=3)
+                if close_now is not None and close_3d is not None and close_3d > 0:
+                    ret_3d = (close_now - close_3d) / close_3d
+                    if abs(ret_3d) > entry_3d_max_abs_return:
+                        logger.debug(
+                            "entry 3d filter: %s 3d_return=%.4f > gate=%.4f -- BUY を抑制 date=%s",
+                            r["code"],
+                            ret_3d,
+                            entry_3d_max_abs_return,
+                            target_date,
+                        )
+                        entry_3d_suppressed += 1
+                        continue
             # 銘柄単位 MA クロスフィルタ
             # - ma75_dev < 0（株価が MA75 を下回る）→ BUY スキップ（強ベア）
             # - ma75_dev >= 0 かつ ma25_dev < 0 → size_multiplier を縮小（弱ベア）
@@ -1786,6 +1857,12 @@ def generate_signals(
                 earnings_suppressed,
                 target_date,
             )
+        if entry_3d_suppressed:
+            logger.info(
+                "generate_signals: entry 3d filter -- %d 銘柄を安定性フィルターで抑制 date=%s",
+                entry_3d_suppressed,
+                target_date,
+            )
 
     # 7. SELL シグナル生成（エグジット条件）
     sell_signals = _generate_sell_signals(
@@ -1803,6 +1880,10 @@ def generate_signals(
         trail_profit_gate_atr=trail_profit_gate_atr,
         trail_stage2_mult=trail_stage2_mult,
         trail_stage3_mult=trail_stage3_mult,
+        trail_stage4_days=trail_stage4_days,
+        trail_stage4_profit_gate=trail_stage4_profit_gate,
+        trail_stage4_mult=trail_stage4_mult,
+        score_drop_atr_gate=score_drop_atr_gate,
     )
 
     # SELL 対象銘柄は BUY から除外し、ランクを連番で再付与（SELL 優先ポリシー）
