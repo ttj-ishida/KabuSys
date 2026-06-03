@@ -966,9 +966,9 @@ def _generate_sell_signals(
     trail_profit_gate_atr: float = 1.5,
     trail_stage2_mult: float = 1.5,
     trail_stage3_mult: float = 1.0,
-    trail_stage4_days: int = 30,
-    trail_stage4_profit_gate: float = 0.10,
-    trail_stage4_mult: float = 1.2,
+    trail_stage4_days: int | None = None,
+    trail_stage4_profit_gate: float | None = None,
+    trail_stage4_mult: float | None = None,
     score_drop_atr_gate: float | None = None,
 ) -> list[dict[str, Any]]:
     """保有ポジションに対してエグジット条件を判定し、SELL シグナルを返す。
@@ -997,10 +997,10 @@ def _generate_sell_signals(
         trail_profit_gate_atr: Stage 1 移行の含み益ゲート（ATR 単位、デフォルト 1.5）。
         trail_stage2_mult:   Stage 2 の ATR 乗数（デフォルト 1.5）。
         trail_stage3_mult:   Stage 3 の ATR 乗数（デフォルト 1.0）。
-        trail_stage4_days:   Stage 4 移行の最低保有営業日数（デフォルト 30）。
+        trail_stage4_days:   Stage 4 移行の最低保有営業日数。None（デフォルト）で無効。
                              Stage 3 より優先されるため trail_stage4_days > 21 を推奨。
-        trail_stage4_profit_gate: Stage 4 移行の最低含み益率（デフォルト 0.10 = 10%）。
-        trail_stage4_mult:   Stage 4 の ATR 乗数（デフォルト 1.2、Stage 3 より tight）。
+        trail_stage4_profit_gate: Stage 4 移行の最低含み益率。None（デフォルト）で無効。
+        trail_stage4_mult:   Stage 4 の ATR 乗数（Stage 3 より tight）。None（デフォルト）で無効。
         score_drop_atr_gate: 指定した場合、スコア低下 SELL を抑制する含み益ゲート（ATR 単位）。
                              含み益 > gate × ATR のとき score_drop SELL を抑制する。
                              None（デフォルト）で無効。
@@ -1097,9 +1097,12 @@ def _generate_sell_signals(
                     if held_for_trail is not None:
                         pnl_rate_trail = (close - avg_price) / avg_price
                         if (
-                            held_for_trail >= trail_stage4_days
+                            trail_stage4_days is not None
+                            and trail_stage4_profit_gate is not None
+                            and trail_stage4_mult is not None
+                            and held_for_trail >= trail_stage4_days
                             and pnl_rate_trail >= trail_stage4_profit_gate
-                        ):  # Stage 4: 長期保有かつ大きな含み益 → 最タイト化
+                        ):  # Stage 4: 長期保有かつ大きな含み益 → 最タイト化（オプトイン）
                             effective_mult = trail_stage4_mult
                         elif held_for_trail >= 21:  # Stage 3: 時間減衰（無条件タイト化）
                             effective_mult = trail_stage3_mult
@@ -1228,9 +1231,9 @@ def generate_signals(
     trail_profit_gate_atr: float = 1.5,
     trail_stage2_mult: float = 1.5,
     trail_stage3_mult: float = 1.0,
-    trail_stage4_days: int = 30,
-    trail_stage4_profit_gate: float = 0.10,
-    trail_stage4_mult: float = 1.2,
+    trail_stage4_days: int | None = None,
+    trail_stage4_profit_gate: float | None = None,
+    trail_stage4_mult: float | None = None,
     score_drop_atr_gate: float | None = None,
     entry_3d_max_abs_return: float | None = None,
     entry_blocked: bool = False,

@@ -313,23 +313,23 @@ def main() -> None:
     parser.add_argument(
         "--trail-stage4-days",
         type=int,
-        default=30,
+        default=None,
         dest="trail_stage4_days",
-        help="Stage 4 移行の最低保有営業日数（trail_stage4_days > 21 を推奨）。[default: %(default)s]",
+        help="Stage 4 移行の最低保有営業日数（trail_stage4_days > 21 を推奨）。[default: None=無効]",
     )
     parser.add_argument(
         "--trail-stage4-profit-gate",
         type=float,
-        default=0.10,
+        default=None,
         dest="trail_stage4_profit_gate",
-        help="Stage 4 移行の最低含み益率（0.10 = 10%%）。[default: %(default)s]",
+        help="Stage 4 移行の最低含み益率（0.10 = 10%%）。[default: None=無効]",
     )
     parser.add_argument(
         "--trail-stage4-mult",
         type=float,
-        default=1.2,
+        default=None,
         dest="trail_stage4_mult",
-        help="Stage 4 の ATR 乗数（最タイト）。[default: %(default)s]",
+        help="Stage 4 の ATR 乗数（最タイト）。[default: None=無効]",
     )
     parser.add_argument(
         "--score-drop-atr-gate",

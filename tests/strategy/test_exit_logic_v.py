@@ -239,6 +239,46 @@ class TestStage4Trail:
             "Stage4(1.2×) は Stage3(1.5×) より tight → 同じかそれ以上の SELL が発生するはず"
         )
 
+    def test_stage4_not_applied_when_params_are_none(self):
+        """trail_stage4_* = None のとき Stage4 は発動せず Stage3 と同一挙動。"""
+        conn = _make_db()
+        _insert_prices(conn, self.CODE, close_today=113.0, avg_daily_range=5.0, n_days=40)
+        _insert_position(conn, self.CODE, avg_price=100.0, held_trading_days=35)
+        _insert_feature(conn, self.CODE, momentum=0.5)
+
+        # Stage4 無効（None）
+        generate_signals(
+            conn=conn,
+            target_date=TARGET,
+            threshold=0.58,
+            dynamic_trailing_stop=True,
+            trail_profit_gate_atr=1.5,
+            trail_stage2_mult=1.8,
+            trail_stage3_mult=1.5,
+            trail_stage4_days=None,
+            trail_stage4_profit_gate=None,
+            trail_stage4_mult=None,
+        )
+        sells_none = _sell_count(conn)
+        conn.execute("DELETE FROM signals")
+
+        # Stage4 を days=999 で事実上無効化（旧来の回避手法）
+        generate_signals(
+            conn=conn,
+            target_date=TARGET,
+            threshold=0.58,
+            dynamic_trailing_stop=True,
+            trail_profit_gate_atr=1.5,
+            trail_stage2_mult=1.8,
+            trail_stage3_mult=1.5,
+            trail_stage4_days=999,
+            trail_stage4_profit_gate=0.10,
+            trail_stage4_mult=1.2,
+        )
+        sells_999 = _sell_count(conn)
+
+        assert sells_none == sells_999, "trail_stage4_*=None は days=999 回避と同等の挙動"
+
     def test_stage4_not_applied_when_profit_below_gate(self):
         """含み益率 5% < gate 10%: Stage4 は適用されず Stage3 と同じ結果。"""
         conn = _make_db()
