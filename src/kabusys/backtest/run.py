@@ -422,7 +422,7 @@ def main() -> None:
     )
     from kabusys.data.schema import init_schema
 
-    conn = init_schema(args.db)
+    conn = init_schema(args.db, read_only=True)
     try:
         scope: BacktestScope | None = None
         if args.scope_mode == "manual_codes":
