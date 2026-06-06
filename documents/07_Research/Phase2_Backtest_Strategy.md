@@ -1311,7 +1311,9 @@ Group R〜V の検証完了。V1（score_drop ATR gate）採用により Sharpe 
 | 課題 | 概要 | 優先度 | 状況 |
 | ---- | ---- | ------ | ---- |
 | **V2 パラメータ再調整** | `trail_stage4_days=25, profit_gate=8%` 等で Stage4 発動率を上げて再検証 | 高 | 未着手 |
-| **V3 gate 緩和再実験** | `±8%` または `±10%` ゲートで再検証 | 中 | 未着手 |
+| **V3 gate 緩和再実験（Group W）** | `±8%/±10%/±12%` ゲートで V1 との複合効果を再検証 | 高 | Issue #390 |
+| **quality_score 閾値の厳格化（Group X）** | `quality_score_min=0.0/0.30` で過剰エントリーを削減 | 高 | Issue #391 |
+| **レジーム検知強化（Group Y）** | TOPIX トレンド + エントリー抑制で横ばい・下落局面の損失削減 | 高 | Issue #392 |
 | **V4 2021-11 月異常損失の原因調査** | V1+V2 複合で発生した単月 −15.7% の構造解明 | 中 | 未着手 |
 | **U1_t4（V1適用後）の OOS 検証** | 採択設定の 2022〜2025 OOS 成績確認 | 高 | 未着手 |
 | **U1_t4 ウォークフォワード詳細分析** | 2021〜2023 年の 3 年連続マイナスの構造・原因分析 | 高 | Issue #388 → 完了 |
@@ -1424,9 +1426,11 @@ score_drop 抑制は大相場（2024）では有効だが、横ばい・下落�
 
 #### 次のアクション（本分析から導出）
 
-1. **0-7日ストップロス帯の削減**: エントリー安定フィルター（V3）の gate を緩和（±8〜10%）して再検証 → 急落直後エントリーを回避することで 0-7d 損失を構造的に削減できる可能性
-2. **quality_score フィルターの閾値見直し**: quality_score_min=−0.30 をより厳格化（例: 0.0 以上）または銘柄数キャップを設けることで 2021 年型の過剰エントリーを防ぐ
-3. **レジーム検知の強化**: 2021〜2023 の「横ばい・下落レジーム」を識別する指標（例: TOPIX 20日ボラティリティ + トレンド方向）を使い、レジームに応じてエントリー抑制する仕組みを検討
+| # | アクション | Issue | スクリプト |
+| - | ---------- | ----- | ---------- |
+| 1 | **V3 gate 緩和（±8%・±10%・±12%）** → 0-7日ストップロス構造の改善 | Issue #390 | `run_phase2_group_w.py` |
+| 2 | **quality_score_min 厳格化（0.0・0.30）** → 2021 年型の過剰エントリー防止 | Issue #391 | `run_phase2_group_x.py` |
+| 3 | **レジーム検知強化（TOPIX トレンド + エントリー抑制）** → 横ばい・下落局面での損失削減 | Issue #392 | `run_phase2_group_y.py`（未作成） |
 
 ---
 
@@ -1434,6 +1438,6 @@ score_drop 抑制は大相場（2024）では有効だが、横ばい・下落�
 
 - `documents/07_Research/Phase1_Backtest_Strategy.md`（Section 27〜46: Phase 1 全検証結果）
 - `documents/10_Runtime/RuntimeJobSchedule.md`
-- GitHub Issues: #374（OOS検証）、#375（Group R）、#376（Group S）、#379（Group T）、#382（Group U）、#384（V1 score_drop 抑制）、#385（V2 Stage4）、#386（V3 エントリーフィルター）、#388（U1_t4 ウォークフォワード詳細分析）
+- GitHub Issues: #374（OOS検証）、#375（Group R）、#376（Group S）、#379（Group T）、#382（Group U）、#384（V1 score_drop 抑制）、#385（V2 Stage4）、#386（V3 エントリーフィルター）、#388（U1_t4 ウォークフォワード詳細分析）、#390（Group W: V3 gate 緩和）、#391（Group X: quality_score 厳格化）、#392（Group Y: レジーム検知強化）
 - GitHub PR: #387（Group V 実装・バックテスト → V1 採用、マージ済み 2026-06-04）
 - バックテスト成果物: `artifacts/backtest/backtest_phase2_group_v/20260603_155545/`、`artifacts/backtest/backtest_phase2_group_u/20260603_021339/`
