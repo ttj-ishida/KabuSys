@@ -221,9 +221,11 @@ class TestBuildCommandMaMultiplier:
         import sys
         from pathlib import Path
 
-        sys.path.insert(0, str(Path(__file__).resolve().parents[2] /
-                              "backtest" / "backtest_improvement_plan"))
-        from run_phase2_group_y import _build_command, _COM_BASE
+        sys.path.insert(
+            0,
+            str(Path(__file__).resolve().parents[2] / "backtest" / "backtest_improvement_plan"),
+        )
+        from run_phase2_group_y import _build_command  # noqa: E402
 
         scenario = {
             "name": "Y4_ma_bear",
@@ -234,18 +236,18 @@ class TestBuildCommandMaMultiplier:
         }
         cmd = _build_command(Path("dummy.duckdb"), scenario, Path("out"))
         idx = cmd.index("--topix-size-multiplier-strong-bear")
-        assert cmd[idx + 1] == "0.0", (
-            f"strong_bear=0.0 が渡されるべきところ: {cmd[idx + 1]}"
-        )
+        assert cmd[idx + 1] == "0.0", f"strong_bear=0.0 が渡されるべきところ: {cmd[idx + 1]}"
 
     def test_none_multiplier_uses_default(self):
         """None のとき COM_BASE デフォルト（1.0）が使われる。"""
         import sys
         from pathlib import Path
 
-        sys.path.insert(0, str(Path(__file__).resolve().parents[2] /
-                              "backtest" / "backtest_improvement_plan"))
-        from run_phase2_group_y import _build_command, _COM_BASE
+        sys.path.insert(
+            0,
+            str(Path(__file__).resolve().parents[2] / "backtest" / "backtest_improvement_plan"),
+        )
+        from run_phase2_group_y import _COM_BASE, _build_command  # noqa: E402
 
         scenario = {
             "name": "Y0_ref",
