@@ -561,19 +561,23 @@ _ALL_DDL: list[str] = [
 # ---------------------------------------------------------------------------
 
 
-def init_schema(db_path: str | Path) -> duckdb.DuckDBPyConnection:
+def init_schema(db_path: str | Path, *, read_only: bool = False) -> duckdb.DuckDBPyConnection:
     """DuckDB データベースを初期化し、全テーブルを作成して接続を返す。
 
     既にテーブルが存在する場合はスキップ（冪等）。
     db_path の親ディレクトリが存在しない場合は自動作成する。
 
     Args:
-        db_path: DuckDB ファイルパス。":memory:" でインメモリ DB を使用可能。
+        db_path:   DuckDB ファイルパス。":memory:" でインメモリ DB を使用可能。
+        read_only: True のとき読み取り専用で接続し、スキーマ作成をスキップする。
+                   複数プロセスから同一 DB を並列参照する場合に使用する。
 
     Returns:
         初期化済みの DuckDB 接続。
     """
     db_path_str = str(db_path)
+    if read_only:
+        return duckdb.connect(db_path_str, read_only=True)
     if db_path_str != ":memory:":
         Path(db_path_str).parent.mkdir(parents=True, exist_ok=True)
     conn = duckdb.connect(db_path_str)
