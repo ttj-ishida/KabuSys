@@ -1439,5 +1439,5 @@ score_drop 抑制は大相場（2024）では有効だが、横ばい・下落�
 - `documents/07_Research/Phase1_Backtest_Strategy.md`（Section 27〜46: Phase 1 全検証結果）
 - `documents/10_Runtime/RuntimeJobSchedule.md`
 - GitHub Issues: #374（OOS検証）、#375（Group R）、#376（Group S）、#379（Group T）、#382（Group U）、#384（V1 score_drop 抑制）、#385（V2 Stage4）、#386（V3 エントリーフィルター）、#388（U1_t4 ウォークフォワード詳細分析）、#390（Group W: V3 gate 緩和）、#391（Group X: quality_score 厳格化）、#392（Group Y: レジーム検知強化）
-- GitHub PR: #387（Group V 実装・バックテスト → V1 採用、マージ済み 2026-06-04）
+- GitHub PR: #387（Group V 実装・バックテスト → V1 採用、マージ済み 2026-06-04）、#389（Issue #388 分析・Group W/X スクリプト追加）
 - バックテスト成果物: `artifacts/backtest/backtest_phase2_group_v/20260603_155545/`、`artifacts/backtest/backtest_phase2_group_u/20260603_021339/`

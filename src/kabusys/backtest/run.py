@@ -346,6 +346,20 @@ def main() -> None:
         help="エントリー安定フィルター（直近 3 営業日騰落率の絶対値がこの値を超える銘柄の BUY を抑制）。[default: None=無効]",
     )
     parser.add_argument(
+        "--topix-return-bear-period",
+        type=int,
+        default=None,
+        dest="topix_return_bear_period",
+        help="TOPIX 騰落率ベアフィルターの参照期間（営業日数）。[default: None=無効]",
+    )
+    parser.add_argument(
+        "--topix-return-bear-threshold",
+        type=float,
+        default=None,
+        dest="topix_return_bear_threshold",
+        help="TOPIX N日騰落率がこの値を下回る日に BUY を全件抑制（例: -0.05 = -5%%）。[default: None=無効]",
+    )
+    parser.add_argument(
         "--portfolio-drawdown-stop",
         type=float,
         default=None,
@@ -467,6 +481,8 @@ def main() -> None:
             trail_stage4_mult=args.trail_stage4_mult,
             score_drop_atr_gate=args.score_drop_atr_gate,
             entry_3d_max_abs_return=args.entry_3d_max_abs_return,
+            topix_return_bear_period=args.topix_return_bear_period,
+            topix_return_bear_threshold=args.topix_return_bear_threshold,
             portfolio_drawdown_stop_pct=args.portfolio_drawdown_stop,
             portfolio_drawdown_stop_timeout_days=args.portfolio_drawdown_stop_timeout_days,
             vol_target=args.vol_target,
