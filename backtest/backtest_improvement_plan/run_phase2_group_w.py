@@ -31,6 +31,7 @@ import argparse
 import csv
 import json
 import os
+import shutil
 import subprocess
 import sys
 import traceback
@@ -393,10 +394,14 @@ def main() -> None:
         description="Phase 2 Group W — V3 エントリーフィルター gate 緩和検証"
     )
     parser.add_argument("--workers", type=int, default=None)
+    parser.add_argument("--keep-snapshots", action="store_true", default=False)
     args = parser.parse_args()
     workers = args.workers or DEFAULT_WORKERS
 
-    db_path = _get_db_path()
+    source_db = _get_db_path()
+    if not source_db.exists():
+        sys.exit(f"[ERROR] DuckDB が見つかりません: {source_db}")
+
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = ARTIFACTS_ROOT / ts
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -411,22 +416,42 @@ def main() -> None:
         f"[INFO] ベース(V1_score): CAGR={_IS_CAGR:.2%}  Sharpe={_IS_SHARPE}  MaxDD={_IS_MAX_DD:.2%}"
     )
 
+    # 各ワーカーが独立したスナップショットを使用することで並列実行時の DB ロック競合を回避
+    snapshots_dir = output_dir / "_snapshots"
+    snapshots_dir.mkdir(exist_ok=True)
+    snapshot_paths = []
+    for i in range(workers):
+        snap = snapshots_dir / f"worker_{i:02d}.duckdb"
+        shutil.copy2(str(source_db), str(snap))
+        snapshot_paths.append(str(snap))
+
     n = len(_SCENARIOS)
     batches = [_SCENARIOS[i::workers] for i in range(workers)]
-    batch_args = [(str(db_path), b, str(output_dir), str(REPO_ROOT)) for b in batches if b]
+    batch_args = [
+        (snapshot_paths[i], batches[i], str(output_dir), str(REPO_ROOT))
+        for i, b in enumerate(batches)
+        if b
+    ]
 
     all_results: list[dict] = []
-    if workers == 1:
-        for ba in batch_args:
-            all_results.extend(_run_batch(ba))
-    else:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_run_batch, ba): ba for ba in batch_args}
-            for fut in as_completed(futures):
-                try:
-                    all_results.extend(fut.result())
-                except Exception:
-                    traceback.print_exc()
+    try:
+        if workers == 1:
+            for ba in batch_args:
+                all_results.extend(_run_batch(ba))
+        else:
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                futures = {pool.submit(_run_batch, ba): ba for ba in batch_args}
+                for fut in as_completed(futures):
+                    try:
+                        all_results.extend(fut.result())
+                    except Exception:
+                        traceback.print_exc()
+    finally:
+        if not args.keep_snapshots:
+            try:
+                shutil.rmtree(snapshots_dir)
+            except Exception as e:
+                print(f"[WARN] スナップショット削除失敗: {e}", file=sys.stderr)
 
     all_results.sort(
         key=lambda r: (
