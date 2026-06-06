@@ -211,9 +211,11 @@ def _build_command(db_path: Path, scenario: dict, output_dir: Path) -> list[str]
         "--threshold",
         str(com["threshold"]),
         "--topix-size-multiplier-weak-bear",
-        str(scenario.get("topix_size_multiplier_weak_bear") or com["weak_bear"]),
+        str(com["weak_bear"] if scenario.get("topix_size_multiplier_weak_bear") is None
+            else scenario["topix_size_multiplier_weak_bear"]),
         "--topix-size-multiplier-strong-bear",
-        str(scenario.get("topix_size_multiplier_strong_bear") or com["strong_bear"]),
+        str(com["strong_bear"] if scenario.get("topix_size_multiplier_strong_bear") is None
+            else scenario["topix_size_multiplier_strong_bear"]),
         "--portfolio-drawdown-stop",
         str(com["dd_stop"]),
         "--portfolio-drawdown-stop-timeout",

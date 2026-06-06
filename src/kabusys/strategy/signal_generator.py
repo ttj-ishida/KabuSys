@@ -610,8 +610,17 @@ def _calc_topix_return(
             [target_date, period + 1],
         ).fetchall()
     except Exception:
+        logger.debug(
+            "_calc_topix_return: topix_daily 取得失敗 → None（BUY 許可）date=%s", target_date
+        )
         return None
     if len(rows) < period + 1:
+        logger.debug(
+            "_calc_topix_return: データ不足 %d/%d → None（BUY 許可）date=%s",
+            len(rows),
+            period + 1,
+            target_date,
+        )
         return None
     latest = float(rows[0][0])
     oldest = float(rows[period][0])

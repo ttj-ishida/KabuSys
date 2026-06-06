@@ -184,3 +184,78 @@ class TestTopixReturnBear:
             topix_return_bear_threshold=-0.03,
         )
         assert _buy_count(conn) == 1, "TOPIX -2.9% > threshold -3% → BUY 通過"
+
+    def test_buy_allowed_when_topix_return_equals_threshold(self):
+        """topix_ret == threshold のとき BUY は通過する（< のみ抑制）。"""
+        conn = _make_db()
+        # 20日間でちょうど -3.0% になるように価格を設定
+        days = []
+        d = TARGET
+        for _ in range(22):
+            d -= timedelta(days=1)
+            if d.weekday() < 5:
+                days.append(d)
+        days.append(TARGET)
+        days.sort()
+        n = len(days) - 1
+        conn.executemany(
+            "INSERT OR REPLACE INTO topix_daily (date, open, high, low, close) VALUES (?, ?, ?, ?, ?)",
+            [(dt, 2000, 2000, 2000, 2000 * (1 - 0.030 * i / n)) for i, dt in enumerate(days)],
+        )
+        _insert_stock(conn, CODE)
+        generate_signals(
+            conn=conn,
+            target_date=TARGET,
+            threshold=0.58,
+            topix_return_bear_period=20,
+            topix_return_bear_threshold=-0.03,
+        )
+        assert _buy_count(conn) == 1, "TOPIX ちょうど -3% == threshold -3% → BUY 通過（< のみ抑制）"
+
+
+class TestBuildCommandMaMultiplier:
+    """run_phase2_group_y._build_command の 0.0 マルチプライヤ検証。"""
+
+    def test_zero_strong_bear_multiplier_is_passed_correctly(self):
+        """strong_bear=0.0 を渡したとき '--topix-size-multiplier-strong-bear' に '0.0' が入る。"""
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] /
+                              "backtest" / "backtest_improvement_plan"))
+        from run_phase2_group_y import _build_command, _COM_BASE
+
+        scenario = {
+            "name": "Y4_ma_bear",
+            "topix_return_bear_period": None,
+            "topix_return_bear_threshold": None,
+            "topix_size_multiplier_weak_bear": 0.5,
+            "topix_size_multiplier_strong_bear": 0.0,  # falsy value
+        }
+        cmd = _build_command(Path("dummy.duckdb"), scenario, Path("out"))
+        idx = cmd.index("--topix-size-multiplier-strong-bear")
+        assert cmd[idx + 1] == "0.0", (
+            f"strong_bear=0.0 が渡されるべきところ: {cmd[idx + 1]}"
+        )
+
+    def test_none_multiplier_uses_default(self):
+        """None のとき COM_BASE デフォルト（1.0）が使われる。"""
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] /
+                              "backtest" / "backtest_improvement_plan"))
+        from run_phase2_group_y import _build_command, _COM_BASE
+
+        scenario = {
+            "name": "Y0_ref",
+            "topix_return_bear_period": None,
+            "topix_return_bear_threshold": None,
+            "topix_size_multiplier_weak_bear": None,
+            "topix_size_multiplier_strong_bear": None,
+        }
+        cmd = _build_command(Path("dummy.duckdb"), scenario, Path("out"))
+        idx = cmd.index("--topix-size-multiplier-strong-bear")
+        assert cmd[idx + 1] == str(_COM_BASE["strong_bear"]), (
+            "None のとき COM_BASE デフォルトを使うべき"
+        )
