@@ -594,6 +594,32 @@ def _calc_topix_vol(
     return math.sqrt(var) * math.sqrt(252)
 
 
+def _calc_topix_return(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+    period: int = 20,
+) -> float | None:
+    """直近 period 営業日の TOPIX 騰落率を返す（ルックアヘッドバイアスなし）。
+
+    (target_date の close / period 日前の close) - 1 を返す。
+    データ不足（< period+1 本）の場合は None を返す。
+    """
+    try:
+        rows = conn.execute(
+            "SELECT close FROM topix_daily WHERE date <= ? ORDER BY date DESC LIMIT ?",
+            [target_date, period + 1],
+        ).fetchall()
+    except Exception:
+        return None
+    if len(rows) < period + 1:
+        return None
+    latest = float(rows[0][0])
+    oldest = float(rows[period][0])
+    if oldest == 0:
+        return None
+    return (latest - oldest) / oldest
+
+
 def _fetch_gap_ratios(
     conn: duckdb.DuckDBPyConnection,
     codes: list[str],
@@ -1238,6 +1264,8 @@ def generate_signals(
     entry_3d_max_abs_return: float | None = None,
     entry_blocked: bool = False,
     block_entries_by_regime: bool = True,
+    topix_return_bear_period: int | None = None,
+    topix_return_bear_threshold: float | None = None,
     *,
     use_stock_ma_cross_filter: bool = False,
     stock_ma_cross_weak_bear_multiplier: float = 0.5,
@@ -1458,12 +1486,26 @@ def generate_signals(
             target_date,
         )
 
-    # 3c. セクター強弱分類（Bear レジーム / breadth_stop では BUY 不要なためスキップ）
+    # 3c. TOPIX 騰落率ベースのエントリー抑制 (Group Y / Issue #392)
+    _topix_return_blocks_entry = False
+    if topix_return_bear_period is not None and topix_return_bear_threshold is not None:
+        topix_ret = _calc_topix_return(conn, target_date, topix_return_bear_period)
+        if topix_ret is not None and topix_ret < topix_return_bear_threshold:
+            _topix_return_blocks_entry = True
+            logger.info(
+                "generate_signals: TOPIX %d日騰落率 %.2f%% < 閾値 %.2f%% — BUY 抑制 date=%s",
+                topix_return_bear_period,
+                topix_ret * 100,
+                topix_return_bear_threshold * 100,
+                target_date,
+            )
+
+    # 3d. セクター強弱分類（Bear レジーム / breadth_stop では BUY 不要なためスキップ）
     top_sectors: frozenset[str] = frozenset()
     bottom_sectors: frozenset[str] = frozenset()
     sector_map: dict[str, str] = {}
     boosted_count = 0
-    if not _regime_blocks_entry and not breadth_stop:
+    if not _regime_blocks_entry and not breadth_stop and not _topix_return_blocks_entry:
         top_sectors, bottom_sectors, sector_map = _calc_sector_strengths(
             conn, target_date, sector_quartile=_cfg["sector_quartile"]
         )
@@ -1582,7 +1624,12 @@ def generate_signals(
                     target_date,
                 )
     buy_signals: list[dict] = []
-    if not _regime_blocks_entry and not breadth_stop and not entry_blocked:
+    if (
+        not _regime_blocks_entry
+        and not breadth_stop
+        and not entry_blocked
+        and not _topix_return_blocks_entry
+    ):
         # 3c. ギャップ比率を一括取得（BUY 生成が必要な場合のみ実行）
         gap_ratios = _fetch_gap_ratios(
             conn, [r["code"] for r in scored if r["score"] >= threshold], target_date
