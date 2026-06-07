@@ -205,13 +205,19 @@ def main() -> None:
             conn = duckdb.connect(db_path)
             update_counts = collect_update_counts(conn, run_date)
             next_day = collect_next_day_summary(conn, run_date)
+            target_date: date | None = None
             try:
-                target_date: date = next_trading_day(conn, run_date)
+                target_date = next_trading_day(conn, run_date)
             except Exception:
-                logger.warning(
-                    "翌営業日の取得に失敗しました。run_date+1 を使用します。", exc_info=True
-                )
+                logger.warning("翌営業日の取得に失敗しました。run_date=%s", run_date, exc_info=True)
+            if target_date is None:
                 target_date = run_date + timedelta(days=1)
+                logger.warning(
+                    "翌営業日が取得できなかったため run_date+1 を使用します。"
+                    " run_date=%s fallback=%s",
+                    run_date,
+                    target_date,
+                )
 
             # --- レポート構築・保存 ---
             report = build_report(
