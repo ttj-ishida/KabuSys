@@ -63,7 +63,7 @@ def main() -> None:
             conn,
             known_codes=known_codes if known_codes else None,
         )
-        logger.info("yahoonews_collection 完了: saved=%d", saved)
+        logger.info("yahoonews_collection 完了: saved=%s", saved)
     except Exception:
         logger.exception("yahoonews_collection バッチが失敗しました")
         _failed = True
