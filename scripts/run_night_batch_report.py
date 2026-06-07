@@ -19,6 +19,7 @@ import duckdb
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
+from kabusys.data.calendar_management import next_trading_day
 from kabusys.operations.job_run_recorder import read_job_results
 from kabusys.operations.night_batch_report import (
     JobRunResult,
@@ -201,20 +202,16 @@ def main() -> None:
 
             # --- DB クエリ ---
             db_path = args.db or str(Settings().duckdb_path)
-            target_date: date = run_date + timedelta(days=1)
             conn = duckdb.connect(db_path)
             update_counts = collect_update_counts(conn, run_date)
             next_day = collect_next_day_summary(conn, run_date)
             try:
-                row = conn.execute(
-                    "SELECT MIN(date) FROM prices_daily WHERE date > ?", [run_date]
-                ).fetchone()
-                if row and row[0]:
-                    target_date = row[0]
+                target_date: date = next_trading_day(conn, run_date)
             except Exception:
                 logger.warning(
                     "翌営業日の取得に失敗しました。run_date+1 を使用します。", exc_info=True
                 )
+                target_date = run_date + timedelta(days=1)
 
             # --- レポート構築・保存 ---
             report = build_report(
