@@ -356,6 +356,8 @@ def _run_batch(args: tuple) -> list[dict]:
         report_dir = scenario_dir / "report"
 
         cmd = _build_command(Path(snapshot_db), scenario, report_dir)
+        (scenario_dir / "command.txt").write_text(" ".join(map(str, cmd)), encoding="utf-8")
+
         env = os.environ.copy()
         env["PYTHONPATH"] = os.pathsep.join(
             filter(None, [str(repo_root / "src"), env.get("PYTHONPATH", "")])
@@ -420,6 +422,7 @@ CSV_FIELDNAMES = [
     "start",
     "end",
     "desc",
+    "is_reference",
     "cagr",
     "sharpe",
     "max_drawdown",
@@ -448,8 +451,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Phase 2 W1_08 OOS Walk-Forward (Issue #396)")
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--keep-snapshots", action="store_true", default=False)
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        default=False,
+        help="WF 含む任意シナリオ失敗で exit 1（デフォルトは致命シナリオのみ）",
+    )
     args = parser.parse_args()
-    workers = min(args.workers or DEFAULT_WORKERS, len(_SCENARIOS))
+    _cpu = os.cpu_count() or DEFAULT_WORKERS
+    workers = min(args.workers or DEFAULT_WORKERS, _cpu, len(_SCENARIOS))
 
     source_db = _get_db_path()
     if not source_db.exists():
@@ -523,22 +533,44 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(success)
 
-    # --- 結果表示 ---
-    ref = next((r for r in success if r.get("is_reference")), None)
-    actual_is_sharpe = ref["sharpe"] if ref and ref.get("sharpe") else _IS_SHARPE
+    # --- IS Sharpe 比較対象の決定: W1_IS(2017-2021) > W1_full > 定数 ---
+    is_ref = next((r for r in success if r.get("name") == "W1_IS"), None)
+    full_ref = next((r for r in success if r.get("is_reference")), None)
+    if is_ref and is_ref.get("sharpe") is not None:
+        actual_is_sharpe = is_ref["sharpe"]
+        is_sharpe_src = "W1_IS"
+        is_sharpe_period = f"{is_ref['start']}~{is_ref['end']}"
+    elif full_ref and full_ref.get("sharpe") is not None:
+        actual_is_sharpe = full_ref["sharpe"]
+        is_sharpe_src = "W1_full"
+        is_sharpe_period = f"{full_ref['start']}~{full_ref['end']}"
+    else:
+        actual_is_sharpe = _IS_SHARPE
+        is_sharpe_src = "fallback"
+        is_sharpe_period = "2017-2025 (const)"
 
     print(f"\n{'=' * 100}")
     print("【W1_08 OOS ウォークフォワード検証結果】")
+    if full_ref:
+        print(
+            f"  IS 参照（{full_ref['start']}~{full_ref['end']}）: "
+            f"CAGR {_pct(full_ref.get('cagr'))}  Sharpe {_fmt(full_ref.get('sharpe'), 3)}  "
+            f"MaxDD {_pct(full_ref.get('max_drawdown'))}  PF {_fmt(full_ref.get('profit_factor'), 3)}"
+        )
+    else:
+        print(
+            f"  IS 参照（2017-2025, const）: CAGR {_IS_CAGR:.2%}  Sharpe {_IS_SHARPE:.3f}  "
+            f"MaxDD {_IS_MAX_DD:.2%}  PF {_IS_PF:.3f}"
+        )
     print(
-        f"  IS 参照（2017-2025）: CAGR {_IS_CAGR:.2%}  Sharpe {_IS_SHARPE:.3f}  "
-        f"MaxDD {_IS_MAX_DD:.2%}  PF {_IS_PF:.3f}"
+        f"  Sharpe 乖離比較対象: {is_sharpe_src} ({is_sharpe_period}) = {_fmt(actual_is_sharpe, 3)}"
     )
     print(f"{'=' * 100}")
 
     # IS / OOS 期間比較
     period_group = [r for r in success if r["group"] in ("IS", "OOS")]
     if period_group:
-        print("\n--- IS / OOS 期間比較 ---")
+        print(f"\n--- IS / OOS 期間比較  ※Sharpe 乖離は vs {is_sharpe_src}({is_sharpe_period}) ---")
         print(
             f"  {'シナリオ':<12} {'期間':<24} {'CAGR':>8} {'Sharpe':>7} {'MaxDD':>8} "
             f"{'PF':>6} {'Trades':>7}  {'Sharpe乖離':>10}  判定"
@@ -594,7 +626,12 @@ def main() -> None:
 
     if oos_main is None:
         print("  [WARNING] W1_OOS が未取得のため採択判定不可")
-        decision = {"verdict": "UNKNOWN", "reason": "W1_OOS not available"}
+        decision = {
+            "verdict": "UNKNOWN",
+            "reason": "W1_OOS not available",
+            "is_sharpe_source": is_sharpe_src,
+            "is_sharpe_period": is_sharpe_period,
+        }
     else:
         oos_sharpe = oos_main.get("sharpe")
         oos_cagr = oos_main.get("cagr")
@@ -610,6 +647,10 @@ def main() -> None:
         passed = cagr_ok and dd_ok and sharpe_ok and pf_ok and div_ok
 
         print(
+            f"  Sharpe 乖離比較: vs {is_sharpe_src}({is_sharpe_period}) IS Sharpe={_fmt(actual_is_sharpe, 3)}"
+        )
+        print()
+        print(
             f"  CAGR > {_OOS_CAGR_MIN:.0%}             : {'[OK]' if cagr_ok else '[NG]'} {_pct(oos_cagr)}"
         )
         print(
@@ -622,7 +663,8 @@ def main() -> None:
             f"  PF >= {_OOS_PF_MIN}                 : {'[OK]' if pf_ok else '[NG]'} {_fmt(oos_pf, 3)}"
         )
         print(
-            f"  Sharpe 乖離 <= {_OOS_SHARPE_DIVERGENCE_MAX}    : {'[OK]' if div_ok else '[NG]'} {_fmt(div, 3) if div is not None else 'NA'}"
+            f"  Sharpe 乖離 <= {_OOS_SHARPE_DIVERGENCE_MAX}"
+            f"    : {'[OK]' if div_ok else '[NG]'} {_fmt(div, 3) if div is not None else 'NA'}"
         )
         print()
         if passed:
@@ -637,6 +679,8 @@ def main() -> None:
             "oos_sharpe": oos_sharpe,
             "oos_profit_factor": oos_pf,
             "is_sharpe": actual_is_sharpe,
+            "is_sharpe_source": is_sharpe_src,
+            "is_sharpe_period": is_sharpe_period,
             "sharpe_divergence": div,
             "cagr_ok": cagr_ok,
             "dd_ok": dd_ok,
@@ -651,9 +695,23 @@ def main() -> None:
 
     print(f"{'=' * 100}")
     print(f"出力: {output_dir}")
+
     if failed:
-        print(f"失敗シナリオ: {[r['name'] for r in failed]}", file=sys.stderr)
-        sys.exit(1)
+        failed_names = {r["name"] for r in failed}
+        critical = {"W1_full", "W1_IS", "W1_OOS"}
+        critical_failed = sorted(failed_names & critical)
+        wf_failed = sorted(failed_names - critical)
+
+        if critical_failed:
+            print(f"[ERROR] 致命的な失敗シナリオ: {critical_failed}", file=sys.stderr)
+            sys.exit(1)
+        elif args.strict and wf_failed:
+            print(f"[ERROR] 失敗シナリオ（--strict）: {wf_failed}", file=sys.stderr)
+            sys.exit(1)
+        else:
+            print(
+                f"[WARN] 一部 WF シナリオ失敗（採択判断には影響なし）: {wf_failed}", file=sys.stderr
+            )
 
 
 if __name__ == "__main__":
