@@ -235,38 +235,67 @@ def _build_command(db_path: Path, scenario: dict, output_dir: Path) -> list[str]
         sys.executable,
         "-m",
         "kabusys.backtest.run",
-        "--db", str(db_path),
-        "--start", scenario["start"],
-        "--end", scenario["end"],
-        "--cash", str(com["cash"]),
-        "--allocation-method", com["allocation_method"],
-        "--max-positions", str(com["max_positions"]),
-        "--max-position-pct", str(com["max_position_pct"]),
-        "--max-utilization", str(com["max_utilization"]),
-        "--risk-pct", str(com["risk_pct"]),
-        "--stop-loss-pct", str(com["stop_loss_pct"]),
-        "--min-holding-days", str(com["min_holding_days"]),
-        "--max-holding-days", str(com["max_holding_days"]),
-        "--trailing-stop-atr", str(com["trailing_stop_atr"]),
-        "--threshold", str(com["threshold"]),
-        "--topix-size-multiplier-weak-bear", str(com["weak_bear"]),
-        "--topix-size-multiplier-strong-bear", str(com["strong_bear"]),
-        "--portfolio-drawdown-stop", str(com["dd_stop"]),
-        "--portfolio-drawdown-stop-timeout", str(com["dd_timeout"]),
+        "--db",
+        str(db_path),
+        "--start",
+        scenario["start"],
+        "--end",
+        scenario["end"],
+        "--cash",
+        str(com["cash"]),
+        "--allocation-method",
+        com["allocation_method"],
+        "--max-positions",
+        str(com["max_positions"]),
+        "--max-position-pct",
+        str(com["max_position_pct"]),
+        "--max-utilization",
+        str(com["max_utilization"]),
+        "--risk-pct",
+        str(com["risk_pct"]),
+        "--stop-loss-pct",
+        str(com["stop_loss_pct"]),
+        "--min-holding-days",
+        str(com["min_holding_days"]),
+        "--max-holding-days",
+        str(com["max_holding_days"]),
+        "--trailing-stop-atr",
+        str(com["trailing_stop_atr"]),
+        "--threshold",
+        str(com["threshold"]),
+        "--topix-size-multiplier-weak-bear",
+        str(com["weak_bear"]),
+        "--topix-size-multiplier-strong-bear",
+        str(com["strong_bear"]),
+        "--portfolio-drawdown-stop",
+        str(com["dd_stop"]),
+        "--portfolio-drawdown-stop-timeout",
+        str(com["dd_timeout"]),
         "--adaptive-threshold-vol-regime",
-        "--topix-vol-window", str(com["topix_vol_window"]),
-        "--topix-vol-low-threshold", str(com["topix_vol_low_threshold"]),
-        "--adaptive-threshold-hi", str(com["adaptive_threshold_hi"]),
+        "--topix-vol-window",
+        str(com["topix_vol_window"]),
+        "--topix-vol-low-threshold",
+        str(com["topix_vol_low_threshold"]),
+        "--adaptive-threshold-hi",
+        str(com["adaptive_threshold_hi"]),
         "--dynamic-trailing-stop",
-        "--trail-profit-gate-atr", str(com["trail_profit_gate_atr"]),
-        "--trail-stage2-mult", str(com["trail_stage2_mult"]),
-        "--trail-stage3-mult", str(com["trail_stage3_mult"]),
+        "--trail-profit-gate-atr",
+        str(com["trail_profit_gate_atr"]),
+        "--trail-stage2-mult",
+        str(com["trail_stage2_mult"]),
+        "--trail-stage3-mult",
+        str(com["trail_stage3_mult"]),
         "--ma200-filter",
-        "--quality-score-min", str(com["quality_score_min"]),
-        "--score-drop-atr-gate", str(com["score_drop_atr_gate"]),
-        "--entry-3d-max-abs-return", str(com["entry_3d_max_abs_return"]),
-        "--output-format", "all",
-        "--output-dir", str(output_dir),
+        "--quality-score-min",
+        str(com["quality_score_min"]),
+        "--score-drop-atr-gate",
+        str(com["score_drop_atr_gate"]),
+        "--entry-3d-max-abs-return",
+        str(com["entry_3d_max_abs_return"]),
+        "--output-format",
+        "all",
+        "--output-dir",
+        str(output_dir),
     ]
     return cmd
 
@@ -416,9 +445,7 @@ def _oos_pass(r: dict, is_sharpe: float) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Phase 2 W1_08 OOS Walk-Forward (Issue #396)"
-    )
+    parser = argparse.ArgumentParser(description="Phase 2 W1_08 OOS Walk-Forward (Issue #396)")
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--keep-snapshots", action="store_true", default=False)
     args = parser.parse_args()
@@ -521,8 +548,10 @@ def main() -> None:
             sharpe = r.get("sharpe")
             div = abs(actual_is_sharpe - sharpe) if sharpe is not None else None
             div_str = _fmt(div, 3) if div is not None else "NA"
-            mark = "[GO]" if (r["group"] == "OOS" and _oos_pass(r, actual_is_sharpe)) else (
-                "ref" if r.get("is_reference") else ""
+            mark = (
+                "[GO]"
+                if (r["group"] == "OOS" and _oos_pass(r, actual_is_sharpe))
+                else ("ref" if r.get("is_reference") else "")
             )
             print(
                 f"  {r['name']:<12} {r['start']}~{r['end']}"
@@ -580,11 +609,21 @@ def main() -> None:
         div_ok = div is not None and div <= _OOS_SHARPE_DIVERGENCE_MAX
         passed = cagr_ok and dd_ok and sharpe_ok and pf_ok and div_ok
 
-        print(f"  CAGR > {_OOS_CAGR_MIN:.0%}             : {'[OK]' if cagr_ok else '[NG]'} {_pct(oos_cagr)}")
-        print(f"  MaxDD < {_OOS_DD_MAX:.0%}           : {'[OK]' if dd_ok else '[NG]'} {_pct(oos_dd)}")
-        print(f"  Sharpe >= {_OOS_SHARPE_MIN}         : {'[OK]' if sharpe_ok else '[NG]'} {_fmt(oos_sharpe, 3)}")
-        print(f"  PF >= {_OOS_PF_MIN}                 : {'[OK]' if pf_ok else '[NG]'} {_fmt(oos_pf, 3)}")
-        print(f"  Sharpe 乖離 <= {_OOS_SHARPE_DIVERGENCE_MAX}    : {'[OK]' if div_ok else '[NG]'} {_fmt(div, 3) if div is not None else 'NA'}")
+        print(
+            f"  CAGR > {_OOS_CAGR_MIN:.0%}             : {'[OK]' if cagr_ok else '[NG]'} {_pct(oos_cagr)}"
+        )
+        print(
+            f"  MaxDD < {_OOS_DD_MAX:.0%}           : {'[OK]' if dd_ok else '[NG]'} {_pct(oos_dd)}"
+        )
+        print(
+            f"  Sharpe >= {_OOS_SHARPE_MIN}         : {'[OK]' if sharpe_ok else '[NG]'} {_fmt(oos_sharpe, 3)}"
+        )
+        print(
+            f"  PF >= {_OOS_PF_MIN}                 : {'[OK]' if pf_ok else '[NG]'} {_fmt(oos_pf, 3)}"
+        )
+        print(
+            f"  Sharpe 乖離 <= {_OOS_SHARPE_DIVERGENCE_MAX}    : {'[OK]' if div_ok else '[NG]'} {_fmt(div, 3) if div is not None else 'NA'}"
+        )
         print()
         if passed:
             print("  → OOS 基準クリア: W1_08 本番投入 Go（Issue #397, #398 へ）")
