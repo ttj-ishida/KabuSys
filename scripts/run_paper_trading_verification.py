@@ -35,6 +35,9 @@ _MIN_BUY_SIGNALS = 10  # 最低シグナル発生数
 _MAX_ERROR_RATE = 0.0  # 最大注文エラー率
 _MAX_SLIPPAGE_PCT = 0.003  # 最大スリッページ乖離（±0.3%）
 
+_FILLED_STATES = frozenset({"filled", "closed", "partial"})
+_REJECTED_STATES = frozenset({"rejected", "error", "failed"})
+
 
 @dataclass
 class VerificationResult:
@@ -68,18 +71,26 @@ def _collect_signal_stats(
     start: date,
     end: date,
 ) -> tuple[int, int]:
-    """期間中の trading days 数と BUY シグナル数を返す。"""
+    """期間中の trading days 数と BUY シグナル数を返す。
+
+    取引日数は side に依存せず全シグナル日付の DISTINCT カウント。
+    BUY シグナル数は side='buy' のみ集計。
+    """
     try:
         row = conn.execute(
             """
-            SELECT COUNT(DISTINCT date) AS trading_days, COUNT(*) AS buy_signals
-            FROM signals
-            WHERE date >= ? AND date <= ? AND side = 'buy'
+            WITH s AS (
+                SELECT date, side FROM signals WHERE date >= ? AND date <= ?
+            )
+            SELECT
+                COUNT(DISTINCT date)                               AS trading_days,
+                SUM(CASE WHEN side = 'buy' THEN 1 ELSE 0 END)    AS buy_signals
+            FROM s
             """,
             [start, end],
         ).fetchone()
         if row:
-            return int(row[0]), int(row[1])
+            return int(row[0]), int(row[1] or 0)
     except Exception:
         logger.warning("signals テーブルの取得に失敗しました", exc_info=True)
     return 0, 0
@@ -111,7 +122,7 @@ def _collect_order_stats(
     sqlite_path: Path,
     signal_ids: set[str],
 ) -> tuple[int, int, int, dict[str, float]]:
-    """SQLite paper_trading.db から注文統計を取得する。
+    """SQLite paper_trading.db から注文統計を取得する（read-only）。
 
     Returns:
         (total, filled, rejected, {signal_id: avg_fill_price})
@@ -122,26 +133,33 @@ def _collect_order_stats(
         logger.warning("paper_trading.db が見つかりません: %s", sqlite_path)
         return total, filled, rejected, fill_prices
 
+    if not signal_ids:
+        return total, filled, rejected, fill_prices
+
     try:
-        with sqlite3.connect(str(sqlite_path)) as conn:
+        uri = f"file:{sqlite_path.as_posix()}?mode=ro"
+        with sqlite3.connect(uri, uri=True) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT signal_id, state, avg_fill_price FROM orders").fetchall()
+            ph = ", ".join("?" * len(signal_ids))
+            rows = conn.execute(
+                f"SELECT signal_id, state, avg_fill_price FROM orders"  # noqa: S608
+                f" WHERE signal_id IN ({ph})",
+                list(signal_ids),
+            ).fetchall()
     except Exception:
         logger.warning("paper_trading.db の読み込みに失敗しました", exc_info=True)
         return total, filled, rejected, fill_prices
 
     for row in rows:
         sid = row["signal_id"]
-        if sid not in signal_ids:
-            continue
         total += 1
         state = row["state"]
-        if state in ("filled", "closed", "partial"):
+        if state in _FILLED_STATES:
             filled += 1
             afp = row["avg_fill_price"]
             if afp is not None:
                 fill_prices[sid] = float(afp)
-        elif state == "rejected":
+        elif state in _REJECTED_STATES:
             rejected += 1
 
     return total, filled, rejected, fill_prices
