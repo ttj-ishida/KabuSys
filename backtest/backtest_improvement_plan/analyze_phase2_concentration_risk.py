@@ -124,7 +124,7 @@ def analyze_full(records: list[dict]) -> dict:
     total_return = (values[-1] / values[0] - 1) * 100
     return {
         "label": "W1_08 全期間（2017-2025）",
-        "years": len(returns),
+        "n_years": len(returns),
         "returns": returns,
         "values": values,
         "cagr": cagr,
@@ -161,13 +161,12 @@ def analyze_concentration(records: list[dict]) -> dict:
     total_gain = values_all[-1] - values_all[0]
 
     contributions = []
-    for rec in records:
+    for i, rec in enumerate(records):
         r = rec["return_pct"] / 100
         # 各年の絶対寄与 = 前年末資産 × 当年リターン
-        idx = next(i for i, x in enumerate(records) if x["year"] == rec["year"])
-        v_before = values_all[idx]
+        v_before = values_all[i]
         abs_contribution = v_before * r
-        pct_of_total = abs_contribution / total_gain * 100 if total_gain > 0 else 0.0
+        pct_of_total = abs_contribution / total_gain * 100 if total_gain > 0 else None
         contributions.append(
             {
                 "year": rec["year"],
@@ -178,14 +177,21 @@ def analyze_concentration(records: list[dict]) -> dict:
             }
         )
 
-    top2_contribution = sum(
-        c["pct_of_total_gain"] for c in contributions if c["year"] in (2018, 2024)
-    )
+    if total_gain > 0:
+        top2_contribution: float | None = sum(
+            c["pct_of_total_gain"]
+            for c in contributions
+            if c["year"] in (2018, 2024) and c["pct_of_total_gain"] is not None
+        )
+        other_contribution: float | None = 100 - top2_contribution
+    else:
+        top2_contribution = None
+        other_contribution = None
     return {
         "total_gain_factor": total_gain,
         "contributions": contributions,
         "2018_2024_contribution_pct": top2_contribution,
-        "other_7years_contribution_pct": 100 - top2_contribution,
+        "other_7years_contribution_pct": other_contribution,
     }
 
 
@@ -263,10 +269,6 @@ def analyze_distribution(records: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _fmt(v: float, decimals: int = 1) -> str:
-    return f"{v:+.{decimals}f}%" if isinstance(v, float) else str(v)
-
-
 def build_report(
     full: dict,
     excl: dict,
@@ -283,7 +285,7 @@ def build_report(
 
     # --- 1. 基準値 ---
     lines.append("\n【全期間成績（IS 参照）】")
-    lines.append(f"  期間       : 2017-2025 ({full['years']} 年)")
+    lines.append(f"  期間       : 2017-2025 ({full['n_years']} 年)")
     lines.append(f"  CAGR       : {IS_CAGR:.1f}% (計算値: {full['cagr']:.1f}%)")
     lines.append(f"  MaxDD      : {IS_MAXDD:.1f}% (計算値: {full['max_drawdown']:.1f}%)")
     lines.append(f"  総収益率   : {full['total_return']:+.1f}%")
@@ -291,17 +293,24 @@ def build_report(
 
     # --- 2. 年次収益集中 ---
     lines.append("\n【収益集中度分析】")
-    lines.append(
-        f"  2018・2024 の寄与率: {conc['2018_2024_contribution_pct']:.1f}% "
-        f"/ 残り 7 年: {conc['other_7years_contribution_pct']:.1f}%"
-    )
+    top2 = conc["2018_2024_contribution_pct"]
+    other = conc["other_7years_contribution_pct"]
+    if top2 is not None and other is not None:
+        lines.append(f"  2018・2024 の寄与率: {top2:.1f}% / 残り 7 年: {other:.1f}%")
+    else:
+        lines.append("  2018・2024 の寄与率: N/A（総利益が 0 以下）")
     lines.append("")
     lines.append(f"  {'年':>4} | {'年次リターン':>12} | {'絶対寄与':>10} | {'総利益寄与%':>10}")
     lines.append(f"  {'-' * 4}-+-{'-' * 12}-+-{'-' * 10}-+-{'-' * 10}")
     for c in conc["contributions"]:
+        pct_str = (
+            f"{c['pct_of_total_gain']:>9.1f}%"
+            if c["pct_of_total_gain"] is not None
+            else "      N/A"
+        )
         lines.append(
             f"  {c['year']:>4} | {c['return_pct']:>+11.1f}% | "
-            f"{c['abs_contribution']:>+9.3f}x | {c['pct_of_total_gain']:>9.1f}%"
+            f"{c['abs_contribution']:>+9.3f}x | {pct_str}"
         )
 
     # --- 3. 2018・2024 除外シミュレーション ---
