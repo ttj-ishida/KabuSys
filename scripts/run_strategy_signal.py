@@ -109,29 +109,33 @@ def _print_signal_report(
         if not portfolio_value or portfolio_value <= 0 or price <= 0 or n_buy == 0:
             return None
         slot = portfolio_value * _REPORT_MAX_UTILIZATION / n_buy
-        base = int(slot / price / _REPORT_LOT_SIZE) * _REPORT_LOT_SIZE
-        after_sm = int(base * sm / _REPORT_LOT_SIZE) * _REPORT_LOT_SIZE
-        cap = int(portfolio_value * _REPORT_MAX_POSITION_PCT / price / _REPORT_LOT_SIZE) * _REPORT_LOT_SIZE
-        return min(after_sm, cap)
+        qty = int(slot * sm / price / _REPORT_LOT_SIZE) * _REPORT_LOT_SIZE
+        cap = (
+            int(portfolio_value * _REPORT_MAX_POSITION_PCT / price / _REPORT_LOT_SIZE)
+            * _REPORT_LOT_SIZE
+        )
+        return min(qty, cap)
 
     # --- 出力 ---
     sep = "=" * 66
     lines: list[str] = []
     lines.append(sep)
     lines.append(f"  [Signal Report] date={target_date}")
-    if portfolio_value is not None:
-        lines.append(
-            f"  PF={portfolio_value:,.0f}円"
-            f"  max_util={_REPORT_MAX_UTILIZATION:.0%}"
-            f"  max_pos={_REPORT_MAX_POSITION_PCT:.0%}"
-            f"  lot={_REPORT_LOT_SIZE}"
-        )
+    pf_s = f"{portfolio_value:,.0f}円" if portfolio_value is not None else "N/A"
+    lines.append(
+        f"  PF={pf_s}"
+        f"  max_util={_REPORT_MAX_UTILIZATION:.0%}"
+        f"  max_pos={_REPORT_MAX_POSITION_PCT:.0%}"
+        f"  lot={_REPORT_LOT_SIZE}"
+    )
     lines.append(sep)
 
     # BUY
     lines.append(f"\n[BUY] {n_buy} 件")
     if buy_rows:
-        lines.append(f"  {'Rk':>2}  {'Code':<6}  {'Name':<22}  {'Close':>8}  {'Est.Qty':>10}  {'Est.Amt':>12}")
+        lines.append(
+            f"  {'Rk':>2}  {'Code':<6}  {'Name':<22}  {'Close':>8}  {'Est.Qty':>10}  {'Est.Amt':>12}"
+        )
         lines.append("  " + "-" * 64)
         total_est = 0.0
         for code, name, rank, sm in buy_rows:
@@ -172,7 +176,9 @@ def _print_signal_report(
         lines.append("  (なし)")
 
     lines.append("\n" + sep)
-    lines.append("  ※ Est.Qty は等配分/close price 基準の推定値。実際の発注量と異なる場合があります。")
+    lines.append(
+        "  ※ Est.Qty は等配分/close price 基準の推定値。実際の発注量と異なる場合があります。"
+    )
 
     report_text = "\n".join(lines)
     print(report_text)
@@ -214,7 +220,15 @@ def main() -> None:
         # --- ポートフォリオ DD 停止チェック ---
         mdb = MonitoringDB(sqlite_conn)
         dashboard = mdb.get_dashboard()
-        pf_value: float | None = float(dashboard["portfolio_value"]) if dashboard is not None else None
+        pf_value: float | None = None
+        if dashboard is not None:
+            val = dashboard.get("portfolio_value")
+            try:
+                pf_value = float(val) if val is not None else None
+            except Exception:
+                logger.warning(
+                    "dashboard.portfolio_value の変換に失敗しました: %r", val, exc_info=True
+                )
         entry_blocked = False
         if dashboard is not None:
             drawdown_pct = float(dashboard["drawdown_pct"])
