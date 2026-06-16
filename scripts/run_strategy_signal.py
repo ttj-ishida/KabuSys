@@ -294,6 +294,10 @@ def main() -> None:
             entry_blocked=entry_blocked,
             block_entries_by_regime=False,
             sqlite_conn=sqlite_conn,
+            # W1_08 IS パラメータ
+            entry_3d_max_abs_return=0.08,
+            quality_score_min=-0.30,
+            score_drop_atr_gate=1.0,
         )
         _updated_rows["signals"] = n
         logger.info("シグナル生成完了: %d 件 (date=%s)", n, target_date)
