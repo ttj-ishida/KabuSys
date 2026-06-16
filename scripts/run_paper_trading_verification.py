@@ -140,10 +140,9 @@ def _collect_order_stats(
         uri = f"file:{sqlite_path.as_posix()}?mode=ro"
         with sqlite3.connect(uri, uri=True) as conn:
             conn.row_factory = sqlite3.Row
-            ph = ", ".join("?" * len(signal_ids))
+            ph = ", ".join(["?"] * len(signal_ids))
             rows = conn.execute(
-                f"SELECT signal_id, state, avg_fill_price FROM orders"  # noqa: S608
-                f" WHERE signal_id IN ({ph})",
+                f"SELECT signal_id, state, avg_fill_price FROM orders WHERE signal_id IN ({ph})",  # noqa: S608
                 list(signal_ids),
             ).fetchall()
     except Exception:
