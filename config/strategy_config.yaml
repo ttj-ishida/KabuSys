@@ -55,4 +55,5 @@ regime:
 
 portfolio:
   # 最大保有銘柄数（select_candidates() に渡される上限値、1 以上の整数）
-  max_positions: 3
+  # W1_08 採用設定（Group R: util=40%, pos=7）
+  max_positions: 7
