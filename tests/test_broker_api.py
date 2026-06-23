@@ -15,6 +15,7 @@ from kabusys.execution.broker_api import (
     RateLimitError,
     WalletInfo,
     create_broker_api,
+    is_broker_offline,
 )
 from kabusys.execution.mock_client import MockBrokerClient
 
@@ -265,6 +266,47 @@ def test_mock_fill_order_manual():
     assert positions[0].qty == 100
     # 残り50株分の現金も減少
     assert client.get_available_cash() == 1_000_000.0 - 100 * 500.0
+
+
+# ---------------------------------------------------------------------------
+# is_broker_offline
+# ---------------------------------------------------------------------------
+
+
+class TestIsBrokerOffline:
+    def test_true_when_connection_refused_is_direct_cause(self):
+        """__cause__ が ConnectionRefusedError なら True。"""
+        inner = ConnectionRefusedError(10061, "接続拒否")
+        outer = BrokerAPIError("トークン取得ネットワークエラー")
+        outer.__cause__ = inner
+        assert is_broker_offline(outer) is True
+
+    def test_true_when_connection_refused_is_nested_cause(self):
+        """ConnectionRefusedError が2段ネストされていても True。"""
+        root = ConnectionRefusedError(10061, "接続拒否")
+        mid = OSError("mid")
+        mid.__cause__ = root
+        outer = BrokerAPIError("ネットワークエラー")
+        outer.__cause__ = mid
+        assert is_broker_offline(outer) is True
+
+    def test_false_when_status_code_401(self):
+        """HTTP 401 (認証失敗) は False。"""
+        exc = BrokerAPIError("トークン取得失敗: 401", status_code=401)
+        assert is_broker_offline(exc) is False
+
+    def test_false_when_no_cause(self):
+        """原因なし BrokerAPIError は False。"""
+        exc = BrokerAPIError("不明なエラー")
+        assert is_broker_offline(exc) is False
+
+    def test_false_when_timeout(self):
+        """タイムアウト例外は False。"""
+        import httpx
+        inner = httpx.TimeoutException("timeout")
+        outer = BrokerAPIError("タイムアウト")
+        outer.__cause__ = inner
+        assert is_broker_offline(outer) is False
 
 
 # ---------------------------------------------------------------------------

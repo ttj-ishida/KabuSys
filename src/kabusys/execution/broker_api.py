@@ -87,6 +87,24 @@ class RateLimitError(BrokerAPIError):
     """API レート制限（429）に達した。"""
 
 
+def is_broker_offline(exc: Exception) -> bool:
+    """例外チェーンに ConnectionRefusedError が含まれるか確認する。
+
+    kabu Station (localhost:18081) が未起動の場合に発生する WinError 10061
+    (WSAECONNREFUSED) は Python の ConnectionRefusedError にマップされる。
+    BrokerAPIError の cause チェーンを辿って判定する。
+    """
+    cause: Exception | None = exc
+    while cause is not None:
+        if isinstance(cause, ConnectionRefusedError):
+            return True
+        next_cause = getattr(cause, "__cause__", None)
+        if next_cause is None:
+            next_cause = getattr(cause, "__context__", None)
+        cause = next_cause
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Protocol インターフェース
 # ---------------------------------------------------------------------------
