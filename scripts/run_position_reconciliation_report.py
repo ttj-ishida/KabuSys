@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
+from kabusys.execution.broker_api import BrokerAPIError, is_broker_offline
 from kabusys.execution.broker_factory import BrokerClientFactory
 from kabusys.execution.order_repository import OrderRepository
 from kabusys.operations.line_reports import format_position_reconciliation_message
@@ -89,6 +90,15 @@ def main() -> None:
                 "Position Reconciliation LINE 通知に失敗しました（処理続行）", exc_info=True
             )
 
+    except BrokerAPIError as exc:
+        if is_broker_offline(exc):
+            logger.warning(
+                "kabu Station が起動していません (localhost:18081 接続拒否)。"
+                " position_reconciliation_report をスキップします。"
+            )
+        else:
+            logger.exception("position_reconciliation_report バッチが失敗しました")
+            _failed = True
     except Exception:
         logger.exception("position_reconciliation_report バッチが失敗しました")
         _failed = True
