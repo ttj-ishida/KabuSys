@@ -34,6 +34,26 @@ _DEFAULT_LOG_DIR = Path("logs")
 _DEFAULT_LOG_LEVEL = "INFO"
 _BACKUP_COUNT = 30  # 日次ローテーション・30日分保持
 
+
+class _WindowsSafeRotatingFileHandler(TimedRotatingFileHandler):
+    """Windows で別プロセスがログファイルをロックしている場合のローテーション失敗を吸収する。
+
+    TimedRotatingFileHandler.doRollover() は Windows で PermissionError (WinError 32) を
+    送出することがある。これを握り潰して書き込みを継続し、ノイズログを防ぐ。
+    """
+
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+        except PermissionError as exc:
+            import sys as _sys
+            print(
+                f"WARNING: ログローテーション失敗 (ファイルが別プロセスに使用中のためスキップ):"
+                f" {self.baseFilename} — {exc}",
+                file=_sys.__stderr__,
+            )
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -209,7 +229,7 @@ def setup_logging(
         # 全実行ログを集約したファイル。`tail -f` での監視に適する。
         log_file = resolved_dir / f"{app_name}.log"
         try:
-            file_handler = TimedRotatingFileHandler(
+            file_handler = _WindowsSafeRotatingFileHandler(
                 log_file,
                 when="midnight",
                 backupCount=_BACKUP_COUNT,

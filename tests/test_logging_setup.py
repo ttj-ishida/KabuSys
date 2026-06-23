@@ -82,13 +82,13 @@ class TestSetupLogging:
         assert (log_dir / "test.log").exists()
 
     def test_stream_and_file_handlers_added(self, tmp_path):
-        """StreamHandler と TimedRotatingFileHandler と FileHandler の3つが追加される。"""
+        """StreamHandler と TimedRotatingFileHandler (Safe 実装) と FileHandler の3つが追加される。"""
+        from kabusys.utils.logging_setup import _WindowsSafeRotatingFileHandler
         setup_logging(app_name="test", log_dir=tmp_path)
         root = logging.getLogger()
-        handler_types = {type(h) for h in root.handlers}
-        assert logging.StreamHandler in handler_types
-        assert TimedRotatingFileHandler in handler_types
-        assert logging.FileHandler in handler_types
+        assert any(type(h) is logging.StreamHandler for h in root.handlers)
+        assert any(isinstance(h, _WindowsSafeRotatingFileHandler) for h in root.handlers)
+        assert any(type(h) is logging.FileHandler for h in root.handlers)
 
     def test_stream_handler_uses_stdout(self, tmp_path):
         """StreamHandler が sys.stdout を使用する。"""
@@ -166,9 +166,9 @@ class TestSetupLogging:
         assert not (tmp_path / "kabusys.log").exists()
 
     def test_rotating_handler_failure_still_creates_run_log(self, tmp_path):
-        """TimedRotatingFileHandler 作成失敗時も StreamHandler + 実行単位 FileHandler で継続する。"""
+        """_WindowsSafeRotatingFileHandler 作成失敗時も StreamHandler + 実行単位 FileHandler で継続する。"""
         with patch(
-            "kabusys.utils.logging_setup.TimedRotatingFileHandler",
+            "kabusys.utils.logging_setup._WindowsSafeRotatingFileHandler",
             side_effect=OSError("permission denied"),
         ):
             run_log = setup_logging(app_name="test", log_dir=tmp_path)
@@ -439,3 +439,51 @@ class TestCaptureStdio:
         assert logged == []
         # バッファがクリアされていること
         assert tee._buf == ""
+
+
+class TestWindowsSafeRotatingFileHandler:
+    def test_dorollover_permission_error_is_suppressed(self, tmp_path):
+        """doRollover() が PermissionError を raise しても例外が外に漏れない。"""
+        from unittest.mock import patch
+        from kabusys.utils.logging_setup import _WindowsSafeRotatingFileHandler
+
+        log_file = tmp_path / "test.log"
+        log_file.write_text("initial", encoding="utf-8")
+        handler = _WindowsSafeRotatingFileHandler(str(log_file), when="midnight", backupCount=1)
+        try:
+            with patch.object(
+                TimedRotatingFileHandler,
+                "doRollover",
+                side_effect=PermissionError("[WinError 32] ファイルが使用中"),
+            ):
+                handler.doRollover()  # 例外が漏れないこと
+        finally:
+            handler.close()
+
+    def test_dorollover_success_still_works(self, tmp_path):
+        """PermissionError がない場合は親クラスの doRollover が呼ばれる。"""
+        from unittest.mock import patch
+        from kabusys.utils.logging_setup import _WindowsSafeRotatingFileHandler
+
+        log_file = tmp_path / "test.log"
+        log_file.write_text("initial", encoding="utf-8")
+        handler = _WindowsSafeRotatingFileHandler(str(log_file), when="midnight", backupCount=1)
+        try:
+            called = []
+            with patch.object(
+                TimedRotatingFileHandler,
+                "doRollover",
+                side_effect=lambda *a, **kw: called.append(True),
+            ):
+                handler.doRollover()
+            assert called == [True]
+        finally:
+            handler.close()
+
+    def test_setup_logging_uses_safe_handler(self, tmp_path):
+        """setup_logging() が _WindowsSafeRotatingFileHandler を使う。"""
+        from kabusys.utils.logging_setup import _WindowsSafeRotatingFileHandler
+        setup_logging(app_name="test_safe", log_dir=tmp_path)
+        root = logging.getLogger()
+        rotating_handlers = [h for h in root.handlers if isinstance(h, _WindowsSafeRotatingFileHandler)]
+        assert len(rotating_handlers) == 1
