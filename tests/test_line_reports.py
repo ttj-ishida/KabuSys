@@ -114,7 +114,7 @@ class TestFormatEveningMessage:
             buy_signals=[],
             sell_signals=[],
         )
-        assert "BUY: 0件 / SELL: 0件" in msg
+        assert "翌日BUY: 0件 / SELL: 0件" in msg
         assert "BUY銘柄:" not in msg
         assert "SELL銘柄:" not in msg
 
@@ -185,7 +185,7 @@ class TestFormatEveningMessage:
         )
         assert "BUY銘柄:" in msg
         assert "SELL銘柄:" in msg
-        assert "BUY: 1件 / SELL: 1件" in msg
+        assert "翌日BUY: 1件 / SELL: 1件" in msg
         assert "トヨタ自動車" in msg
         assert "オリエンタルランド" in msg
 

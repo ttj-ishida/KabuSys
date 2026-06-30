@@ -148,6 +148,9 @@ def format_evening_message(
 
     buy_signals=None のとき件数のみの旧フォーマット（後方互換）。
     buy_signals が list のとき BUY/SELL 詳細を展開する。
+    buy_signals 各要素: {"code": str, "name": str, "size": int}
+    sell_signals 各要素: {"code": str, "name": str}
+    inserted は buy_signals=None のとき（後方互換）のみ使用される。
     """
     if buy_signals is not None:
         buy_count = len(buy_signals)
@@ -162,10 +165,7 @@ def format_evening_message(
         f"当日リターン: {_fmt_rate(daily_return)}",
     ]
 
-    has_details = (buy_signals is not None and len(buy_signals) > 0) or (
-        sell_signals is not None and len(sell_signals) > 0
-    )
-    if has_details:
+    if buy_signals or sell_signals:
         lines.append("───────────────")
 
     if buy_signals:
