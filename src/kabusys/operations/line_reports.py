@@ -165,24 +165,25 @@ def format_evening_message(
         f"当日リターン: {_fmt_rate(daily_return)}",
     ]
 
-    if buy_signals or sell_signals:
-        lines.append("───────────────")
+    if buy_signals is not None:
+        if buy_signals or sell_signals:
+            lines.append("───────────────")
 
-    if buy_signals:
-        lines.append("BUY銘柄:")
-        shown = buy_signals[:max_signals]
-        for s in shown:
-            lines.append(f"  {s['code']} {s['name']}  {s['size']}株")
-        if len(buy_signals) > max_signals:
-            lines.append(f"  … 他 {len(buy_signals) - max_signals} 件")
+        if buy_signals:
+            lines.append("BUY銘柄:")
+            shown = buy_signals[:max_signals]
+            for s in shown:
+                lines.append(f"  {s['code']} {s['name']}  {s['size']}株")
+            if len(buy_signals) > max_signals:
+                lines.append(f"  … 他 {len(buy_signals) - max_signals} 件")
 
-    if sell_signals:
-        lines.append("SELL銘柄:")
-        shown = sell_signals[:max_signals]
-        for s in shown:
-            lines.append(f"  {s['code']} {s['name']}")
-        if len(sell_signals) > max_signals:
-            lines.append(f"  … 他 {len(sell_signals) - max_signals} 件")
+        if sell_signals:
+            lines.append("SELL銘柄:")
+            shown = sell_signals[:max_signals]
+            for s in shown:
+                lines.append(f"  {s['code']} {s['name']}")
+            if len(sell_signals) > max_signals:
+                lines.append(f"  … 他 {len(sell_signals) - max_signals} 件")
 
     return "\n".join(lines)
 

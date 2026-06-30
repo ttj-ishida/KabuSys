@@ -201,6 +201,19 @@ class TestFormatEveningMessage:
         assert "SELL銘柄:" not in msg
         assert "BUY: 1件" in msg
 
+    def test_buy_signals_none_with_sell_signals_hides_all_details(self):
+        """buy_signals=None のとき sell_signals が非空でも詳細セクションを出さない（後方互換）。"""
+        msg = format_evening_message(
+            inserted=0,
+            report_date="2026-06-28",
+            daily_return=None,
+            buy_signals=None,
+            sell_signals=[{"code": "4661", "name": "オリエンタルランド"}],
+        )
+        assert "翌日シグナル: 0 件" in msg
+        assert "SELL銘柄:" not in msg
+        assert "───────────────" not in msg
+
 
 class TestFormatWeeklyMessage:
     def test_with_full_summary(self):

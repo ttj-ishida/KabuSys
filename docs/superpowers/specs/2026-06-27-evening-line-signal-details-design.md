@@ -69,19 +69,20 @@ SELL銘柄:
 `signal_queue` 挿入後、LINE通知送信直前に以下をクエリ:
 
 ```sql
--- BUY シグナル
+-- BUY シグナル（signal_queue: 発注キューに積まれた翌日執行予定シグナル）
 SELECT q.code, COALESCE(st.name, q.code) AS name, q.size
 FROM signal_queue q
 LEFT JOIN stocks st ON q.code = st.code
 WHERE q.date = ? AND q.side = 'buy' AND q.status = 'pending'
 ORDER BY q.code
 
--- SELL シグナル
-SELECT q.code, COALESCE(st.name, q.code) AS name
-FROM signal_queue q
-LEFT JOIN stocks st ON q.code = st.code
-WHERE q.date = ? AND q.side = 'sell' AND q.status = 'pending'
-ORDER BY q.code
+-- SELL シグナル（signals: 戦略エンジンが生成した翌日手仕舞い予定シグナル）
+-- BUY と異なり signals テーブルを参照する。SELL は signal_queue には積まれない。
+SELECT s.code, COALESCE(st.name, s.code) AS name
+FROM signals s
+LEFT JOIN stocks st ON s.code = st.code
+WHERE s.date = ? AND s.side = 'sell'
+ORDER BY s.code
 ```
 
 - クエリ失敗時は `buy_signals=None` / `sell_signals=None` にフォールバックし、LINE通知は件数のみ表示（ジョブ失敗にはしない）

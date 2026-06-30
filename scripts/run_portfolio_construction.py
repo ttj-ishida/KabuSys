@@ -262,6 +262,7 @@ def _collect_evening_signals(
             """,
             [target_date],
         ).fetchall()
+        # signal_queue.size は BIGINT NOT NULL のため r[2] が None になることはない
         buy = [{"code": r[0], "name": r[1], "size": int(r[2])} for r in rows]
     except Exception:
         logger.warning("LINE通知用BUYシグナル詳細の取得に失敗しました", exc_info=True)
