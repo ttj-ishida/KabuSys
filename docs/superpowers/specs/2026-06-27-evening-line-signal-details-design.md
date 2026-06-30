@@ -103,5 +103,6 @@ ORDER BY s.code
 ## 制約
 
 - LINE通知の送信失敗はジョブ失敗にしない（既存ポリシー踏襲）
-- クエリ失敗時は `buy_signals=None` にフォールバック（LINE通知は件数のみ表示）
+- BUY クエリ失敗時は `(None, None)` を返し `buy_signals=None` 扱い（件数のみ表示にフォールバック）
+- SELL クエリ失敗時は `(buy, [])` を返す。`sell_signals=[]`（0件）として BUY 詳細は継続表示し、警告ログを出すのみでジョブは失敗にしない
 - `stocks.name` が NULL の場合は `code` を代用（`COALESCE` で対応）
