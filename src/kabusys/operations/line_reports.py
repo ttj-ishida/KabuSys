@@ -140,13 +140,50 @@ def format_evening_message(
     inserted: int,
     report_date: str,
     daily_return: float | None = None,
+    buy_signals: list[dict] | None = None,
+    sell_signals: list[dict] | None = None,
+    max_signals: int = 10,
 ) -> str:
-    """portfolio_construction 完了後の夜通知メッセージを生成する。"""
+    """portfolio_construction 完了後の夜通知メッセージを生成する。
+
+    buy_signals=None のとき件数のみの旧フォーマット（後方互換）。
+    buy_signals が list のとき BUY/SELL 詳細を展開する。
+    """
+    if buy_signals is not None:
+        buy_count = len(buy_signals)
+        sell_count = len(sell_signals) if sell_signals is not None else 0
+        header_signal = f"翌日BUY: {buy_count}件 / SELL: {sell_count}件"
+    else:
+        header_signal = f"翌日シグナル: {inserted} 件"
+
     lines = [
         f"【KabuSys 夜】{report_date}",
-        f"翌日シグナル: {inserted} 件",
+        header_signal,
         f"当日リターン: {_fmt_rate(daily_return)}",
     ]
+
+    has_details = (buy_signals is not None and len(buy_signals) > 0) or (
+        sell_signals is not None and len(sell_signals) > 0
+    )
+    if has_details:
+        lines.append("───────────────")
+
+    if buy_signals:
+        lines.append("BUY銘柄:")
+        shown = buy_signals[:max_signals]
+        for s in shown:
+            lines.append(f"  {s['code']} {s['name']}  {s['size']}株")
+        if len(buy_signals) > max_signals:
+            lines.append(f"  … 他 {len(buy_signals) - max_signals} 件")
+
+    if sell_signals:
+        lines.append("SELL銘柄:")
+        shown = sell_signals[:max_signals]
+        for s in shown:
+            lines.append(f"  {s['code']} {s['name']}")
+        if len(sell_signals) > max_signals:
+            lines.append(f"  … 他 {len(sell_signals) - max_signals} 件")
+
     return "\n".join(lines)
 
 

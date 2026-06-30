@@ -94,6 +94,113 @@ class TestFormatEveningMessage:
         assert isinstance(msg, str)
         assert len(msg) > 0
 
+    def test_buy_signals_none_keeps_legacy_format(self):
+        """buy_signals=None のとき既存フォーマット（後方互換）。"""
+        msg = format_evening_message(
+            inserted=3,
+            report_date="2026-06-28",
+            daily_return=0.01,
+            buy_signals=None,
+        )
+        assert "翌日シグナル: 3 件" in msg
+        assert "BUY銘柄:" not in msg
+
+    def test_buy_signals_empty_list_shows_new_header(self):
+        """buy_signals=[] のとき件数ヘッダーが新形式で BUY セクションなし。"""
+        msg = format_evening_message(
+            inserted=0,
+            report_date="2026-06-28",
+            daily_return=None,
+            buy_signals=[],
+            sell_signals=[],
+        )
+        assert "BUY: 0件 / SELL: 0件" in msg
+        assert "BUY銘柄:" not in msg
+        assert "SELL銘柄:" not in msg
+
+    def test_buy_signals_shows_code_name_size(self):
+        """BUY 1件のとき証券コード・銘柄名・株数が含まれる。"""
+        msg = format_evening_message(
+            inserted=1,
+            report_date="2026-06-28",
+            daily_return=None,
+            buy_signals=[{"code": "7203", "name": "トヨタ自動車", "size": 100}],
+            sell_signals=[],
+        )
+        assert "7203" in msg
+        assert "トヨタ自動車" in msg
+        assert "100株" in msg
+        assert "BUY銘柄:" in msg
+
+    def test_buy_signals_truncated_at_max(self):
+        """BUY 12件のとき max_signals=10 で切り捨て「他2件」が表示される。"""
+        signals = [{"code": str(i), "name": f"銘柄{i}", "size": 100} for i in range(12)]
+        msg = format_evening_message(
+            inserted=12,
+            report_date="2026-06-28",
+            daily_return=None,
+            buy_signals=signals,
+            sell_signals=[],
+            max_signals=10,
+        )
+        assert "他 2 件" in msg
+        assert "銘柄0" in msg
+        assert "銘柄10" not in msg
+
+    def test_sell_signals_shows_code_name_no_size(self):
+        """SELL 1件のとき証券コード・銘柄名のみ（株数なし）。"""
+        msg = format_evening_message(
+            inserted=0,
+            report_date="2026-06-28",
+            daily_return=None,
+            buy_signals=[],
+            sell_signals=[{"code": "4661", "name": "オリエンタルランド"}],
+        )
+        assert "4661" in msg
+        assert "オリエンタルランド" in msg
+        assert "SELL銘柄:" in msg
+        assert "株" not in msg
+
+    def test_sell_signals_truncated_at_max(self):
+        """SELL 12件のとき max_signals=10 で切り捨て「他2件」が表示される。"""
+        signals = [{"code": str(i), "name": f"銘柄{i}"} for i in range(12)]
+        msg = format_evening_message(
+            inserted=0,
+            report_date="2026-06-28",
+            daily_return=None,
+            buy_signals=[],
+            sell_signals=signals,
+            max_signals=10,
+        )
+        assert "他 2 件" in msg
+
+    def test_buy_and_sell_signals_both_shown(self):
+        """BUY + SELL 混在のとき両セクションが出力される。"""
+        msg = format_evening_message(
+            inserted=1,
+            report_date="2026-06-28",
+            daily_return=0.005,
+            buy_signals=[{"code": "7203", "name": "トヨタ自動車", "size": 100}],
+            sell_signals=[{"code": "4661", "name": "オリエンタルランド"}],
+        )
+        assert "BUY銘柄:" in msg
+        assert "SELL銘柄:" in msg
+        assert "BUY: 1件 / SELL: 1件" in msg
+        assert "トヨタ自動車" in msg
+        assert "オリエンタルランド" in msg
+
+    def test_sell_signals_none_shows_no_sell_section(self):
+        """sell_signals=None のとき SELL セクションなし。"""
+        msg = format_evening_message(
+            inserted=1,
+            report_date="2026-06-28",
+            daily_return=None,
+            buy_signals=[{"code": "7203", "name": "トヨタ自動車", "size": 100}],
+            sell_signals=None,
+        )
+        assert "SELL銘柄:" not in msg
+        assert "BUY: 1件" in msg
+
 
 class TestFormatWeeklyMessage:
     def test_with_full_summary(self):
