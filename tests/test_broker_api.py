@@ -303,6 +303,7 @@ class TestIsBrokerOffline:
     def test_false_when_timeout(self):
         """タイムアウト例外は False。"""
         import httpx
+
         inner = httpx.TimeoutException("timeout")
         outer = BrokerAPIError("タイムアウト")
         outer.__cause__ = inner
