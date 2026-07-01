@@ -47,6 +47,7 @@ class _WindowsSafeRotatingFileHandler(TimedRotatingFileHandler):
             super().doRollover()
         except PermissionError as exc:
             import sys as _sys
+
             print(
                 f"WARNING: ログローテーション失敗 (ファイルが別プロセスに使用中のためスキップ):"
                 f" {self.baseFilename} — {exc}",
