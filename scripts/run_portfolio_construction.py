@@ -240,6 +240,53 @@ def _get_today_return(conn: duckdb.DuckDBPyConnection, target_date: date, env: s
     return float(row[0])
 
 
+def _collect_evening_signals(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+) -> tuple[list[dict] | None, list[dict] | None]:
+    """LINE 夜通知用の BUY/SELL シグナル詳細を取得する。
+
+    BUY は signal_queue JOIN stocks（size あり）。
+    SELL は signals JOIN stocks（size なし）。
+    BUY クエリ失敗時は (None, None) を返し、呼び出し元が件数表示にフォールバックする。
+    """
+    buy: list[dict] = []
+    try:
+        rows = conn.execute(
+            """
+            SELECT q.code, COALESCE(st.name, q.code) AS name, CAST(q.size AS BIGINT) AS size
+            FROM signal_queue q
+            LEFT JOIN stocks st ON q.code = st.code
+            WHERE q.date = ? AND q.side = 'buy' AND q.status = 'pending'
+            ORDER BY q.code
+            """,
+            [target_date],
+        ).fetchall()
+        # signal_queue.size は BIGINT NOT NULL のため r[2] が None になることはない
+        buy = [{"code": r[0], "name": r[1], "size": int(r[2])} for r in rows]
+    except Exception:
+        logger.warning("LINE通知用BUYシグナル詳細の取得に失敗しました", exc_info=True)
+        return None, None
+
+    sell: list[dict] = []
+    try:
+        rows = conn.execute(
+            """
+            SELECT s.code, COALESCE(st.name, s.code) AS name
+            FROM signals s
+            LEFT JOIN stocks st ON s.code = st.code
+            WHERE s.date = ? AND s.side = 'sell'
+            ORDER BY s.code
+            """,
+            [target_date],
+        ).fetchall()
+        sell = [{"code": r[0], "name": r[1]} for r in rows]
+    except Exception:
+        logger.warning("LINE通知用SELLシグナル詳細の取得に失敗しました", exc_info=True)
+
+    return buy, sell
+
+
 def main() -> None:
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
@@ -386,11 +433,14 @@ def main() -> None:
 
             # 夜の日次通知
             daily_return = _get_today_return(conn, target_date, env)
+            buy_sigs, sell_sigs = _collect_evening_signals(conn, target_date)
             notifier.send(
                 format_evening_message(
                     inserted=inserted,
                     report_date=target_date.isoformat(),
                     daily_return=daily_return,
+                    buy_signals=buy_sigs,
+                    sell_signals=sell_sigs,
                 )
             )
 

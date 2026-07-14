@@ -69,19 +69,20 @@ SELL銘柄:
 `signal_queue` 挿入後、LINE通知送信直前に以下をクエリ:
 
 ```sql
--- BUY シグナル
+-- BUY シグナル（signal_queue: 発注キューに積まれた翌日執行予定シグナル）
 SELECT q.code, COALESCE(st.name, q.code) AS name, q.size
 FROM signal_queue q
 LEFT JOIN stocks st ON q.code = st.code
 WHERE q.date = ? AND q.side = 'buy' AND q.status = 'pending'
 ORDER BY q.code
 
--- SELL シグナル
-SELECT q.code, COALESCE(st.name, q.code) AS name
-FROM signal_queue q
-LEFT JOIN stocks st ON q.code = st.code
-WHERE q.date = ? AND q.side = 'sell' AND q.status = 'pending'
-ORDER BY q.code
+-- SELL シグナル（signals: 戦略エンジンが生成した翌日手仕舞い予定シグナル）
+-- BUY と異なり signals テーブルを参照する。SELL は signal_queue には積まれない。
+SELECT s.code, COALESCE(st.name, s.code) AS name
+FROM signals s
+LEFT JOIN stocks st ON s.code = st.code
+WHERE s.date = ? AND s.side = 'sell'
+ORDER BY s.code
 ```
 
 - クエリ失敗時は `buy_signals=None` / `sell_signals=None` にフォールバックし、LINE通知は件数のみ表示（ジョブ失敗にはしない）
@@ -102,5 +103,6 @@ ORDER BY q.code
 ## 制約
 
 - LINE通知の送信失敗はジョブ失敗にしない（既存ポリシー踏襲）
-- クエリ失敗時は `buy_signals=None` にフォールバック（LINE通知は件数のみ表示）
+- BUY クエリ失敗時は `(None, None)` を返し `buy_signals=None` 扱い（件数のみ表示にフォールバック）
+- SELL クエリ失敗時は `(buy, [])` を返す。`sell_signals=[]`（0件）として BUY 詳細は継続表示し、警告ログを出すのみでジョブは失敗にしない
 - `stocks.name` が NULL の場合は `code` を代用（`COALESCE` で対応）
