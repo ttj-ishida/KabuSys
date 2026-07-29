@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 _MIN_PRICE: float = 300.0  # ユニバース最低株価（円）
 _MIN_TURNOVER: float = 5e8  # ユニバース最低平均売買代金（円）
 _ZSCORE_CLIP: float = 3.0  # Z スコアクリップ範囲
+_ALLOWED_MARKETS: frozenset[str] = frozenset({"Prime", "Standard", "Growth"})  # ETF/REIT 等を除外
 
 # Z スコア正規化対象カラム（per は逆数スコアに変換するため正規化しない）
 _NORM_COLS: tuple[str, ...] = (
@@ -68,16 +69,23 @@ _NORM_COLS: tuple[str, ...] = (
 def _apply_universe_filter(
     records: list[dict[str, Any]],
     price_map: dict[str, float],
+    market_set: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """株価・流動性フィルタを適用し、基準を満たす銘柄のみを返す。
+    """株価・流動性・市場区分フィルタを適用し、基準を満たす銘柄のみを返す。
 
     フィルタ条件 (StrategyModel.md Section 2.2 / UniverseDefinition.md Section 5):
       - 株価 >= _MIN_PRICE（300 円）
       - 20日平均売買代金 >= _MIN_TURNOVER（5 億円）
+      - market_set が指定されている場合: コードが market_set に含まれること
+        （ETF/REIT 等 Prime/Standard/Growth 以外の銘柄を除外）
+      - market_set が None または空の場合: 市場区分フィルタをスキップ
+        （stocks テーブル未整備時のグレースフルデグラデーション）
     """
     result = []
     for r in records:
         code = r["code"]
+        if market_set and code not in market_set:
+            continue
         close = price_map.get(code)
         avg_turnover = r.get("avg_turnover")
         if close is None or not math.isfinite(close) or close < _MIN_PRICE:
@@ -142,6 +150,10 @@ def build_features(
     ).fetchall()
     price_map: dict[str, float] = {code: close for code, close in price_rows}
 
+    # 2b. 市場区分（stocks テーブル）。未整備時は空集合となりフィルタがスキップされる。
+    market_rows = conn.execute("SELECT code, market FROM stocks").fetchall()
+    market_set: set[str] = {code for code, market in market_rows if market in _ALLOWED_MARKETS}
+
     # 3. 全コードをマージしたレコードを構築
     all_codes = set(mom_map) | set(vol_map) | set(val_map)
     merged: list[dict[str, Any]] = []
@@ -178,7 +190,7 @@ def build_features(
         )
 
     # 4. ユニバースフィルタ
-    filtered = _apply_universe_filter(merged, price_map)
+    filtered = _apply_universe_filter(merged, price_map, market_set)
 
     # 5. Z スコア正規化
     normalized = zscore_normalize(filtered, list(_NORM_COLS))
