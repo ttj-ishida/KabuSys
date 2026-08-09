@@ -155,7 +155,9 @@ def build_features(
     # stocks に登録済みで market が Prime/Standard/Growth 以外（ETF/REIT等）のコードのみを
     # 除外対象とする。stocks に未登録のコード（部分更新中等）はフィルタの対象外として通過させる。
     market_rows = conn.execute("SELECT code, market FROM stocks").fetchall()
-    excluded_codes: set[str] = {code for code, market in market_rows if market not in _ALLOWED_MARKETS}
+    excluded_codes: set[str] = {
+        code for code, market in market_rows if market not in _ALLOWED_MARKETS
+    }
 
     # 3. 全コードをマージしたレコードを構築
     all_codes = set(mom_map) | set(vol_map) | set(val_map)
