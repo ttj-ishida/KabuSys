@@ -404,6 +404,7 @@ python scripts/setup_db.py --paper-reset
 ## 参考リンク
 
 - [kabu ステーション API ドキュメント](https://kabucom.github.io/kabusapi/ptal/add-in.html) — 検証用ポート（18081）の説明あり
+- [W1_08 Paper Trading 4週間検証 Runbook](../08_Operations/W1_08_PaperTradingValidationRunbook.md) — 4週間検証の手順・証跡・合否基準
 - `documents/08_Operations/TradingRunbook.md` — 日次運用の詳細手順（本番・ペーパー共通）
 - `documents/08_Operations/TODO_PaperTradingE2E.md` — ペーパートレード機能の実装要件一覧
 - `documents/08_Operations/FailureRecovery.md` — 異常時の対応手順
