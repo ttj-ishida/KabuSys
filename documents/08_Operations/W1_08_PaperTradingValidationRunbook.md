@@ -77,6 +77,8 @@ Day 0 のダミーシグナル、休場日、必須ジョブまたは証跡が�
 | `artifacts/paper_trading_verification/<RUN_ID>/final/` | 最終レポートと Go / No-Go 判断 |
 
 ログは削除・上書きせず、既存の実行単位ログ `logs/<app>_YYYYMMDD_HHMMSS_<PID>.log` を参照する。
+証跡の共有前に、kabu ステーション API トークン、パスワード、その他の秘密値がログへ
+出力されていないことを確認する。証跡一式は取引・口座情報を含む機密データとして扱う。
 
 ---
 
@@ -125,7 +127,7 @@ Day 0 の合格条件:
 | ソース | `git rev-parse HEAD`、ブランチ、`git status --short` が空であること |
 | 実行環境 | Windows バージョン、Python バージョン、依存パッケージ一覧 |
 | モード | `KABUSYS_ENV=paper_trading`、`KABU_USE_SANDBOX=true`、検証用ポート `18081` |
-| 時間窓 | Execution 起動 `08:30`、送信 `08:50-09:10`、終了 `15:30` |
+| 時間窓 | Execution 起動 `08:30`、`KABUSYS_SIGNAL_SEND_START=08:50`、`KABUSYS_SIGNAL_SEND_END=09:10`、終了 `15:30` |
 | W1_08 | 上表の固定パラメータと `run_strategy_signal.py` のハッシュ |
 | リスク・注文 | `risk_config.yaml`、`execution_config.yaml` のハッシュと注文方式 |
 | DB | DuckDB、Paper SQLite、Monitoring SQLite の絶対パス、サイズ、ハッシュ |
@@ -149,6 +151,13 @@ python -m pip freeze | Set-Content "$Baseline\pip_freeze.txt"
 
 Get-FileHash scripts\run_strategy_signal.py,config\risk_config.yaml,config\execution_config.yaml |
   Export-Csv -NoTypeInformation "$Baseline\config_hashes.csv"
+
+Get-Item data\kabusys.duckdb,data\paper_trading.db,data\monitoring.db |
+  Select-Object FullName,Length,LastWriteTimeUtc |
+  Export-Csv -NoTypeInformation "$Baseline\db_files.csv"
+
+Get-FileHash data\kabusys.duckdb,data\paper_trading.db,data\monitoring.db |
+  Export-Csv -NoTypeInformation "$Baseline\db_hashes.csv"
 
 Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo |
   Export-Csv -NoTypeInformation "$Baseline\scheduled_tasks.csv"
@@ -187,7 +196,7 @@ Paper DB が Day 0 の注文を含む場合は開始しない。
 
 | 時刻 | 操作・確認 | 日次合格条件 | 保存する証跡 |
 |---|---|---|---|
-| 07:45 | PC、検証版 kabu ステーション、ポート18081、タスク状態を確認 | 接続可、設定・Git SHAに差分なし | 接続結果、タスク一覧 |
+| 07:45 | PC、時刻同期、空き容量、検証版 kabu ステーション、ポート18081、タスク状態を確認 | タイムゾーンJST、時刻同期正常、必要容量あり、接続可、設定・Git SHAに差分なし | 時刻同期、ディスク、接続結果、タスク一覧 |
 | 08:00 | Pre-Market Report | `BLOCKED` でない。例外は承認済み `VALID_NO_SIGNAL` のみ | `artifacts/pre_market/<DATE>/` |
 | 08:02 | Signal Queue Report | 件数・銘柄・方向・数量が夜間結果と一致 | `artifacts/signal_queue/<DATE>/` |
 | 08:30 | Execution 自動起動 | PID生成、Startup Report生成、起動エラーなし | PID、startup report、ログ |
@@ -215,7 +224,7 @@ python scripts/run_paper_trading_verification.py `
 途中日の終了コード1だけを障害扱いせず、各指標と保存された JSON を確認する。
 
 `paper_verification_report` の `trade_logs` / `system_status` は UTC の ISO8601 時刻で保存され、
-`--from` / `--to` も UTC 日付境界で絞り込む。08:50 JST の初回注文を落とさないため、
+`--from` / `--to` は UTC 日付の `YYYY-MM-DD` で指定する。08:50 JST の初回注文を落とさないため、
 通常は `<REPORT_FROM_UTC_DATE>` を `<START_DATE>` の前日にする。Day 0 のデータが同じ UTC 範囲へ
 入らないよう、スモーク後に Paper DB を必ずリセットする。Monitoring DB の Day 0 poll が範囲に
 入る場合は、開始時の `system_status.id` と UTC 時刻を記録し、最終判断で開始前行を除外する。
@@ -259,6 +268,9 @@ deviation_from_assumption = signed_slippage - 0.001
 - コード・設定・依存関係のハッシュが開始時と一致する
 - `INVALID_DAY` と追加すべき延長日数が確定している
 
+20日・10件へ到達する前の W1 verifier 終了コード1は想定内であり、週次障害には数えない。
+各指標の内訳と JSON の生成有無で判断する。
+
 週次レビューでハード基準違反が判明した場合、4週目まで待たずに Run を `FAIL` とする。
 
 ---
@@ -276,18 +288,20 @@ deviation_from_assumption = signed_slippage - 0.001
 | 注文データ | Created、総注文、スリッページ標本が各1件以上 | 0件/N/A は `INCONCLUSIVE` |
 | Queue追跡 | 実行対象 queue → Created が100%追跡可能 | 欠落は `FAIL` |
 | 注文エラー率 | `rejected` / `error` / `failed` が0件、エラー率0% | 1件でも `FAIL` |
-| スリッページ | 自動集計の最大絶対値が0.3%以下 | 超過は `FAIL` |
+| スリッページ | W1 JSON の `slippage_max_pct` が0.3%以下 | 超過は `FAIL` |
 | 想定との差 | 符号付き実測と想定0.1%の差が±0.3 percentage point以内（絶対値 `<= 0.003`） | 超過は `FAIL` |
-| 稼働率 | 99%以上、標本あり | 未達は `FAIL`、N/A は `INCONCLUSIVE` |
-| 送信率 | 95%以上、Createdあり | 未達は `FAIL`、N/A は `INCONCLUSIVE` |
-| 約定率 | 90%以上、Createdあり | 未達は `FAIL`、N/A は `INCONCLUSIVE` |
-| P95レイテンシ | 200ms以下、標本あり | 未達は `FAIL`、N/A は `INCONCLUSIVE` |
+| 稼働率 | Generic report の `system_status.uptime_pct` が99%以上、標本あり | 未達は `FAIL`、N/A は `INCONCLUSIVE` |
+| 送信率 | Generic report の `Sent / Created` が95%以上、Createdあり | 未達は `FAIL`、N/A は `INCONCLUSIVE` |
+| 約定率 | Generic report の `Filled / Created` が90%以上、Createdあり | 未達は `FAIL`、N/A は `INCONCLUSIVE` |
+| P95レイテンシ | Generic report の `trade_logs.latency_ms` P95が200ms以下、標本あり | 未達は `FAIL`、N/A は `INCONCLUSIVE` |
 | Reconciliation | 最終未解消差分0、全差分に説明あり | 未解消は `FAIL` |
 | ジョブ・証跡 | 算入した全営業日で必須ジョブ・日次証跡が揃う | 欠測日は無効、継続 |
 | 変更管理 | 取引判断へ影響するコード・設定変更0件 | 変更時点で `FAIL`、再開始 |
 
 リスクルールによる意図した却下は技術エラーと分け、`risk_logs` の理由と queue との対応を記録する。
 Broker またはシステムが返した `rejected` / `error` / `failed` は技術エラーとして数える。
+W1 固有のシグナル件数と自動スリッページは BUY を対象とするが、技術エラー率、送信率、約定率、
+リコンシリエーションは BUY / SELL を含む全実行対象注文で判定する。
 
 休場日、特別気配、上場廃止などが期間中に発生した場合は、対象銘柄、システム判断、注文有無、
 ログを記録し、クラッシュ・重複・不正注文がないことを確認する。自然発生しなかった項目は
