@@ -45,6 +45,9 @@ _MIN_PRICE: float = 300.0  # ユニバース最低株価（円）
 _MIN_TURNOVER: float = 5e8  # ユニバース最低平均売買代金（円）
 _ZSCORE_CLIP: float = 3.0  # Z スコアクリップ範囲
 _ALLOWED_MARKETS: frozenset[str] = frozenset({"Prime", "Standard", "Growth"})  # ETF/REIT 等を除外
+_ALLOWED_MARKETS_NORMALIZED: frozenset[str] = frozenset(
+    market.casefold() for market in _ALLOWED_MARKETS
+)
 
 # Z スコア正規化対象カラム（per は逆数スコアに変換するため正規化しない）
 _NORM_COLS: tuple[str, ...] = (
@@ -69,22 +72,23 @@ _NORM_COLS: tuple[str, ...] = (
 def _apply_universe_filter(
     records: list[dict[str, Any]],
     price_map: dict[str, float],
-    market_set: set[str] | None = None,
+    excluded_codes: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """株価・流動性・市場区分フィルタを適用し、基準を満たす銘柄のみを返す。
 
     フィルタ条件 (StrategyModel.md Section 2.2 / UniverseDefinition.md Section 5):
       - 株価 >= _MIN_PRICE（300 円）
       - 20日平均売買代金 >= _MIN_TURNOVER（5 億円）
-      - market_set が指定されている場合: コードが market_set に含まれること
-        （ETF/REIT 等 Prime/Standard/Growth 以外の銘柄を除外）
-      - market_set が None または空の場合: 市場区分フィルタをスキップ
+      - excluded_codes が指定されている場合: コードが excluded_codes に含まれないこと
+        （stocks に登録済みかつ market 確定済みで、Prime/Standard/Growth 以外＝ETF/REIT
+        等の銘柄を除外。stocks 未登録または market 未確定のコードは通過する）
+      - excluded_codes が None または空の場合: 市場区分フィルタをスキップ
         （stocks テーブル未整備時のグレースフルデグラデーション）
     """
     result = []
     for r in records:
         code = r["code"]
-        if market_set and code not in market_set:
+        if excluded_codes and code in excluded_codes:
             continue
         close = price_map.get(code)
         avg_turnover = r.get("avg_turnover")
@@ -151,8 +155,15 @@ def build_features(
     price_map: dict[str, float] = {code: close for code, close in price_rows}
 
     # 2b. 市場区分（stocks テーブル）。未整備時は空集合となりフィルタがスキップされる。
+    # stocks に登録済みかつ market 確定済みで Prime/Standard/Growth 以外（ETF/REIT等）の
+    # コードのみを除外する。未登録または market 未確定のコード（部分更新中等）は通過させる。
     market_rows = conn.execute("SELECT code, market FROM stocks").fetchall()
-    market_set: set[str] = {code for code, market in market_rows if market in _ALLOWED_MARKETS}
+    excluded_codes: set[str] = {
+        str(code)
+        for code, market in market_rows
+        if (normalized_market := str(market).strip().casefold() if market is not None else "")
+        and normalized_market not in _ALLOWED_MARKETS_NORMALIZED
+    }
 
     # 3. 全コードをマージしたレコードを構築
     all_codes = set(mom_map) | set(vol_map) | set(val_map)
@@ -190,7 +201,7 @@ def build_features(
         )
 
     # 4. ユニバースフィルタ
-    filtered = _apply_universe_filter(merged, price_map, market_set)
+    filtered = _apply_universe_filter(merged, price_map, excluded_codes)
 
     # 5. Z スコア正規化
     normalized = zscore_normalize(filtered, list(_NORM_COLS))
