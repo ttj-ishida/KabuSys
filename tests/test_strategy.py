@@ -379,6 +379,28 @@ def test_build_features_market_filter_passes_unregistered_codes(conn):
     assert codes == {"1301", "9999"}
 
 
+@pytest.mark.parametrize("market", [None, "", "   "], ids=["null", "empty", "whitespace"])
+def test_build_features_market_filter_passes_unknown_market(conn, market):
+    """市場区分が未確定の場合は、登録済みコードでも除外しない"""
+    _insert_price_history(conn, [("1301", 1000.0, 6e8)])
+    conn.execute("INSERT INTO stocks (code, market) VALUES (?, ?)", ["1301", market])
+    build_features(conn, TARGET_DATE)
+    rows = conn.execute("SELECT code FROM features WHERE date = ?", [TARGET_DATE]).fetchall()
+    assert {r[0] for r in rows} == {"1301"}
+
+
+def test_build_features_market_filter_normalizes_market_and_code(conn):
+    """市場区分の表記揺れと数値型コードを正規化して判定する"""
+    _insert_price_history(conn, [("1301", 1000.0, 6e8), ("1305", 1000.0, 6e8)])
+    conn.executemany(
+        "INSERT INTO stocks (code, market) VALUES (?, ?)",
+        [[1301, " prime "], [1305, "ReIt"]],
+    )
+    build_features(conn, TARGET_DATE)
+    rows = conn.execute("SELECT code FROM features WHERE date = ?", [TARGET_DATE]).fetchall()
+    assert {r[0] for r in rows} == {"1301"}
+
+
 def test_build_features_zscore_clipped(conn):
     """Z スコア値は ±3 内に収まる"""
     _insert_price_history(conn, [("A", 1000.0, 6e8), ("B", 500.0, 6e8), ("C", 800.0, 6e8)])

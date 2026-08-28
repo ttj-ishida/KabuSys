@@ -45,6 +45,9 @@ _MIN_PRICE: float = 300.0  # ユニバース最低株価（円）
 _MIN_TURNOVER: float = 5e8  # ユニバース最低平均売買代金（円）
 _ZSCORE_CLIP: float = 3.0  # Z スコアクリップ範囲
 _ALLOWED_MARKETS: frozenset[str] = frozenset({"Prime", "Standard", "Growth"})  # ETF/REIT 等を除外
+_ALLOWED_MARKETS_NORMALIZED: frozenset[str] = frozenset(
+    market.casefold() for market in _ALLOWED_MARKETS
+)
 
 # Z スコア正規化対象カラム（per は逆数スコアに変換するため正規化しない）
 _NORM_COLS: tuple[str, ...] = (
@@ -77,8 +80,8 @@ def _apply_universe_filter(
       - 株価 >= _MIN_PRICE（300 円）
       - 20日平均売買代金 >= _MIN_TURNOVER（5 億円）
       - excluded_codes が指定されている場合: コードが excluded_codes に含まれないこと
-        （stocks に登録済みで market が Prime/Standard/Growth 以外＝ETF/REIT 等の銘柄を除外。
-        stocks に未登録のコードは対象外＝除外リストには入らないため通過する）
+        （stocks に登録済みかつ market 確定済みで、Prime/Standard/Growth 以外＝ETF/REIT
+        等の銘柄を除外。stocks 未登録または market 未確定のコードは通過する）
       - excluded_codes が None または空の場合: 市場区分フィルタをスキップ
         （stocks テーブル未整備時のグレースフルデグラデーション）
     """
@@ -152,11 +155,14 @@ def build_features(
     price_map: dict[str, float] = {code: close for code, close in price_rows}
 
     # 2b. 市場区分（stocks テーブル）。未整備時は空集合となりフィルタがスキップされる。
-    # stocks に登録済みで market が Prime/Standard/Growth 以外（ETF/REIT等）のコードのみを
-    # 除外対象とする。stocks に未登録のコード（部分更新中等）はフィルタの対象外として通過させる。
+    # stocks に登録済みかつ market 確定済みで Prime/Standard/Growth 以外（ETF/REIT等）の
+    # コードのみを除外する。未登録または market 未確定のコード（部分更新中等）は通過させる。
     market_rows = conn.execute("SELECT code, market FROM stocks").fetchall()
     excluded_codes: set[str] = {
-        code for code, market in market_rows if market not in _ALLOWED_MARKETS
+        str(code)
+        for code, market in market_rows
+        if (normalized_market := str(market).strip().casefold() if market is not None else "")
+        and normalized_market not in _ALLOWED_MARKETS_NORMALIZED
     }
 
     # 3. 全コードをマージしたレコードを構築
