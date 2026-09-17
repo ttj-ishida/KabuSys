@@ -7,7 +7,9 @@
 
 ## 1. 全体像
 
-KabuSys は、夜間バッチで翌営業日のシグナルと発注キューを作り、翌朝に Execution / Monitoring を起動してザラ場を監視する構成です。
+KabuSys は、夜間バッチで翌営業日のシグナルと注文候補を作り、翌朝にユーザーが手動注文できるよう確認レポートを生成する構成です。
+
+当面の本番運用では kabuステーション API による自動発注を主ルートにしない。Execution / Monitoring は Paper Trading や検証時のみ使用する。
 
 ```text
 17:30  data_update
@@ -20,9 +22,9 @@ KabuSys は、夜間バッチで翌営業日のシグナルと発注キューを
 21:30  night batch status confirmation（オペレーター確認）
 08:00  pre_market_report（自動）
 08:02  signal_queue_report（自動）
-08:05  position_reconciliation_report（自動）
-08:30  execution start（自動）
-09:00  monitoring start（自動）
+08:05  manual order final check（手動）
+08:30  broker web/order screen preparation（手動）
+09:00  manual order entry（手動）
 15:00  market_close_report（手動）
 ```
 
@@ -91,7 +93,7 @@ KabuSys は、夜間バッチで翌営業日のシグナルと発注キューを
 役割:
 
 - ポジションサイズ計算
-- 翌営業日発注キュー生成
+- 翌営業日手動注文候補生成
 
 主なテーブル:
 
@@ -138,7 +140,7 @@ Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object 
 
 判定:
 
-- `READY`: 全必須ジョブ成功かつ翌営業日の `signal_queue` が作成済み
+- `READY`: 全必須ジョブ成功かつ翌営業日の `signal_queue` が作成済み。手動注文候補として確認可能
 - `READY_WITH_WARNINGS`: warning はあるが翌営業日の準備は完了
 - `BLOCKED`: 以下のいずれかに該当する場合
 
@@ -157,13 +159,13 @@ Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object 
 
 ## 4. Pre-Market（08:00〜08:05）
 
-3 本のレポートが Task Scheduler により自動実行される。
+2 本のレポートが Task Scheduler により自動実行される。手動注文メイン運用では、証券口座との自動リコンシリエーションは必須にしない。
 
 | 時刻 | タスク名 | スクリプト | 出力先 |
 |------|----------|------------|--------|
 | 08:00 | `KabuSys_PreMarketReport` | `scripts/run_pre_market_report.py` | `artifacts/pre_market/{date}/report.md` |
 | 08:02 | `KabuSys_SignalQueueReport` | `scripts/run_signal_queue_report.py` | `artifacts/signal_queue/{date}/report.md` |
-| 08:05 | `KabuSys_PositionReconciliationReport` | `scripts/run_position_reconciliation_report.py` | `artifacts/position_reconciliation/{date}/report.json` |
+| 08:05 | 手動確認 | WebManual / Signal Queue Report | `artifacts/signal_queue/{date}/report.md` |
 
 判定（pre_market_report）:
 
@@ -176,7 +178,6 @@ Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object 
 - stop flag
 - Task Scheduler readiness
 - Signal Queue
-- ポジション差分
 - データ鮮度
 
 手動再実行（デバッグ時）:
@@ -184,14 +185,32 @@ Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object 
 ```cmd
 python scripts/run_pre_market_report.py
 python scripts/run_signal_queue_report.py
-python scripts/run_position_reconciliation_report.py
 ```
 
 ---
 
-## 5. Execution / Monitoring
+## 5. Manual Order / Optional Execution
 
-### 5.1 Execution Start（08:30）
+### 5.1 手動注文確認（08:30）
+
+手動注文メイン運用では、Execution は起動しない。
+
+確認するもの:
+
+- `artifacts/signal_queue/{date}/report.md`
+- BUY 候補
+- SELL 候補
+- 推奨数量
+- 想定約定金額
+- 見送り条件
+
+### 5.2 手動注文（09:00）
+
+ユーザーが証券会社の画面で注文する。
+
+約定後は、約定日、銘柄コード、売買、数量、単価、メモを保存する。手動約定投入 CLI 実装後は `manual_trades` に取り込む。
+
+### 5.3 Optional Execution Start（検証用）
 
 ```cmd
 python scripts\start_system.py --component execution
@@ -199,16 +218,17 @@ python scripts\start_system.py --component execution
 
 補足:
 
+- Paper Trading や自動発注検証時のみ使用する
 - `python -m kabusys.run_execution` 実行時に Execution Startup Summary が自動保存される
 - 保存先: `artifacts/execution_startup/{date}/report.md`
 
-### 5.2 Monitoring Start（09:00）
+### 5.4 Optional Monitoring Start（検証用）
 
 ```cmd
 python scripts\start_system.py --component monitoring
 ```
 
-ザラ場では `execution_service` と `monitoring_service` が動作し、注文・ポジション・リスク状態を監視する。
+Paper Trading や自動発注検証時に、注文・ポジション・リスク状態を監視する。
 
 ---
 

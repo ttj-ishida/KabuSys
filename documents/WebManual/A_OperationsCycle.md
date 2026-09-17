@@ -8,29 +8,29 @@
 
 ## 1. このシステムはどう動くか
 
-KabuSys は、**市場が閉まっている時間に翌営業日の売買準備を行い、ザラ場中は発注と監視に専念する** システムです。
+KabuSys は、**市場が閉まっている時間に翌営業日の売買準備を行い、前日夜・当日朝にユーザーが手動注文を判断できるようにする** システムです。
 
 1日の流れは大きく分けて次の4段階です。
 
 1. 引け後から夜間に、データ更新と分析を行う
-2. 翌朝、Execution を起動し、売買準備を整える
-3. ザラ場中に、発注・約定確認・監視を行う
+2. 翌朝、候補・リスク・見送り条件を確認する
+3. ユーザーが証券画面で手動注文し、約定結果を控える
 4. 引け後に、当日結果を保存し、次の夜間バッチへ移る
 
-この構成により、ザラ場中に重い計算処理を持ち込まず、発注処理を最優先にできます。
+この構成により、kabuステーション API の起動・ログイン維持に依存せず、日次の売買判断を継続できます。
 
 ---
 
 ## 2. 1日の運用タイムライン
 
 ```text
-07:50  PC・kabuステーション起動確認
+07:50  PC 起動確認
 08:00  pre_market_report（自動）
 08:02  signal_queue_report（自動）
-08:05  position_reconciliation_report（自動）
-08:30  Execution 起動（自動）
-09:00  Monitoring 起動（自動） / 前場開始
-09:00-11:30  前場監視
+08:05  手動注文候補の最終確認
+08:30  証券画面で発注準備
+09:00  ユーザーが手動注文 / 前場開始
+09:00-11:30  約定確認・必要に応じて手動メモ
 11:30-12:30  昼休み
 12:30-15:00  後場監視
 15:00  市場クローズ確認
@@ -56,21 +56,20 @@ KabuSys は、**市場が閉まっている時間に翌営業日の売買準備�
 
 - Windows PC が起動している
 - スリープしていない
-- kabuステーションが起動している
-- kabuステーションにログイン済みである
-- API 接続が正常である
+- 前日夜バッチの結果を確認できる
+- 証券会社の注文画面へログインできる
 
 システムはこの時点では、まだ売買を始めません。
 
 ### 3.2 Pre-Market Checklist（08:00〜08:05）
 
-市場開始前のレポート 3 本が Task Scheduler により自動実行されます。
+市場開始前のレポートが Task Scheduler により自動実行されます。
 
 | 時刻 | ジョブ | 出力先 |
 |------|--------|--------|
 | 08:00 | `pre_market_report` | `artifacts/pre_market/{date}/report.md` |
 | 08:02 | `signal_queue_report` | `artifacts/signal_queue/{date}/report.md` |
-| 08:05 | `position_reconciliation_report` | `artifacts/position_reconciliation/{date}/report.json` |
+| 08:05 | 手動注文候補の最終確認 | `artifacts/signal_queue/{date}/report.md` |
 
 LINE 通知が有効な場合、各レポートの結果がスマートフォンへ自動送信されます。結果は Streamlit の **Pre-Market** / **Signal Queue** ページでも確認できます。
 
@@ -87,74 +86,48 @@ python scripts/run_position_reconciliation_report.py
 確認項目:
 
 - 前日分データが正常に取り込まれている
-- 本日の `Signal Queue` に `pending` シグナルが存在する
-- DB 上のポジションと証券口座のポジションが一致している（`position_reconciliation_report` で確認）
+- 本日の `Signal Queue` に候補が存在する
+- 手動注文する候補と見送る候補を決める
 - `data/stop_requested.flag` が存在しない
 - Task Scheduler の KabuSys タスクが `Ready` 状態である
 
 ここはユーザーの責任範囲です。  
 この確認をせずに運用を始めると、Execution が正常に起動しても古いデータや不整合ポジションのまま売買する可能性があります。
 
-### 3.3 Execution 起動（08:30）
+### 3.3 手動注文準備（08:30）
 
-Execution は Task Scheduler により自動起動します。
-
-Execution が自動で行うこと:
-
-1. 停止フラグの確認
-2. 注文の自動リコンシリエーション
-3. `pending` シグナルの読み込み
-4. 発注準備開始
+この運用では Execution は起動しません。ユーザーが証券画面で注文する前に、候補と数量を最終確認します。
 
 ユーザーが確認すること:
 
-Execution 起動直後に `artifacts/execution_startup/{date}/report.md` が自動生成されます。ステータスが `READY` であれば継続可能です。
+1. BUY 候補
+2. SELL 候補
+3. 推奨数量
+4. 想定金額
+5. 見送り条件
 
-- `BLOCKED`（`orders_no_status > 0`）: 注文ステータス不明。二重発注リスクがあるため手動対応が必要
-- `READY_WITH_WARNINGS`（`position_discrepancies` あり）: 執行は継続可能だが DB とブローカー間の数量差分を確認すること。差分の `kind` が `CLOSED_STATE_CONSTRAINT` の場合は `Filled→Closed` 遷移未実装による既知差分のため対応不要
-- `READY`: 問題なし。発注ループを継続する
+自動発注を検証する場合のみ、別途 Paper Trading 手順に従って Execution を起動します。
 
-### 3.4 Monitoring 起動 / 前場開始（09:00）
+### 3.4 手動注文 / 前場開始（09:00）
 
-09:00 からは、Monitoring も起動し、ザラ場監視体制に入ります。
+ユーザーが証券画面で注文します。
 
-ザラ場中に動くのは主に以下です。
+注文後は、約定結果を控えます。
 
-- `execution_service`
-- `monitoring_service`
+控える項目:
 
-夜間バッチのような重い分析処理は動きません。
+- 銘柄コード
+- 売買
+- 約定数量
+- 約定単価
+- 約定日
+- メモ
 
 ### 3.5 ザラ場中（09:00-11:30 / 12:30-15:00）
 
-システムが自動で行うこと:
-
-- `pending` シグナル取得
-- 発注
-- 約定確認
-- ポジション更新
-- 口座余力チェック
-- 二重発注防止
-- ポジション上限チェック
-- ドローダウン監視
-- API 接続監視
-- Kill Switch 判定
-
 ユーザーが行うこと:
 
-`run_intraday_monitor` を起動して Intraday Monitoring Interface でステータスを確認する。
-
-```cmd
-python -m kabusys.run_intraday_monitor --watch
-```
-
-または Streamlit ダッシュボードを開いて常時監視する:
-
-```cmd
-python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
-```
-
-> ⚠️ Streamlit はターミナルを占有します。レポートスクリプトなどを別途実行する場合は、**新しいターミナルウィンドウ**を開いて `.venv\Scripts\Activate.ps1` を有効化してから実行してください。
+証券画面で約定状況を確認し、必要に応じて注文メモを残します。KabuSys 側の自動発注プロセスは動かしません。
 
 ダッシュボードは 11 ページ構成です。
 
@@ -178,7 +151,7 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 - **Home > Overview** の直近エラーイベントに `ORDER_ERROR` / `RISK_BREACH` が表示されている場合は即時対応
 - ドローダウンが -10% 超の場合は警告バナーが表示される（Kill Switch 発動を検討）
 
-ザラ場中の基本方針は、**売買判断と執行はシステム、継続運転の最終監督はユーザー** です。
+ザラ場中の基本方針は、**売買判断の材料はKabuSys、執行はユーザー** です。
 
 ### 3.6 市場クローズ確認（15:00）
 
@@ -187,9 +160,9 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 確認項目:
 
 - `signal_queue` に `pending` が残っていないか
-- `positions` テーブルが更新されているか
-- `portfolio_performance` に本日分が記録されているか
-- 必要なら Execution を停止する
+- 手動注文した約定を記録したか
+- 約定CSVまたはメモを保存したか
+- 翌営業日のSELL候補に影響するポジションを把握したか
 
 この時間帯は、新規売買のためではなく、当日運用結果が正常に締められたかを確認する時間です。
 
@@ -257,7 +230,7 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 
 - ポジションサイズ計算
 - リスク制御適用
-- 発注キュー生成
+- 手動注文候補の生成
 
 保存先:
 
@@ -282,7 +255,7 @@ python scripts/run_night_batch_report.py
 
 判定:
 
-- `READY`: 全必須ジョブ成功かつ `signal_queue` 作成済み → 翌日執行可
+- `READY`: 全必須ジョブ成功かつ `signal_queue` 作成済み → 翌日の手動注文候補として確認可
 - `READY_WITH_WARNINGS`: 警告はあるが翌営業日の準備は完了 → 内容確認の上で判断
 - `BLOCKED`: 以下のいずれかに該当 → 翌朝の自動執行を開始しない
   - 必須ジョブが失敗 / 欠落
@@ -290,7 +263,7 @@ python scripts/run_night_batch_report.py
   - `prices_daily == 0`（価格データ未取得）
   - `features == 0`（特徴量未生成）
 
-夜間バッチが失敗している場合、翌朝の自動執行は危険です。  
+夜間バッチが失敗している場合、翌朝の注文判断は危険です。  
 少なくとも `Signal Queue` が妥当かどうかは、ユーザーが確認する前提です。
 
 ---
@@ -307,27 +280,22 @@ python scripts/run_night_batch_report.py
 - 売買シグナル生成
 - ポートフォリオ構築
 - `Signal Queue` 生成
-- 発注
-- 約定確認
-- ポジション更新
-- ドローダウン監視
-- API 接続監視
-- Kill Switch 発動
+- 手動注文候補の提示
+- 保有評価
+- 売却候補の提示
 
-要するに、**分析・執行・一次監視はシステム** が担当します。
+要するに、**分析・候補提示・評価はシステム** が担当します。
 
 ## 4.2 ユーザーの役割
 
 ユーザーが担当する範囲は以下です。
 
 - 朝の事前確認
-- PC と kabuステーションの稼働確認
-- API 接続状態の確認
-- ポジション整合性の確認
+- 注文候補の採否判断
+- 証券画面での手動発注
+- 約定結果の記録
 - Task Scheduler の状態確認
-- ザラ場中の異常監視
-- アラート発生時の判断
-- 必要時の手動再起動
+- 必要時の手動復旧
 - 緊急停止の実行
 - 夜間バッチ成功確認
 

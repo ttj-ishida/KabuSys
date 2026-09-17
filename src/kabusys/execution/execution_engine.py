@@ -24,6 +24,7 @@ from kabusys.execution.broker_api import BrokerAPIProtocol, OrderSentPendingErro
 
 # DuplicateOrderError は _process_signals() (Task 7) で使用
 from kabusys.execution.order_manager import DuplicateOrderError, OrderManager
+from kabusys.execution.order_record import OrderState
 from kabusys.execution.order_repository import OrderRepository
 from kabusys.execution.reconciler import Reconciler
 from kabusys.execution.risk_manager import RiskManager, RiskRejectReason
@@ -118,6 +119,7 @@ class ExecutionEngine:
                 self.kill_switch()
                 return
 
+            signal_id: str = sig["signal_id"]
             code: str = sig["code"]
             side: str = sig["side"]
             raw_qty: int = sig["qty"]
@@ -138,13 +140,13 @@ class ExecutionEngine:
             else:
                 qty = raw_qty
 
-            signal_id = f"{self._config.target_date.isoformat()}_{code}_{side}"
             order_value = price * qty
 
             # Gate 1: シグナルレベル検査
             g1 = self._risk_manager.check_signal(signal_id, code, order_value, side=side)
             if not g1.passed:
                 logger.info("Gate 1 NG - signal_id=%s: %s", signal_id, g1.reason)
+                self._update_signal_queue_status(signal_id, "failed")
                 continue
 
             # Gate 2: エグゼキューションレベル検査（レート制限: リトライ最大3回）
@@ -162,10 +164,12 @@ class ExecutionEngine:
 
             if not g2_passed:
                 logger.info("Gate 2 NG - signal_id=%s: %s", signal_id, g2.reason)
+                self._update_signal_queue_status(signal_id, "failed")
                 continue
 
             # 発注
             try:
+                self._update_signal_queue_status(signal_id, "processing")
                 order_type = "market" if price == 0.0 else "limit"
                 record = self._order_manager.create_order(
                     signal_id,
@@ -180,6 +184,7 @@ class ExecutionEngine:
                 self._log_trade_event("Created", record)
             except DuplicateOrderError:
                 logger.info("DuplicateOrderError - skip: signal_id=%s", signal_id)
+                self._update_signal_queue_status(signal_id, "processing")
                 continue
 
             t0 = _time_module.perf_counter()
@@ -201,9 +206,11 @@ class ExecutionEngine:
                 self._risk_manager.record_api_success()
                 _order_sent = True
                 _order_pending = True
+                self._update_signal_queue_status(signal_id, "processing")
                 logger.info("発注保留（pending）: signal_id=%s", signal_id)
             except Exception as exc:
                 self._risk_manager.record_api_error()
+                self._update_signal_queue_status(signal_id, "failed")
                 logger.error("発注失敗: signal_id=%s: %s", signal_id, exc)
 
             # position_entries に約定を記録（最低保有日数・再エントリー制限用）
@@ -251,10 +258,16 @@ class ExecutionEngine:
             if latency_ms is not None and record.broker_order_id:
                 try:
                     status = self._broker.get_order_status(record.broker_order_id)
+                    if status is not None:
+                        updated_record = self._order_manager.sync_order(record.client_order_id)
+                        if updated_record.state == OrderState.Filled:
+                            self._update_signal_queue_status(signal_id, "filled")
+                        else:
+                            self._update_signal_queue_status(signal_id, "processing")
                     if status is not None and status.status == "filled":
                         self._log_trade_event(
                             "Filled",
-                            record,
+                            updated_record,
                             filled_qty=status.filled_qty,
                             latency_ms=latency_ms,
                             state="filled",
@@ -449,14 +462,37 @@ class ExecutionEngine:
         rows = self._read_signal_queue_rows()
         return [
             {
-                "code": r[0],
-                "side": r[1],
-                "qty": int(r[2]),
-                "price": float(r[3]),
-                "size_multiplier": float(r[4]),
+                "signal_id": r[0],
+                "code": r[1],
+                "side": r[2],
+                "qty": int(r[3]),
+                "price": float(r[4]),
+                "size_multiplier": float(r[5]),
             }
             for r in rows
         ]
+
+    def _update_signal_queue_status(self, signal_id: str, status: str) -> None:
+        """signal_queue の処理状態を更新する。失敗しても発注フローは止めない。"""
+        try:
+            queue_columns = self._duckdb_columns("signal_queue")
+            if "processed_at" in queue_columns and status in {"filled", "failed", "error"}:
+                self._duckdb_conn.execute(
+                    "UPDATE signal_queue SET status = ?, processed_at = current_timestamp WHERE signal_id = ?",
+                    [status, signal_id],
+                )
+            else:
+                self._duckdb_conn.execute(
+                    "UPDATE signal_queue SET status = ? WHERE signal_id = ?",
+                    [status, signal_id],
+                )
+        except Exception as exc:
+            logger.warning(
+                "signal_queue status update failed: signal_id=%s status=%s: %s",
+                signal_id,
+                status,
+                exc,
+            )
 
     def _read_signal_queue_rows(self) -> list[tuple]:
         queue_columns = self._duckdb_columns("signal_queue")
@@ -492,7 +528,7 @@ class ExecutionEngine:
         try:
             return self._duckdb_conn.execute(
                 f"""
-                SELECT q.code, q.side, q.size AS qty, {price_expr} AS price,
+                SELECT q.signal_id, q.code, q.side, q.size AS qty, {price_expr} AS price,
                        {multiplier_expr} AS size_multiplier
                 FROM signal_queue q
                 {signal_join}

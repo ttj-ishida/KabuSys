@@ -48,7 +48,13 @@ def _insert_signal(conn, code: str, side: str = "buy", score: float = 0.8):
     )
 
 
-def _insert_target(conn, code: str, qty: int = 100, price: float = 1500.0):
+def _insert_target(
+    conn,
+    code: str,
+    qty: int = 100,
+    price: float = 1500.0,
+    signal_id: str | None = None,
+):
     side_row = conn.execute(
         "SELECT side FROM signals WHERE date = ? AND code = ? ORDER BY signal_rank ASC NULLS LAST LIMIT 1",
         [TARGET_DATE, code],
@@ -64,7 +70,16 @@ def _insert_target(conn, code: str, qty: int = 100, price: float = 1500.0):
             (signal_id, date, code, side, size, order_type, price, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [f"{TARGET_DATE}_{code}_{side}", TARGET_DATE, code, side, qty, "limit", price, "pending"],
+        [
+            signal_id or f"{TARGET_DATE}_{code}_{side}",
+            TARGET_DATE,
+            code,
+            side,
+            qty,
+            "limit",
+            price,
+            "pending",
+        ],
     )
 
 
@@ -130,6 +145,7 @@ class TestReadSignals:
 
         assert signals == [
             {
+                "signal_id": "sig-joinless",
                 "code": "7203",
                 "side": "buy",
                 "qty": 100,
@@ -180,6 +196,7 @@ class TestReadSignals:
 
         assert signals == [
             {
+                "signal_id": "sig-market",
                 "code": "7203",
                 "side": "buy",
                 "qty": 100,
@@ -299,6 +316,36 @@ class TestProcessSignals:
         assert "Created" in events
         assert "Sent" in events
         assert "Filled" in events
+
+    def test_instant_fill_syncs_order_and_signal_queue(self, sqlite_conn, duckdb_conn):
+        """即時約定した Paper 注文は orders と signal_queue の両方に反映される。"""
+        queue_signal_id = "QUEUE_CUSTOM_2026-03-29_1234_buy"
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(
+            duckdb_conn,
+            "1234",
+            qty=100,
+            price=1500.0,
+            signal_id=queue_signal_id,
+        )
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        orders = engine._repo.list_active()
+        assert len(orders) == 1
+        assert orders[0].signal_id == queue_signal_id
+        assert orders[0].state == OrderState.Filled
+        assert orders[0].filled_qty == 100
+        assert orders[0].avg_fill_price == 1500.0
+
+        row = duckdb_conn.execute(
+            "SELECT status, processed_at FROM signal_queue WHERE signal_id = ?",
+            [queue_signal_id],
+        ).fetchone()
+        assert row[0] == "filled"
+        assert row[1] is not None
 
     def test_latency_ms_recorded_for_pending_order(self, sqlite_conn, duckdb_conn, monitoring_conn):
         """fill_mode=never (OrderSentPendingError) でも latency_ms が記録される"""
