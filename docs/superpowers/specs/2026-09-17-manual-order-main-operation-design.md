@@ -54,17 +54,14 @@ kabuステーションを毎営業日確実に起動し、ログイン状態と 
 
 ### 注文後
 
-約定した注文を KabuSys に投入する。
+約定した注文を KabuSys に入力する。
 
 ```powershell
-python scripts/import_manual_trade.py --code 72030 --side buy --qty 100 --price 3016 --trade-date 2026-09-17
+python -m kabusys.manual_trades add --date 2026-09-17 --code 72030 --side buy --qty 100 --price 3016 --apply
+python -m kabusys.manual_trades wizard
 ```
 
-CSV 取り込みも用意する。
-
-```powershell
-python scripts/import_manual_trade.py --csv data/manual_trades.csv
-```
+GUI 入力は後続で Streamlit に追加する。GUI も CLI と同じ `manual_trades` テーブルへ登録する。
 
 ### 引け後
 
@@ -92,9 +89,9 @@ python scripts/import_manual_trade.py --csv data/manual_trades.csv
 | `qty` | 約定数量 |
 | `price` | 約定単価 |
 | `trade_date` | 約定日 |
-| `source` | `manual` |
+| `source_signal_id` | 対応する Signal Queue ID（任意） |
 | `note` | 任意メモ |
-| `imported_at` | 取り込み日時 |
+| `created_at` | 入力日時 |
 
 `manual_action_queue` は発注キューではなく、ユーザーに提示する行動候補とする。
 
@@ -127,7 +124,7 @@ Execution Engine は当面、Paper / 検証用のまま維持する。本番運�
 
 1. 手動注文メインのWebManualを追加する。
 2. 前日夜・当日朝の候補レポートを整備する。
-3. `manual_trades` 取り込み CLI を追加する。
+3. `manual_trades` 入力 CLI を追加する。
 4. 手動ポジション評価レポートを追加する。
 5. SELL 候補助言を自動売買ロジックから再利用する。
 6. 週次・月次の手動運用成績レポートを追加する。

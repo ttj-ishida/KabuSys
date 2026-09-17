@@ -81,7 +81,7 @@ python scripts/run_position_reconciliation_report.py
 - ポジション上限・1銘柄上限・当日余力に違反しないこと
 - 自分で入力する注文内容が候補と一致していること
 
-発注後は、約定結果を記録します。手動投入 CLI が整備されるまでは、取引履歴 CSV またはメモに以下を残してください。
+発注後は、約定結果を CLI で KabuSys に登録します。
 
 | 項目 | 内容 |
 |------|------|
@@ -93,10 +93,22 @@ python scripts/run_position_reconciliation_report.py
 | `fees` | 手数料・諸経費 |
 | `source_signal_id` | 対応する Signal Queue ID（分かる場合） |
 
-手動投入 CLI の整備後は、次のように取り込みます。
+確認だけ行う場合:
 
 ```powershell
-python scripts/import_manual_trade.py --file data/manual_trades/YYYY-MM-DD.csv --apply
+python -m kabusys.manual_trades add --date 2026-09-17 --code 72030 --side buy --qty 100 --price 3016
+```
+
+DB に保存する場合:
+
+```powershell
+python -m kabusys.manual_trades add --date 2026-09-17 --code 72030 --side buy --qty 100 --price 3016 --apply
+```
+
+対話式で入力する場合:
+
+```powershell
+python -m kabusys.manual_trades wizard
 ```
 
 > 手動注文メイン運用では、Execution Engine を通常起動しません。`signal_queue` は発注命令ではなく、運用者向けの助言・候補として扱います。

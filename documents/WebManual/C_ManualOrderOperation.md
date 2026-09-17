@@ -96,23 +96,33 @@ python scripts/run_signal_queue_report.py
 
 ## C-5. 約定データ投入
 
-現時点では手動約定投入 CLI は TODO 段階。
+約定後は、CSV ではなく CLI で 1 件ずつ登録する。
 
-予定コマンド:
+確認だけ行い、DB に保存しない場合:
 
 ```powershell
-python scripts/import_manual_trade.py --code 72030 --side buy --qty 100 --price 3016 --trade-date 2026-09-17
-python scripts/import_manual_trade.py --csv data/manual_trades.csv
+python -m kabusys.manual_trades add --date 2026-09-17 --code 72030 --side buy --qty 100 --price 3016 --note W1_08候補
 ```
 
-CLI 実装までは、注文・約定履歴を CSV で保存しておく。
+DB に保存する場合:
 
-推奨CSV:
-
-```csv
-trade_date,code,side,qty,price,note
-2026-09-17,72030,buy,100,3016,W1_08候補
+```powershell
+python -m kabusys.manual_trades add --date 2026-09-17 --code 72030 --side buy --qty 100 --price 3016 --note W1_08候補 --apply
 ```
+
+対話式で入力する場合:
+
+```powershell
+python -m kabusys.manual_trades wizard
+```
+
+登録内容を確認する場合:
+
+```powershell
+python -m kabusys.manual_trades list --date 2026-09-17
+```
+
+GUI 入力は後続タスクとして Streamlit に追加する。GUI も CLI と同じ `manual_trades` テーブルを使う。
 
 ---
 
@@ -145,7 +155,7 @@ python -m kabusys.run_performance_report --type daily --save
 
 ## C-8. 実装TODO
 
-- 手動約定投入 CLI
+- 手動約定入力 GUI
 - 手動ポジション評価レポート
 - 手動ポジション向け SELL 候補レポート
 - 前日夜・当日朝の注文候補レポート強化

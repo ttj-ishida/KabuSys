@@ -47,15 +47,17 @@ kabuステーションを毎営業日起動・ログイン維持し、API 接続
 python -m kabusys.run_manual_order_plan --date 2026-09-17 --save
 ```
 
-### [ ] 2. 手動売買データ投入 CLI
+### [x] 2. 手動売買データ投入 CLI
 
 手動で約定した BUY/SELL を投入する CLI を追加する。
 
-候補:
+実装済み:
 
 ```powershell
-python scripts/import_manual_trade.py --code 7203 --side buy --qty 100 --price 2500 --trade-date 2026-09-16
-python scripts/import_manual_trade.py --csv data/manual_trades.csv
+python -m kabusys.manual_trades add --date 2026-09-16 --code 7203 --side buy --qty 100 --price 2500 --apply
+python -m kabusys.manual_trades wizard
+python -m kabusys.manual_trades list --date 2026-09-16
+python -m kabusys.manual_trades delete MANUAL_2026-09-16_7203_buy
 ```
 
 必須項目:
@@ -67,8 +69,10 @@ python scripts/import_manual_trade.py --csv data/manual_trades.csv
 | `qty` | 株数 |
 | `price` | 約定単価 |
 | `trade_date` | 約定日 |
-| `source` | `manual` 固定、または任意メモ |
+| `source_signal_id` | 対応する Signal Queue ID（任意） |
 | `note` | 任意の判断メモ |
+
+GUI 入力は後続タスク。Streamlit からも同じ `manual_trades` テーブルへ登録する。
 
 ### [ ] 3. DB スキーマへの出所情報追加
 
@@ -77,7 +81,7 @@ python scripts/import_manual_trade.py --csv data/manual_trades.csv
 検討案:
 
 - `trade_source`: `auto` / `manual`
-- `external_trade_id`: 手動投入 CSV 側の一意キー、または冪等キー
+- `trade_id`: CLI/GUI 入力で生成する冪等キー
 - `imported_at`: 投入日時
 - `note`: 任意メモ
 
@@ -141,12 +145,12 @@ python scripts/import_manual_trade.py --csv data/manual_trades.csv
 - 手動投入ポジションに対して `max_holding_days` を約定日基準で適用するか、投入日基準で適用するか。
 - レポートだけに留めるか、将来的に「ユーザー承認後に発注」できる確認キューへ拡張するか。
 - `signal_queue` を手動注文候補として使い続けるか、専用の `manual_action_queue` に分離するか。
-- 約定CSVの標準フォーマットを証券会社のエクスポート形式に寄せるか、KabuSys 独自形式にするか。
+- Streamlit GUI では、1件入力フォームにするか、当日の候補一覧から選んで入力する形にするか。
 
 ## 5. 完了条件
 
 - 前日夜・当日朝に手動注文候補を確認できる。
-- 手動約定を CLI または CSV で投入できる。
+- 手動約定を CLI で投入できる。GUI 入力は後続で追加する。
 - 投入されたポジションが日次評価・リスク監視・SELL 判断に含まれる。
 - 売却候補が自動発注されず、助言として確認できる。
 - 二重投入・二重発注を防ぐテストがある。
