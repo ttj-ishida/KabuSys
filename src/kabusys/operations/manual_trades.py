@@ -43,6 +43,15 @@ class ManualTrade:
     created_at: datetime
 
 
+@dataclass(frozen=True)
+class ManualPosition:
+    code: str
+    qty: int
+    avg_price: float
+    realized_pnl: float
+    last_trade_date: date
+
+
 _MANUAL_TRADES_DDL = """
 CREATE TABLE IF NOT EXISTS manual_trades (
     trade_id          VARCHAR       NOT NULL PRIMARY KEY,
@@ -60,10 +69,16 @@ CREATE TABLE IF NOT EXISTS manual_trades (
 
 
 def ensure_manual_trade_schema(conn: duckdb.DuckDBPyConnection) -> None:
-    conn.execute(_MANUAL_TRADES_DDL)
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_manual_trades_date_code ON manual_trades(trade_date, code)"
-    )
+    try:
+        conn.execute(_MANUAL_TRADES_DDL)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_manual_trades_date_code ON manual_trades(trade_date, code)"
+        )
+    except duckdb.Error as exc:
+        msg = str(exc).lower()
+        if "read-only" in msg or "read only" in msg:
+            return
+        raise
 
 
 def build_manual_trade_id(trade_date: date, code: str, side: str) -> str:
@@ -199,3 +214,81 @@ def delete_manual_trade(conn: duckdb.DuckDBPyConnection, trade_id: str) -> int:
         return 0
     conn.execute("DELETE FROM manual_trades WHERE trade_id = ?", [trade_id])
     return 1
+
+
+def calculate_manual_positions(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    as_of: date | None = None,
+) -> list[ManualPosition]:
+    """manual_trades から現在の手動保有ポジションを計算する。
+
+    BUY 手数料は取得原価に含め、SELL 手数料は実現損益から控除する。
+    部分売却時は平均単価法で原価を取り崩す。
+    """
+    ensure_manual_trade_schema(conn)
+    if as_of is None:
+        rows = conn.execute(
+            """
+            SELECT trade_date, code, side, qty, price, fees
+            FROM manual_trades
+            ORDER BY trade_date, created_at, trade_id
+            """
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT trade_date, code, side, qty, price, fees
+            FROM manual_trades
+            WHERE trade_date <= ?
+            ORDER BY trade_date, created_at, trade_id
+            """,
+            [as_of],
+        ).fetchall()
+
+    state: dict[str, dict[str, float | int | date]] = {}
+    for trade_date, code, side, qty, price, fees in rows:
+        qty = int(qty)
+        price = float(price)
+        fees = float(fees)
+        pos = state.setdefault(
+            code,
+            {
+                "qty": 0,
+                "cost": 0.0,
+                "realized_pnl": 0.0,
+                "last_trade_date": trade_date,
+            },
+        )
+        current_qty = int(pos["qty"])
+        current_cost = float(pos["cost"])
+        if side == "buy":
+            pos["qty"] = current_qty + qty
+            pos["cost"] = current_cost + (qty * price) + fees
+        elif side == "sell":
+            sell_qty = min(qty, current_qty)
+            avg_cost = current_cost / current_qty if current_qty > 0 else 0.0
+            released_cost = avg_cost * sell_qty
+            pos["qty"] = current_qty - sell_qty
+            pos["cost"] = max(0.0, current_cost - released_cost)
+            pos["realized_pnl"] = (
+                float(pos["realized_pnl"]) + (sell_qty * price) - released_cost - fees
+            )
+        pos["last_trade_date"] = trade_date
+
+    positions: list[ManualPosition] = []
+    for code, pos in state.items():
+        qty = int(pos["qty"])
+        if qty <= 0:
+            continue
+        cost = float(pos["cost"])
+        positions.append(
+            ManualPosition(
+                code=code,
+                qty=qty,
+                avg_price=cost / qty,
+                realized_pnl=float(pos["realized_pnl"]),
+                last_trade_date=pos["last_trade_date"],
+            )
+        )
+    return sorted(positions, key=lambda p: p.code)

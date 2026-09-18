@@ -59,9 +59,10 @@ kabuステーションを毎営業日確実に起動し、ログイン状態と 
 ```powershell
 python -m kabusys.manual_trades add --date 2026-09-17 --code 72030 --side buy --qty 100 --price 3016 --apply
 python -m kabusys.manual_trades wizard
+python -m kabusys.manual_trades positions --date 2026-09-17
 ```
 
-GUI 入力は後続で Streamlit に追加する。GUI も CLI と同じ `manual_trades` テーブルへ登録する。
+GUI 入力は Streamlit の **Manual Trades** ページに追加する。GUI も CLI と同じ `manual_trades` テーブルへ登録する。
 
 ### 引け後
 
@@ -125,7 +126,7 @@ Execution Engine は当面、Paper / 検証用のまま維持する。本番運�
 1. 手動注文メインのWebManualを追加する。
 2. 前日夜・当日朝の候補レポートを整備する。
 3. `manual_trades` 入力 CLI を追加する。
-4. 手動ポジション評価レポートを追加する。
+4. 手動ポジション表示を追加する。
 5. SELL 候補助言を自動売買ロジックから再利用する。
 6. 週次・月次の手動運用成績レポートを追加する。
 

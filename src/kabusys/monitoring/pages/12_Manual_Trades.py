@@ -1,0 +1,126 @@
+"""pages/12_Manual_Trades.py — 手動約定入力・確認ビュー。"""
+
+from __future__ import annotations
+
+from datetime import date
+
+import streamlit as st
+
+from kabusys.config import Settings
+from kabusys.data.schema import init_schema
+from kabusys.monitoring.dashboard_data import load_manual_positions
+from kabusys.monitoring.db_connect import connect_duckdb_ro
+from kabusys.operations.manual_trades import (
+    DuplicateManualTradeError,
+    ManualTradeInput,
+    add_manual_trade,
+    delete_manual_trade,
+    list_manual_trades,
+)
+
+st.set_page_config(page_title="Manual Trades", layout="wide", page_icon="📝")
+st.title("📝 Manual Trades — 手動約定")
+
+settings = Settings()
+
+with st.sidebar:
+    st.caption(f"環境: **{settings.env}**")
+    if st.button("🔄 Refresh"):
+        st.rerun()
+
+tab_add, tab_positions, tab_history = st.tabs(["入力", "手動ポジション", "履歴"])
+
+with tab_add:
+    st.subheader("手動約定を入力")
+
+    with st.form("manual_trade_form"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            trade_date = st.date_input("約定日", value=date.today())
+            code = st.text_input("銘柄コード", placeholder="7203")
+        with col2:
+            side = st.selectbox("売買", ["buy", "sell"])
+            qty = st.number_input("数量", min_value=1, step=100, value=100)
+        with col3:
+            price = st.number_input("約定単価", min_value=0.0, step=1.0, value=0.0)
+            fees = st.number_input("手数料", min_value=0.0, step=1.0, value=0.0)
+
+        source_signal_id = st.text_input("Signal ID（任意）")
+        note = st.text_input("メモ（任意）")
+        force = st.checkbox("同一IDがある場合は上書きする")
+        submitted = st.form_submit_button("登録")
+
+    if submitted:
+        if not code.strip():
+            st.error("銘柄コードを入力してください。")
+        else:
+            conn = init_schema(settings.duckdb_path)
+            try:
+                trade_id = add_manual_trade(
+                    conn,
+                    ManualTradeInput(
+                        trade_date=trade_date,
+                        code=code,
+                        side=side,
+                        qty=int(qty),
+                        price=float(price),
+                        fees=float(fees),
+                        source_signal_id=source_signal_id.strip() or None,
+                        note=note.strip() or None,
+                    ),
+                    force=force,
+                )
+            except DuplicateManualTradeError as exc:
+                st.error(str(exc))
+            except ValueError as exc:
+                st.error(str(exc))
+            finally:
+                conn.close()
+
+            if "trade_id" in locals():
+                st.success(f"登録しました: {trade_id}")
+
+with tab_positions:
+    st.subheader("手動ポジション")
+    conn = connect_duckdb_ro(settings.duckdb_path)
+    try:
+        df = load_manual_positions(conn)
+    finally:
+        conn.close()
+
+    if df.empty:
+        st.info("手動ポジションはありません。")
+    else:
+        st.dataframe(df, use_container_width=True)
+
+with tab_history:
+    st.subheader("手動約定履歴")
+    conn = init_schema(settings.duckdb_path)
+    try:
+        rows = list_manual_trades(conn)
+    finally:
+        conn.close()
+
+    if not rows:
+        st.info("手動約定履歴はありません。")
+    else:
+        for row in rows[:100]:
+            with st.expander(f"{row.trade_date} {row.code} {row.side} {row.qty}株"):
+                st.write(
+                    {
+                        "trade_id": row.trade_id,
+                        "price": row.price,
+                        "fees": row.fees,
+                        "source_signal_id": row.source_signal_id,
+                        "note": row.note,
+                        "created_at": row.created_at,
+                    }
+                )
+                if st.button("削除", key=f"delete_{row.trade_id}"):
+                    conn = init_schema(settings.duckdb_path)
+                    try:
+                        delete_manual_trade(conn, row.trade_id)
+                    finally:
+                        conn.close()
+                    st.success(f"削除しました: {row.trade_id}")
+                    st.rerun()

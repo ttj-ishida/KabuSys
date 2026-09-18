@@ -79,6 +79,20 @@ def duck_conn():
             size BIGINT NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE manual_trades (
+            trade_id VARCHAR PRIMARY KEY,
+            trade_date DATE NOT NULL,
+            code VARCHAR NOT NULL,
+            side VARCHAR NOT NULL,
+            qty BIGINT NOT NULL,
+            price DECIMAL(18,4) NOT NULL,
+            fees DECIMAL(18,4) NOT NULL DEFAULT 0,
+            source_signal_id VARCHAR,
+            note VARCHAR,
+            created_at TIMESTAMP NOT NULL DEFAULT current_timestamp
+        )
+    """)
     return conn
 
 
@@ -229,3 +243,21 @@ def test_load_recent_trades_empty(duck_conn):
 
     df = load_recent_trades(duck_conn)
     assert df.empty
+
+
+def test_load_manual_positions_returns_open_positions(duck_conn):
+    from kabusys.monitoring.dashboard_data import load_manual_positions
+
+    duck_conn.execute("""
+        INSERT INTO manual_trades (trade_id, trade_date, code, side, qty, price, fees)
+        VALUES
+          ('m1', DATE '2026-09-18', '7203', 'buy', 100, 1000, 100),
+          ('m2', DATE '2026-09-19', '7203', 'sell', 40, 1200, 50)
+    """)
+
+    df = load_manual_positions(duck_conn)
+
+    assert len(df) == 1
+    assert df.iloc[0]["code"] == "7203"
+    assert int(df.iloc[0]["qty"]) == 60
+    assert float(df.iloc[0]["avg_price"]) == pytest.approx(1001.0)

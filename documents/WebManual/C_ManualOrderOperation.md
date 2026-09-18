@@ -122,7 +122,13 @@ python -m kabusys.manual_trades wizard
 python -m kabusys.manual_trades list --date 2026-09-17
 ```
 
-GUI 入力は後続タスクとして Streamlit に追加する。GUI も CLI と同じ `manual_trades` テーブルを使う。
+手動保有ポジションを確認する場合:
+
+```powershell
+python -m kabusys.manual_trades positions --date 2026-09-17
+```
+
+GUI で入力する場合は、Streamlit の **Manual Trades** ページを使う。GUI も CLI と同じ `manual_trades` テーブルを使う。
 
 ---
 
@@ -155,8 +161,8 @@ python -m kabusys.run_performance_report --type daily --save
 
 ## C-8. 実装TODO
 
-- 手動約定入力 GUI
-- 手動ポジション評価レポート
+- 手動ポジション評価レポートの SELL 助言接続
+- 日次評価レポートへの手動ポジション統合
 - 手動ポジション向け SELL 候補レポート
 - 前日夜・当日朝の注文候補レポート強化
 - 自動発注を使わない運用モードの明示

@@ -9,6 +9,7 @@ from kabusys.operations.manual_trades import (
     DuplicateManualTradeError,
     ManualTradeInput,
     add_manual_trade,
+    calculate_manual_positions,
     delete_manual_trade,
     ensure_manual_trade_schema,
     list_manual_trades,
@@ -155,6 +156,105 @@ def test_delete_manual_trade_returns_count(conn):
     assert list_manual_trades(conn) == []
 
 
+def test_calculate_manual_positions_aggregates_buys_and_partial_sells(conn):
+    add_manual_trade(
+        conn,
+        ManualTradeInput(
+            trade_date=date(2026, 9, 18),
+            code="7203",
+            side="buy",
+            qty=100,
+            price=1000,
+            fees=100,
+        ),
+    )
+    add_manual_trade(
+        conn,
+        ManualTradeInput(
+            trade_date=date(2026, 9, 19),
+            code="7203",
+            side="buy",
+            qty=100,
+            price=1200,
+            fees=100,
+        ),
+    )
+    add_manual_trade(
+        conn,
+        ManualTradeInput(
+            trade_date=date(2026, 9, 20),
+            code="7203",
+            side="sell",
+            qty=50,
+            price=1300,
+            fees=50,
+        ),
+    )
+
+    positions = calculate_manual_positions(conn, as_of=date(2026, 9, 20))
+
+    assert len(positions) == 1
+    assert positions[0].code == "7203"
+    assert positions[0].qty == 150
+    assert positions[0].avg_price == pytest.approx(1101.0)
+    assert positions[0].realized_pnl == pytest.approx(9900.0)
+    assert positions[0].last_trade_date == date(2026, 9, 20)
+
+
+def test_calculate_manual_positions_excludes_closed_positions(conn):
+    add_manual_trade(
+        conn,
+        ManualTradeInput(
+            trade_date=date(2026, 9, 18),
+            code="7203",
+            side="buy",
+            qty=100,
+            price=1000,
+        ),
+    )
+    add_manual_trade(
+        conn,
+        ManualTradeInput(
+            trade_date=date(2026, 9, 19),
+            code="7203",
+            side="sell",
+            qty=100,
+            price=1010,
+        ),
+    )
+
+    assert calculate_manual_positions(conn, as_of=date(2026, 9, 19)) == []
+
+
+def test_calculate_manual_positions_supports_read_only_connection(tmp_path):
+    from kabusys.data.schema import init_schema
+
+    db_path = tmp_path / "manual.duckdb"
+    conn = init_schema(db_path)
+    try:
+        add_manual_trade(
+            conn,
+            ManualTradeInput(
+                trade_date=date(2026, 9, 18),
+                code="7203",
+                side="buy",
+                qty=100,
+                price=2850,
+            ),
+        )
+    finally:
+        conn.close()
+
+    ro_conn = duckdb.connect(str(db_path), read_only=True)
+    try:
+        positions = calculate_manual_positions(ro_conn)
+    finally:
+        ro_conn.close()
+
+    assert len(positions) == 1
+    assert positions[0].code == "7203"
+
+
 def test_cli_add_and_list_records_trade(tmp_path, monkeypatch, capsys):
     from kabusys import manual_trades as cli
 
@@ -224,6 +324,35 @@ def test_cli_add_requires_apply_for_persistence(tmp_path, monkeypatch):
         assert list_manual_trades(conn) == []
     finally:
         conn.close()
+
+
+def test_cli_positions_prints_open_manual_positions(tmp_path, monkeypatch, capsys):
+    from kabusys import manual_trades as cli
+
+    db_path = tmp_path / "manual.duckdb"
+    monkeypatch.setattr(cli, "settings", _Settings(db_path))
+    cli.main(
+        [
+            "add",
+            "--date",
+            "2026-09-18",
+            "--code",
+            "7203",
+            "--side",
+            "BUY",
+            "--qty",
+            "100",
+            "--price",
+            "2850",
+            "--apply",
+        ]
+    )
+
+    assert cli.main(["positions", "--date", "2026-09-18"]) == 0
+    out = capsys.readouterr().out
+    assert "7203" in out
+    assert "100" in out
+    assert "2850" in out
 
 
 def test_init_schema_creates_manual_trades_table(tmp_path):

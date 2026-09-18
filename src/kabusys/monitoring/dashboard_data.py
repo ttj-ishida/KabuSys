@@ -12,6 +12,8 @@ from datetime import date, timedelta
 import duckdb
 import pandas as pd
 
+from kabusys.operations.manual_trades import calculate_manual_positions
+
 # ---------------------------------------------------------------------------
 # Home ページ（SQLite）
 # ---------------------------------------------------------------------------
@@ -106,3 +108,21 @@ def load_recent_trades(conn: duckdb.DuckDBPyConnection, limit: int = 50) -> pd.D
            LIMIT ?""",
         [limit],
     ).df()
+
+
+def load_manual_positions(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """manual_trades から手動保有ポジションを返す。"""
+    rows = calculate_manual_positions(conn)
+    return pd.DataFrame(
+        [
+            {
+                "code": row.code,
+                "qty": row.qty,
+                "avg_price": row.avg_price,
+                "realized_pnl": row.realized_pnl,
+                "last_trade_date": row.last_trade_date,
+            }
+            for row in rows
+        ],
+        columns=["code", "qty", "avg_price", "realized_pnl", "last_trade_date"],
+    )

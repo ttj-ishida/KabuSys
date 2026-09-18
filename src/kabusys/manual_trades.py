@@ -18,6 +18,7 @@ from kabusys.operations.manual_trades import (
     DuplicateManualTradeError,
     ManualTradeInput,
     add_manual_trade,
+    calculate_manual_positions,
     delete_manual_trade,
     list_manual_trades,
 )
@@ -143,6 +144,33 @@ def _cmd_delete(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_positions(args: argparse.Namespace) -> int:
+    conn = init_schema(settings.duckdb_path)
+    try:
+        rows = calculate_manual_positions(conn, as_of=args.date)
+    finally:
+        conn.close()
+
+    if not rows:
+        print("手動保有ポジションはありません。")
+        return 0
+
+    print("code | qty | avg_price | realized_pnl | last_trade_date")
+    for row in rows:
+        print(
+            " | ".join(
+                [
+                    row.code,
+                    str(row.qty),
+                    f"{row.avg_price:g}",
+                    f"{row.realized_pnl:g}",
+                    row.last_trade_date.isoformat(),
+                ]
+            )
+        )
+    return 0
+
+
 def _prompt(label: str, *, default: str | None = None) -> str:
     suffix = f" [{default}]" if default is not None else ""
     value = input(f"{label}{suffix}: ").strip()
@@ -217,6 +245,10 @@ def build_parser() -> argparse.ArgumentParser:
     delete = sub.add_parser("delete", help="手動約定を trade_id で削除する")
     delete.add_argument("trade_id")
     delete.set_defaults(func=_cmd_delete)
+
+    positions = sub.add_parser("positions", help="手動約定から現在の保有ポジションを表示する")
+    positions.add_argument("--date", type=_parse_date, default=None, help="この日付時点で集計する")
+    positions.set_defaults(func=_cmd_positions)
 
     wizard = sub.add_parser("wizard", help="対話式で手動約定を入力する")
     wizard.add_argument("--apply", action="store_true", help="最後の確認を省略して保存する")

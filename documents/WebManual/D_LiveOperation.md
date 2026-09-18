@@ -111,6 +111,14 @@ python -m kabusys.manual_trades add --date 2026-09-17 --code 72030 --side buy --
 python -m kabusys.manual_trades wizard
 ```
 
+手動保有ポジションを確認する場合:
+
+```powershell
+python -m kabusys.manual_trades positions --date 2026-09-17
+```
+
+Streamlit では **Manual Trades** ページで入力・履歴確認、**Performance > 手動ポジション** タブで保有状況を確認できます。
+
 > 手動注文メイン運用では、Execution Engine を通常起動しません。`signal_queue` は発注命令ではなく、運用者向けの助言・候補として扱います。
 
 ---

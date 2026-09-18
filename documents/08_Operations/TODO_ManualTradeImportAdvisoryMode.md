@@ -57,6 +57,7 @@ python -m kabusys.run_manual_order_plan --date 2026-09-17 --save
 python -m kabusys.manual_trades add --date 2026-09-16 --code 7203 --side buy --qty 100 --price 2500 --apply
 python -m kabusys.manual_trades wizard
 python -m kabusys.manual_trades list --date 2026-09-16
+python -m kabusys.manual_trades positions --date 2026-09-16
 python -m kabusys.manual_trades delete MANUAL_2026-09-16_7203_buy
 ```
 
@@ -72,7 +73,20 @@ python -m kabusys.manual_trades delete MANUAL_2026-09-16_7203_buy
 | `source_signal_id` | 対応する Signal Queue ID（任意） |
 | `note` | 任意の判断メモ |
 
-GUI 入力は後続タスク。Streamlit からも同じ `manual_trades` テーブルへ登録する。
+GUI 入力も Streamlit の **Manual Trades** ページから同じ `manual_trades` テーブルへ登録する。
+
+### [x] 2a. 手動ポジション表示
+
+`manual_trades` から平均単価・残数量・実現損益を集計し、CLI と Streamlit で確認できるようにする。
+
+実装済み:
+
+```powershell
+python -m kabusys.manual_trades positions --date 2026-09-16
+```
+
+- Streamlit **Performance > 手動ポジション** タブ
+- Streamlit **Manual Trades** ページ
 
 ### [ ] 3. DB スキーマへの出所情報追加
 
@@ -150,7 +164,8 @@ GUI 入力は後続タスク。Streamlit からも同じ `manual_trades` テー�
 ## 5. 完了条件
 
 - 前日夜・当日朝に手動注文候補を確認できる。
-- 手動約定を CLI で投入できる。GUI 入力は後続で追加する。
+- 手動約定を CLI / GUI で投入できる。
+- 手動約定から手動保有ポジションを確認できる。
 - 投入されたポジションが日次評価・リスク監視・SELL 判断に含まれる。
 - 売却候補が自動発注されず、助言として確認できる。
 - 二重投入・二重発注を防ぐテストがある。
