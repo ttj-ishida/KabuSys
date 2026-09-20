@@ -18,8 +18,8 @@ from kabusys.operations.manual_trades import (
     DuplicateManualTradeError,
     ManualTradeInput,
     add_manual_trade,
-    calculate_manual_positions,
     delete_manual_trade,
+    evaluate_manual_positions,
     list_manual_trades,
 )
 
@@ -147,7 +147,7 @@ def _cmd_delete(args: argparse.Namespace) -> int:
 def _cmd_positions(args: argparse.Namespace) -> int:
     conn = init_schema(settings.duckdb_path)
     try:
-        rows = calculate_manual_positions(conn, as_of=args.date)
+        rows = evaluate_manual_positions(conn, as_of=args.date)
     finally:
         conn.close()
 
@@ -155,15 +155,29 @@ def _cmd_positions(args: argparse.Namespace) -> int:
         print("手動保有ポジションはありません。")
         return 0
 
-    print("code | qty | avg_price | realized_pnl | last_trade_date")
+    print(
+        "code | qty | avg_price | cost_basis | price_date | close_price | "
+        "market_value | unrealized_pnl | unrealized_pnl_pct | realized_pnl | "
+        "total_pnl | last_trade_date"
+    )
     for row in rows:
+        def value(item: float | None) -> str:
+            return "" if item is None else f"{item:g}"
+
         print(
             " | ".join(
                 [
                     row.code,
                     str(row.qty),
                     f"{row.avg_price:g}",
+                    f"{row.cost_basis:g}",
+                    row.price_date.isoformat() if row.price_date else "",
+                    value(row.close_price),
+                    value(row.market_value),
+                    value(row.unrealized_pnl),
+                    value(row.unrealized_pnl_pct),
                     f"{row.realized_pnl:g}",
+                    value(row.total_pnl),
                     row.last_trade_date.isoformat(),
                 ]
             )

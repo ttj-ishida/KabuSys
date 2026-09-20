@@ -77,7 +77,7 @@ GUI 入力も Streamlit の **Manual Trades** ページから同じ `manual_trad
 
 ### [x] 2a. 手動ポジション表示
 
-`manual_trades` から平均単価・残数量・実現損益を集計し、CLI と Streamlit で確認できるようにする。
+`manual_trades` から平均単価・残数量・実現損益を集計し、指定日以前の最新終値による評価額・含み損益・合計損益を CLI と Streamlit で確認できるようにする。
 
 実装済み:
 
@@ -87,6 +87,7 @@ python -m kabusys.manual_trades positions --date 2026-09-16
 
 - Streamlit **Performance > 手動ポジション** タブ
 - Streamlit **Manual Trades** ページ
+- 評価日は GUI で選択可能（初期値は前日）。未来の価格は参照しない
 
 ### [ ] 3. DB スキーマへの出所情報追加
 

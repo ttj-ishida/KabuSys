@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 
 import duckdb
 import pytest
@@ -249,15 +250,29 @@ def test_load_manual_positions_returns_open_positions(duck_conn):
     from kabusys.monitoring.dashboard_data import load_manual_positions
 
     duck_conn.execute("""
+        CREATE TABLE prices_daily (
+            date DATE, code VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE,
+            close DOUBLE, volume BIGINT, turnover DOUBLE
+        )
+    """)
+    duck_conn.execute("""
         INSERT INTO manual_trades (trade_id, trade_date, code, side, qty, price, fees)
         VALUES
           ('m1', DATE '2026-09-18', '7203', 'buy', 100, 1000, 100),
           ('m2', DATE '2026-09-19', '7203', 'sell', 40, 1200, 50)
     """)
+    duck_conn.execute("""
+        INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover)
+        VALUES (DATE '2026-09-19', '7203', 1090, 1220, 1080, 1200, 1000, 1200000)
+    """)
 
-    df = load_manual_positions(duck_conn)
+    df = load_manual_positions(duck_conn, as_of=date(2026, 9, 19))
 
     assert len(df) == 1
     assert df.iloc[0]["code"] == "7203"
     assert int(df.iloc[0]["qty"]) == 60
     assert float(df.iloc[0]["avg_price"]) == pytest.approx(1001.0)
+    assert float(df.iloc[0]["market_value"]) == pytest.approx(72000.0)
+    assert float(df.iloc[0]["unrealized_pnl"]) == pytest.approx(11940.0)
+    assert float(df.iloc[0]["realized_pnl"]) == pytest.approx(7910.0)
+    assert float(df.iloc[0]["total_pnl"]) == pytest.approx(19850.0)

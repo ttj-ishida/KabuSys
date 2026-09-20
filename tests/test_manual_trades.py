@@ -12,6 +12,7 @@ from kabusys.operations.manual_trades import (
     calculate_manual_positions,
     delete_manual_trade,
     ensure_manual_trade_schema,
+    evaluate_manual_positions,
     list_manual_trades,
 )
 
@@ -253,6 +254,69 @@ def test_calculate_manual_positions_supports_read_only_connection(tmp_path):
 
     assert len(positions) == 1
     assert positions[0].code == "7203"
+
+
+def test_evaluate_manual_positions_uses_latest_close_on_or_before_date(conn):
+    add_manual_trade(
+        conn,
+        ManualTradeInput(
+            trade_date=date(2026, 9, 18),
+            code="7203",
+            side="buy",
+            qty=100,
+            price=1000,
+            fees=100,
+        ),
+    )
+    conn.execute(
+        """
+        CREATE TABLE prices_daily (
+            date DATE, code VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE,
+            close DOUBLE, volume BIGINT, turnover DOUBLE
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO prices_daily VALUES
+          (DATE '2026-09-18', '7203', 1000, 1100, 900, 1050, 1000, 1000000),
+          (DATE '2026-09-21', '7203', 1100, 1200, 1000, 1150, 1000, 1100000)
+        """
+    )
+
+    positions = evaluate_manual_positions(conn, as_of=date(2026, 9, 20))
+
+    assert len(positions) == 1
+    position = positions[0]
+    assert position.price_date == date(2026, 9, 18)
+    assert position.close_price == pytest.approx(1050.0)
+    assert position.cost_basis == pytest.approx(100100.0)
+    assert position.market_value == pytest.approx(105000.0)
+    assert position.unrealized_pnl == pytest.approx(4900.0)
+    assert position.unrealized_pnl_pct == pytest.approx(4.8951048951)
+    assert position.realized_pnl == pytest.approx(0.0)
+    assert position.total_pnl == pytest.approx(4900.0)
+
+
+def test_evaluate_manual_positions_keeps_position_when_price_is_missing(conn):
+    add_manual_trade(
+        conn,
+        ManualTradeInput(
+            trade_date=date(2026, 9, 18),
+            code="7203",
+            side="buy",
+            qty=100,
+            price=1000,
+        ),
+    )
+
+    positions = evaluate_manual_positions(conn, as_of=date(2026, 9, 20))
+
+    assert len(positions) == 1
+    assert positions[0].price_date is None
+    assert positions[0].close_price is None
+    assert positions[0].unrealized_pnl is None
+    assert positions[0].total_pnl is None
 
 
 def test_cli_add_and_list_records_trade(tmp_path, monkeypatch, capsys):

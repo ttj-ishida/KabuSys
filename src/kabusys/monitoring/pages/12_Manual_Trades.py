@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import streamlit as st
 
@@ -82,15 +82,32 @@ with tab_add:
 
 with tab_positions:
     st.subheader("手動ポジション")
+    valuation_date = st.date_input(
+        "評価日",
+        value=date.today() - timedelta(days=1),
+        help="この日以前で最新の終値を使って評価します。",
+    )
     conn = connect_duckdb_ro(settings.duckdb_path)
     try:
-        df = load_manual_positions(conn)
+        df = load_manual_positions(conn, as_of=valuation_date)
     finally:
         conn.close()
 
     if df.empty:
         st.info("手動ポジションはありません。")
     else:
+        total_pnl = df["total_pnl"].sum(min_count=1)
+        unrealized_pnl = df["unrealized_pnl"].sum(min_count=1)
+        realized_pnl = df["realized_pnl"].sum()
+        col1, col2, col3 = st.columns(3)
+        col1.metric(
+            "含み損益",
+            f"{unrealized_pnl:,.0f}円" if unrealized_pnl == unrealized_pnl else "-",
+        )
+        col2.metric("実現損益", f"{realized_pnl:,.0f}円")
+        col3.metric(
+            "合計損益", f"{total_pnl:,.0f}円" if total_pnl == total_pnl else "-"
+        )
         st.dataframe(df, use_container_width=True)
 
 with tab_history:

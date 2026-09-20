@@ -128,7 +128,9 @@ python -m kabusys.manual_trades list --date 2026-09-17
 python -m kabusys.manual_trades positions --date 2026-09-17
 ```
 
-GUI で入力する場合は、Streamlit の **Manual Trades** ページを使う。GUI も CLI と同じ `manual_trades` テーブルを使う。
+`--date` 以前で最新の終値を使い、取得原価、評価額、含み損益、実現損益、合計損益を表示する。休日を指定した場合は、直前取引日の終値が自動的に使われる。
+
+GUI で入力・損益確認する場合は、Streamlit の **Manual Trades** ページを使う。**手動ポジション** タブの評価日は前日が初期値で、任意の日付へ変更できる。GUI も CLI と同じ `manual_trades` テーブルを使う。
 
 ---
 

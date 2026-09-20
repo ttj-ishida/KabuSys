@@ -12,7 +12,7 @@ from datetime import date, timedelta
 import duckdb
 import pandas as pd
 
-from kabusys.operations.manual_trades import calculate_manual_positions
+from kabusys.operations.manual_trades import evaluate_manual_positions
 
 # ---------------------------------------------------------------------------
 # Home ページ（SQLite）
@@ -110,19 +110,33 @@ def load_recent_trades(conn: duckdb.DuckDBPyConnection, limit: int = 50) -> pd.D
     ).df()
 
 
-def load_manual_positions(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
-    """manual_trades から手動保有ポジションを返す。"""
-    rows = calculate_manual_positions(conn)
+def load_manual_positions(
+    conn: duckdb.DuckDBPyConnection, *, as_of: date | None = None
+) -> pd.DataFrame:
+    """manual_trades と指定日以前の最新終値から手動保有評価を返す。"""
+    rows = evaluate_manual_positions(conn, as_of=as_of)
     return pd.DataFrame(
         [
             {
                 "code": row.code,
                 "qty": row.qty,
                 "avg_price": row.avg_price,
+                "cost_basis": row.cost_basis,
+                "price_date": row.price_date,
+                "close_price": row.close_price,
+                "market_value": row.market_value,
+                "unrealized_pnl": row.unrealized_pnl,
+                "unrealized_pnl_pct": row.unrealized_pnl_pct,
                 "realized_pnl": row.realized_pnl,
+                "total_pnl": row.total_pnl,
                 "last_trade_date": row.last_trade_date,
             }
             for row in rows
         ],
-        columns=["code", "qty", "avg_price", "realized_pnl", "last_trade_date"],
+        columns=[
+            "code", "qty", "avg_price", "cost_basis", "price_date",
+            "close_price", "market_value", "unrealized_pnl",
+            "unrealized_pnl_pct", "realized_pnl", "total_pnl",
+            "last_trade_date",
+        ],
     )
