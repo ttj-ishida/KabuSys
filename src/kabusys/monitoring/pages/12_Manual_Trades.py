@@ -105,9 +105,7 @@ with tab_positions:
             f"{unrealized_pnl:,.0f}円" if unrealized_pnl == unrealized_pnl else "-",
         )
         col2.metric("実現損益", f"{realized_pnl:,.0f}円")
-        col3.metric(
-            "合計損益", f"{total_pnl:,.0f}円" if total_pnl == total_pnl else "-"
-        )
+        col3.metric("合計損益", f"{total_pnl:,.0f}円" if total_pnl == total_pnl else "-")
         st.dataframe(df, use_container_width=True)
 
 with tab_history:

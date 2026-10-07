@@ -134,9 +134,17 @@ def load_manual_positions(
             for row in rows
         ],
         columns=[
-            "code", "qty", "avg_price", "cost_basis", "price_date",
-            "close_price", "market_value", "unrealized_pnl",
-            "unrealized_pnl_pct", "realized_pnl", "total_pnl",
+            "code",
+            "qty",
+            "avg_price",
+            "cost_basis",
+            "price_date",
+            "close_price",
+            "market_value",
+            "unrealized_pnl",
+            "unrealized_pnl_pct",
+            "realized_pnl",
+            "total_pnl",
             "last_trade_date",
         ],
     )

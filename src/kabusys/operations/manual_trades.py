@@ -134,9 +134,7 @@ def add_manual_trade(
 ) -> str:
     ensure_manual_trade_schema(conn)
     normalized = _normalize_input(payload)
-    trade_id = build_manual_trade_id(
-        normalized.trade_date, normalized.code, normalized.side
-    )
+    trade_id = build_manual_trade_id(normalized.trade_date, normalized.code, normalized.side)
 
     conn.execute("BEGIN")
     try:
@@ -223,9 +221,7 @@ def list_manual_trades(
 
 def delete_manual_trade(conn: duckdb.DuckDBPyConnection, trade_id: str) -> int:
     ensure_manual_trade_schema(conn)
-    existing = conn.execute(
-        "SELECT 1 FROM manual_trades WHERE trade_id = ?", [trade_id]
-    ).fetchone()
+    existing = conn.execute("SELECT 1 FROM manual_trades WHERE trade_id = ?", [trade_id]).fetchone()
     if existing is None:
         return 0
     conn.execute("DELETE FROM manual_trades WHERE trade_id = ?", [trade_id])
@@ -347,19 +343,13 @@ def evaluate_manual_positions(
         price_date = price_row[0] if price_row else None
         close_price = float(price_row[1]) if price_row else None
         market_value = position.qty * close_price if close_price is not None else None
-        unrealized_pnl = (
-            market_value - cost_basis if market_value is not None else None
-        )
+        unrealized_pnl = market_value - cost_basis if market_value is not None else None
         unrealized_pnl_pct = (
             unrealized_pnl / cost_basis * 100
             if unrealized_pnl is not None and cost_basis > 0
             else None
         )
-        total_pnl = (
-            position.realized_pnl + unrealized_pnl
-            if unrealized_pnl is not None
-            else None
-        )
+        total_pnl = position.realized_pnl + unrealized_pnl if unrealized_pnl is not None else None
         valuations.append(
             ManualPositionValuation(
                 code=position.code,

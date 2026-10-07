@@ -161,6 +161,7 @@ def _cmd_positions(args: argparse.Namespace) -> int:
         "total_pnl | last_trade_date"
     )
     for row in rows:
+
         def value(item: float | None) -> str:
             return "" if item is None else f"{item:g}"
 

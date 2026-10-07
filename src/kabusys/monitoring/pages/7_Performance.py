@@ -79,9 +79,10 @@ try:
             st.info("手動注文ポジションはありません。")
         else:
             total_cost = float(
-                (pd.to_numeric(df["qty"], errors="coerce").fillna(0) * pd.to_numeric(
-                    df["avg_price"], errors="coerce"
-                ).fillna(0)).sum()
+                (
+                    pd.to_numeric(df["qty"], errors="coerce").fillna(0)
+                    * pd.to_numeric(df["avg_price"], errors="coerce").fillna(0)
+                ).sum()
             )
             realized = float(pd.to_numeric(df["realized_pnl"], errors="coerce").fillna(0).sum())
             col1, col2, col3 = st.columns(3)
