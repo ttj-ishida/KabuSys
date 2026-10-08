@@ -325,3 +325,43 @@ def test_load_manual_actions_missing_table_read_only(tmp_path):
 
     assert df.empty
     assert "action_id" in df.columns
+
+
+def test_load_manual_positions_missing_table_read_only(tmp_path):
+    """manual_trades 未作成 DB を read_only で開いても空（仕様 §9: 手動保有なし）。"""
+    from kabusys.monitoring.dashboard_data import load_manual_positions
+    from kabusys.operations.manual_trades import (
+        calc_manual_portfolio_value,
+        calculate_manual_positions,
+        list_manual_trades,
+    )
+
+    path = str(tmp_path / "ro_manual.duckdb")
+    duckdb.connect(path).close()
+    ro = duckdb.connect(path, read_only=True)
+    try:
+        df = load_manual_positions(ro, as_of=date(2026, 10, 8))
+        positions = calculate_manual_positions(ro)
+        trades = list_manual_trades(ro)
+        value = calc_manual_portfolio_value(ro, 1_000_000.0, as_of=date(2026, 10, 8))
+    finally:
+        ro.close()
+
+    assert df.empty
+    assert list(df.columns) == [
+        "code",
+        "qty",
+        "avg_price",
+        "cost_basis",
+        "price_date",
+        "close_price",
+        "market_value",
+        "unrealized_pnl",
+        "unrealized_pnl_pct",
+        "realized_pnl",
+        "total_pnl",
+        "last_trade_date",
+    ]
+    assert positions == []
+    assert trades == []
+    assert value == (1_000_000.0, 1_000_000.0)

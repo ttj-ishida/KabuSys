@@ -105,6 +105,22 @@ def ensure_manual_trade_schema(conn: duckdb.DuckDBPyConnection) -> None:
         raise
 
 
+def _fetch_manual_trade_rows(
+    conn: duckdb.DuckDBPyConnection, sql: str, params: list[Any] | None = None
+) -> list[tuple[Any, ...]]:
+    """manual_trades への SELECT を実行する。
+
+    read-only 接続では ensure_manual_trade_schema が CREATE をスキップするため、
+    テーブル未作成時は CatalogException になる。仕様 §9 に従い「手動保有なし」
+    （空）として扱う。
+    """
+    try:
+        return conn.execute(sql, params or []).fetchall()
+    except duckdb.CatalogException:
+        logger.debug("manual_trades テーブルが存在しないため空として扱います")
+        return []
+
+
 def build_manual_trade_id(trade_date: date, code: str, side: str) -> str:
     return f"MANUAL_{trade_date.isoformat()}_{code}_{side.lower()}"
 
@@ -205,16 +221,18 @@ def list_manual_trades(
 ) -> list[ManualTrade]:
     ensure_manual_trade_schema(conn)
     if trade_date is None:
-        rows = conn.execute(
+        rows = _fetch_manual_trade_rows(
+            conn,
             """
             SELECT trade_id, trade_date, code, side, qty, price, fees,
                    source_signal_id, note, created_at
             FROM manual_trades
             ORDER BY trade_date DESC, created_at DESC, trade_id
-            """
-        ).fetchall()
+            """,
+        )
     else:
-        rows = conn.execute(
+        rows = _fetch_manual_trade_rows(
+            conn,
             """
             SELECT trade_id, trade_date, code, side, qty, price, fees,
                    source_signal_id, note, created_at
@@ -223,7 +241,7 @@ def list_manual_trades(
             ORDER BY created_at DESC, trade_id
             """,
             [trade_date],
-        ).fetchall()
+        )
     return [_row_to_manual_trade(row) for row in rows]
 
 
@@ -248,15 +266,17 @@ def calculate_manual_positions(
     """
     ensure_manual_trade_schema(conn)
     if as_of is None:
-        rows = conn.execute(
+        rows = _fetch_manual_trade_rows(
+            conn,
             """
             SELECT trade_date, code, side, qty, price, fees
             FROM manual_trades
             ORDER BY trade_date, created_at, trade_id
-            """
-        ).fetchall()
+            """,
+        )
     else:
-        rows = conn.execute(
+        rows = _fetch_manual_trade_rows(
+            conn,
             """
             SELECT trade_date, code, side, qty, price, fees
             FROM manual_trades
@@ -264,7 +284,7 @@ def calculate_manual_positions(
             ORDER BY trade_date, created_at, trade_id
             """,
             [as_of],
-        ).fetchall()
+        )
 
     state: dict[str, dict[str, Any]] = {}
     for trade_date, code, side, qty, price, fees in rows:
@@ -423,7 +443,8 @@ def calc_manual_portfolio_value(
     """
     ensure_manual_trade_schema(conn)
     cash = float(initial_cash)
-    rows = conn.execute(
+    rows = _fetch_manual_trade_rows(
+        conn,
         """
         SELECT side, SUM(qty * price), SUM(fees)
         FROM manual_trades
@@ -431,7 +452,7 @@ def calc_manual_portfolio_value(
         GROUP BY side
         """,
         [as_of],
-    ).fetchall()
+    )
     for side, amount, fees in rows:
         amount_f = float(amount or 0.0)
         fees_f = float(fees or 0.0)
