@@ -6,6 +6,7 @@ CLI と将来の GUI はこのモジュールを共通利用する。
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -524,3 +525,29 @@ def update_manual_action_status(
         [status, action_id],
     )
     return int(before)
+
+
+def run_manual_signal_step(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+    *,
+    enabled: bool,
+    generate: Callable[..., int],
+    **generate_kwargs: Any,
+) -> tuple[int, int]:
+    """generate_signals を手動保有込みで実行し、手動保有の SELL を売却候補として記録する。
+
+    enabled=False のときは手動保有を渡さず、候補も記録しない（従来動作）。
+    signals 書き込み後に候補記録が失敗した場合は例外を送出する（ジョブを失敗扱いにするため）。
+    """
+    manual_positions = load_manual_held_positions(conn, target_date) if enabled else None
+    sell_out: list[dict[str, Any]] = []
+    n = generate(
+        conn,
+        target_date,
+        manual_positions=manual_positions,
+        sell_signals_out=sell_out,
+        **generate_kwargs,
+    )
+    recorded = record_sell_candidates(conn, target_date, sell_out) if enabled else 0
+    return n, recorded

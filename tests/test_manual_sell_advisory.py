@@ -165,3 +165,39 @@ def test_generate_signals_merges_auto_and_manual_same_code(conn):
 
     assert out[0]["qty"] == 300
     assert out[0]["source"] == "mixed"
+
+
+def test_run_manual_signal_step_records_candidates_when_enabled(conn):
+    from kabusys.operations.manual_trades import list_manual_actions, run_manual_signal_step
+
+    add_manual_trade(
+        conn,
+        ManualTradeInput(
+            trade_date=TARGET - timedelta(days=3), code="S1", side="buy", qty=100, price=1000.0
+        ),
+    )
+    _price(conn, TARGET, "S1", 900.0)
+
+    n, recorded = run_manual_signal_step(conn, TARGET, enabled=True, generate=generate_signals)
+
+    assert n >= 1
+    assert recorded == 1
+    [action] = list_manual_actions(conn, target_date=TARGET)
+    assert (action.code, action.reason, action.qty) == ("S1", "stop_loss", 100)
+
+
+def test_run_manual_signal_step_disabled_ignores_manual_trades(conn):
+    from kabusys.operations.manual_trades import list_manual_actions, run_manual_signal_step
+
+    add_manual_trade(
+        conn,
+        ManualTradeInput(
+            trade_date=TARGET - timedelta(days=3), code="S2", side="buy", qty=100, price=1000.0
+        ),
+    )
+    _price(conn, TARGET, "S2", 900.0)
+
+    _, recorded = run_manual_signal_step(conn, TARGET, enabled=False, generate=generate_signals)
+
+    assert recorded == 0
+    assert list_manual_actions(conn, target_date=TARGET) == []
