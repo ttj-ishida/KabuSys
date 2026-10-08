@@ -101,6 +101,8 @@ python scripts/run_signal_queue_report.py
     MANUAL_TRADING_ENABLED=true
     MANUAL_TRADING_INITIAL_CASH=3000000
 
+- 既定値: `MANUAL_TRADING_ENABLED` は既定 `false`（未設定なら手動保有は判定に含めない）。`MANUAL_TRADING_INITIAL_CASH` は未設定時 `PORTFOLIO_VALUE` を使う。
+
 - 夜間バッチ（strategy_signal）が手動保有に損切り・トレーリングストップ・保有期限・スコア低下などの SELL 判定を行い、該当銘柄を `manual_action_queue` に「売却候補」として記録する。KabuSys は発注しない。
 - 夜 LINE の SELL 行に株数・理由・`[手動保有]` が表示される。
 - 手動保有中の銘柄が BUY 候補になった場合、目標株数との差分だけが提示され、`[買い増し]` と表示される。
