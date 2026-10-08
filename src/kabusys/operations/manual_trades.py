@@ -400,3 +400,127 @@ def load_manual_held_positions(
 def manual_position_qty_map(conn: duckdb.DuckDBPyConnection, *, as_of: date) -> dict[str, int]:
     """as_of 時点の手動保有数量 {code: qty}。"""
     return {p.code: p.qty for p in calculate_manual_positions(conn, as_of=as_of)}
+
+
+_ACTION_STATUSES = frozenset({"open", "done", "skipped"})
+_MANUAL_SOURCES = frozenset({"manual", "mixed"})
+
+
+@dataclass(frozen=True)
+class ManualAction:
+    action_id: str
+    date: date
+    code: str
+    action: str
+    qty: int
+    reason: str
+    status: str
+    created_at: datetime
+    updated_at: datetime | None
+
+
+def ensure_manual_action_schema(conn: duckdb.DuckDBPyConnection) -> None:
+    from kabusys.data.schema import _MANUAL_ACTION_QUEUE
+
+    try:
+        conn.execute(_MANUAL_ACTION_QUEUE)
+    except duckdb.Error as exc:
+        msg = str(exc).lower()
+        if "read-only" in msg or "read only" in msg:
+            return
+        raise
+
+
+def build_action_id(target_date: date, code: str, action: str) -> str:
+    return f"{target_date.isoformat()}_{code}_{action}"
+
+
+def record_sell_candidates(
+    conn: duckdb.DuckDBPyConnection,
+    target_date: date,
+    sell_signals: list[dict[str, Any]],
+) -> int:
+    """手動保有（source=manual/mixed）の SELL を売却候補として記録する（冪等）。
+
+    既存行は qty / reason のみ更新し、ユーザーが変更した status は保持する。
+    発注は行わない。Execution Engine はこのテーブルを参照しない。
+    """
+    ensure_manual_action_schema(conn)
+    recorded = 0
+    for sig in sell_signals:
+        if sig.get("source") not in _MANUAL_SOURCES:
+            continue
+        conn.execute(
+            """
+            INSERT INTO manual_action_queue (action_id, date, code, action, qty, reason)
+            VALUES (?, ?, ?, 'sell_candidate', ?, ?)
+            ON CONFLICT (action_id) DO UPDATE SET
+                qty = excluded.qty,
+                reason = excluded.reason,
+                updated_at = now()
+            """,
+            [
+                build_action_id(target_date, sig["code"], "sell_candidate"),
+                target_date,
+                sig["code"],
+                int(sig["qty"]),
+                str(sig["reason"]),
+            ],
+        )
+        recorded += 1
+    return recorded
+
+
+def list_manual_actions(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    target_date: date | None = None,
+    status: str | None = None,
+) -> list[ManualAction]:
+    ensure_manual_action_schema(conn)
+    where: list[str] = []
+    params: list[Any] = []
+    if target_date is not None:
+        where.append("date = ?")
+        params.append(target_date)
+    if status is not None:
+        where.append("status = ?")
+        params.append(status)
+    sql = (
+        "SELECT action_id, date, code, action, qty, reason, status, created_at, updated_at "
+        "FROM manual_action_queue"
+    )
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY date DESC, code"
+    return [
+        ManualAction(
+            action_id=r[0],
+            date=r[1],
+            code=r[2],
+            action=r[3],
+            qty=int(r[4]),
+            reason=r[5],
+            status=r[6],
+            created_at=r[7],
+            updated_at=r[8],
+        )
+        for r in conn.execute(sql, params).fetchall()
+    ]
+
+
+def update_manual_action_status(
+    conn: duckdb.DuckDBPyConnection, action_id: str, status: str
+) -> int:
+    if status not in _ACTION_STATUSES:
+        raise ValueError(f"status は open/done/skipped を指定してください: {status!r}")
+    ensure_manual_action_schema(conn)
+    before = conn.execute(
+        "SELECT COUNT(*) FROM manual_action_queue WHERE action_id = ?", [action_id]
+    ).fetchone()[0]
+    conn.execute(
+        "UPDATE manual_action_queue SET status = ?, updated_at = current_timestamp "
+        "WHERE action_id = ?",
+        [status, action_id],
+    )
+    return int(before)

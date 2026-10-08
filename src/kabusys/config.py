@@ -266,6 +266,27 @@ class Settings:
         return val
 
     @property
+    def manual_trading_enabled(self) -> bool:
+        """手動約定の保有を SELL 判定・BUY 株数計算に含めるか（MANUAL_TRADING_ENABLED、既定 false）。"""
+        return _parse_bool_env("MANUAL_TRADING_ENABLED", default=False)
+
+    @property
+    def manual_trading_initial_cash(self) -> float:
+        """手動運用の元手（MANUAL_TRADING_INITIAL_CASH、未設定時は PORTFOLIO_VALUE）。"""
+        raw = os.environ.get("MANUAL_TRADING_INITIAL_CASH")
+        if raw is None or raw.strip() == "":
+            return self.portfolio_value
+        try:
+            val = float(raw)
+        except ValueError as exc:
+            raise ValueError(
+                f"MANUAL_TRADING_INITIAL_CASH の値が不正です: '{raw}'. 正の数値で設定してください。"
+            ) from exc
+        if val <= 0:
+            raise ValueError(f"MANUAL_TRADING_INITIAL_CASH は正の数値で設定してください: {val}")
+        return val
+
+    @property
     def paper_trading_initial_cash(self) -> float:
         """ペーパートレード用初期資金（PAPER_TRADING_INITIAL_CASH、デフォルト: 10,000,000）。"""
         raw = os.environ.get("PAPER_TRADING_INITIAL_CASH", "10000000")

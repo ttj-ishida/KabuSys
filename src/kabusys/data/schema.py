@@ -334,6 +334,20 @@ CREATE TABLE IF NOT EXISTS manual_trades (
 )
 """
 
+_MANUAL_ACTION_QUEUE = """
+CREATE TABLE IF NOT EXISTS manual_action_queue (
+    action_id   VARCHAR   NOT NULL PRIMARY KEY,
+    date        DATE      NOT NULL,
+    code        VARCHAR   NOT NULL,
+    action      VARCHAR   NOT NULL CHECK (action IN ('sell_candidate')),
+    qty         BIGINT    NOT NULL CHECK (qty > 0),
+    reason      VARCHAR   NOT NULL,
+    status      VARCHAR   NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done', 'skipped')),
+    created_at  TIMESTAMP NOT NULL DEFAULT current_timestamp,
+    updated_at  TIMESTAMP
+)
+"""
+
 _POSITIONS = """
 CREATE TABLE IF NOT EXISTS positions (
     date            DATE        NOT NULL,
@@ -558,6 +572,7 @@ _ALL_DDL: list[str] = [
     _ORDERS,
     _TRADES,
     _MANUAL_TRADES,
+    _MANUAL_ACTION_QUEUE,
     _POSITIONS,
     _POSITION_ENTRIES,
     _EARNINGS_CALENDAR,
