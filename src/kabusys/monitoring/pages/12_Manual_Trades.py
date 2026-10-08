@@ -127,10 +127,18 @@ with tab_actions:
     st.caption(
         "KabuSys は発注しません。証券画面で手動売却後、約定を「入力」タブで登録してください。"
     )
-    show_all = st.checkbox("対応済み・見送りも表示", value=False)
+    show_all = st.checkbox("対応済み・見送りも表示", value=False, key="actions_show_all")
+    filter_by_date = st.checkbox("日付で絞り込む", value=False, key="actions_filter_by_date")
+    action_date = (
+        st.date_input("対象日", value=date.today(), key="actions_target_date")
+        if filter_by_date
+        else None
+    )
     conn = connect_duckdb_ro(settings.duckdb_path)
     try:
-        actions = load_manual_actions(conn, status=None if show_all else "open")
+        actions = load_manual_actions(
+            conn, target_date=action_date, status=None if show_all else "open"
+        )
     finally:
         conn.close()
 

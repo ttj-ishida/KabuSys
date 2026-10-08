@@ -310,3 +310,18 @@ def test_load_manual_actions_empty():
     df = load_manual_actions(duckdb.connect(":memory:"))
     assert df.empty
     assert "action_id" in df.columns
+
+
+def test_load_manual_actions_missing_table_read_only(tmp_path):
+    from kabusys.monitoring.dashboard_data import load_manual_actions
+
+    path = str(tmp_path / "ro.duckdb")
+    duckdb.connect(path).close()
+    ro = duckdb.connect(path, read_only=True)
+    try:
+        df = load_manual_actions(ro)
+    finally:
+        ro.close()
+
+    assert df.empty
+    assert "action_id" in df.columns
