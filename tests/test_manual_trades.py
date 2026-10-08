@@ -435,3 +435,78 @@ def test_init_schema_creates_manual_trades_table(tmp_path):
         conn.close()
 
     assert count == 1
+
+
+def _buy(conn, d, code="7203", qty=100, price=1000.0):
+    add_manual_trade(
+        conn, ManualTradeInput(trade_date=d, code=code, side="buy", qty=qty, price=price)
+    )
+
+
+def _sell(conn, d, code="7203", qty=100, price=1000.0):
+    add_manual_trade(
+        conn, ManualTradeInput(trade_date=d, code=code, side="sell", qty=qty, price=price)
+    )
+
+
+def test_manual_positions_track_entry_dates(conn):
+    _buy(conn, date(2026, 9, 1))
+    _buy(conn, date(2026, 9, 3))
+
+    pos = calculate_manual_positions(conn, as_of=date(2026, 9, 10))[0]
+
+    assert pos.first_entry_date == date(2026, 9, 1)
+    assert pos.latest_entry_date == date(2026, 9, 3)
+
+
+def test_manual_positions_reset_entry_after_full_exit(conn):
+    _buy(conn, date(2026, 9, 1))
+    _sell(conn, date(2026, 9, 2))
+    _buy(conn, date(2026, 9, 7))
+
+    pos = calculate_manual_positions(conn, as_of=date(2026, 9, 10))[0]
+
+    assert pos.qty == 100
+    assert pos.first_entry_date == date(2026, 9, 7)
+    assert pos.latest_entry_date == date(2026, 9, 7)
+
+
+def test_fully_sold_manual_position_is_not_held(conn):
+    from kabusys.operations.manual_trades import load_manual_held_positions
+
+    _buy(conn, date(2026, 9, 1))
+    _sell(conn, date(2026, 9, 2))
+
+    assert load_manual_held_positions(conn, date(2026, 9, 10)) == []
+
+
+def test_load_manual_held_positions_returns_held_positions(conn):
+    from kabusys.operations.manual_trades import load_manual_held_positions
+    from kabusys.strategy.holdings import HeldPosition
+
+    _buy(conn, date(2026, 9, 1), price=1000.0)
+    _buy(conn, date(2026, 9, 3), price=1200.0)
+    _buy(conn, date(2026, 9, 20), price=1500.0)  # target_date より後 → 含めない
+
+    result = load_manual_held_positions(conn, date(2026, 9, 10))
+
+    assert result == [
+        HeldPosition(
+            code="7203",
+            qty=200,
+            avg_price=1100.0,
+            first_entry_date=date(2026, 9, 1),
+            latest_entry_date=date(2026, 9, 3),
+            source="manual",
+        )
+    ]
+
+
+def test_manual_position_qty_map(conn):
+    from kabusys.operations.manual_trades import manual_position_qty_map
+
+    _buy(conn, date(2026, 9, 1), code="7203", qty=200)
+    _buy(conn, date(2026, 9, 1), code="6758", qty=100)
+    _sell(conn, date(2026, 9, 2), code="6758", qty=100)
+
+    assert manual_position_qty_map(conn, as_of=date(2026, 9, 10)) == {"7203": 200}

@@ -12,6 +12,8 @@ from typing import Any
 
 import duckdb
 
+from kabusys.strategy.holdings import HeldPosition
+
 
 class DuplicateManualTradeError(Exception):
     """同一 manual trade ID が既に存在するときに送出される。"""
@@ -50,6 +52,8 @@ class ManualPosition:
     avg_price: float
     realized_pnl: float
     last_trade_date: date
+    first_entry_date: date | None = None
+    latest_entry_date: date | None = None
 
 
 @dataclass(frozen=True)
@@ -258,7 +262,7 @@ def calculate_manual_positions(
             [as_of],
         ).fetchall()
 
-    state: dict[str, dict[str, float | int | date]] = {}
+    state: dict[str, dict[str, Any]] = {}
     for trade_date, code, side, qty, price, fees in rows:
         qty = int(qty)
         price = float(price)
@@ -270,11 +274,16 @@ def calculate_manual_positions(
                 "cost": 0.0,
                 "realized_pnl": 0.0,
                 "last_trade_date": trade_date,
+                "first_entry_date": None,
+                "latest_entry_date": None,
             },
         )
         current_qty = int(pos["qty"])
         current_cost = float(pos["cost"])
         if side == "buy":
+            if current_qty == 0:
+                pos["first_entry_date"] = trade_date
+            pos["latest_entry_date"] = trade_date
             pos["qty"] = current_qty + qty
             pos["cost"] = current_cost + (qty * price) + fees
         elif side == "sell":
@@ -301,6 +310,8 @@ def calculate_manual_positions(
                 avg_price=cost / qty,
                 realized_pnl=float(pos["realized_pnl"]),
                 last_trade_date=pos["last_trade_date"],
+                first_entry_date=pos["first_entry_date"],
+                latest_entry_date=pos["latest_entry_date"],
             )
         )
     return sorted(positions, key=lambda p: p.code)
@@ -367,3 +378,25 @@ def evaluate_manual_positions(
             )
         )
     return valuations
+
+
+def load_manual_held_positions(
+    conn: duckdb.DuckDBPyConnection, target_date: date
+) -> list[HeldPosition]:
+    """target_date 時点の手動保有を SELL 判定用の HeldPosition に変換する。"""
+    return [
+        HeldPosition(
+            code=p.code,
+            qty=p.qty,
+            avg_price=p.avg_price,
+            first_entry_date=p.first_entry_date,
+            latest_entry_date=p.latest_entry_date,
+            source="manual",
+        )
+        for p in calculate_manual_positions(conn, as_of=target_date)
+    ]
+
+
+def manual_position_qty_map(conn: duckdb.DuckDBPyConnection, *, as_of: date) -> dict[str, int]:
+    """as_of 時点の手動保有数量 {code: qty}。"""
+    return {p.code: p.qty for p in calculate_manual_positions(conn, as_of=as_of)}
