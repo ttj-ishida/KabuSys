@@ -1,9 +1,17 @@
-"""pages/12_Manual_Trades.py — 手動約定入力・確認ビュー。"""
+"""pages/12_Manual_Trades.py — 手動約定入力・確認ビュー。
+
+表示は常に read-only 接続（connect_duckdb_ro）で行い、read-write 接続（init_schema）は
+登録・削除・ステータス変更ボタンのハンドラ内でのみ開く。執行エンジンや夜間バッチが
+DB をロック中の場合は警告を出してページはクラッシュさせない。
+"""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date, timedelta
+from typing import TypeVar
 
+import duckdb
 import streamlit as st
 
 from kabusys.config import Settings
@@ -26,6 +34,33 @@ st.set_page_config(page_title="Manual Trades", layout="wide", page_icon="📝")
 st.title("📝 Manual Trades — 手動約定")
 
 settings = Settings()
+
+_T = TypeVar("_T")
+_DB_BUSY_MESSAGE = (
+    "⚙️ バッチまたは執行エンジンが DB を使用中のため、書き込めませんでした。"
+    "しばらく待ってから再度実行してください。"
+)
+
+
+def _run_write(action: Callable[[duckdb.DuckDBPyConnection], _T]) -> tuple[bool, _T | None]:
+    """read-write 接続を開いて action を実行する。
+
+    ロック競合・I/O エラー時は st.warning を表示して (False, None) を返す。
+    業務例外（DuplicateManualTradeError / ValueError など）は呼び出し側へ伝播する。
+    """
+    try:
+        conn = init_schema(settings.duckdb_path)
+    except (duckdb.IOException, OSError) as exc:
+        st.warning(f"{_DB_BUSY_MESSAGE}（{exc}）")
+        return False, None
+    try:
+        return True, action(conn)
+    except (duckdb.IOException, OSError) as exc:
+        st.warning(f"{_DB_BUSY_MESSAGE}（{exc}）")
+        return False, None
+    finally:
+        conn.close()
+
 
 with st.sidebar:
     st.caption(f"環境: **{settings.env}**")
@@ -60,31 +95,23 @@ with tab_add:
         if not code.strip():
             st.error("銘柄コードを入力してください。")
         else:
-            conn = init_schema(settings.duckdb_path)
+            payload = ManualTradeInput(
+                trade_date=trade_date,
+                code=code,
+                side=side,
+                qty=int(qty),
+                price=float(price),
+                fees=float(fees),
+                source_signal_id=source_signal_id.strip() or None,
+                note=note.strip() or None,
+            )
             try:
-                trade_id = add_manual_trade(
-                    conn,
-                    ManualTradeInput(
-                        trade_date=trade_date,
-                        code=code,
-                        side=side,
-                        qty=int(qty),
-                        price=float(price),
-                        fees=float(fees),
-                        source_signal_id=source_signal_id.strip() or None,
-                        note=note.strip() or None,
-                    ),
-                    force=force,
-                )
-            except DuplicateManualTradeError as exc:
+                ok, trade_id = _run_write(lambda c: add_manual_trade(c, payload, force=force))
+            except (DuplicateManualTradeError, ValueError) as exc:
                 st.error(str(exc))
-            except ValueError as exc:
-                st.error(str(exc))
-            finally:
-                conn.close()
-
-            if "trade_id" in locals():
-                st.success(f"登録しました: {trade_id}")
+            else:
+                if ok:
+                    st.success(f"登録しました: {trade_id}")
 
 with tab_positions:
     st.subheader("手動ポジション")
@@ -136,8 +163,12 @@ with tab_actions:
     )
     conn = connect_duckdb_ro(settings.duckdb_path)
     try:
+        # 日付で絞り込まない場合、毎晩候補に残る銘柄が重複しないよう銘柄ごとに最新行のみ表示
         actions = load_manual_actions(
-            conn, target_date=action_date, status=None if show_all else "open"
+            conn,
+            target_date=action_date,
+            status=None if show_all else "open",
+            latest_per_code=not filter_by_date,
         )
     finally:
         conn.close()
@@ -156,16 +187,17 @@ with tab_actions:
                 if col.button(
                     label, key=f"{new_status}_{row.action_id}", disabled=row.status == new_status
                 ):
-                    conn = init_schema(settings.duckdb_path)
-                    try:
-                        update_manual_action_status(conn, row.action_id, new_status)
-                    finally:
-                        conn.close()
-                    st.rerun()
+                    ok, _ = _run_write(
+                        lambda c, aid=row.action_id, s=new_status: update_manual_action_status(
+                            c, aid, s
+                        )
+                    )
+                    if ok:
+                        st.rerun()
 
 with tab_history:
     st.subheader("手動約定履歴")
-    conn = init_schema(settings.duckdb_path)
+    conn = connect_duckdb_ro(settings.duckdb_path)
     try:
         rows = list_manual_trades(conn)
     finally:
@@ -187,10 +219,7 @@ with tab_history:
                     }
                 )
                 if st.button("削除", key=f"delete_{row.trade_id}"):
-                    conn = init_schema(settings.duckdb_path)
-                    try:
-                        delete_manual_trade(conn, row.trade_id)
-                    finally:
-                        conn.close()
-                    st.success(f"削除しました: {row.trade_id}")
-                    st.rerun()
+                    ok, _ = _run_write(lambda c, tid=row.trade_id: delete_manual_trade(c, tid))
+                    if ok:
+                        st.success(f"削除しました: {row.trade_id}")
+                        st.rerun()
