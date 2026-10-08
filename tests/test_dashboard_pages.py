@@ -276,3 +276,37 @@ def test_load_manual_positions_returns_open_positions(duck_conn):
     assert float(df.iloc[0]["unrealized_pnl"]) == pytest.approx(11940.0)
     assert float(df.iloc[0]["realized_pnl"]) == pytest.approx(7910.0)
     assert float(df.iloc[0]["total_pnl"]) == pytest.approx(19850.0)
+
+
+def test_load_manual_actions_returns_dataframe():
+    from kabusys.monitoring.dashboard_data import load_manual_actions
+    from kabusys.operations.manual_trades import record_sell_candidates
+
+    c = duckdb.connect(":memory:")
+    d = date(2026, 10, 8)
+    record_sell_candidates(
+        c, d, [{"code": "7203", "reason": "stop_loss", "qty": 100, "source": "manual"}]
+    )
+
+    df = load_manual_actions(c, target_date=d)
+
+    assert list(df.columns) == [
+        "action_id",
+        "date",
+        "code",
+        "action",
+        "qty",
+        "reason",
+        "status",
+        "updated_at",
+    ]
+    assert df.iloc[0]["code"] == "7203"
+    assert df.iloc[0]["status"] == "open"
+
+
+def test_load_manual_actions_empty():
+    from kabusys.monitoring.dashboard_data import load_manual_actions
+
+    df = load_manual_actions(duckdb.connect(":memory:"))
+    assert df.empty
+    assert "action_id" in df.columns

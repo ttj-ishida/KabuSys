@@ -12,7 +12,7 @@ from datetime import date, timedelta
 import duckdb
 import pandas as pd
 
-from kabusys.operations.manual_trades import evaluate_manual_positions
+from kabusys.operations.manual_trades import evaluate_manual_positions, list_manual_actions
 
 # ---------------------------------------------------------------------------
 # Home ページ（SQLite）
@@ -147,4 +147,33 @@ def load_manual_positions(
             "total_pnl",
             "last_trade_date",
         ],
+    )
+
+
+_MANUAL_ACTION_COLUMNS = [
+    "action_id",
+    "date",
+    "code",
+    "action",
+    "qty",
+    "reason",
+    "status",
+    "updated_at",
+]
+
+
+def load_manual_actions(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    target_date: date | None = None,
+    status: str | None = None,
+) -> pd.DataFrame:
+    """manual_action_queue（手動売却候補）を DataFrame で返す。テーブル未作成時は空。"""
+    try:
+        rows = list_manual_actions(conn, target_date=target_date, status=status)
+    except duckdb.CatalogException:
+        rows = []
+    return pd.DataFrame(
+        [{col: getattr(r, col) for col in _MANUAL_ACTION_COLUMNS} for r in rows],
+        columns=_MANUAL_ACTION_COLUMNS,
     )

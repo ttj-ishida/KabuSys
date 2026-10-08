@@ -8,7 +8,10 @@ import streamlit as st
 
 from kabusys.config import Settings
 from kabusys.data.schema import init_schema
-from kabusys.monitoring.dashboard_data import load_manual_positions
+from kabusys.monitoring.dashboard_data import (
+    load_manual_actions,
+    load_manual_positions,
+)
 from kabusys.monitoring.db_connect import connect_duckdb_ro
 from kabusys.operations.manual_trades import (
     DuplicateManualTradeError,
@@ -16,6 +19,7 @@ from kabusys.operations.manual_trades import (
     add_manual_trade,
     delete_manual_trade,
     list_manual_trades,
+    update_manual_action_status,
 )
 
 st.set_page_config(page_title="Manual Trades", layout="wide", page_icon="📝")
@@ -28,7 +32,9 @@ with st.sidebar:
     if st.button("🔄 Refresh"):
         st.rerun()
 
-tab_add, tab_positions, tab_history = st.tabs(["入力", "手動ポジション", "履歴"])
+tab_add, tab_positions, tab_actions, tab_history = st.tabs(
+    ["入力", "手動ポジション", "売却候補", "履歴"]
+)
 
 with tab_add:
     st.subheader("手動約定を入力")
@@ -107,6 +113,47 @@ with tab_positions:
         col2.metric("実現損益", f"{realized_pnl:,.0f}円")
         col3.metric("合計損益", f"{total_pnl:,.0f}円" if total_pnl == total_pnl else "-")
         st.dataframe(df, use_container_width=True)
+
+_REASON_LABELS = {
+    "stop_loss": "損切り",
+    "trailing_stop": "トレーリング",
+    "time_exit": "保有期限",
+    "score_drop": "スコア低下",
+    "earnings_avoidance": "決算回避",
+}
+
+with tab_actions:
+    st.subheader("手動売却候補")
+    st.caption(
+        "KabuSys は発注しません。証券画面で手動売却後、約定を「入力」タブで登録してください。"
+    )
+    show_all = st.checkbox("対応済み・見送りも表示", value=False)
+    conn = connect_duckdb_ro(settings.duckdb_path)
+    try:
+        actions = load_manual_actions(conn, status=None if show_all else "open")
+    finally:
+        conn.close()
+
+    if actions.empty:
+        st.info("売却候補はありません。")
+    else:
+        for row in actions.itertuples():
+            reason = _REASON_LABELS.get(row.reason, row.reason)
+            cols = st.columns([4, 1, 1])
+            cols[0].write(f"{row.date} **{row.code}** {row.qty}株 — {reason}（{row.status}）")
+            for col, label, new_status in (
+                (cols[1], "対応済み", "done"),
+                (cols[2], "見送り", "skipped"),
+            ):
+                if col.button(
+                    label, key=f"{new_status}_{row.action_id}", disabled=row.status == new_status
+                ):
+                    conn = init_schema(settings.duckdb_path)
+                    try:
+                        update_manual_action_status(conn, row.action_id, new_status)
+                    finally:
+                        conn.close()
+                    st.rerun()
 
 with tab_history:
     st.subheader("手動約定履歴")
