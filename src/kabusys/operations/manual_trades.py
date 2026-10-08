@@ -6,6 +6,7 @@ CLI と将来の GUI はこのモジュールを共通利用する。
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -14,6 +15,8 @@ from typing import Any
 import duckdb
 
 from kabusys.strategy.holdings import HeldPosition
+
+logger = logging.getLogger(__name__)
 
 
 class DuplicateManualTradeError(Exception):
@@ -405,6 +408,61 @@ def manual_position_qty_map(conn: duckdb.DuckDBPyConnection, *, as_of: date) -> 
 
 _ACTION_STATUSES = frozenset({"open", "done", "skipped"})
 _MANUAL_SOURCES = frozenset({"manual", "mixed"})
+
+
+def calc_manual_portfolio_value(
+    conn: duckdb.DuckDBPyConnection,
+    initial_cash: float,
+    *,
+    as_of: date,
+) -> tuple[float, float]:
+    """手動運用の (総資産, 利用可能現金) を返す。
+
+    現金 = 元手 − Σ(BUY 約定額 + 手数料) + Σ(SELL 約定額 − 手数料)
+    総資産 = 現金 + Σ(手動保有数量 × as_of 以前の最新終値)。終値なしは時価 0 として warning。
+    """
+    ensure_manual_trade_schema(conn)
+    cash = float(initial_cash)
+    rows = conn.execute(
+        """
+        SELECT side, SUM(qty * price), SUM(fees)
+        FROM manual_trades
+        WHERE trade_date <= ?
+        GROUP BY side
+        """,
+        [as_of],
+    ).fetchall()
+    for side, amount, fees in rows:
+        amount_f = float(amount or 0.0)
+        fees_f = float(fees or 0.0)
+        if side == "buy":
+            cash -= amount_f + fees_f
+        else:
+            cash += amount_f - fees_f
+
+    market_value = 0.0
+    for valuation in evaluate_manual_positions(conn, as_of=as_of):
+        if valuation.market_value is None:
+            logger.warning(
+                "手動保有 %s の終値がないため時価 0 として総資産を計算します as_of=%s",
+                valuation.code,
+                as_of,
+            )
+            continue
+        market_value += valuation.market_value
+    return max(cash + market_value, 0.0), max(cash, 0.0)
+
+
+def merge_current_positions(
+    current: dict[str, int], manual_qty: dict[str, int], codes: list[str]
+) -> dict[str, int]:
+    """BUY 候補 codes について、自動分の保有株数に手動保有数量を加算する。"""
+    merged = dict(current)
+    for code in codes:
+        qty = manual_qty.get(code, 0)
+        if qty > 0:
+            merged[code] = merged.get(code, 0) + qty
+    return merged
 
 
 @dataclass(frozen=True)

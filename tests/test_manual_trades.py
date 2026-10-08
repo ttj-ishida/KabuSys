@@ -510,3 +510,71 @@ def test_manual_position_qty_map(conn):
     _sell(conn, date(2026, 9, 2), code="6758", qty=100)
 
     assert manual_position_qty_map(conn, as_of=date(2026, 9, 10)) == {"7203": 200}
+
+
+def _prices_table(conn):
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS prices_daily (date DATE, code VARCHAR, open DOUBLE, "
+        "high DOUBLE, low DOUBLE, close DOUBLE, volume BIGINT)"
+    )
+
+
+def test_calc_manual_portfolio_value(conn):
+    from kabusys.operations.manual_trades import calc_manual_portfolio_value
+
+    _prices_table(conn)
+    add_manual_trade(
+        conn,
+        ManualTradeInput(
+            trade_date=date(2026, 9, 1), code="7203", side="buy", qty=200, price=1000.0, fees=100.0
+        ),
+    )
+    add_manual_trade(
+        conn,
+        ManualTradeInput(
+            trade_date=date(2026, 9, 2), code="7203", side="sell", qty=100, price=1100.0, fees=50.0
+        ),
+    )
+    conn.execute("INSERT INTO prices_daily VALUES ('2026-09-02', '7203', 0, 0, 0, 1200, 0)")
+
+    pv, cash = calc_manual_portfolio_value(conn, 1_000_000.0, as_of=date(2026, 9, 2))
+
+    # 現金 = 1,000,000 - (200,000 + 100) + (110,000 - 50) = 909,850
+    assert cash == pytest.approx(909_850.0)
+    # 総資産 = 現金 + 100株 × 1200
+    assert pv == pytest.approx(1_029_850.0)
+
+
+def test_calc_manual_portfolio_value_missing_price_counts_zero(conn):
+    from kabusys.operations.manual_trades import calc_manual_portfolio_value
+
+    _prices_table(conn)
+    add_manual_trade(
+        conn,
+        ManualTradeInput(
+            trade_date=date(2026, 9, 1), code="7203", side="buy", qty=100, price=1000.0
+        ),
+    )
+
+    pv, cash = calc_manual_portfolio_value(conn, 500_000.0, as_of=date(2026, 9, 2))
+
+    assert cash == pytest.approx(400_000.0)
+    assert pv == pytest.approx(400_000.0)
+
+
+def test_calc_manual_portfolio_value_no_trades(conn):
+    from kabusys.operations.manual_trades import calc_manual_portfolio_value
+
+    assert calc_manual_portfolio_value(conn, 500_000.0, as_of=date(2026, 9, 2)) == (
+        500_000.0,
+        500_000.0,
+    )
+
+
+def test_merge_current_positions_adds_manual_qty_for_candidates():
+    from kabusys.operations.manual_trades import merge_current_positions
+
+    result = merge_current_positions(
+        {"7203": 100}, {"7203": 200, "6758": 100, "9984": 100}, ["7203", "6758"]
+    )
+    assert result == {"7203": 300, "6758": 100}

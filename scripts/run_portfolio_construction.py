@@ -37,6 +37,11 @@ from kabusys.operations.line_reports import (
     format_monthly_message,
     format_weekly_message,
 )
+from kabusys.operations.manual_trades import (
+    calc_manual_portfolio_value,
+    manual_position_qty_map,
+    merge_current_positions,
+)
 from kabusys.operations.night_batch_report import JobRunResult
 from kabusys.operations.notifier import build_notifier
 from kabusys.operations.performance_collector import (
@@ -305,7 +310,19 @@ def main() -> None:
         settings = Settings()
         conn = duckdb.connect(str(settings.duckdb_path))
 
-        if settings.is_live:
+        manual_qty: dict[str, int] = {}
+        if settings.manual_trading_enabled:
+            portfolio_value, available_cash = calc_manual_portfolio_value(
+                conn, settings.manual_trading_initial_cash, as_of=target_date
+            )
+            manual_qty = manual_position_qty_map(conn, as_of=target_date)
+            logger.info(
+                "手動運用: portfolio_value=%.0f 円, available_cash=%.0f 円, 手動保有 %d 銘柄",
+                portfolio_value,
+                available_cash,
+                len(manual_qty),
+            )
+        elif settings.is_live:
             portfolio_value, available_cash = _calc_live_portfolio_value(settings, conn)
         elif settings.is_paper or settings.is_dev:
             portfolio_value, available_cash = _calc_paper_portfolio_value(settings, conn)
@@ -372,6 +389,9 @@ def main() -> None:
                         codes,
                     )
                     current_positions = {r[0]: int(r[1]) for r in pos_cur.fetchall()}
+                    current_positions = merge_current_positions(
+                        current_positions, manual_qty, codes
+                    )
 
                     sizes = calc_position_sizes(
                         weights=weights,
