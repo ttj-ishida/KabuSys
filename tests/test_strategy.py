@@ -267,6 +267,32 @@ def test_apply_universe_filter_none_price():
     assert result == []
 
 
+def test_apply_universe_filter_market_excludes_unlisted_codes():
+    """market_set が指定されている場合、含まれないコード（ETF/REIT等）は除外される"""
+    records = [
+        {"code": "STOCK", "avg_turnover": 6e8},
+        {"code": "ETF", "avg_turnover": 6e8},
+    ]
+    price_map = {"STOCK": 1000.0, "ETF": 1000.0}
+    result = _apply_universe_filter(records, price_map, market_set={"STOCK"})
+    codes = {r["code"] for r in result}
+    assert codes == {"STOCK"}
+
+
+def test_apply_universe_filter_market_none_skips_filter():
+    """market_set が None の場合は市場区分フィルタをスキップする（後方互換）"""
+    records = [{"code": "X", "avg_turnover": 6e8}]
+    result = _apply_universe_filter(records, {"X": 1000.0}, market_set=None)
+    assert {r["code"] for r in result} == {"X"}
+
+
+def test_apply_universe_filter_market_empty_skips_filter():
+    """market_set が空集合の場合は市場区分フィルタをスキップする（stocks 未整備時）"""
+    records = [{"code": "X", "avg_turnover": 6e8}]
+    result = _apply_universe_filter(records, {"X": 1000.0}, market_set=set())
+    assert {r["code"] for r in result} == {"X"}
+
+
 # ---------------------------------------------------------------------------
 # build_features
 # ---------------------------------------------------------------------------
@@ -307,6 +333,27 @@ def test_build_features_idempotent(conn):
     build_features(conn, TARGET_DATE)
     c2 = conn.execute("SELECT COUNT(*) FROM features WHERE date = ?", [TARGET_DATE]).fetchone()[0]
     assert c1 == c2
+
+
+def test_build_features_market_filter_excludes_etf(conn):
+    """stocks.market が Prime/Standard/Growth 以外（ETF等）の銘柄は除外される"""
+    _insert_price_history(conn, [("1301", 1000.0, 6e8), ("1305", 1000.0, 6e8)])
+    conn.execute("INSERT INTO stocks (code, market) VALUES (?, ?)", ["1301", "Prime"])
+    conn.execute("INSERT INTO stocks (code, market) VALUES (?, ?)", ["1305", "ETF"])
+    build_features(conn, TARGET_DATE)
+    rows = conn.execute("SELECT code FROM features WHERE date = ?", [TARGET_DATE]).fetchall()
+    codes = {r[0] for r in rows}
+    assert "1301" in codes
+    assert "1305" not in codes
+
+
+def test_build_features_market_filter_skipped_when_stocks_empty(conn):
+    """stocks テーブルが未整備（空）の場合、市場区分フィルタはスキップされる"""
+    _insert_price_history(conn, [("A", 1000.0, 6e8), ("B", 2000.0, 6e8)])
+    build_features(conn, TARGET_DATE)
+    rows = conn.execute("SELECT code FROM features WHERE date = ?", [TARGET_DATE]).fetchall()
+    codes = {r[0] for r in rows}
+    assert codes == {"A", "B"}
 
 
 def test_build_features_zscore_clipped(conn):
