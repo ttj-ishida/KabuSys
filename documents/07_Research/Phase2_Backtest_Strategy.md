@@ -1312,7 +1312,7 @@ Group R〜Y の検証完了。W1_08（V1 + V3 gate=±8%）採用により CAGR 1
 | ---- | ---- | ------ | ---- |
 | **V2 パラメータ再調整** | `trail_stage4_days=25, profit_gate=8%` 等で Stage4 発動率を上げて再検証 | 高 | 未着手 |
 | **V4 2021-11 月異常損失の原因調査** | V1+V2 複合で発生した単月 −15.7% の構造解明 | 中 | 未着手 |
-| **W1_08（V1+V3）の OOS 検証** | 採択設定の 2022〜2025 OOS 成績確認 | 高 | 未着手 |
+| **W1_08（V1+V3）の OOS 検証** | 採択設定の 2022〜2025 OOS 成績確認 | 高 | 完了（Section 16、GO） |
 | **U1_t4 ウォークフォワード詳細分析** | 2021〜2023 年の 3 年連続マイナスの構造・原因分析 | 高 | Issue #388 → 完了 |
 | マルチ戦略化 | 第二戦略（例: クオリティ安定配当）との組み合わせで収益の年次偏中を解消 | 高（長期） | 未着手 |
 | ATR リスク均等化サイジング | 個別銘柄 ATR 逆数でポジションサイズを調整 | 中 | 未着手 |
@@ -1332,6 +1332,7 @@ Group R〜Y の検証完了。W1_08（V1 + V3 gate=±8%）採用により CAGR 1
 | **Group W** | **V3 エントリーフィルター gate 緩和（±8%/±10%/±12%）** | **W1_08（V1 + gate=±8%）採用 → CAGR 14.4%, Sharpe 0.674, MaxDD 18.4%** |
 | **Group X** | **quality_score 閾値の厳格化（0.0 / 0.30）** | **X0_ref（−0.30 現設定）が最良。閾値強化は全シナリオ崩壊 → 変更なし** |
 | **Group Y** | **TOPIX 騰落率ベースのレジーム検知強化（20日/-3%・20日/-5%・10日/-3%・MAクロス）** | **Y0_ref（現設定）が最良。全フィルターシナリオが劣後 → 変更なし** |
+| **W1_08 OOS** | **2022〜2025 OOS 検証** | **GO。OOS CAGR +5.27%, Sharpe 0.544, MaxDD 17.80%, PF 1.60** |
 
 ---
 
@@ -1407,7 +1408,7 @@ Group R〜Y の検証完了。W1_08（V1 + V3 gate=±8%）採用により CAGR 1
 | リスク | 内容 |
 | ------ | ---- |
 | **収益の年次集中** | 2018（+49%）・2024（+53%）の 2 年で CAGR の大半を生成。横ばい相場年（2021〜2023）は 3 年連続マイナス |
-| **OOS 未検証** | W1_08 の 2022〜2025 OOS 成績が未確認。IS 過剰適合のリスクを排除できていない |
+| **OOS 低迷年リスク** | W1_08 の 2022〜2025 OOS は GO だが、2022 年単年はマイナス。低迷年を許容しつつ回復年で取り返す前提が残る |
 | **2018・2024 の月次集中** | 2018年9月 +59.2%・2024年12月 +33.1% という単月依存が残存 |
 | **2025 年末 DD** | 2025 年内最大 DD が 17.9%（通算 MaxDD 18.4% に肉薄）|
 
@@ -1694,7 +1695,7 @@ Calmar 比は 0.581 → **0.780** と改善し、リスク調整後リターン�
 
 | アクション | 内容 | 優先度 |
 | ---------- | ---- | ------ |
-| **W1_08 の OOS 検証** | 2022〜2025 期間での Sharpe・MaxDD を確認 | 最高 |
+| **W1_08 の OOS 検証** | 2022〜2025 期間での Sharpe・MaxDD を確認 | 完了（GO） |
 | **Group X: quality_score 厳格化** | `quality_score_min=0.0/0.30` で 2021 年型過剰エントリーを削減（Issue #391） | 高 |
 | **Group Y: TOPIX レジーム検知強化** | 横ばい・下落局面での損失削減を引き続き検証（Issue #392） | 高 |
 | V2 パラメータ再調整 | `trail_stage4_days=25, profit_gate=8%` 等で Stage4 発動率を上げて再検証 | 中 |
@@ -1870,7 +1871,7 @@ quality_score_min=−0.30 は「有害な低クオリティ銘柄を除外しつ
 | アクション | 内容 | 優先度 |
 | ---------- | ---- | ------ |
 | **Group Y: TOPIX レジーム検知強化** | 横ばい・下落局面（2021〜2023）でのエントリー抑制（Issue #392） | 最高 |
-| **W1_08 の OOS 検証** | 2022〜2025 OOS 期間での Sharpe・MaxDD を確認 | 高 |
+| **W1_08 の OOS 検証** | 2022〜2025 OOS 期間での Sharpe・MaxDD を確認 | 完了（GO） |
 | **V2 パラメータ再調整** | Stage4 発動条件緩和（`days=25, gate=8%`）で再試験 | 中 |
 
 ---
@@ -2069,7 +2070,7 @@ Y1_20d_m3 の年次変化（Y0_ref との差）:
 
 | アクション | 内容 | 優先度 |
 | ---------- | ---- | ------ |
-| **W1_08 の OOS 検証** | 2022〜2025 期間での Sharpe・MaxDD を確認（Group W/X/Y 完了につき最優先） | 最高 |
+| **W1_08 の OOS 検証** | 2022〜2025 期間での Sharpe・MaxDD を確認（Group W/X/Y 完了につき最優先） | 完了（GO） |
 | **V2 パラメータ再調整** | `trail_stage4_days=25, profit_gate=8%` で Stage4 発動率を上げて再検証 | 中 |
 | **2021-2023 対策の再考** | TOPIX 騰落率・MA ともに機能しないことが判明。シグナル品質改善（別ファクター）またはポジションサイジング調整で対応を検討 | 中 |
 | マルチ戦略化 | 2021〜2023 型の横ばい相場に強い第二戦略（クオリティ安定配当等）との組み合わせ | 高（長期）|
@@ -2228,17 +2229,53 @@ dd_stop 発動後に相場が回復した場合、利益機会を失うトレー
 
 | アクション | 内容 | 優先度 |
 | ---------- | ---- | ------ |
-| **Issue #398 Paper Trading** | W1_08 シグナル・注文フロー本番前検証 | 高 |
+| **手動注文メイン運用** | W1_08 候補を前日夜・当日朝に確認し、ユーザーが手動注文する運用へ移行 | 最高 |
+| **Issue #398 Paper Trading** | W1_08 シグナル・注文フロー本番前検証。自動発注再開時の検証ルートとして維持 | 中 |
 | **dd_stop 閾値最適化** | 12% vs 18-20% で機会損失とリスク削減のトレードオフ検証 | 中 |
 | **マルチ戦略化** | 2021-2023 型横ばい相場に強い第二戦略（配当・クオリティ等）との組み合わせ | 高（長期）|
 
 ---
 
-## 16. 参考
+## 16. W1_08 OOS 検証結果（Issue #396）
+
+### 16.1 判定
+
+W1_08 の 2022〜2025 OOS 検証は **GO**。
+IS 比で成績は低下するが、Sharpe・MaxDD・PF は採択基準内に収まり、Paper Trading へ進める。
+
+成果物: `artifacts/backtest/backtest_phase2_oos_w1/20260608_033225/`
+
+| 区分 | 期間 | CAGR | Sharpe | MaxDD | PF | Trades |
+| ---- | ---- | ---: | -----: | ----: | -: | -----: |
+| W1_full | 2017〜2025 | +14.38% | 0.674 | 18.43% | 1.79 | 722 |
+| W1_IS | 2017〜2021 | +14.03% | 0.568 | 13.90% | 1.72 | 336 |
+| W1_OOS | 2022〜2025 | +5.27% | 0.544 | 17.80% | 1.60 | 148 |
+
+### 16.2 注意点
+
+- 2022 年単年はマイナスで、OOS は安定成長というより「低迷年を許容しつつ回復年で取り返す」性質が残る。
+- OOS MaxDD は 17.80% で、リスク上限 20% 以内。
+- OOS 通過により、次段階は **手動注文メイン運用**。Paper Trading 4週間検証は、自動発注へ戻す場合の検証ルートとして維持する。
+
+### 16.3 Paper Trading 開始前チェック（2026-09-17）
+
+| 項目 | 状況 |
+| ---- | ---- |
+| `KABUSYS_ENV` | `paper_trading` |
+| 設定検証 | `python -m kabusys.validate_config` PASS |
+| DuckDB データ | `prices_daily` / `features` / `topix_daily` は 2026-09-16 まで存在 |
+| `signals` | 2026-05-13〜2026-09-16、1,640 件 |
+| `signal_queue` | 2026-05-13〜2026-09-15、25 件 |
+| `paper_trading.db` | 作成済み。ただし注文・約定ログは未蓄積 |
+| Paper Verification | 注文データ未蓄積のため FAIL。運用開始後に再判定する |
+
+---
+
+## 17. 参考
 
 - `documents/07_Research/Phase1_Backtest_Strategy.md`（Section 27〜46: Phase 1 全検証結果）
 - `documents/10_Runtime/RuntimeJobSchedule.md`
-- GitHub Issues: #374（OOS検証）、#375（Group R）、#376（Group S）、#379（Group T）、#382（Group U）、#384（V1 score_drop 抑制）、#385（V2 Stage4）、#386（V3 エントリーフィルター）、#388（U1_t4 ウォークフォワード詳細分析）、#390（Group W: V3 gate 緩和）、#391（Group X: quality_score 厳格化）、#392（Group Y: レジーム検知強化）、#397（収益集中リスク定量評価）
+- GitHub Issues: #374（OOS検証）、#375（Group R）、#376（Group S）、#379（Group T）、#382（Group U）、#384（V1 score_drop 抑制）、#385（V2 Stage4）、#386（V3 エントリーフィルター）、#388（U1_t4 ウォークフォワード詳細分析）、#390（Group W: V3 gate 緩和）、#391（Group X: quality_score 厳格化）、#392（Group Y: レジーム検知強化）、#397（収益集中リスク定量評価）、#398（Paper Trading）
 - GitHub PR: #387（Group V 実装・バックテスト → V1 採用、マージ済み 2026-06-04）、#389（Issue #388 分析・Group W/X/Y スクリプト追加）、#393（Group W/X/Y 実装 → W1_08 採用、マージ済み 2026-06-07）
-- バックテスト成果物: `artifacts/backtest/backtest_phase2_group_v/20260603_155545/`、`artifacts/backtest/backtest_phase2_group_u/20260603_021339/`、`artifacts/backtest/backtest_phase2_group_w/20260607_023211/`、`artifacts/backtest/backtest_phase2_group_x/20260607_023308/`、`artifacts/backtest/backtest_phase2_group_y/20260607_101046/`
+- バックテスト成果物: `artifacts/backtest/backtest_phase2_group_v/20260603_155545/`、`artifacts/backtest/backtest_phase2_group_u/20260603_021339/`、`artifacts/backtest/backtest_phase2_group_w/20260607_023211/`、`artifacts/backtest/backtest_phase2_group_x/20260607_023308/`、`artifacts/backtest/backtest_phase2_group_y/20260607_101046/`、`artifacts/backtest/backtest_phase2_oos_w1/20260608_033225/`
 - 分析スクリプト: `backtest/backtest_improvement_plan/analyze_phase2_concentration_risk.py`

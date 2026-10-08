@@ -234,8 +234,8 @@ class TestSignalQueueExecution:
 
         assert self._count_orders(orders_conn) == 1
         states = self._get_order_states(orders_conn)
-        # _process_signals() 単体では OrderAccepted まで遷移（Filled は sync_order() 後）
-        assert states[0] == OrderState.OrderAccepted.value
+        # fill_mode=instant では _process_signals() 内で Filled まで同期される
+        assert states[0] == OrderState.Filled.value
 
     def test_multiple_signals_all_processed(self, orders_conn, duck_conn):
         """複数シグナルがすべて処理されること"""
@@ -249,7 +249,7 @@ class TestSignalQueueExecution:
 
         assert self._count_orders(orders_conn) == 3
         states = self._get_order_states(orders_conn)
-        assert all(s == OrderState.OrderAccepted.value for s in states)
+        assert all(s == OrderState.Filled.value for s in states)
 
     def test_duplicate_signal_is_skipped(self, orders_conn, duck_conn):
         """同一 signal_id の重複発注が防止されること"""

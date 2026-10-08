@@ -118,16 +118,16 @@ class TestSystemStability:
 class TestOrderSuccessRate:
     """注文成功率: 各 fill_mode で期待する注文状態になることを検証"""
 
-    def test_instant_mode_order_accepted(self, orders_conn, duckdb_conn):
-        """fill_mode=instant → _process_signals() 後は OrderAccepted 状態になる
-        (sync_order() を呼ぶと Filled になるが、_process_signals() 単体では OrderAccepted)"""
+    def test_instant_mode_order_filled(self, orders_conn, duckdb_conn):
+        """fill_mode=instant → _process_signals() 後に Filled まで同期される"""
         _sig(duckdb_conn, "1234")
         _tgt(duckdb_conn, "1234", qty=100)
         engine = _engine(orders_conn, duckdb_conn, fill_mode="instant")
         engine._process_signals()
         orders = engine._repo.list_active()
         assert len(orders) == 1
-        assert orders[0].state == OrderState.OrderAccepted
+        assert orders[0].state == OrderState.Filled
+        assert orders[0].filled_qty == 100
 
     def test_reject_mode_no_active_orders(self, orders_conn, duckdb_conn):
         """fill_mode=reject → Rejected 注文は list_active() に含まれない"""
@@ -137,16 +137,16 @@ class TestOrderSuccessRate:
         engine._process_signals()
         assert len(engine._repo.list_active()) == 0
 
-    def test_partial_mode_order_accepted(self, orders_conn, duckdb_conn):
-        """fill_mode=partial → _process_signals() 後は OrderAccepted 状態になる
-        (broker 側で partial fill されているが、sync_order() を呼ぶまで DB の filled_qty は 0)"""
+    def test_partial_mode_order_partial(self, orders_conn, duckdb_conn):
+        """fill_mode=partial → _process_signals() 後に PartialFill まで同期される"""
         _sig(duckdb_conn, "1234")
         _tgt(duckdb_conn, "1234", qty=100)
         engine = _engine(orders_conn, duckdb_conn, fill_mode="partial")
         engine._process_signals()
         orders = engine._repo.list_active()
         assert len(orders) == 1
-        assert orders[0].state == OrderState.OrderAccepted
+        assert orders[0].state == OrderState.PartialFill
+        assert orders[0].filled_qty == 50
 
     def test_never_mode_order_stays_sent(self, orders_conn, duckdb_conn):
         """fill_mode=never → 注文が OrderSent 状態のまま残る"""

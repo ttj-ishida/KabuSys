@@ -19,6 +19,7 @@ from kabusys.config import Settings
 from kabusys.execution.order_repository import init_position_entries_db
 from kabusys.monitoring.monitoring_db import MonitoringDB, init_monitoring_db
 from kabusys.operations.job_run_recorder import write_job_result
+from kabusys.operations.manual_trades import run_manual_signal_step
 from kabusys.operations.night_batch_report import JobRunResult
 from kabusys.operations.process_registry import register_process, update_process
 from kabusys.strategy.signal_generator import generate_signals
@@ -282,9 +283,11 @@ def main() -> None:
 
         if entry_blocked:
             logger.info("DD Stop により BUY をスキップします（SELL は継続）date=%s", target_date)
-        n = generate_signals(
+        n, manual_recorded = run_manual_signal_step(
             conn,
             target_date,
+            enabled=settings.manual_trading_enabled,
+            generate=generate_signals,
             use_ma200_filter=True,
             adaptive_threshold_vol_regime=True,
             topix_vol_low_threshold=0.12,
@@ -300,6 +303,9 @@ def main() -> None:
             score_drop_atr_gate=1.0,
         )
         _updated_rows["signals"] = n
+        if settings.manual_trading_enabled:
+            _updated_rows["manual_action_queue"] = manual_recorded
+            logger.info("手動売却候補: %d 件記録 (date=%s)", manual_recorded, target_date)
         logger.info("シグナル生成完了: %d 件 (date=%s)", n, target_date)
         _print_signal_report(conn, target_date, pf_value)
     except Exception as exc:

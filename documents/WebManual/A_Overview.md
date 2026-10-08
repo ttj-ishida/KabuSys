@@ -7,8 +7,10 @@
 
 ## A-1. KabuSys とは何か
 
-KabuSys は、日本株の日次運用を前提にした自動売買支援システムです。  
-夜間バッチで翌営業日の候補を作り、朝に運用可否を確認し、ザラ場で注文と監視を行い、引け後に結果を記録します。
+KabuSys は、日本株の日次運用を前提にした売買支援システムです。  
+夜間バッチで翌営業日の候補を作り、朝に運用可否を確認し、ユーザーが手動で注文し、引け後に結果を記録します。
+
+当面の本番運用では、kabuステーション API による自動発注を主ルートにしません。kabuステーションを毎営業日起動・ログイン維持する負荷が高いため、前日夜・当日朝の候補確認と手動注文を主ルートにします。
 
 前提:
 
@@ -26,7 +28,9 @@ Core 機能:
 - 特徴量生成
 - 売買シグナル生成
 - ポートフォリオ構築
-- 自動執行
+- 手動注文候補レポート
+- 手動約定の記録・評価
+- 自動執行（検証用・任意）
 - リスク管理と Kill Switch
 - 日次 / 週次 / 月次レポート
 
@@ -66,10 +70,11 @@ Addon 機能:（任意・後から追加可能。未設定でも Core は動作�
 
 1. [B_CoreSetup.md](./B_CoreSetup.md)
 2. [A_OperationsCycle.md](./A_OperationsCycle.md)
-3. [C_PaperTrading.md](./C_PaperTrading.md)
-4. [D_LiveOperation.md](./D_LiveOperation.md)
-5. [E_FailureRecovery.md](./E_FailureRecovery.md)
-6. [A_StrategyFlow.md](./A_StrategyFlow.md) — 売買判断の詳細フロー（深掘り用）
+3. [C_ManualOrderOperation.md](./C_ManualOrderOperation.md)
+4. [C_PaperTrading.md](./C_PaperTrading.md)
+5. [D_LiveOperation.md](./D_LiveOperation.md)
+6. [E_FailureRecovery.md](./E_FailureRecovery.md)
+7. [A_StrategyFlow.md](./A_StrategyFlow.md) — 売買判断の詳細フロー（深掘り用）
 
 ---
 
@@ -85,8 +90,8 @@ Addon 機能:（任意・後から追加可能。未設定でも Core は動作�
 08:00  pre_market_report（自動）
 08:02  signal_queue_report（自動）
 08:05  position_reconciliation_report（自動）
-08:30  execution start（自動）
-09:00  monitoring start（自動）
+08:30  手動注文候補の最終確認
+09:00  ユーザーが証券画面で手動注文
 15:00  market_close_report（手動）
 
 # AI Addon（ENABLE_AI_SENTIMENT=true のときのみ）
@@ -103,6 +108,8 @@ Addon 機能:（任意・後から追加可能。未設定でも Core は動作�
 - `run_market_close_report`
 - Night Batch 状態確認（Task Scheduler + Signal Queue）
 - `run_performance_report`
+
+自動発注を検証するときだけ、`paper_trading` と Execution Engine を使います。
 
 ---
 
@@ -131,6 +138,7 @@ Streamlit が向くもの:
 
 - [A_OperationsCycle.md](./A_OperationsCycle.md)
 - [B_CoreSetup.md](./B_CoreSetup.md)
+- [C_ManualOrderOperation.md](./C_ManualOrderOperation.md)
 - [C_PaperTrading.md](./C_PaperTrading.md)
 - [D_LiveOperation.md](./D_LiveOperation.md)
 - [E_FailureRecovery.md](./E_FailureRecovery.md)

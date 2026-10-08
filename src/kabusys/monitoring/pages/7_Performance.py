@@ -10,6 +10,7 @@ import streamlit as st
 
 from kabusys.config import Settings
 from kabusys.monitoring.dashboard_data import (
+    load_manual_positions,
     load_open_positions,
     load_portfolio_performance,
     load_recent_trades,
@@ -30,8 +31,8 @@ with st.sidebar:
 conn = connect_duckdb_ro(settings.duckdb_path)
 
 try:
-    tab_perf, tab_pos, tab_trades, tab_paper = st.tabs(
-        ["エクイティカーブ", "ポジション", "取引履歴", "Paper Verification"]
+    tab_perf, tab_pos, tab_manual, tab_trades, tab_paper = st.tabs(
+        ["エクイティカーブ", "ポジション", "手動ポジション", "取引履歴", "Paper Verification"]
     )
 
     with tab_perf:
@@ -69,6 +70,25 @@ try:
             st.caption(f"基準日: {df['date'].iloc[0]}")
             total_mv = float(pd.to_numeric(df["market_value"], errors="coerce").fillna(0).sum())
             st.metric("時価総額合計", f"¥{total_mv:,.0f}")
+            st.dataframe(df, use_container_width=True)
+
+    with tab_manual:
+        st.subheader("手動注文ポジション")
+        df = load_manual_positions(conn)
+        if df.empty:
+            st.info("手動注文ポジションはありません。")
+        else:
+            total_cost = float(
+                (
+                    pd.to_numeric(df["qty"], errors="coerce").fillna(0)
+                    * pd.to_numeric(df["avg_price"], errors="coerce").fillna(0)
+                ).sum()
+            )
+            realized = float(pd.to_numeric(df["realized_pnl"], errors="coerce").fillna(0).sum())
+            col1, col2, col3 = st.columns(3)
+            col1.metric("銘柄数", f"{len(df)}")
+            col2.metric("取得原価合計", f"¥{total_cost:,.0f}")
+            col3.metric("実現損益", f"¥{realized:,.0f}")
             st.dataframe(df, use_container_width=True)
 
     with tab_trades:

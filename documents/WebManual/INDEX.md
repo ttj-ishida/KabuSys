@@ -13,13 +13,15 @@
    `Core` の初期セットアップ、`.env`、DB、Task Scheduler の確認手順です。
 3. [C_Backtest.md](./C_Backtest.md)  
    過去データで戦略を検証するバックテストの実行手順です。
-4. [C_PaperTrading.md](./C_PaperTrading.md)  
+4. [C_ManualOrderOperation.md](./C_ManualOrderOperation.md)  
+   kabuステーション API による自動発注を使わず、前日夜・当日朝の候補を見て手動注文する運用手順です。
+5. [C_PaperTrading.md](./C_PaperTrading.md)  
    実資金を使う前に `paper_trading` で検証するための手順です。
-5. [C_1WeekPaperChecklist.md](./C_1WeekPaperChecklist.md)  
+6. [C_1WeekPaperChecklist.md](./C_1WeekPaperChecklist.md)  
    最初の 1 week を `paper_trading` で回すときの運用チェックリストです。
-6. [D_LiveOperation.md](./D_LiveOperation.md)  
+7. [D_LiveOperation.md](./D_LiveOperation.md)  
    本番運用に入った後の日次運用手順です。
-7. [E_FailureRecovery.md](./E_FailureRecovery.md)  
+8. [E_FailureRecovery.md](./E_FailureRecovery.md)  
    障害時、異常時、復旧時の確認手順です。
 
 ---

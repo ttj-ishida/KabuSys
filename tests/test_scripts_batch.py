@@ -111,6 +111,7 @@ def test_run_strategy_signal_calls_generate_signals():
 def _mock_paper_settings(mock_settings: MagicMock, tmp_path: Path) -> None:
     """portfolio_construction テスト用の Paper モード settings を設定する。"""
     mock_settings.return_value.duckdb_path = Path("/fake.duckdb")
+    mock_settings.return_value.manual_trading_enabled = False
     mock_settings.return_value.is_live = False
     mock_settings.return_value.is_paper = True
     mock_settings.return_value.is_dev = False
