@@ -119,9 +119,14 @@ class ExecutionEngine:
                 self.kill_switch()
                 return
 
-            signal_id: str = sig["signal_id"]
+            # queue_signal_id: signal_queue 行の ID（状態更新専用。uuid の場合あり）
+            queue_signal_id: str = sig["signal_id"]
             code: str = sig["code"]
             side: str = sig["side"]
+            # signal_id: 発注の業務キー（date_code_side）。Gate 1 重複検査と
+            # create_order の DuplicateOrderError に使い、同一日・銘柄・売買方向の
+            # 二重発注を queue 行の ID に依存せず防ぐ。
+            signal_id = f"{self._config.target_date.isoformat()}_{code}_{side}"
             raw_qty: int = sig["qty"]
             price: float = sig["price"]
 
@@ -146,7 +151,7 @@ class ExecutionEngine:
             g1 = self._risk_manager.check_signal(signal_id, code, order_value, side=side)
             if not g1.passed:
                 logger.info("Gate 1 NG - signal_id=%s: %s", signal_id, g1.reason)
-                self._update_signal_queue_status(signal_id, "failed")
+                self._update_signal_queue_status(queue_signal_id, "failed")
                 continue
 
             # Gate 2: エグゼキューションレベル検査（レート制限: リトライ最大3回）
@@ -164,12 +169,12 @@ class ExecutionEngine:
 
             if not g2_passed:
                 logger.info("Gate 2 NG - signal_id=%s: %s", signal_id, g2.reason)
-                self._update_signal_queue_status(signal_id, "failed")
+                self._update_signal_queue_status(queue_signal_id, "failed")
                 continue
 
             # 発注
             try:
-                self._update_signal_queue_status(signal_id, "processing")
+                self._update_signal_queue_status(queue_signal_id, "processing")
                 order_type = "market" if price == 0.0 else "limit"
                 record = self._order_manager.create_order(
                     signal_id,
@@ -184,7 +189,7 @@ class ExecutionEngine:
                 self._log_trade_event("Created", record)
             except DuplicateOrderError:
                 logger.info("DuplicateOrderError - skip: signal_id=%s", signal_id)
-                self._update_signal_queue_status(signal_id, "processing")
+                self._update_signal_queue_status(queue_signal_id, "processing")
                 continue
 
             t0 = _time_module.perf_counter()
@@ -206,11 +211,11 @@ class ExecutionEngine:
                 self._risk_manager.record_api_success()
                 _order_sent = True
                 _order_pending = True
-                self._update_signal_queue_status(signal_id, "processing")
+                self._update_signal_queue_status(queue_signal_id, "processing")
                 logger.info("発注保留（pending）: signal_id=%s", signal_id)
             except Exception as exc:
                 self._risk_manager.record_api_error()
-                self._update_signal_queue_status(signal_id, "failed")
+                self._update_signal_queue_status(queue_signal_id, "failed")
                 logger.error("発注失敗: signal_id=%s: %s", signal_id, exc)
 
             # position_entries に約定を記録（最低保有日数・再エントリー制限用）
@@ -261,9 +266,9 @@ class ExecutionEngine:
                     if status is not None:
                         updated_record = self._order_manager.sync_order(record.client_order_id)
                         if updated_record.state == OrderState.Filled:
-                            self._update_signal_queue_status(signal_id, "filled")
+                            self._update_signal_queue_status(queue_signal_id, "filled")
                         else:
-                            self._update_signal_queue_status(signal_id, "processing")
+                            self._update_signal_queue_status(queue_signal_id, "processing")
                     if status is not None and status.status == "filled":
                         self._log_trade_event(
                             "Filled",
@@ -496,7 +501,7 @@ class ExecutionEngine:
 
     def _read_signal_queue_rows(self) -> list[tuple]:
         queue_columns = self._duckdb_columns("signal_queue")
-        required_columns = {"date", "code", "side", "size", "status"}
+        required_columns = {"signal_id", "date", "code", "side", "size", "status"}
         if not required_columns.issubset(queue_columns):
             missing = sorted(required_columns - queue_columns)
             raise RuntimeError(f"signal_queue schema missing required columns: {missing}")

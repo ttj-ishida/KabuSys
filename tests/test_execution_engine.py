@@ -154,6 +154,23 @@ class TestReadSignals:
             }
         ]
 
+    def test_legacy_queue_without_signal_id_reports_missing_column(self, sqlite_conn):
+        conn = duckdb.connect(":memory:")
+        conn.execute("""
+            CREATE TABLE signal_queue (
+                date DATE NOT NULL,
+                code VARCHAR NOT NULL,
+                side VARCHAR NOT NULL,
+                size BIGINT NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'pending'
+            )
+        """)
+        broker = MockBrokerClient(available_cash=5_000_000.0)
+        engine = _make_engine(broker, sqlite_conn, conn)
+
+        with pytest.raises(RuntimeError, match="missing required columns.*signal_id"):
+            engine._read_signals()
+
     def test_reads_queue_without_price_column_as_market_order(self, sqlite_conn):
         conn = duckdb.connect(":memory:")
         conn.execute("""
@@ -242,6 +259,37 @@ class TestProcessSignals:
         # fill_mode="instant" の場合 Filled → list_active に残る
         active = engine._repo.list_active()
         assert len(active) == 1
+
+    def test_same_business_key_queue_rows_create_single_order(self, sqlite_conn, duckdb_conn):
+        """同一 date/code/side で signal_id が異なる pending 行が2件あっても発注は1件のみ。"""
+        _insert_signal(duckdb_conn, "1234")
+        for queue_id in ("uuid-aaaa", "uuid-bbbb"):
+            duckdb_conn.execute(
+                """
+                INSERT INTO signal_queue
+                    (signal_id, date, code, side, size, order_type, price, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [queue_id, TARGET_DATE, "1234", "buy", 100, "limit", 1500.0, "pending"],
+            )
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        orders = engine._repo.list_active()
+        assert len(orders) == 1
+        assert orders[0].signal_id == f"{TARGET_DATE.isoformat()}_1234_buy"
+        statuses = dict(
+            duckdb_conn.execute("SELECT signal_id, status FROM signal_queue").fetchall()
+        )
+        assert statuses["uuid-aaaa"] == "filled"
+        # 2行目は Gate 1 の重複検査で拒否され、pending のまま再試行され続けない
+        assert statuses["uuid-bbbb"] == "failed"
+
+        # 再実行しても注文は増えない
+        engine._process_signals()
+        assert len(engine._repo.list_active()) == 1
 
     def test_multiple_signals_processed(self, sqlite_conn, duckdb_conn):
         """複数シグナルがすべて処理される"""
@@ -335,7 +383,8 @@ class TestProcessSignals:
 
         orders = engine._repo.list_active()
         assert len(orders) == 1
-        assert orders[0].signal_id == queue_signal_id
+        # 注文の signal_id は業務キー（date_code_side）。queue 行 ID は状態更新専用。
+        assert orders[0].signal_id == f"{TARGET_DATE.isoformat()}_1234_buy"
         assert orders[0].state == OrderState.Filled
         assert orders[0].filled_qty == 100
         assert orders[0].avg_fill_price == 1500.0
