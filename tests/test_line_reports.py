@@ -584,3 +584,64 @@ class TestGetTodayReturn:
         conn.execute.return_value.fetchone.return_value = (None,)
         result = _get_today_return(conn, date(2026, 5, 7), "live")
         assert result is None
+
+
+def test_evening_message_shows_manual_sell_details_and_add_on():
+    msg = format_evening_message(
+        inserted=1,
+        report_date="2026-10-08",
+        buy_signals=[{"code": "7203", "name": "トヨタ", "size": 100, "add_on": True}],
+        sell_signals=[
+            {"code": "6758", "name": "ソニー", "qty": 200, "reason": "stop_loss", "manual": True},
+            {"code": "9984", "name": "SBG"},
+        ],
+    )
+    assert "  7203 トヨタ  100株 [買い増し]" in msg
+    assert "  6758 ソニー  200株 (損切り) [手動保有]" in msg
+    assert "  9984 SBG\n" in msg + "\n"
+
+
+def _make_evening_conn():
+    import duckdb
+
+    c = duckdb.connect(":memory:")
+    c.execute(
+        "CREATE TABLE signal_queue (signal_id VARCHAR, date DATE, code VARCHAR, "
+        "side VARCHAR, size BIGINT, status VARCHAR)"
+    )
+    c.execute("CREATE TABLE signals (date DATE, code VARCHAR, side VARCHAR, score DOUBLE)")
+    c.execute("CREATE TABLE stocks (code VARCHAR, name VARCHAR)")
+    return c
+
+
+def test_collect_evening_signals_without_manual_action_table():
+    from scripts.run_portfolio_construction import _collect_evening_signals
+
+    c = _make_evening_conn()
+    c.execute("INSERT INTO signals VALUES ('2026-10-08', '6758', 'sell', 0.1)")
+
+    buy, sell = _collect_evening_signals(c, date(2026, 10, 8))
+
+    assert buy == []
+    assert sell == [{"code": "6758", "name": "6758", "qty": None, "reason": None, "manual": False}]
+
+
+def test_collect_evening_signals_with_manual_actions():
+    from kabusys.operations.manual_trades import record_sell_candidates
+    from scripts.run_portfolio_construction import _collect_evening_signals
+
+    d = date(2026, 10, 8)
+    c = _make_evening_conn()
+    c.execute("INSERT INTO stocks VALUES ('7203', 'トヨタ'), ('6758', 'ソニー')")
+    c.execute("INSERT INTO signal_queue VALUES ('q1', '2026-10-08', '7203', 'buy', 100, 'pending')")
+    c.execute("INSERT INTO signals VALUES ('2026-10-08', '6758', 'sell', 0.1)")
+    record_sell_candidates(
+        c, d, [{"code": "6758", "reason": "trailing_stop", "qty": 300, "source": "manual"}]
+    )
+
+    buy, sell = _collect_evening_signals(c, d, manual_codes={"7203"})
+
+    assert buy == [{"code": "7203", "name": "トヨタ", "size": 100, "add_on": True}]
+    assert sell == [
+        {"code": "6758", "name": "ソニー", "qty": 300, "reason": "trailing_stop", "manual": True}
+    ]

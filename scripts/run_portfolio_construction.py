@@ -248,11 +248,12 @@ def _get_today_return(conn: duckdb.DuckDBPyConnection, target_date: date, env: s
 def _collect_evening_signals(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
+    manual_codes: set[str] | None = None,
 ) -> tuple[list[dict] | None, list[dict] | None]:
     """LINE 夜通知用の BUY/SELL シグナル詳細を取得する。
 
     BUY は signal_queue JOIN stocks（size あり）。
-    SELL は signals JOIN stocks（size なし）。
+    SELL は signals JOIN stocks。manual_action_queue があれば理由・株数を付与（テーブル無しでも動作）。
     BUY クエリ失敗時は (None, None) を返し、呼び出し元が件数表示にフォールバックする。
     """
     buy: list[dict] = []
@@ -268,24 +269,54 @@ def _collect_evening_signals(
             [target_date],
         ).fetchall()
         # signal_queue.size は BIGINT NOT NULL のため r[2] が None になることはない
-        buy = [{"code": r[0], "name": r[1], "size": int(r[2])} for r in rows]
+        manual = manual_codes or set()
+        buy = [
+            {"code": r[0], "name": r[1], "size": int(r[2]), "add_on": r[0] in manual} for r in rows
+        ]
     except Exception:
         logger.warning("LINE通知用BUYシグナル詳細の取得に失敗しました", exc_info=True)
         return None, None
 
     sell: list[dict] = []
     try:
-        rows = conn.execute(
-            """
-            SELECT s.code, COALESCE(st.name, s.code) AS name
-            FROM signals s
-            LEFT JOIN stocks st ON s.code = st.code
-            WHERE s.date = ? AND s.side = 'sell'
-            ORDER BY s.code
-            """,
-            [target_date],
-        ).fetchall()
-        sell = [{"code": r[0], "name": r[1]} for r in rows]
+        has_actions = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'main' AND table_name = 'manual_action_queue'"
+        ).fetchone()[0]
+        if has_actions:
+            rows = conn.execute(
+                """
+                SELECT s.code, COALESCE(st.name, s.code), m.qty, m.reason, m.action_id IS NOT NULL
+                FROM signals s
+                LEFT JOIN stocks st ON s.code = st.code
+                LEFT JOIN manual_action_queue m
+                  ON m.date = s.date AND m.code = s.code AND m.action = 'sell_candidate'
+                WHERE s.date = ? AND s.side = 'sell'
+                ORDER BY s.code
+                """,
+                [target_date],
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT s.code, COALESCE(st.name, s.code), NULL, NULL, FALSE
+                FROM signals s
+                LEFT JOIN stocks st ON s.code = st.code
+                WHERE s.date = ? AND s.side = 'sell'
+                ORDER BY s.code
+                """,
+                [target_date],
+            ).fetchall()
+        sell = [
+            {
+                "code": r[0],
+                "name": r[1],
+                "qty": int(r[2]) if r[2] is not None else None,
+                "reason": r[3],
+                "manual": bool(r[4]),
+            }
+            for r in rows
+        ]
     except Exception:
         logger.warning("LINE通知用SELLシグナル詳細の取得に失敗しました", exc_info=True)
 
@@ -453,7 +484,9 @@ def main() -> None:
 
             # 夜の日次通知
             daily_return = _get_today_return(conn, target_date, env)
-            buy_sigs, sell_sigs = _collect_evening_signals(conn, target_date)
+            buy_sigs, sell_sigs = _collect_evening_signals(
+                conn, target_date, manual_codes=set(manual_qty)
+            )
             notifier.send(
                 format_evening_message(
                     inserted=inserted,
