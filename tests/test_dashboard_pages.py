@@ -365,3 +365,38 @@ def test_load_manual_positions_missing_table_read_only(tmp_path):
     assert positions == []
     assert trades == []
     assert value == (1_000_000.0, 1_000_000.0)
+
+
+def test_load_manual_actions_latest_per_code():
+    """latest_per_code=True では銘柄ごとに最新日の1行のみ返す（status は最新行で判定）。"""
+    from kabusys.monitoring.dashboard_data import load_manual_actions
+    from kabusys.operations.manual_trades import (
+        build_action_id,
+        record_sell_candidates,
+        update_manual_action_status,
+    )
+
+    c = duckdb.connect(":memory:")
+    d1, d2, d3 = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8)
+    for d in (d1, d2, d3):
+        record_sell_candidates(
+            c, d, [{"code": "7203", "reason": "stop_loss", "qty": 100, "source": "manual"}]
+        )
+    for d in (d1, d2):
+        record_sell_candidates(
+            c, d, [{"code": "6758", "reason": "time_exit", "qty": 200, "source": "manual"}]
+        )
+    # 6758 は最新行(d2)を対応済みにした → open 表示から消える（古い d1 の open は出さない）
+    update_manual_action_status(c, build_action_id(d2, "6758", "sell_candidate"), "done")
+
+    latest_all = load_manual_actions(c, latest_per_code=True)
+    assert sorted(latest_all["code"].tolist()) == ["6758", "7203"]
+    assert latest_all.set_index("code").loc["7203", "date"] == d3
+    assert latest_all.set_index("code").loc["6758", "date"] == d2
+
+    latest_open = load_manual_actions(c, status="open", latest_per_code=True)
+    assert latest_open["code"].tolist() == ["7203"]
+    assert latest_open.iloc[0]["date"] == d3
+
+    # 既定（後方互換）では全行
+    assert len(load_manual_actions(c)) == 5

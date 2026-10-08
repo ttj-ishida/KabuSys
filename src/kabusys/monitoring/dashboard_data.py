@@ -167,13 +167,27 @@ def load_manual_actions(
     *,
     target_date: date | None = None,
     status: str | None = None,
+    latest_per_code: bool = False,
 ) -> pd.DataFrame:
-    """manual_action_queue（手動売却候補）を DataFrame で返す。テーブル未作成時は空。"""
+    """manual_action_queue（手動売却候補）を DataFrame で返す。テーブル未作成時は空。
+
+    latest_per_code=True のときは銘柄ごとに最新日の1行のみ返す。候補は毎晩記録され
+    同一銘柄が重複表示されるのを防ぐ。status 絞り込みは最新行に対して適用する
+    （最新行を対応済みにすれば、古い open 行は表示されない）。
+    """
+    query_status = None if latest_per_code else status
     try:
-        rows = list_manual_actions(conn, target_date=target_date, status=status)
+        rows = list_manual_actions(conn, target_date=target_date, status=query_status)
     except duckdb.CatalogException:
         rows = []
-    return pd.DataFrame(
+    df = pd.DataFrame(
         [{col: getattr(r, col) for col in _MANUAL_ACTION_COLUMNS} for r in rows],
         columns=_MANUAL_ACTION_COLUMNS,
     )
+    if latest_per_code and not df.empty:
+        df = df.sort_values(["date", "code"], ascending=[False, True], kind="stable")
+        df = df.drop_duplicates(subset="code", keep="first")
+        if status is not None:
+            df = df[df["status"] == status]
+        df = df.reset_index(drop=True)
+    return df
