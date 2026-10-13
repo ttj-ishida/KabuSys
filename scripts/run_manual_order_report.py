@@ -43,13 +43,23 @@ _BASE = Path(__file__).resolve().parent.parent
 _STOP_FLAG = _BASE / "data" / "stop_requested.flag"
 
 
-def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="手動注文候補レポートを生成する（発注はしない）")
     p.add_argument("--phase", choices=PHASES, required=True)
     p.add_argument(
-        "--date", type=date.fromisoformat, default=None, help="レポート日 YYYY-MM-DD（既定: 今日）"
+        "--date",
+        type=date.fromisoformat,
+        default=None,
+        help=(
+            "レポート日 YYYY-MM-DD（既定: 今日）。過去日を指定しても、停止フラグ・DD 停止・"
+            "資金などは実行時点の状態を反映する"
+        ),
     )
-    return p.parse_args(argv)
+    return p
+
+
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    return _build_parser().parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 D_SIG = date(2026, 10, 13)  # 火曜
 D_NEXT = date(2026, 10, 14)  # 水曜
 GAPS = (0.05, -0.03)
+NOW = datetime(2026, 10, 13, 21, 10)
 
 
 def _seed(conn: duckdb.DuckDBPyConnection, sig_date: date = D_SIG) -> None:
@@ -71,6 +72,11 @@ def _seed(conn: duckdb.DuckDBPyConnection, sig_date: date = D_SIG) -> None:
     )
     add_manual_trade(conn, ManualTradeInput(date(2026, 10, 1), "6758", "buy", 50, 2400))
     add_manual_trade(conn, ManualTradeInput(date(2026, 10, 1), "8306", "buy", 300, 1000))
+    # 登録時刻を現実的な値に固定（シグナル生成 21:00 より前）
+    conn.execute(
+        "UPDATE manual_trades SET created_at = CAST(trade_date AS TIMESTAMP) + INTERVAL 9 HOUR"
+    )
+    conn.execute("UPDATE signal_queue SET created_at = CAST(date AS TIMESTAMP) + INTERVAL 21 HOUR")
 
 
 @pytest.fixture()
@@ -99,6 +105,7 @@ def _collect(c, phase="evening", report_date=D_SIG, **kw):
         initial_cash=1_000_000,
         portfolio_value=10_000_000,
         gap_thresholds=GAPS,
+        now=NOW,
     )
     params.update(kw)
     return collect_manual_order_report(c, **params)
@@ -126,8 +133,8 @@ def test_evening_buy_candidates(conn):
     assert toyota.rank == 1
     assert toyota.held_qty == 100  # 自動保有
     assert toyota.add_on is True
-    assert toyota.skip_upper == pytest.approx(3150)
-    assert toyota.skip_lower == pytest.approx(2910)
+    assert toyota.buy_max_price == 3150  # 3150 以下なら買付可（+5% 超で見送り）
+    assert toyota.buy_min_price == 2911  # 2910 以下は見送り → 2911 以上で買付可
     # 参考価格なし → signal_date 以前の最新終値（未来日 9999 は使わない）
     assert sony.ref_price == 2500
     assert sony.amount == 500_000
@@ -167,10 +174,146 @@ def test_non_manual_uses_settings_portfolio_value(conn):
     assert r.max_position_amount == pytest.approx(1_000_000)
 
 
-def test_evening_warns_when_no_signal_today(conn):
-    r = _collect(conn, report_date=D_NEXT)
+def test_evening_stale_signal_skips_buys(conn):
+    # M7: 夜に当日のシグナルがない → BUY は見送り
+    r = _collect(conn, report_date=D_NEXT, now=datetime(2026, 10, 14, 21, 10))
     assert r.signal_date == D_SIG
     assert any("2026-10-13" in w for w in r.warnings)
+    assert r.buy_candidates == []
+    assert [b.code for b in r.skipped_buys] == ["7203", "6758"]
+    assert r.status == "BUY_SKIPPED"
+    assert len(r.sell_candidates) == 2
+
+
+# --- I1: シグナル生成後の保有変化 ---
+
+
+def test_manual_trade_after_signal_date_skips_that_buy(conn):
+    add_manual_trade(conn, ManualTradeInput(D_NEXT, "7203", "buy", 100, 3010))
+    r = _collect(conn, phase="morning", report_date=D_NEXT, sqlite_path=None)
+    assert [b.code for b in r.buy_candidates] == ["6758"]
+    assert [b.code for b in r.skipped_buys] == ["7203"]
+    assert r.skipped_buys[0].skip_reason == (
+        "シグナル生成後に保有が変わりました。株数を再確認してください"
+    )
+    md = format_markdown(r)
+    assert "シグナル生成後に保有が変わりました" in md
+    assert "シグナル生成後に保有が変わりました" in format_line_message(r)
+
+
+def test_manual_trade_registered_after_signal_created_skips_buy(conn):
+    # 約定日はシグナル日と同じだが、登録がシグナル生成（21:00）より後
+    add_manual_trade(conn, ManualTradeInput(D_SIG, "6758", "buy", 10, 2500))
+    conn.execute(
+        "UPDATE manual_trades SET created_at = TIMESTAMP '2026-10-13 21:30:00' "
+        "WHERE code = '6758' AND trade_date = DATE '2026-10-13'"
+    )
+    r = _collect(conn)
+    assert [b.code for b in r.buy_candidates] == ["7203"]
+    assert [b.code for b in r.skipped_buys] == ["6758"]
+
+
+def test_add_on_uses_holdings_as_of_signal_date(conn):
+    # 10/13 21:00 生成のシグナル。10/14 に手動で 6758 を 30 株買い増し → 見送り。
+    # 保有表示はシグナル時点（50 株）
+    add_manual_trade(conn, ManualTradeInput(D_NEXT, "6758", "buy", 30, 2500))
+    r = _collect(conn, phase="morning", report_date=D_NEXT)
+    sony = r.skipped_buys[0]
+    assert sony.code == "6758"
+    assert sony.held_qty == 50
+    assert "保有 50 株 → 目標 250 株（差分 200 株を買う）" in format_markdown(r)
+
+
+# --- M1: 見送り価格の丸め ---
+
+
+def test_gap_bounds_rounded_to_yen(conn):
+    conn.execute("UPDATE signal_queue SET price = 2345 WHERE signal_id = 'q1'")
+    r = _collect(conn)
+    toyota = r.buy_candidates[0]
+    assert toyota.buy_max_price == 2462  # 2345*1.05=2462.25 → 2462 以下なら買付可
+    assert toyota.buy_min_price == 2275  # 2345*0.97=2274.65 → 2275 以上なら買付可
+    md = format_markdown(r)
+    assert "2,462" in md and "2,275" in md
+    assert "この価格以下なら買付可" in md and "この価格以上なら買付可" in md
+
+
+# --- M2: 休場日 ---
+
+
+def test_morning_on_holiday_skips_buys(conn, tmp_path):
+    r = _collect(
+        conn,
+        phase="morning",
+        report_date=date(2026, 10, 17),  # 土曜（カレンダーなし → 曜日判定）
+        now=datetime(2026, 10, 17, 8, 5),
+        stop_flag_path=tmp_path / "x",
+    )
+    assert any("本日は休場日です" in w for w in r.warnings)
+    assert r.buy_candidates == []
+    assert len(r.skipped_buys) == 2
+    assert any("休場日" in x for x in r.buy_skip_reasons)
+
+
+# --- M3: BUY 0 件でも停止条件を警告 ---
+
+
+def test_stop_flag_warns_even_without_buys(conn, tmp_path):
+    conn.execute("DELETE FROM signal_queue")
+    flag = tmp_path / "stop.flag"
+    flag.write_text("x")
+    r = _collect(conn, phase="morning", report_date=D_NEXT, stop_flag_path=flag)
+    assert any("停止フラグ" in w for w in r.warnings)
+    assert r.status != "OK"
+    assert "停止フラグ" in format_line_message(r)
+
+
+def test_dd_stop_warns_even_without_buys(conn, tmp_path):
+    conn.execute("DELETE FROM signal_queue")
+    db = _monitoring_db(tmp_path, "2026-10-10")
+    r = _collect(conn, phase="morning", report_date=D_NEXT, sqlite_path=db)
+    assert any("DD 停止" in w for w in r.warnings)
+    assert "DD 停止" in format_line_message(r)
+
+
+# --- M4: signals に BUY があるのに signal_queue が空 ---
+
+
+def test_warns_when_buy_signals_but_no_queue(conn):
+    conn.execute("DELETE FROM signal_queue WHERE date = DATE '2026-10-13'")
+    r = _collect(conn)
+    assert r.signal_date == D_SIG
+    assert any("portfolio_construction" in w for w in r.warnings)
+
+
+# --- M5: 手動保有は MANUAL_TRADING_ENABLED のときだけ ---
+
+
+def test_manual_holdings_ignored_when_disabled(conn):
+    r = _collect(conn, manual_trading_enabled=False)
+    sony = next(b for b in r.buy_candidates if b.code == "6758")
+    assert sony.held_qty == 0
+    assert sony.add_on is False
+    toyota = next(b for b in r.buy_candidates if b.code == "7203")
+    assert toyota.held_qty == 100  # 自動保有はそのまま
+
+
+# --- M6: 過去日付の再生成 ---
+
+
+def test_past_report_date_warns(conn):
+    r = _collect(conn, now=datetime(2026, 10, 20, 9, 0))
+    assert any("過去日" in w for w in r.warnings)
+    assert "実行時点" in format_markdown(
+        _collect(conn, phase="morning", report_date=D_NEXT, now=datetime(2026, 10, 20, 9, 0))
+    )
+
+
+def test_script_date_help_mentions_current_state():
+    import run_manual_order_report as mod
+
+    help_text = mod._build_parser().format_help()
+    assert "実行時点" in help_text
 
 
 # --- morning ---
@@ -261,10 +404,11 @@ def test_partial_tables_read_only(tmp_path):
     c = duckdb.connect(str(path))
     c.execute(
         "CREATE TABLE signal_queue (signal_id VARCHAR, date DATE, code VARCHAR, side VARCHAR,"
-        " size BIGINT, order_type VARCHAR, price DECIMAL(18,4), status VARCHAR)"
+        " size BIGINT, order_type VARCHAR, price DECIMAL(18,4), status VARCHAR,"
+        " created_at TIMESTAMP)"
     )
     c.execute(
-        "INSERT INTO signal_queue VALUES ('q', ?, '7203', 'buy', 100, 'market', 3000, 'pending')",
+        "INSERT INTO signal_queue VALUES ('q', ?, '7203', 'buy', 100, 'market', 3000, 'pending', NULL)",
         [D_SIG],
     )
     c.close()

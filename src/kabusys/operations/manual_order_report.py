@@ -5,7 +5,8 @@ DuckDB から読み取り専用で集める。発注はしない。kabu API / Ex
 
 - evening: 夜間バッチ直後（21:10）。signal_date は通常 report_date 当日。
 - morning: 寄り前（08:05）。signal_date は通常 report_date の前営業日。
-  停止フラグ・DD 停止・シグナル欠落時は BUY 候補をすべて見送り候補に移す。
+  休場日・停止フラグ・DD 停止・シグナル欠落時は BUY 候補をすべて見送り候補に移す。
+- シグナル生成後に手動約定があった銘柄の BUY は個別に見送り候補に移す。
 
 Look-ahead 防止: すべてのクエリは date <= report_date（価格は <= signal_date）に限定する。
 フォーマッタ・保存関数は manual_order_report_format.py。
@@ -15,15 +16,22 @@ from __future__ import annotations
 
 import inspect
 import logging
-import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
 
 import duckdb
 
-from kabusys.data.calendar_management import prev_trading_day
+from kabusys.data.calendar_management import is_trading_day, prev_trading_day
+from kabusys.operations.manual_order_report_checks import (
+    HOLDINGS_CHANGED_REASON,
+    SafeReader,
+    as_date,
+    buy_price_bounds,
+    check_dd_stop,
+    holdings_changed_codes,
+    load_gap_thresholds,
+)
 from kabusys.operations.manual_trades import calc_manual_portfolio_value, manual_position_qty_map
 from kabusys.operations.pre_market_collector import check_data_freshness, check_stop_flag
 from kabusys.portfolio.position_sizing import calc_position_sizes
@@ -51,10 +59,11 @@ class BuyCandidate:
     amount: float | None
     score: float | None
     rank: int | None
-    held_qty: int  # 手動保有 + 自動保有
+    held_qty: int  # シグナル日時点の自動保有 (+ 手動保有: MANUAL_TRADING_ENABLED 時)
     add_on: bool
-    skip_upper: float | None  # 寄り付きがこの価格を超えたら見送り
-    skip_lower: float | None  # 寄り付きがこの価格以下なら見送り
+    buy_max_price: int | None  # この価格以下なら買付可（上限）
+    buy_min_price: int | None  # この価格以上なら買付可（下限）
+    skip_reason: str | None = None  # 見送り理由（見送り候補のみ）
 
 
 @dataclass
@@ -110,54 +119,17 @@ class ManualOrderReport:
         return STATUS_OK
 
 
-class _Reader:
-    """テーブル欠落（CatalogException）を空扱い + 警告にする読み取りヘルパー。"""
-
-    def __init__(self, conn: duckdb.DuckDBPyConnection, warnings: list[str]) -> None:
-        self.conn = conn
-        self.warnings = warnings
-
-    def warn(self, msg: str) -> None:
-        if msg not in self.warnings:
-            self.warnings.append(msg)
-
-    def fetch(self, table: str, sql: str, params: list[Any] | None = None) -> list[tuple]:
-        try:
-            return self.conn.execute(sql, params or []).fetchall()
-        except duckdb.CatalogException:
-            self.warn(f"テーブル {table} がないため空として扱いました")
-            return []
-
-    def has_table(self, table: str) -> bool:
-        row = self.conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'main' AND table_name = ?",
-            [table],
-        ).fetchone()
-        return bool(row and row[0])
-
-
-def _as_date(v: object) -> date | None:
-    if v is None:
-        return None
-    if isinstance(v, datetime):
-        return v.date()
-    if isinstance(v, date):
-        return v
-    return date.fromisoformat(str(v)[:10])
-
-
-def _latest_signal_date(rd: _Reader, report_date: date) -> date | None:
+def _latest_signal_date(rd: SafeReader, report_date: date) -> date | None:
     dates: list[date] = []
     for table in ("signal_queue", "signals"):
         rows = rd.fetch(table, f"SELECT MAX(date) FROM {table} WHERE date <= ?", [report_date])
-        d = _as_date(rows[0][0]) if rows else None
+        d = as_date(rows[0][0]) if rows else None
         if d is not None:
             dates.append(d)
     return max(dates) if dates else None
 
 
-def _auto_positions(rd: _Reader, report_date: date) -> dict[str, int]:
+def _auto_positions(rd: SafeReader, report_date: date) -> dict[str, int]:
     rows = rd.fetch(
         "positions",
         """
@@ -169,12 +141,12 @@ def _auto_positions(rd: _Reader, report_date: date) -> dict[str, int]:
     return {r[0]: int(r[1]) for r in rows if r[1] is not None}
 
 
-def _stock_names(rd: _Reader) -> dict[str, str]:
+def _stock_names(rd: SafeReader) -> dict[str, str]:
     rows = rd.fetch("stocks", "SELECT code, name FROM stocks")
     return {r[0]: r[1] for r in rows if r[1]}
 
 
-def _latest_closes(rd: _Reader, codes: list[str], as_of: date) -> dict[str, float]:
+def _latest_closes(rd: SafeReader, codes: list[str], as_of: date) -> dict[str, float]:
     if not codes:
         return {}
     params = ",".join(["?"] * len(codes))
@@ -193,7 +165,7 @@ def _latest_closes(rd: _Reader, codes: list[str], as_of: date) -> dict[str, floa
 
 
 def _collect_buys(
-    rd: _Reader,
+    rd: SafeReader,
     signal_date: date,
     names: dict[str, str],
     held: dict[str, int],
@@ -202,7 +174,7 @@ def _collect_buys(
     rows = rd.fetch(
         "signal_queue",
         """
-        SELECT code, CAST(size AS BIGINT), price FROM signal_queue
+        SELECT code, CAST(size AS BIGINT), price, created_at FROM signal_queue
         WHERE date = ? AND side = 'buy' AND status = 'pending'
         """,
         [signal_date],
@@ -217,13 +189,14 @@ def _collect_buys(
             [signal_date],
         )
     }
-    missing = [r[0] for r in rows if r[2] is None]
-    closes = _latest_closes(rd, missing, signal_date)
+    closes = _latest_closes(rd, [r[0] for r in rows if r[2] is None], signal_date)
+    changed = holdings_changed_codes(rd.conn, signal_date, {r[0]: r[3] for r in rows})
     out: list[BuyCandidate] = []
-    for code, size, price in rows:
+    for code, size, price, _created in rows:
         ref = float(price) if price is not None else closes.get(code)
         score, rank = scores.get(code, (None, None))
         qty = held.get(code, 0)
+        upper, lower = buy_price_bounds(ref, gaps)
         out.append(
             BuyCandidate(
                 code=code,
@@ -235,8 +208,9 @@ def _collect_buys(
                 rank=int(rank) if rank is not None else None,
                 held_qty=qty,
                 add_on=qty > 0,
-                skip_upper=ref * (1 + gaps[0]) if ref is not None else None,
-                skip_lower=ref * (1 + gaps[1]) if ref is not None else None,
+                buy_max_price=upper,
+                buy_min_price=lower,
+                skip_reason=HOLDINGS_CHANGED_REASON if code in changed else None,
             )
         )
     out.sort(key=lambda b: (b.rank is None, b.rank or 0, b.code))
@@ -244,7 +218,7 @@ def _collect_buys(
 
 
 def _collect_sells(
-    rd: _Reader, signal_date: date, names: dict[str, str], auto: dict[str, int]
+    rd: SafeReader, signal_date: date, names: dict[str, str], auto: dict[str, int]
 ) -> list[SellCandidate]:
     if rd.has_table("manual_action_queue"):
         sql = """
@@ -274,33 +248,23 @@ def _collect_sells(
     ]
 
 
-def _check_dd_stop(sqlite_path: Path | None) -> tuple[bool | None, str | None]:
-    """監視 SQLite の dashboard.dd_stop_blocked_since を読む。読めなければ (None, None)。"""
-    if sqlite_path is None or not Path(sqlite_path).exists():
-        return None, None
-    try:
-        sc = sqlite3.connect(f"file:{Path(sqlite_path).as_posix()}?mode=ro", uri=True)
-        try:
-            row = sc.execute("SELECT dd_stop_blocked_since FROM dashboard WHERE id = 1").fetchone()
-        finally:
-            sc.close()
-    except Exception:
-        logger.warning("DD 停止状態の取得に失敗しました: %s", sqlite_path, exc_info=True)
-        return None, None
-    since = row[0] if row else None
-    return (since is not None and str(since).strip() != ""), since
-
-
-def load_gap_thresholds() -> tuple[float, float]:
-    """config/strategy_config.yaml の (gap_up_threshold, gap_down_threshold)。"""
-    from kabusys.strategy.signal_generator import _load_strategy_config
-
-    cfg = _load_strategy_config()
-    return float(cfg["gap_up_threshold"]), float(cfg["gap_down_threshold"])
+def _skip_all_buys(rd: SafeReader, report: ManualOrderReport, reasons: list[str]) -> None:
+    """全 BUY 候補を見送りに移す。BUY が 0 件でも理由は警告・見送り理由として残す。"""
+    if not reasons:
+        return
+    for reason in reasons:
+        rd.warn(reason)
+        if reason not in report.buy_skip_reasons:
+            report.buy_skip_reasons.append(reason)
+    joined = " / ".join(reasons)
+    for b in report.buy_candidates:
+        b.skip_reason = joined if b.skip_reason is None else f"{b.skip_reason} / {joined}"
+    report.skipped_buys = report.skipped_buys + report.buy_candidates
+    report.buy_candidates = []
 
 
 def _apply_morning_checks(
-    rd: _Reader,
+    rd: SafeReader,
     report: ManualOrderReport,
     stop_flag_path: Path | None,
     sqlite_path: Path | None,
@@ -315,11 +279,13 @@ def _apply_morning_checks(
         rd.warn("価格データ（prices_daily）が古いか、ありません")
 
     report.stop_flag = check_stop_flag(stop_flag_path) if stop_flag_path is not None else False
-    report.dd_stop, report.dd_stop_since = _check_dd_stop(sqlite_path)
+    report.dd_stop, report.dd_stop_since = check_dd_stop(sqlite_path)
     if report.dd_stop is None:
         rd.warn("DD 停止状態を確認できません（監視 SQLite を読めないため不明）")
 
     reasons: list[str] = []
+    if not is_trading_day(conn, report_date):
+        reasons.append("本日は休場日です")
     if report.stop_flag:
         reasons.append("停止フラグ（data/stop_requested.flag）があります")
     if report.dd_stop:
@@ -331,10 +297,24 @@ def _apply_morning_checks(
             f"期待値 {expected} 以降）。夜間バッチの欠落を確認してください"
         )
         reasons.append(f"シグナル日 {report.signal_date} が前営業日 {expected} より古い")
-    if reasons and report.buy_candidates:
-        report.skipped_buys = report.buy_candidates
-        report.buy_candidates = []
-        report.buy_skip_reasons = reasons
+    _skip_all_buys(rd, report, reasons)
+
+
+def _warn_missing_queue(rd: SafeReader, signal_date: date, has_buys: bool) -> None:
+    """signals に BUY があるのに signal_queue に pending BUY がない場合に警告する。"""
+    if has_buys:
+        return
+    rows = rd.fetch(
+        "signals",
+        "SELECT COUNT(*) FROM signals WHERE date = ? AND side = 'buy'",
+        [signal_date],
+    )
+    n = int(rows[0][0]) if rows and rows[0][0] else 0
+    if n > 0:
+        rd.warn(
+            f"signals に {signal_date} の BUY が {n} 件ありますが、signal_queue に pending の "
+            "BUY がありません（portfolio_construction の失敗の可能性）"
+        )
 
 
 def collect_manual_order_report(
@@ -354,24 +334,20 @@ def collect_manual_order_report(
     if phase not in PHASES:
         raise ValueError(f"phase は {PHASES} のいずれか: {phase!r}")
     warnings: list[str] = []
-    rd = _Reader(conn, warnings)
+    rd = SafeReader(conn, warnings)
     gaps = gap_thresholds if gap_thresholds is not None else load_gap_thresholds()
+    now = now or datetime.now()
 
     available_cash: float | None = None
     if manual_trading_enabled:
         portfolio_value, available_cash = calc_manual_portfolio_value(
             conn, initial_cash, as_of=report_date
         )
-    manual_qty = manual_position_qty_map(conn, as_of=report_date)
-    auto_qty = _auto_positions(rd, report_date)
-    held = dict(auto_qty)
-    for code, qty in manual_qty.items():
-        held[code] = held.get(code, 0) + qty
 
     report = ManualOrderReport(
         phase=phase,
         report_date=report_date,
-        generated_at=now or datetime.now(),
+        generated_at=now,
         signal_date=_latest_signal_date(rd, report_date),
         gap_up_threshold=gaps[0],
         gap_down_threshold=gaps[1],
@@ -382,21 +358,38 @@ def collect_manual_order_report(
         max_position_amount=float(portfolio_value) * MAX_POSITION_PCT,
         warnings=warnings,
     )
+    if report_date < now.date():
+        rd.warn(
+            f"過去日（{report_date}）のレポートです。停止フラグ・DD 停止・資金などは"
+            "実行時点の状態を反映しています"
+        )
 
     if report.signal_date is None:
         rd.warn(f"{report_date} 以前のシグナルがありません")
     else:
+        sig = report.signal_date
         names = _stock_names(rd)
-        report.buy_candidates = _collect_buys(rd, report.signal_date, names, held, gaps)
-        report.sell_candidates = _collect_sells(rd, report.signal_date, names, auto_qty)
-        if phase == "evening" and report.signal_date != report_date:
-            rd.warn(
-                f"本日（{report_date}）のシグナルがありません。"
-                f"最新の {report.signal_date} 分を表示しています"
-            )
-        missing_price = [b.code for b in report.buy_candidates if b.ref_price is None]
+        # 保有は sizing と同じ前提（シグナル日時点・手動分は MANUAL_TRADING_ENABLED 時のみ）
+        held = _auto_positions(rd, sig)
+        if manual_trading_enabled:
+            for code, qty in manual_position_qty_map(conn, as_of=sig).items():
+                held[code] = held.get(code, 0) + qty
+        buys = _collect_buys(rd, sig, names, held, gaps)
+        report.buy_candidates = [b for b in buys if b.skip_reason is None]
+        report.skipped_buys = [b for b in buys if b.skip_reason is not None]
+        if report.skipped_buys:
+            rd.warn(f"{HOLDINGS_CHANGED_REASON}: " + ", ".join(b.code for b in report.skipped_buys))
+        report.sell_candidates = _collect_sells(rd, sig, names, _auto_positions(rd, report_date))
+        _warn_missing_queue(rd, sig, bool(buys))
+        missing_price = [b.code for b in buys if b.ref_price is None]
         if missing_price:
             rd.warn(f"参考価格を取得できない BUY 候補があります: {', '.join(missing_price)}")
+        if phase == "evening" and sig != report_date:
+            _skip_all_buys(
+                rd,
+                report,
+                [f"本日（{report_date}）のシグナルがありません。シグナル日 {sig} は古い"],
+            )
 
     if phase == "morning":
         _apply_morning_checks(rd, report, stop_flag_path, sqlite_path)

@@ -68,22 +68,43 @@ def sell_qty(s: SellCandidate) -> int | None:
 # ---------------------------------------------------------------------------
 
 
-def _buy_table(buys: list[BuyCandidate]) -> list[str]:
+BUY_MAX_LABEL = "この価格以下なら買付可（上限）"
+BUY_MIN_LABEL = "この価格以上なら買付可（下限）"
+
+
+def _buy_table(buys: list[BuyCandidate], *, with_reason: bool = False) -> list[str]:
     if not buys:
         return ["候補なし", ""]
-    lines = [
-        "| 順位 | コード | 銘柄名 | 株数 | 参考価格 | 想定金額 | スコア | 見送り上限 | 見送り下限 | 備考 |",
-        "|---:|---|---|---:|---:|---:|---:|---:|---:|---|",
-    ]
+    header = (
+        "| 順位 | コード | 銘柄名 | 株数 | 参考価格 | 想定金額 | スコア "
+        f"| {BUY_MAX_LABEL} | {BUY_MIN_LABEL} | 備考 |"
+    )
+    sep = "|---:|---|---|---:|---:|---:|---:|---:|---:|---|"
+    if with_reason:
+        header += " 見送り理由 |"
+        sep += "---|"
+    lines = [header, sep]
     for b in buys:
         score = "-" if b.score is None else f"{b.score:.3f}"
-        lines.append(
+        line = (
             f"| {b.rank if b.rank is not None else '-'} | {b.code} | {b.name} | {b.size:,} "
             f"| {_num(b.ref_price)} | {_num(b.amount)} | {score} "
-            f"| {_num(b.skip_upper)} | {_num(b.skip_lower)} | {add_on_text(b)} |"
+            f"| {_num(b.buy_max_price)} | {_num(b.buy_min_price)} | {add_on_text(b)} |"
         )
+        if with_reason:
+            line += f" {b.skip_reason or '-'} |"
+        lines.append(line)
     lines.append("")
     return lines
+
+
+def _skipped_section(r: ManualOrderReport, heading: str) -> list[str]:
+    if not r.skipped_buys and not r.buy_skip_reasons:
+        return []
+    lines = [f"{heading}（{len(r.skipped_buys)} 件）", ""]
+    if r.buy_skip_reasons:
+        lines += ["BUY 全件見送りの理由:", *[f"- {x}" for x in r.buy_skip_reasons], ""]
+    return lines + _buy_table(r.skipped_buys, with_reason=True)
 
 
 def _sell_table(sells: list[SellCandidate]) -> list[str]:
@@ -134,6 +155,8 @@ def format_markdown(report: ManualOrderReport) -> str:
         lines += [
             "## 当日朝チェック",
             "",
+            "停止フラグ・DD 停止・データ鮮度は、レポートを実行した時点の状態です。",
+            "",
             "| 項目 | 結果 |",
             "|---|---|",
             f"| データ鮮度 | {_ok_ng(r.data_freshness_ok, 'OK', 'NG（古い）')} |",
@@ -148,12 +171,8 @@ def format_markdown(report: ManualOrderReport) -> str:
             f"### SELL（{len(r.sell_candidates)} 件）",
             "",
             *_sell_table(r.sell_candidates),
-            f"## 見送り候補（{len(r.skipped_buys)} 件）",
-            "",
         ]
-        if r.skipped_buys:
-            lines += ["見送り理由:", *[f"- {x}" for x in r.buy_skip_reasons], ""]
-        lines += _buy_table(r.skipped_buys)
+        lines += _skipped_section(r, "## 見送り候補") or ["## 見送り候補（0 件）", "", "なし", ""]
     else:
         lines += [
             f"## BUY 候補（{len(r.buy_candidates)} 件）",
@@ -162,13 +181,15 @@ def format_markdown(report: ManualOrderReport) -> str:
             f"## SELL 候補（{len(r.sell_candidates)} 件）",
             "",
             *_sell_table(r.sell_candidates),
+            *_skipped_section(r, "## BUY 見送り候補"),
         ]
     lines += [
         "## 見送りルール",
         "",
         f"- {gap_rule_text(r)}",
         "- 寄り前の気配は取得できないため、ギャップ率は計算しません。"
-        "BUY 表の「見送り上限 / 見送り下限」と寄り付き価格を見比べてください。",
+        f"BUY 表の「{BUY_MAX_LABEL}」「{BUY_MIN_LABEL}」と寄り付き価格を見比べてください"
+        "（円未満は切り捨て / 切り上げ済み）。",
         "",
         "## 警告",
         "",
@@ -229,9 +250,12 @@ def format_line_message(report: ManualOrderReport, *, max_buys: int = 10) -> str
         lines.append(f"  {b.code} {b.name}  {b.size}株  {amount}{suffix}")
     if len(r.buy_candidates) > max_buys:
         lines.append(f"  … 他 {len(r.buy_candidates) - max_buys} 件")
-    if r.skipped_buys:
+    if r.skipped_buys or r.buy_skip_reasons:
         lines.append(f"BUY 見送り {len(r.skipped_buys)}件:")
         lines += [f"  ・{x}" for x in r.buy_skip_reasons]
+        for b in r.skipped_buys:
+            if b.skip_reason and b.skip_reason not in " / ".join(r.buy_skip_reasons):
+                lines.append(f"  {b.code} {b.name}: {b.skip_reason}")
     lines.append(f"SELL {len(r.sell_candidates)}件" + (":" if r.sell_candidates else ""))
     for s in r.sell_candidates:
         line = f"  {s.code} {s.name}"
