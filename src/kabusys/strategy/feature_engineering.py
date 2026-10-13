@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 import math
+import re
+import unicodedata
 from datetime import date
 from typing import Any
 
@@ -62,8 +64,18 @@ _ALLOWED_MARKETS: frozenset[str] = frozenset(
         "JASDAQ グロース",
     }
 )
+
+
+def _normalize_market(market: object) -> str:
+    """市場区分の表記ゆれ（全角英数・全角スペース・連続空白・大小文字）を吸収する。"""
+    if market is None:
+        return ""
+    text = unicodedata.normalize("NFKC", str(market)).strip()
+    return re.sub(r"\s+", " ", text).casefold()
+
+
 _ALLOWED_MARKETS_NORMALIZED: frozenset[str] = frozenset(
-    market.casefold() for market in _ALLOWED_MARKETS
+    _normalize_market(market) for market in _ALLOWED_MARKETS
 )
 
 # Z スコア正規化対象カラム（per は逆数スコアに変換するため正規化しない）
@@ -178,7 +190,7 @@ def build_features(
     excluded_codes: set[str] = {
         str(code)
         for code, market in market_rows
-        if (normalized_market := str(market).strip().casefold() if market is not None else "")
+        if (normalized_market := _normalize_market(market))
         and normalized_market not in _ALLOWED_MARKETS_NORMALIZED
     }
 

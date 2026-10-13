@@ -420,6 +420,7 @@ def test_build_features_market_filter_accepts_japanese_market_names(conn):
         "1009": "その他",
         "1010": "TOKYO PRO MARKET",
         "1011": "Other",
+        "1012": "ＪＡＳＤＡＱ　スタンダード",  # 全角英字・全角スペース（NFKC で吸収）
     }
     _insert_price_history(conn, [(code, 1000.0, 6e8) for code in markets])
     conn.executemany(
@@ -427,7 +428,7 @@ def test_build_features_market_filter_accepts_japanese_market_names(conn):
     )
     build_features(conn, TARGET_DATE)
     rows = conn.execute("SELECT code FROM features WHERE date = ?", [TARGET_DATE]).fetchall()
-    assert {r[0] for r in rows} == {f"100{i}" for i in range(1, 9)}
+    assert {r[0] for r in rows} == {f"100{i}" for i in range(1, 9)} | {"1012"}
 
 
 def test_build_features_zscore_clipped(conn):
