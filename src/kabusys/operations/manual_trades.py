@@ -159,8 +159,8 @@ def _normalize_input(payload: ManualTradeInput) -> ManualTradeInput:
         code=code,
         side=side,
         qty=payload.qty,
-        price=payload.price,
-        fees=payload.fees,
+        price=round(payload.price, 4),  # 列は DECIMAL(18,4)
+        fees=round(payload.fees, 4),
         source_signal_id=payload.source_signal_id,
         note=payload.note,
     )
@@ -203,16 +203,9 @@ def add_manual_trade(
                 ):
                     raise DuplicateManualTradeError(
                         f"同一内容の約定が既に存在します（trade_id={existing_id!r}）。"
-                        "もう 1 件登録するには --allow-duplicate を指定してください。"
+                        "もう 1 件登録するには --allow-duplicate（GUI は"
+                        "「同じ内容の約定をもう 1 件登録する」）を指定してください。"
                     )
-
-        if normalized.side == "sell" and not allow_oversell:
-            held = _held_qty_as_of(conn, normalized.code, normalized.trade_date)
-            if normalized.qty > held:
-                raise OversellError(
-                    f"売却数量 {normalized.qty} が {normalized.trade_date} 時点の保有 {held} を"
-                    "超えています。保有を超える売却を登録するには --allow-oversell を指定してください。"
-                )
 
         trade_id = _allocate_manual_trade_id(
             {row[0] for row in same_group},
@@ -220,6 +213,14 @@ def add_manual_trade(
             normalized.code,
             normalized.side,
         )
+        if normalized.side == "sell" and not allow_oversell:
+            clamped = _oversold_trade_ids(conn, trade_id, normalized)
+            if clamped:
+                raise OversellError(
+                    f"この売却を登録すると保有を超える売却になります（対象: {', '.join(clamped)}）。"
+                    "先に不足している BUY 約定を登録してください。手動記録前からの保有を売る場合は "
+                    "--allow-oversell（GUI は「保有を超える売却を許可する」）を指定してください。"
+                )
         conn.execute(
             """
             INSERT INTO manual_trades (
@@ -308,13 +309,16 @@ _TRADE_ORDER_BY = (
 )
 
 
-def _fold_manual_trades(rows: list[tuple[Any, ...]]) -> dict[str, dict[str, Any]]:
-    """約定行 (trade_date, code, side, qty, price, fees) を順に畳み込み、銘柄別の状態を返す。
+def _fold_manual_trades(
+    rows: list[tuple[Any, ...]], clamped: list[str] | None = None
+) -> dict[str, dict[str, Any]]:
+    """約定行 (trade_id, trade_date, code, side, qty, price, fees) を順に畳み込み、銘柄別の状態を返す。
 
     保有を超える SELL は保有数量に切り詰め、logger.warning を出す。
+    clamped を渡すと、切り詰めが発生した約定の trade_id を追記する。
     """
     state: dict[str, dict[str, Any]] = {}
-    for trade_date, code, side, qty, price, fees in rows:
+    for trade_id, trade_date, code, side, qty, price, fees in rows:
         qty = int(qty)
         price = float(price)
         fees = float(fees)
@@ -340,8 +344,11 @@ def _fold_manual_trades(rows: list[tuple[Any, ...]]) -> dict[str, dict[str, Any]
         elif side == "sell":
             sell_qty = min(qty, current_qty)
             if sell_qty < qty:
+                if clamped is not None:
+                    clamped.append(trade_id)
                 logger.warning(
-                    "手動約定 %s %s の売却数量 %d が保有 %d を超えるため保有数量に切り詰めます",
+                    "手動約定 %s（%s %s）の売却数量 %d が保有 %d を超えるため保有数量に切り詰めます",
+                    trade_id,
                     code,
                     trade_date,
                     qty,
@@ -358,19 +365,31 @@ def _fold_manual_trades(rows: list[tuple[Any, ...]]) -> dict[str, dict[str, Any]
     return state
 
 
-def _held_qty_as_of(conn: duckdb.DuckDBPyConnection, code: str, as_of: date) -> int:
-    """code の as_of 以前の約定を calculate_manual_positions と同じ順序・切り詰めで畳んだ保有数量。"""
+def _oversold_trade_ids(
+    conn: duckdb.DuckDBPyConnection, new_trade_id: str, new: ManualTradeInput
+) -> list[str]:
+    """new を加えた code の全履歴を畳み、切り詰めが発生する約定（新規・既存の後日 SELL）の ID を返す。"""
     rows = _fetch_manual_trade_rows(
         conn,
         f"""
-        SELECT trade_date, code, side, qty, price, fees
+        SELECT trade_id, trade_date, code, side, qty, price, fees
         FROM manual_trades
-        WHERE code = ? AND trade_date <= ?
+        WHERE code = ?
         {_TRADE_ORDER_BY}
         """,
-        [code, as_of],
+        [new.code],
     )
-    return int(_fold_manual_trades(rows).get(code, {}).get("qty", 0))
+    new_row = (new_trade_id, new.trade_date, new.code, new.side, new.qty, new.price, new.fees)
+    # 新規約定は同日・同売買の既存行より後（created_at が最新）に並ぶ
+    idx = len(rows)
+    for i, row in enumerate(rows):
+        if (row[1], 0 if row[3] == "buy" else 1) > (new.trade_date, 1):
+            idx = i
+            break
+    rows.insert(idx, new_row)
+    clamped: list[str] = []
+    _fold_manual_trades(rows, clamped)
+    return clamped
 
 
 def calculate_manual_positions(
@@ -389,7 +408,7 @@ def calculate_manual_positions(
         rows = _fetch_manual_trade_rows(
             conn,
             f"""
-            SELECT trade_date, code, side, qty, price, fees
+            SELECT trade_id, trade_date, code, side, qty, price, fees
             FROM manual_trades
             {_TRADE_ORDER_BY}
             """,
@@ -398,7 +417,7 @@ def calculate_manual_positions(
         rows = _fetch_manual_trade_rows(
             conn,
             f"""
-            SELECT trade_date, code, side, qty, price, fees
+            SELECT trade_id, trade_date, code, side, qty, price, fees
             FROM manual_trades
             WHERE trade_date <= ?
             {_TRADE_ORDER_BY}

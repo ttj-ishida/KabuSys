@@ -151,10 +151,37 @@ def test_oversell_raises_error(conn):
 
 
 def test_oversell_counts_same_day_buy(conn):
-    add_manual_trade(conn, _p(side="sell", qty=100), allow_oversell=True)
-    delete_manual_trade(conn, "MANUAL_2026-09-18_7203_sell")
     add_manual_trade(conn, _p(side="buy", qty=100))
     add_manual_trade(conn, _p(side="sell", qty=100))
+
+    assert calculate_manual_positions(conn, as_of=date(2026, 9, 18)) == []
+
+
+def test_backfilled_sell_that_clamps_later_sell_is_rejected(conn):
+    add_manual_trade(conn, _p(qty=100, d=date(2026, 9, 1)))
+    add_manual_trade(conn, _p(side="sell", qty=100, d=date(2026, 9, 20)))
+
+    with pytest.raises(OversellError, match="MANUAL_2026-09-20_7203_sell"):
+        add_manual_trade(conn, _p(side="sell", qty=100, d=date(2026, 9, 18)))
+    assert len(list_manual_trades(conn)) == 2
+
+    trade_id = add_manual_trade(
+        conn, _p(side="sell", qty=100, d=date(2026, 9, 18)), allow_oversell=True
+    )
+    assert trade_id == "MANUAL_2026-09-18_7203_sell"
+
+
+def test_oversell_message_mentions_gui_label_and_buy_first(conn):
+    with pytest.raises(OversellError) as ei:
+        add_manual_trade(conn, _p(side="sell", qty=100))
+    assert "保有を超える売却を許可する" in str(ei.value)
+    assert "BUY" in str(ei.value)
+
+
+def test_price_and_fees_rounded_to_four_decimals_for_duplicate_check(conn):
+    add_manual_trade(conn, _p(price=2850.12345, fees=1.23456))
+    with pytest.raises(DuplicateManualTradeError):
+        add_manual_trade(conn, _p(price=2850.12345, fees=1.23456))
 
 
 def test_oversell_without_any_holding_raises(conn):
@@ -176,7 +203,11 @@ def test_allow_oversell_registers_and_warns_on_positions(conn, caplog):
         positions = calculate_manual_positions(conn, as_of=date(2026, 9, 18))
 
     assert positions == []
-    assert any("7203" in r.getMessage() for r in caplog.records if r.levelname == "WARNING")
+    assert any(
+        "MANUAL_2026-09-18_7203_sell" in r.getMessage()
+        for r in caplog.records
+        if r.levelname == "WARNING"
+    )
 
 
 def test_second_fill_is_reflected_in_portfolio_cash(conn):
