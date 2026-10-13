@@ -196,6 +196,47 @@ def list_open_order_links(conn: sqlite3.Connection) -> list[tuple[str, str]]:
     return [(str(r[0]), str(r[1])) for r in rows]
 
 
+def list_processing_without_order_id(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    """client_order_id が未設定の processing 行の (queue_signal_id, business_key) を返す。"""
+    if not _table_exists(conn):
+        return []
+    rows = conn.execute(
+        """
+        SELECT queue_signal_id, business_key FROM signal_queue_status
+         WHERE status = 'processing' AND client_order_id IS NULL
+        """
+    ).fetchall()
+    return [(str(r[0]), str(r[1])) for r in rows]
+
+
+def count_unprocessed_pending(
+    duckdb_conn, sqlite_conn: sqlite3.Connection, signal_date: date
+) -> int:
+    """signal_date の DuckDB signal_queue 行のうち、まだ処理されていない件数を返す。
+
+    DuckDB で status='pending' の行から、SQLite signal_queue_status で pending 以外
+    （処理済み）と記録された行を除いて数える。Execution Engine が起動しなかった・
+    行を読まなかった場合も未処理として数える。signal_queue テーブルがなければ 0。
+    """
+    exists = duckdb_conn.execute(
+        """
+        SELECT 1 FROM information_schema.tables
+         WHERE lower(table_name) = 'signal_queue' AND table_schema = current_schema()
+         LIMIT 1
+        """
+    ).fetchone()
+    if exists is None:
+        return 0
+    rows = duckdb_conn.execute(
+        "SELECT signal_id FROM signal_queue WHERE date = ? AND status = 'pending'",
+        [signal_date],
+    ).fetchall()
+    processed = {
+        qid for qid, st in get_statuses(sqlite_conn, signal_date).items() if st != "pending"
+    }
+    return sum(1 for r in rows if str(r[0]) not in processed)
+
+
 def status_for_order_state(state: OrderState) -> tuple[str, str | None]:
     """注文の状態を (signal_queue status, reason) に変換する。"""
     if state in (OrderState.Filled, OrderState.Closed):

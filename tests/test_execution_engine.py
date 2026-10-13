@@ -1219,3 +1219,115 @@ class TestReadOnlyDuckDB:
             assert ro.execute("SELECT status FROM signal_queue").fetchone()[0] == "pending"
         finally:
             ro.close()
+
+
+# ---------------------------------------------------------------------------
+# Issue #413 fix round 1
+# ---------------------------------------------------------------------------
+
+
+class TestSignalProcessingFailureKeepsSession:
+    """I1: シグナル処理の例外でセッションを落とさず、発注だけ止めて push/Gate 3 は継続する。"""
+
+    def _run(self, engine, tmp_path):
+        engine._pid_file = tmp_path / "execution.pid"
+        drained = []
+        with (
+            patch("kabusys.execution.execution_engine.settings") as mock_settings,
+            patch.object(engine, "_websocket_worker"),
+            patch.object(
+                engine,
+                "_process_signals",
+                side_effect=RuntimeError("signal_queue_status read failed"),
+            ),
+            patch.object(
+                engine,
+                "_drain_push_queue",
+                side_effect=lambda: (drained.append(1), engine._stop_event.set()),
+            ),
+            patch.object(engine._config, "signal_send_start", time(0, 0)),
+            patch.object(engine._config, "signal_send_end", time(23, 59, 59)),
+            patch.object(engine._config, "market_close", time(23, 59, 59)),
+        ):
+            mock_settings.kill_flag_path = tmp_path / "kill.flag"
+            engine.run_session()  # 例外を外に出さない
+        return drained
+
+    def test_failure_logged_flagged_and_drain_continues(self, sqlite_conn, duckdb_conn, tmp_path):
+        engine = _make_engine(MockBrokerClient(), sqlite_conn, duckdb_conn)
+        drained = self._run(engine, tmp_path)
+        assert engine.signal_processing_failed is True
+        assert drained, "push ドレインループ（Gate 3）は継続するべき"
+
+    def test_failure_sends_notification(self, sqlite_conn, duckdb_conn, tmp_path):
+        from unittest.mock import MagicMock
+
+        engine = _make_engine(MockBrokerClient(), sqlite_conn, duckdb_conn)
+        notifier = MagicMock()
+        engine._notifier = notifier
+        self._run(engine, tmp_path)
+        notifier.send.assert_called_once()
+        assert "signal_queue_status read failed" in notifier.send.call_args.args[0]
+
+    def test_notification_failure_is_swallowed(self, sqlite_conn, duckdb_conn, tmp_path):
+        from unittest.mock import MagicMock
+
+        engine = _make_engine(MockBrokerClient(), sqlite_conn, duckdb_conn)
+        engine._notifier = MagicMock()
+        engine._notifier.send.side_effect = RuntimeError("LINE down")
+        self._run(engine, tmp_path)
+        assert engine.signal_processing_failed is True
+
+    def test_flag_false_on_normal_session(self, sqlite_conn, duckdb_conn):
+        engine = _make_engine(MockBrokerClient(), sqlite_conn, duckdb_conn)
+        assert engine.signal_processing_failed is False
+
+
+class TestQtyZeroAndOrphanProcessing:
+    def test_qty_zero_records_cancelled(self, sqlite_conn, duckdb_conn):
+        """Minor 1: size_multiplier 適用後 qty=0 のスキップは cancelled/qty_zero。"""
+        duckdb_conn.execute(
+            "INSERT INTO signals (date, code, side, score, signal_rank, size_multiplier)"
+            " VALUES (?, '4444', 'buy', 0.8, 1, 0.0)",
+            [TARGET_DATE],
+        )
+        _insert_target(duckdb_conn, "4444", qty=50, price=1000.0)
+        engine = _make_engine(MockBrokerClient(), sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        assert _status_row(sqlite_conn, f"{TARGET_DATE}_4444_buy")[:2] == (
+            "cancelled",
+            "qty_zero",
+        )
+
+    def test_orphan_processing_row_logs_error(self, sqlite_conn, duckdb_conn, caplog):
+        """Minor 5: client_order_id なし・注文なしの processing 行は起動時に ERROR ログ。"""
+        sqs.ensure_schema(sqlite_conn)
+        sqs.record(
+            sqlite_conn,
+            queue_signal_id="orphan",
+            signal_date=TARGET_DATE,
+            code="1234",
+            side="buy",
+            status="processing",
+        )
+        engine = _make_engine(MockBrokerClient(), sqlite_conn, duckdb_conn)
+        with caplog.at_level("ERROR", logger="kabusys.execution.execution_engine"):
+            engine.sync_queue_statuses_from_orders()
+        assert any("orphan" in r.getMessage() for r in caplog.records if r.levelname == "ERROR")
+
+    def test_processing_row_with_existing_order_not_reported(
+        self, sqlite_conn, duckdb_conn, caplog
+    ):
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._process_signals()
+        # client_order_id が無い processing 行だが、業務キーの注文は存在する
+        sqlite_conn.execute("UPDATE signal_queue_status SET client_order_id = NULL")
+        sqlite_conn.commit()
+        with caplog.at_level("ERROR", logger="kabusys.execution.execution_engine"):
+            engine.sync_queue_statuses_from_orders()
+        assert not [r for r in caplog.records if r.levelname == "ERROR"]

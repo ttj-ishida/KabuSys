@@ -62,6 +62,7 @@ class ExecutionEngine:
         reconciler: Reconciler | None = None,
         pid_file: Path | None = None,
         monitoring_db: MonitoringDB | None = None,
+        notifier: object | None = None,
     ) -> None:
         self._broker = broker
         self._repo = repo
@@ -73,6 +74,10 @@ class ExecutionEngine:
         self._reconciler = reconciler
         self._pid_file: Path | None = pid_file
         self._monitoring_db = monitoring_db
+        # send(text) を持つ通知オブジェクト（LINE 等）。None なら通知しない。
+        self._notifier = notifier
+        # シグナル処理が例外で中断された場合 True（発注は停止、push/Gate 3 は継続）
+        self._signal_processing_failed = False
         self._columns_cache: dict[str, set[str]] = {}
         self._stop_event = threading.Event()
         self._push_queue: queue.Queue[dict] = queue.Queue()
@@ -91,6 +96,30 @@ class ExecutionEngine:
     @property
     def signal_date(self) -> date:
         return self._signal_date
+
+    @property
+    def signal_processing_failed(self) -> bool:
+        """シグナル処理が例外で中断されたか（run_execution がジョブ失敗の判定に使う）。"""
+        return self._signal_processing_failed
+
+    def _on_signal_processing_failure(self, exc: BaseException) -> None:
+        """シグナル処理の例外を記録・通知する。発注は止めるがセッションは継続する。"""
+        self._signal_processing_failed = True
+        logger.critical(
+            "シグナル処理が失敗しました。本日の発注を停止します（push 監視・Gate 3 は継続）: %s",
+            exc,
+            exc_info=exc,
+        )
+        if self._notifier is None:
+            return
+        try:
+            self._notifier.send(  # type: ignore[attr-defined]
+                "[KabuSys] シグナル処理失敗: 本日の自動発注を停止しました"
+                f"（push 監視・ドローダウン監視は継続）\n"
+                f"signal_date={self._signal_date}\n理由: {exc}"
+            )
+        except Exception:
+            logger.warning("シグナル処理失敗の通知に失敗しました", exc_info=True)
 
     def _record_status(
         self,
@@ -170,7 +199,34 @@ class ExecutionEngine:
                 logger.warning("signal_queue_status 更新失敗（継続）: %s: %s", client_order_id, exc)
         if updated:
             logger.info("signal_queue_status を注文状態に同期: %d 件", updated)
+        self._report_orphan_processing_rows()
         return updated
+
+    def _report_orphan_processing_rows(self) -> None:
+        """注文に紐付かない processing 行（発注直前のクラッシュ等）を ERROR ログで可視化する。
+
+        これらの行は再起動時に再読込されない（二重発注防止）ため、発注漏れの可能性がある。
+        """
+        if self._sqlite_conn is None:
+            return
+        try:
+            rows = sqs.list_processing_without_order_id(self._sqlite_conn)
+        except Exception as exc:
+            logger.warning("signal_queue_status 読み込み失敗（孤立行の確認をスキップ）: %s", exc)
+            return
+        for queue_signal_id, business_key in rows:
+            try:
+                has_order = bool(self._repo.get_by_signal(business_key))
+            except Exception as exc:
+                logger.warning("注文取得失敗（スキップ）: %s: %s", business_key, exc)
+                continue
+            if not has_order:
+                logger.error(
+                    "processing のまま注文が存在しない queue 行があります（発注漏れの可能性。"
+                    "手動確認要）: queue_signal_id=%s business_key=%s",
+                    queue_signal_id,
+                    business_key,
+                )
 
     def _log_trade_event(
         self,
@@ -244,6 +300,7 @@ class ExecutionEngine:
                         code,
                         sm,
                     )
+                    self._record_status(queue_signal_id, code, side, "cancelled", reason="qty_zero")
                     continue
             else:
                 qty = raw_qty
@@ -572,7 +629,12 @@ class ExecutionEngine:
             # 現在時刻が signal_send_end を超えている場合はシグナル処理をスキップ
             current_time = _now_time()
             if not self._stop_event.is_set() and current_time < self._config.signal_send_end:
-                self._process_signals()
+                # 例外でセッション（daemon スレッド）を落とさない。発注は止め、
+                # push ドレイン（sync_order + Gate 3 ドローダウン監視）は継続する。
+                try:
+                    self._process_signals()
+                except Exception as exc:
+                    self._on_signal_processing_failure(exc)
             elif not self._stop_event.is_set():
                 logger.warning(
                     "Signal processing skipped: now=%s is at or after signal_send_end=%s",
