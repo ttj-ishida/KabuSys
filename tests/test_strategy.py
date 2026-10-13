@@ -267,29 +267,41 @@ def test_apply_universe_filter_none_price():
     assert result == []
 
 
-def test_apply_universe_filter_market_excludes_unlisted_codes():
-    """market_set が指定されている場合、含まれないコード（ETF/REIT等）は除外される"""
+def test_apply_universe_filter_excluded_codes_excludes_registered_non_allowed_market():
+    """excluded_codes が指定されている場合、含まれるコード（ETF/REIT等）は除外される"""
     records = [
         {"code": "STOCK", "avg_turnover": 6e8},
         {"code": "ETF", "avg_turnover": 6e8},
     ]
     price_map = {"STOCK": 1000.0, "ETF": 1000.0}
-    result = _apply_universe_filter(records, price_map, market_set={"STOCK"})
+    result = _apply_universe_filter(records, price_map, excluded_codes={"ETF"})
     codes = {r["code"] for r in result}
     assert codes == {"STOCK"}
 
 
-def test_apply_universe_filter_market_none_skips_filter():
-    """market_set が None の場合は市場区分フィルタをスキップする（後方互換）"""
+def test_apply_universe_filter_excluded_codes_passes_unregistered_codes():
+    """excluded_codes に含まれない未登録コードは、フィルタが有効でも通過する"""
+    records = [
+        {"code": "ETF", "avg_turnover": 6e8},
+        {"code": "UNKNOWN", "avg_turnover": 6e8},
+    ]
+    price_map = {"ETF": 1000.0, "UNKNOWN": 1000.0}
+    result = _apply_universe_filter(records, price_map, excluded_codes={"ETF"})
+    codes = {r["code"] for r in result}
+    assert codes == {"UNKNOWN"}
+
+
+def test_apply_universe_filter_excluded_codes_none_skips_filter():
+    """excluded_codes が None の場合は市場区分フィルタをスキップする（後方互換）"""
     records = [{"code": "X", "avg_turnover": 6e8}]
-    result = _apply_universe_filter(records, {"X": 1000.0}, market_set=None)
+    result = _apply_universe_filter(records, {"X": 1000.0}, excluded_codes=None)
     assert {r["code"] for r in result} == {"X"}
 
 
-def test_apply_universe_filter_market_empty_skips_filter():
-    """market_set が空集合の場合は市場区分フィルタをスキップする（stocks 未整備時）"""
+def test_apply_universe_filter_excluded_codes_empty_skips_filter():
+    """excluded_codes が空集合の場合は市場区分フィルタをスキップする（stocks 未整備時）"""
     records = [{"code": "X", "avg_turnover": 6e8}]
-    result = _apply_universe_filter(records, {"X": 1000.0}, market_set=set())
+    result = _apply_universe_filter(records, {"X": 1000.0}, excluded_codes=set())
     assert {r["code"] for r in result} == {"X"}
 
 
@@ -354,6 +366,39 @@ def test_build_features_market_filter_skipped_when_stocks_empty(conn):
     rows = conn.execute("SELECT code FROM features WHERE date = ?", [TARGET_DATE]).fetchall()
     codes = {r[0] for r in rows}
     assert codes == {"A", "B"}
+
+
+def test_build_features_market_filter_passes_unregistered_codes(conn):
+    """stocks に一部銘柄しか登録されていない場合でも、未登録コードはフィルタ対象外として通過する"""
+    _insert_price_history(conn, [("1301", 1000.0, 6e8), ("9999", 1000.0, 6e8)])
+    conn.execute("INSERT INTO stocks (code, market) VALUES (?, ?)", ["1301", "Prime"])
+    # "9999" は stocks 未登録（部分更新中を想定）
+    build_features(conn, TARGET_DATE)
+    rows = conn.execute("SELECT code FROM features WHERE date = ?", [TARGET_DATE]).fetchall()
+    codes = {r[0] for r in rows}
+    assert codes == {"1301", "9999"}
+
+
+@pytest.mark.parametrize("market", [None, "", "   "], ids=["null", "empty", "whitespace"])
+def test_build_features_market_filter_passes_unknown_market(conn, market):
+    """市場区分が未確定の場合は、登録済みコードでも除外しない"""
+    _insert_price_history(conn, [("1301", 1000.0, 6e8)])
+    conn.execute("INSERT INTO stocks (code, market) VALUES (?, ?)", ["1301", market])
+    build_features(conn, TARGET_DATE)
+    rows = conn.execute("SELECT code FROM features WHERE date = ?", [TARGET_DATE]).fetchall()
+    assert {r[0] for r in rows} == {"1301"}
+
+
+def test_build_features_market_filter_normalizes_market_and_code(conn):
+    """市場区分の表記揺れと数値型コードを正規化して判定する"""
+    _insert_price_history(conn, [("1301", 1000.0, 6e8), ("1305", 1000.0, 6e8)])
+    conn.executemany(
+        "INSERT INTO stocks (code, market) VALUES (?, ?)",
+        [[1301, " prime "], [1305, "ReIt"]],
+    )
+    build_features(conn, TARGET_DATE)
+    rows = conn.execute("SELECT code FROM features WHERE date = ?", [TARGET_DATE]).fetchall()
+    assert {r[0] for r in rows} == {"1301"}
 
 
 def test_build_features_zscore_clipped(conn):
