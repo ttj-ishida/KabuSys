@@ -254,7 +254,9 @@ def _to_duckdb_timestamp(raw: str) -> datetime | None:
     except (TypeError, ValueError):
         return None
     if dt.tzinfo is not None:
-        dt = dt.astimezone().replace(tzinfo=None)  # ローカル時刻（naive）で保存
+        # DuckDB の TIMESTAMP 列（created_at の DEFAULT current_timestamp 等）は
+        # ローカル時刻の naive 値で入っているため、processed_at もローカル naive に揃える。
+        dt = dt.astimezone().replace(tzinfo=None)
     return dt
 
 
