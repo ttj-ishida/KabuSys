@@ -6,6 +6,7 @@ Task Scheduler から 20:00 に起動される。
 
 from __future__ import annotations
 
+import argparse
 import logging
 import sqlite3
 import sys
@@ -195,7 +196,25 @@ def _print_signal_report(
         logger.warning("シグナルレポートのファイル保存に失敗しました", exc_info=True)
 
 
-def main() -> None:
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """CLI 引数を解析する。argv=None（テスト等の直接呼び出し）は引数なしとして扱う。
+
+    --date: 対象日（既定: 今日）。夜間バッチが失敗した翌朝に、前営業日を指定して
+            再実行するために使う（signal_queue.date がその日付になり、当日の執行で読まれる）。
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--date",
+        type=date.fromisoformat,
+        default=date.today(),
+        metavar="YYYY-MM-DD",
+        help="対象日（省略時: 今日）。翌朝の再実行時は前営業日を指定する",
+    )
+    return parser.parse_args(argv if argv is not None else [])
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = _parse_args(argv)
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
     run_id: int | None = None
@@ -216,7 +235,7 @@ def main() -> None:
         sqlite_conn.row_factory = sqlite3.Row
         init_position_entries_db(sqlite_conn)
         init_monitoring_db(sqlite_conn)
-        target_date = date.today()
+        target_date = args.date
 
         # --- ポートフォリオ DD 停止チェック ---
         mdb = MonitoringDB(sqlite_conn)
@@ -347,4 +366,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

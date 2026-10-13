@@ -685,3 +685,124 @@ def test_run_edinet_collection_exits_when_api_key_missing():
 
     assert exc_info.value.code == 1
     mock_fn.assert_not_called()
+
+
+# ---------- Issue #413 fix round 1: 夜間バッチの --date 再実行 ----------
+
+
+def test_run_strategy_signal_date_arg_is_used():
+    """I2: 翌朝の再実行用に --date で対象日（前営業日）を指定できる。"""
+    from datetime import date
+
+    import run_strategy_signal
+
+    with (
+        patch("run_strategy_signal.Settings") as mock_settings,
+        patch("run_strategy_signal.duckdb.connect"),
+        patch("run_strategy_signal.sqlite3.connect"),
+        patch("run_strategy_signal.init_position_entries_db"),
+        patch("run_strategy_signal.init_monitoring_db"),
+        patch("run_strategy_signal.MonitoringDB") as mock_mdb,
+        patch("run_strategy_signal.run_manual_signal_step", return_value=(0, 0)) as mock_step,
+        patch("run_strategy_signal._print_signal_report"),
+    ):
+        mock_settings.return_value.manual_trading_enabled = False
+        mock_mdb.return_value.get_dashboard.return_value = None
+        run_strategy_signal.main(["--date", "2026-03-27"])
+
+    assert mock_step.call_args.args[1] == date(2026, 3, 27)
+
+
+def test_run_strategy_signal_default_date_is_today():
+    from datetime import date
+
+    import run_strategy_signal
+
+    assert run_strategy_signal._parse_args([]).date == date.today()
+    assert run_strategy_signal._parse_args(["--date", "2026-03-27"]).date == date(2026, 3, 27)
+    with pytest.raises(SystemExit):
+        run_strategy_signal._parse_args(["--date", "2026/03/27"])
+
+
+def test_portfolio_construction_date_arg_is_used(tmp_path: Path):
+    """I2: --date 指定時は signals 読み込み・signal_queue 書き込みがその日付になる。"""
+    from datetime import date
+
+    import run_portfolio_construction
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchall.return_value = []
+    mock_cursor.description = [("code",), ("side",), ("score",), ("signal_rank",)]
+    mock_conn.execute.return_value = mock_cursor
+
+    with (
+        patch("run_portfolio_construction.Settings") as mock_settings,
+        patch("run_portfolio_construction.duckdb.connect", return_value=mock_conn),
+        patch("run_portfolio_construction._sync_signal_queue_status"),
+    ):
+        _mock_paper_settings(mock_settings, tmp_path)
+        run_portfolio_construction.main(["--date", "2026-03-27"])
+
+    date_params = [
+        c.args[1]
+        for c in mock_conn.execute.call_args_list
+        if len(c.args) > 1 and "signals" in str(c.args[0])
+    ]
+    assert date_params and all(date(2026, 3, 27) in p for p in date_params)
+
+
+def test_portfolio_construction_default_date_is_today():
+    from datetime import date
+
+    import run_portfolio_construction
+
+    assert run_portfolio_construction._parse_args([]).date == date.today()
+    assert run_portfolio_construction._parse_args(["--date", "2026-03-27"]).date == date(
+        2026, 3, 27
+    )
+
+
+# ---------- Issue #413 fix round 1: run_signal_queue_report の既定日付 ----------
+
+
+def _run_sq_report(argv):
+    from datetime import date
+
+    import run_signal_queue_report
+
+    with (
+        patch("run_signal_queue_report.Settings"),
+        patch("run_signal_queue_report.duckdb.connect"),
+        patch("run_signal_queue_report.register_process", return_value=None),
+        patch("run_signal_queue_report.collect_signals", return_value=[]) as mock_collect,
+        patch("run_signal_queue_report.build_report") as mock_build,
+        patch("run_signal_queue_report.save_report"),
+        patch("run_signal_queue_report.format_cli_summary", return_value=""),
+        patch("run_signal_queue_report.build_notifier"),
+        patch("run_signal_queue_report.format_signal_queue_message", return_value=""),
+        patch(
+            "run_signal_queue_report.prev_trading_day", return_value=date(2026, 3, 27)
+        ) as mock_prev,
+    ):
+        mock_build.return_value.status = "READY"
+        run_signal_queue_report.main(argv)
+    return mock_collect, mock_prev
+
+
+def test_signal_queue_report_defaults_to_prev_trading_day():
+    """Minor 2: 08:02 のレポートは前営業日（夜間バッチ日）の signal_queue を読む。"""
+    from datetime import date
+
+    mock_collect, mock_prev = _run_sq_report([])
+    mock_prev.assert_called_once()
+    assert mock_prev.call_args.args[1] == date.today()
+    assert mock_collect.call_args.args[1] == date(2026, 3, 27)
+
+
+def test_signal_queue_report_date_arg():
+    from datetime import date
+
+    mock_collect, mock_prev = _run_sq_report(["--date", "2026-03-20"])
+    mock_prev.assert_not_called()
+    assert mock_collect.call_args.args[1] == date(2026, 3, 20)

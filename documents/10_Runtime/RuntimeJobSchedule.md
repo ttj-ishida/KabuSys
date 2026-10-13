@@ -170,7 +170,7 @@ Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object 
 | 時刻 | タスク名 | スクリプト | 出力先 |
 |------|----------|------------|--------|
 | 08:00 | `KabuSys_PreMarketReport` | `scripts/run_pre_market_report.py` | `artifacts/pre_market/{date}/report.md` |
-| 08:02 | `KabuSys_SignalQueueReport` | `scripts/run_signal_queue_report.py` | `artifacts/signal_queue/{date}/report.md` |
+| 08:02 | `KabuSys_SignalQueueReport` | `scripts/run_signal_queue_report.py`（既定で前営業日＝当日執行分の queue を読む。`--date` 指定可） | `artifacts/signal_queue/{date}/report.md`（`{date}` は queue の日付） |
 | 08:05 | 手動確認 | WebManual / Signal Queue Report | `artifacts/signal_queue/{date}/report.md` |
 
 判定（pre_market_report）:
@@ -255,8 +255,10 @@ python -m kabusys.run_performance_report --type daily --save
 - `OK`
 - `BLOCKED`
 
-シグナル件数（pending / filled）は SQLite の `signal_queue_status` から、当日執行分
-（前営業日の `signal_date`）を数える。テーブルがない（Execution 未起動）場合は 0。
+シグナル件数は当日執行分（前営業日の `signal_date`）で数える。pending は DuckDB
+`signal_queue` の pending 行のうち、SQLite `signal_queue_status` で処理済み（pending 以外）と
+記録されていない件数（Execution 未起動・未処理も pending として数える）。filled は
+`signal_queue_status` の件数。SQLite は Execution と同じく paper_trading では `paper_trading.db` を読む。
 
 出力先:
 
