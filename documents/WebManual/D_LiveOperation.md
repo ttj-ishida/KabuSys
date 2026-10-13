@@ -1,7 +1,7 @@
 # D. 本番運用 — WebManual
 
 - **対象**: `live` 環境で KabuSys を運用する担当者
-- **前提**: Paper Trading で一通り確認済み
+- **前提**: 手動注文メイン運用として、前日夜・当日朝に候補を確認して証券会社画面から発注する
 
 ---
 
@@ -9,7 +9,8 @@
 
 - `.env` の `KABUSYS_ENV=live` を確認
 - `python -m kabusys.validate_config` がエラーなく完了する
-- kabuステーション（本番ポート 18080）が起動し API 接続できる
+- 手動注文メイン運用では、kabuステーションの常時起動は必須ではない
+- 自動発注を検証・再開する場合のみ、kabuステーション（本番ポート 18080）が起動し API 接続できることを確認する
 - `config/risk_config.yaml` のドローダウン上限・ポジション上限を確認
 - Task Scheduler の Core ジョブ（`KabuSys_DataUpdate` / `KabuSys_FeatureGen` など）が `Ready` 状態
 - Addon を有効にしている場合は対応ジョブも登録・`Ready` であること
@@ -33,9 +34,8 @@
 | 08:00 | Pre-Market レポート | 自動 | `scripts/run_pre_market_report.py` |
 | 08:02 | Signal Queue レポート | 自動 | `scripts/run_signal_queue_report.py` |
 | 08:05 | Position Reconciliation レポート | 自動 | `scripts/run_position_reconciliation_report.py` |
-| 08:30 | Execution Engine 起動 | 自動 | `scripts/start_system.py --component execution` |
-| 09:00 | Monitoring 起動 | 自動 | `scripts/start_system.py --component monitoring` |
-| 09:00〜15:00 | ザラ場監視 | **手動** | Streamlit ダッシュボード / CLI |
+| 08:10〜08:50 | 当日注文候補の最終確認・手動発注 | **手動** | 証券会社画面 |
+| 09:00〜15:00 | ザラ場監視・売却判断 | **手動** | Streamlit ダッシュボード / CLI |
 | 15:00 | 引け後確認・Market Close レポート | **手動** | `python -m kabusys.run_market_close_report --save` |
 
 ---
@@ -56,9 +56,9 @@ LINE 通知が有効な場合、各レポート完了後に結果が自動送信
 
 | 判定 | 意味 | 対応 |
 |------|------|------|
-| `READY` | 執行開始可 | そのまま 08:30 の自動起動を待つ |
-| `READY_WITH_WARNINGS` | 警告あり | 内容を確認した上で判断 |
-| `BLOCKED` | 執行不可 | 原因を解消してから Execution を手動起動 |
+| `READY` | 注文候補の確認可 | 候補・数量・リスク上限を確認して手動発注 |
+| `READY_WITH_WARNINGS` | 警告あり | 内容を確認し、必要なら発注を見送る |
+| `BLOCKED` | 当日運用不可 | 原因を解消するまで発注しない |
 
 手動で再実行したい場合（再確認・デバッグ時）:
 
@@ -70,9 +70,63 @@ python scripts/run_position_reconciliation_report.py
 
 ---
 
-## D-4. Execution 起動（08:30 自動）
+## D-4. 手動注文（08:10〜08:50）
 
-Task Scheduler の `KabuSys_ExecutionStart`（08:30）が自動起動します。
+手動注文メイン運用では、`Signal Queue` と各種レポートを「注文候補」として扱い、最終発注は運用者が証券会社画面から行います。
+
+発注前に確認すること:
+
+- `Signal Queue` の BUY/SELL、銘柄、数量、理由
+- `Pre-Market` の判定が `READY` または許容できる `READY_WITH_WARNINGS` であること
+- ポジション上限・1銘柄上限・当日余力に違反しないこと
+- 自分で入力する注文内容が候補と一致していること
+
+発注後は、約定結果を CLI で KabuSys に登録します。
+
+| 項目 | 内容 |
+|------|------|
+| `trade_date` | 約定日 |
+| `code` | 銘柄コード |
+| `side` | BUY / SELL |
+| `qty` | 約定数量 |
+| `price` | 約定単価 |
+| `fees` | 手数料・諸経費 |
+| `source_signal_id` | 対応する Signal Queue ID（分かる場合） |
+
+確認だけ行う場合:
+
+```powershell
+python -m kabusys.manual_trades add --date 2026-09-17 --code 72030 --side buy --qty 100 --price 3016
+```
+
+DB に保存する場合:
+
+```powershell
+python -m kabusys.manual_trades add --date 2026-09-17 --code 72030 --side buy --qty 100 --price 3016 --apply
+```
+
+対話式で入力する場合:
+
+```powershell
+python -m kabusys.manual_trades wizard
+```
+
+手動保有ポジションを確認する場合:
+
+```powershell
+python -m kabusys.manual_trades positions --date 2026-09-17
+```
+
+Streamlit では **Manual Trades** ページで入力・履歴確認、**Performance > 手動ポジション** タブで保有状況を確認できます。
+
+> 手動注文メイン運用では、Execution Engine を通常起動しません。`signal_queue` は発注命令ではなく、運用者向けの助言・候補として扱います。
+
+---
+
+## D-4a. Execution 起動（任意・自動発注検証時のみ）
+
+自動発注を再開・検証する場合に限り、Execution Engine を起動します。kabuステーションの起動負荷が運用上のボトルネックになる場合、この手順は日次運用から外します。
+
 手動で起動・確認したい場合:
 
 ```powershell

@@ -319,6 +319,35 @@ CREATE TABLE IF NOT EXISTS trades (
 )
 """
 
+_MANUAL_TRADES = """
+CREATE TABLE IF NOT EXISTS manual_trades (
+    trade_id          VARCHAR       NOT NULL PRIMARY KEY,
+    trade_date        DATE          NOT NULL,
+    code              VARCHAR       NOT NULL,
+    side              VARCHAR       NOT NULL CHECK (side IN ('buy', 'sell')),
+    qty               BIGINT        NOT NULL CHECK (qty > 0),
+    price             DECIMAL(18,4) NOT NULL CHECK (price >= 0),
+    fees              DECIMAL(18,4) NOT NULL DEFAULT 0 CHECK (fees >= 0),
+    source_signal_id  VARCHAR,
+    note              VARCHAR,
+    created_at        TIMESTAMP     NOT NULL DEFAULT current_timestamp
+)
+"""
+
+_MANUAL_ACTION_QUEUE = """
+CREATE TABLE IF NOT EXISTS manual_action_queue (
+    action_id   VARCHAR   NOT NULL PRIMARY KEY,
+    date        DATE      NOT NULL,
+    code        VARCHAR   NOT NULL,
+    action      VARCHAR   NOT NULL CHECK (action IN ('sell_candidate')),
+    qty         BIGINT    NOT NULL CHECK (qty > 0),
+    reason      VARCHAR   NOT NULL,
+    status      VARCHAR   NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done', 'skipped')),
+    created_at  TIMESTAMP NOT NULL DEFAULT current_timestamp,
+    updated_at  TIMESTAMP
+)
+"""
+
 _POSITIONS = """
 CREATE TABLE IF NOT EXISTS positions (
     date            DATE        NOT NULL,
@@ -465,6 +494,7 @@ _INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)",
     "CREATE INDEX IF NOT EXISTS idx_orders_signal_id ON orders(signal_id)",
     "CREATE INDEX IF NOT EXISTS idx_trades_order_id ON trades(order_id)",
+    "CREATE INDEX IF NOT EXISTS idx_manual_trades_date_code ON manual_trades(trade_date, code)",
     "CREATE INDEX IF NOT EXISTS idx_news_symbols_code ON news_symbols(code)",
     "CREATE INDEX IF NOT EXISTS idx_raw_news_datetime ON raw_news(datetime)",
     "CREATE INDEX IF NOT EXISTS idx_position_entries_code_sell ON position_entries(code, sell_date)",
@@ -541,6 +571,8 @@ _ALL_DDL: list[str] = [
     _PORTFOLIO_TARGETS,
     _ORDERS,
     _TRADES,
+    _MANUAL_TRADES,
+    _MANUAL_ACTION_QUEUE,
     _POSITIONS,
     _POSITION_ENTRIES,
     _EARNINGS_CALENDAR,

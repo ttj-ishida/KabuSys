@@ -268,7 +268,7 @@ def main() -> None:
     sqlite_conn = sqlite3.connect(str(sqlite_path), timeout=30.0, check_same_thread=False)
     init_monitoring_db(sqlite_conn)  # 監視テーブルが存在することを保証（冪等）
     init_position_entries_db(sqlite_conn)  # position_entries テーブルが存在することを保証（冪等）
-    duckdb_conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
+    duckdb_conn = duckdb.connect(str(settings.duckdb_path))
 
     try:
         # 3. ブローカークライアント（paper mode は前回状態を復元）

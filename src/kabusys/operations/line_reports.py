@@ -5,6 +5,14 @@
 
 from __future__ import annotations
 
+_SELL_REASON_LABELS: dict[str, str] = {
+    "stop_loss": "損切り",
+    "trailing_stop": "トレーリング",
+    "time_exit": "保有期限",
+    "score_drop": "スコア低下",
+    "earnings_avoidance": "決算回避",
+}
+
 
 def _fmt_rate(value: float | None) -> str:
     if value is None:
@@ -148,8 +156,8 @@ def format_evening_message(
 
     buy_signals=None のとき件数のみの旧フォーマット（後方互換）。
     buy_signals が list のとき BUY/SELL 詳細を展開する。
-    buy_signals 各要素: {"code": str, "name": str, "size": int}
-    sell_signals 各要素: {"code": str, "name": str}
+    buy_signals 各要素: {"code", "name", "size", "add_on"(任意)}
+    sell_signals 各要素: {"code", "name", "qty"(任意), "reason"(任意), "manual"(任意)}
     inserted は buy_signals=None のとき（後方互換）のみ使用される。
     """
     if buy_signals is not None:
@@ -173,7 +181,8 @@ def format_evening_message(
             lines.append("BUY銘柄:")
             shown = buy_signals[:max_signals]
             for s in shown:
-                lines.append(f"  {s['code']} {s['name']}  {s['size']}株")
+                suffix = " [買い増し]" if s.get("add_on") else ""
+                lines.append(f"  {s['code']} {s['name']}  {s['size']}株{suffix}")
             if len(buy_signals) > max_signals:
                 lines.append(f"  … 他 {len(buy_signals) - max_signals} 件")
 
@@ -181,7 +190,14 @@ def format_evening_message(
             lines.append("SELL銘柄:")
             shown = sell_signals[:max_signals]
             for s in shown:
-                lines.append(f"  {s['code']} {s['name']}")
+                line = f"  {s['code']} {s['name']}"
+                if s.get("qty"):
+                    line += f"  {s['qty']}株"
+                if s.get("reason"):
+                    line += f" ({_SELL_REASON_LABELS.get(s['reason'], s['reason'])})"
+                if s.get("manual"):
+                    line += " [手動保有]"
+                lines.append(line)
             if len(sell_signals) > max_signals:
                 lines.append(f"  … 他 {len(sell_signals) - max_signals} 件")
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 
 import duckdb
 import pytest
@@ -77,6 +78,20 @@ def duck_conn():
             code VARCHAR NOT NULL,
             price DECIMAL(18,4) NOT NULL,
             size BIGINT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE manual_trades (
+            trade_id VARCHAR PRIMARY KEY,
+            trade_date DATE NOT NULL,
+            code VARCHAR NOT NULL,
+            side VARCHAR NOT NULL,
+            qty BIGINT NOT NULL,
+            price DECIMAL(18,4) NOT NULL,
+            fees DECIMAL(18,4) NOT NULL DEFAULT 0,
+            source_signal_id VARCHAR,
+            note VARCHAR,
+            created_at TIMESTAMP NOT NULL DEFAULT current_timestamp
         )
     """)
     return conn
@@ -229,3 +244,159 @@ def test_load_recent_trades_empty(duck_conn):
 
     df = load_recent_trades(duck_conn)
     assert df.empty
+
+
+def test_load_manual_positions_returns_open_positions(duck_conn):
+    from kabusys.monitoring.dashboard_data import load_manual_positions
+
+    duck_conn.execute("""
+        CREATE TABLE prices_daily (
+            date DATE, code VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE,
+            close DOUBLE, volume BIGINT, turnover DOUBLE
+        )
+    """)
+    duck_conn.execute("""
+        INSERT INTO manual_trades (trade_id, trade_date, code, side, qty, price, fees)
+        VALUES
+          ('m1', DATE '2026-09-18', '7203', 'buy', 100, 1000, 100),
+          ('m2', DATE '2026-09-19', '7203', 'sell', 40, 1200, 50)
+    """)
+    duck_conn.execute("""
+        INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover)
+        VALUES (DATE '2026-09-19', '7203', 1090, 1220, 1080, 1200, 1000, 1200000)
+    """)
+
+    df = load_manual_positions(duck_conn, as_of=date(2026, 9, 19))
+
+    assert len(df) == 1
+    assert df.iloc[0]["code"] == "7203"
+    assert int(df.iloc[0]["qty"]) == 60
+    assert float(df.iloc[0]["avg_price"]) == pytest.approx(1001.0)
+    assert float(df.iloc[0]["market_value"]) == pytest.approx(72000.0)
+    assert float(df.iloc[0]["unrealized_pnl"]) == pytest.approx(11940.0)
+    assert float(df.iloc[0]["realized_pnl"]) == pytest.approx(7910.0)
+    assert float(df.iloc[0]["total_pnl"]) == pytest.approx(19850.0)
+
+
+def test_load_manual_actions_returns_dataframe():
+    from kabusys.monitoring.dashboard_data import load_manual_actions
+    from kabusys.operations.manual_trades import record_sell_candidates
+
+    c = duckdb.connect(":memory:")
+    d = date(2026, 10, 8)
+    record_sell_candidates(
+        c, d, [{"code": "7203", "reason": "stop_loss", "qty": 100, "source": "manual"}]
+    )
+
+    df = load_manual_actions(c, target_date=d)
+
+    assert list(df.columns) == [
+        "action_id",
+        "date",
+        "code",
+        "action",
+        "qty",
+        "reason",
+        "status",
+        "updated_at",
+    ]
+    assert df.iloc[0]["code"] == "7203"
+    assert df.iloc[0]["status"] == "open"
+
+
+def test_load_manual_actions_empty():
+    from kabusys.monitoring.dashboard_data import load_manual_actions
+
+    df = load_manual_actions(duckdb.connect(":memory:"))
+    assert df.empty
+    assert "action_id" in df.columns
+
+
+def test_load_manual_actions_missing_table_read_only(tmp_path):
+    from kabusys.monitoring.dashboard_data import load_manual_actions
+
+    path = str(tmp_path / "ro.duckdb")
+    duckdb.connect(path).close()
+    ro = duckdb.connect(path, read_only=True)
+    try:
+        df = load_manual_actions(ro)
+    finally:
+        ro.close()
+
+    assert df.empty
+    assert "action_id" in df.columns
+
+
+def test_load_manual_positions_missing_table_read_only(tmp_path):
+    """manual_trades 未作成 DB を read_only で開いても空（仕様 §9: 手動保有なし）。"""
+    from kabusys.monitoring.dashboard_data import load_manual_positions
+    from kabusys.operations.manual_trades import (
+        calc_manual_portfolio_value,
+        calculate_manual_positions,
+        list_manual_trades,
+    )
+
+    path = str(tmp_path / "ro_manual.duckdb")
+    duckdb.connect(path).close()
+    ro = duckdb.connect(path, read_only=True)
+    try:
+        df = load_manual_positions(ro, as_of=date(2026, 10, 8))
+        positions = calculate_manual_positions(ro)
+        trades = list_manual_trades(ro)
+        value = calc_manual_portfolio_value(ro, 1_000_000.0, as_of=date(2026, 10, 8))
+    finally:
+        ro.close()
+
+    assert df.empty
+    assert list(df.columns) == [
+        "code",
+        "qty",
+        "avg_price",
+        "cost_basis",
+        "price_date",
+        "close_price",
+        "market_value",
+        "unrealized_pnl",
+        "unrealized_pnl_pct",
+        "realized_pnl",
+        "total_pnl",
+        "last_trade_date",
+    ]
+    assert positions == []
+    assert trades == []
+    assert value == (1_000_000.0, 1_000_000.0)
+
+
+def test_load_manual_actions_latest_per_code():
+    """latest_per_code=True では銘柄ごとに最新日の1行のみ返す（status は最新行で判定）。"""
+    from kabusys.monitoring.dashboard_data import load_manual_actions
+    from kabusys.operations.manual_trades import (
+        build_action_id,
+        record_sell_candidates,
+        update_manual_action_status,
+    )
+
+    c = duckdb.connect(":memory:")
+    d1, d2, d3 = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8)
+    for d in (d1, d2, d3):
+        record_sell_candidates(
+            c, d, [{"code": "7203", "reason": "stop_loss", "qty": 100, "source": "manual"}]
+        )
+    for d in (d1, d2):
+        record_sell_candidates(
+            c, d, [{"code": "6758", "reason": "time_exit", "qty": 200, "source": "manual"}]
+        )
+    # 6758 は最新行(d2)を対応済みにした → open 表示から消える（古い d1 の open は出さない）
+    update_manual_action_status(c, build_action_id(d2, "6758", "sell_candidate"), "done")
+
+    latest_all = load_manual_actions(c, latest_per_code=True)
+    assert sorted(latest_all["code"].tolist()) == ["6758", "7203"]
+    assert latest_all.set_index("code").loc["7203", "date"] == d3
+    assert latest_all.set_index("code").loc["6758", "date"] == d2
+
+    latest_open = load_manual_actions(c, status="open", latest_per_code=True)
+    assert latest_open["code"].tolist() == ["7203"]
+    assert latest_open.iloc[0]["date"] == d3
+
+    # 既定（後方互換）では全行
+    assert len(load_manual_actions(c)) == 5

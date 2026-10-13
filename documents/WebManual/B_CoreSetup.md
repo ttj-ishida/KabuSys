@@ -258,8 +258,9 @@ powershell -File scripts\remove_task_scheduler.ps1
 | 08:00 | Pre-Market レポート | `scripts/run_pre_market_report.py` | Core |
 | 08:02 | Signal Queue レポート | `scripts/run_signal_queue_report.py` | Core |
 | 08:05 | Position Reconciliation レポート | `scripts/run_position_reconciliation_report.py` | Core |
-| 08:30 | Execution Engine 起動 | `scripts/start_system.py --component execution` | Core |
-| 09:00 | Monitoring 起動 | `scripts/start_system.py --component monitoring` | Core |
+| 08:10〜08:50 | 注文候補の最終確認・手動発注 | 証券会社画面 | 手動 |
+| 08:30 | Execution Engine 起動 | `scripts/start_system.py --component execution` | 任意（自動発注検証時のみ） |
+| 09:00 | Monitoring 起動 | `scripts/start_system.py --component monitoring` | 任意 |
 | 15:35 | TDnet 適時開示収集 | `scripts/run_tdnet_collection.py` | Addon（`ENABLE_TDNET=true`） |
 | 17:30 | 市場データ更新 | `scripts/run_data_update.py` | Core |
 | 17:33 | Yahoo News RSS 収集 | `scripts/run_yahoonews_collection.py` | Addon（`ENABLE_YAHOONEWS=true`） |

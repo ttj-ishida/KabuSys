@@ -12,6 +12,8 @@ from datetime import date, timedelta
 import duckdb
 import pandas as pd
 
+from kabusys.operations.manual_trades import evaluate_manual_positions, list_manual_actions
+
 # ---------------------------------------------------------------------------
 # Home ページ（SQLite）
 # ---------------------------------------------------------------------------
@@ -106,3 +108,86 @@ def load_recent_trades(conn: duckdb.DuckDBPyConnection, limit: int = 50) -> pd.D
            LIMIT ?""",
         [limit],
     ).df()
+
+
+def load_manual_positions(
+    conn: duckdb.DuckDBPyConnection, *, as_of: date | None = None
+) -> pd.DataFrame:
+    """manual_trades と指定日以前の最新終値から手動保有評価を返す。"""
+    rows = evaluate_manual_positions(conn, as_of=as_of)
+    return pd.DataFrame(
+        [
+            {
+                "code": row.code,
+                "qty": row.qty,
+                "avg_price": row.avg_price,
+                "cost_basis": row.cost_basis,
+                "price_date": row.price_date,
+                "close_price": row.close_price,
+                "market_value": row.market_value,
+                "unrealized_pnl": row.unrealized_pnl,
+                "unrealized_pnl_pct": row.unrealized_pnl_pct,
+                "realized_pnl": row.realized_pnl,
+                "total_pnl": row.total_pnl,
+                "last_trade_date": row.last_trade_date,
+            }
+            for row in rows
+        ],
+        columns=[
+            "code",
+            "qty",
+            "avg_price",
+            "cost_basis",
+            "price_date",
+            "close_price",
+            "market_value",
+            "unrealized_pnl",
+            "unrealized_pnl_pct",
+            "realized_pnl",
+            "total_pnl",
+            "last_trade_date",
+        ],
+    )
+
+
+_MANUAL_ACTION_COLUMNS = [
+    "action_id",
+    "date",
+    "code",
+    "action",
+    "qty",
+    "reason",
+    "status",
+    "updated_at",
+]
+
+
+def load_manual_actions(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    target_date: date | None = None,
+    status: str | None = None,
+    latest_per_code: bool = False,
+) -> pd.DataFrame:
+    """manual_action_queue（手動売却候補）を DataFrame で返す。テーブル未作成時は空。
+
+    latest_per_code=True のときは銘柄ごとに最新日の1行のみ返す。候補は毎晩記録され
+    同一銘柄が重複表示されるのを防ぐ。status 絞り込みは最新行に対して適用する
+    （最新行を対応済みにすれば、古い open 行は表示されない）。
+    """
+    query_status = None if latest_per_code else status
+    try:
+        rows = list_manual_actions(conn, target_date=target_date, status=query_status)
+    except duckdb.CatalogException:
+        rows = []
+    df = pd.DataFrame(
+        [{col: getattr(r, col) for col in _MANUAL_ACTION_COLUMNS} for r in rows],
+        columns=_MANUAL_ACTION_COLUMNS,
+    )
+    if latest_per_code and not df.empty:
+        df = df.sort_values(["date", "code"], ascending=[False, True], kind="stable")
+        df = df.drop_duplicates(subset="code", keep="first")
+        if status is not None:
+            df = df[df["status"] == status]
+        df = df.reset_index(drop=True)
+    return df
