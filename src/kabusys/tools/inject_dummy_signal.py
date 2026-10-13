@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import uuid
 from datetime import date
 from typing import Optional
 
@@ -40,17 +41,18 @@ def resolve_target_date(
     """対象日（signal_queue.date）を解決する。
 
     explicit_date が指定されればその値をそのまま返す。
-    None の場合は、次回の Execution Engine 実行（today の翌営業日）が読む
-    signal_date（= その前営業日）を返す。エンジンは執行日の前営業日の行を読むため
-    （Issue #413）、営業日に注入すれば today、休日なら直前の営業日になる。
+    None の場合は prev_trading_day(today) を返す（Issue #413）。Execution Engine は
+    執行日の前営業日（signal_date）の行を読むため、当日の執行ですぐ拾われる。
+    また 21:00 の portfolio_construction は当日日付の pending 行を DELETE するため、
+    当日日付で注入すると夜間に消えるが、前営業日の日付なら消されない。
     """
     if explicit_date is not None:
         return explicit_date
 
-    from kabusys.data.calendar_management import next_trading_day, prev_trading_day
+    from kabusys.data.calendar_management import prev_trading_day
 
     base = today if today is not None else date.today()
-    return prev_trading_day(conn, next_trading_day(conn, base))
+    return prev_trading_day(conn, base)
 
 
 def inject_signal(
@@ -84,20 +86,29 @@ def inject_signal(
     if qty <= 0:
         raise ValueError(f"qty は 1 以上の整数を指定してください: {qty}")
 
-    signal_id = build_signal_id(target_date, code, side)
+    base_id = build_signal_id(target_date, code, side)
+    signal_id = base_id
 
     conn.execute("BEGIN")
     try:
+        # 過去の --force 再注入分（{base_id}_R{suffix}）も同じシグナルとして扱う
         existing = conn.execute(
-            "SELECT 1 FROM signal_queue WHERE signal_id = ?", [signal_id]
-        ).fetchone()
+            "SELECT signal_id FROM signal_queue WHERE signal_id = ? OR starts_with(signal_id, ?)",
+            [base_id, base_id + "_R"],
+        ).fetchall()
 
-        if existing is not None:
+        if existing:
             if not force:
                 raise DuplicateSignalError(
-                    f"signal_id={signal_id!r} は既に存在します。上書きするには --force を指定してください。"
+                    f"signal_id={base_id!r} は既に存在します。上書きするには --force を指定してください。"
                 )
-            conn.execute("DELETE FROM signal_queue WHERE signal_id = ?", [signal_id])
+            conn.execute(
+                "DELETE FROM signal_queue WHERE signal_id = ? OR starts_with(signal_id, ?)",
+                [base_id, base_id + "_R"],
+            )
+            # 再注入は新しい signal_id にする。同じ ID だと、Execution Engine の
+            # signal_queue_status（SQLite）に処理済みとして残っていて読み飛ばされる（#413）。
+            signal_id = f"{base_id}_R{uuid.uuid4().hex[:8]}"
 
         conn.execute(
             """
@@ -147,8 +158,8 @@ def main() -> None:
         "--date",
         default=None,
         help=(
-            "signal_queue の日付 YYYY-MM-DD（省略時: 次回執行が読む日付＝"
-            "翌営業日の前営業日。執行エンジンは執行日の前営業日の行を読む）。"
+            "signal_queue の日付 YYYY-MM-DD（省略時: 今日の前営業日。"
+            "執行エンジンは執行日の前営業日の行を読むため、当日の執行で拾われる）。"
             "注入後すぐに run_signal_queue_report で確認する場合は"
             " --date に同じ日付を指定すること"
             "（レポートのデフォルトは date.today()）。"
