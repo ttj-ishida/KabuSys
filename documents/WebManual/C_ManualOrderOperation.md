@@ -133,6 +133,12 @@ python -m kabusys.manual_trades add --date 2026-09-17 --code 72030 --side buy --
 python -m kabusys.manual_trades wizard
 ```
 
+同日・同銘柄・同売買で分割約定した場合は、約定ごとに 1 件ずつ登録する。2 件目以降の ID には `_2`、`_3` が付く（既存の約定は上書きされない）。
+
+- 数量・単価・手数料まで同一の約定は二重入力として拒否される。本当に同じ内容の約定が 2 件ある場合は `--allow-duplicate`（GUI は「同じ内容の約定をもう 1 件登録する」）を付ける。`--force` は非推奨で、`--allow-duplicate` と同じ意味になった。
+- 保有を超える売却は拒否される。手動記録開始前から持っていた株を売る場合は `--allow-oversell`（GUI は「保有を超える売却を許可する」）を付ける。
+- 登録内容を修正する場合は、`delete <trade_id>` で削除してから登録し直す。
+
 登録内容を確認する場合:
 
 ```powershell

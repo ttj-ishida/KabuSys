@@ -88,7 +88,8 @@ with tab_add:
 
         source_signal_id = st.text_input("Signal ID（任意）")
         note = st.text_input("メモ（任意）")
-        force = st.checkbox("同一IDがある場合は上書きする")
+        allow_duplicate = st.checkbox("同じ内容の約定をもう 1 件登録する")
+        allow_oversell = st.checkbox("保有を超える売却を許可する")
         submitted = st.form_submit_button("登録")
 
     if submitted:
@@ -106,7 +107,14 @@ with tab_add:
                 note=note.strip() or None,
             )
             try:
-                ok, trade_id = _run_write(lambda c: add_manual_trade(c, payload, force=force))
+                ok, trade_id = _run_write(
+                    lambda c: add_manual_trade(
+                        c,
+                        payload,
+                        allow_duplicate=allow_duplicate,
+                        allow_oversell=allow_oversell,
+                    )
+                )
             except (DuplicateManualTradeError, ValueError) as exc:
                 st.error(str(exc))
             else:
