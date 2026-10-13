@@ -187,6 +187,100 @@ def test_portfolio_construction_no_signals_exits_0(tmp_path: Path):
         run_portfolio_construction.main()  # SystemExit が起きないこと
 
 
+# ---------- Issue #413: signal_queue_status の夜間同期 ----------
+
+
+def test_sync_signal_queue_status_updates_duckdb(tmp_path: Path):
+    """SQLite signal_queue_status の非 pending 行を DuckDB signal_queue に反映する。"""
+    import sqlite3
+    from datetime import date
+
+    import duckdb
+    import run_portfolio_construction
+
+    from kabusys.execution import signal_queue_status as sqs
+
+    sqlite_path = tmp_path / "paper.db"
+    sconn = sqlite3.connect(str(sqlite_path))
+    sqs.ensure_schema(sconn)
+    for qid, status in (("q-filled", "filled"), ("q-pending", "pending")):
+        sqs.record(
+            sconn,
+            queue_signal_id=qid,
+            signal_date=date(2026, 3, 27),
+            code="1234",
+            side="buy",
+            status=status,
+        )
+    sconn.close()
+
+    dconn = duckdb.connect(":memory:")
+    dconn.execute(
+        "CREATE TABLE signal_queue (signal_id VARCHAR, status VARCHAR, processed_at TIMESTAMP)"
+    )
+    dconn.execute("INSERT INTO signal_queue VALUES ('q-filled', 'pending', NULL)")
+    dconn.execute("INSERT INTO signal_queue VALUES ('q-pending', 'pending', NULL)")
+
+    settings = MagicMock()
+    settings.is_paper = True
+    settings.paper_sqlite_path = sqlite_path
+
+    n = run_portfolio_construction._sync_signal_queue_status(dconn, settings)
+
+    assert n == 1
+    rows = dict(dconn.execute("SELECT signal_id, status FROM signal_queue").fetchall())
+    assert rows == {"q-filled": "filled", "q-pending": "pending"}
+
+
+def test_sync_signal_queue_status_missing_sqlite_is_noop(tmp_path: Path):
+    import run_portfolio_construction
+
+    mock_conn = MagicMock()
+    settings = MagicMock()
+    settings.is_paper = False
+    settings.sqlite_path = tmp_path / "missing.db"
+
+    assert run_portfolio_construction._sync_signal_queue_status(mock_conn, settings) == 0
+    mock_conn.execute.assert_not_called()
+    assert not (tmp_path / "missing.db").exists()
+
+
+def test_sync_signal_queue_status_failure_only_warns(tmp_path: Path):
+    import sqlite3
+
+    import run_portfolio_construction
+
+    sqlite_path = tmp_path / "prod.db"
+    sqlite3.connect(str(sqlite_path)).close()
+    settings = MagicMock()
+    settings.is_paper = False
+    settings.sqlite_path = sqlite_path
+
+    with patch("run_portfolio_construction.sync_to_duckdb", side_effect=RuntimeError("boom")):
+        assert run_portfolio_construction._sync_signal_queue_status(MagicMock(), settings) == 0
+
+
+def test_portfolio_construction_calls_status_sync_first(tmp_path: Path):
+    import run_portfolio_construction
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchall.return_value = []
+    mock_cursor.description = [("code",), ("side",), ("score",), ("signal_rank",)]
+    mock_conn.execute.return_value = mock_cursor
+
+    with (
+        patch("run_portfolio_construction.Settings") as mock_settings,
+        patch("run_portfolio_construction.duckdb.connect", return_value=mock_conn),
+        patch("run_portfolio_construction._sync_signal_queue_status") as mock_sync,
+    ):
+        _mock_paper_settings(mock_settings, tmp_path)
+        run_portfolio_construction.main()
+
+    mock_sync.assert_called_once()
+    assert mock_sync.call_args.args[0] is mock_conn
+
+
 # ---------- _calc_paper_portfolio_value ----------
 
 

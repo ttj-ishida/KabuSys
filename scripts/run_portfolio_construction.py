@@ -31,6 +31,7 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from kabusys.config import Settings
+from kabusys.execution.signal_queue_status import sync_to_duckdb
 from kabusys.operations.job_run_recorder import write_job_result
 from kabusys.operations.line_reports import (
     format_evening_message,
@@ -64,6 +65,32 @@ logger = logging.getLogger(__name__)
 _MAX_UTILIZATION = 0.70  # Live/その他環境でのフォールバック時に適用。Paper では適用しない
 _JOB_NAME = "portfolio_construction_job"
 _APP_NAME = "portfolio_construction"
+
+
+def _sync_signal_queue_status(conn: duckdb.DuckDBPyConnection, settings: Settings) -> int:
+    """Execution Engine が SQLite に記録した signal_queue の状態を DuckDB に反映する（Issue #413）。
+
+    夜間バッチは DuckDB を排他利用する時間帯に動くため、ここで反映する。
+    pending の行には触れない。失敗しても警告ログだけ出して処理を続ける。
+    Execution Engine と同じく paper_trading では paper 用 SQLite を参照する。
+    """
+    try:
+        sqlite_path = Path(
+            settings.paper_sqlite_path if settings.is_paper else settings.sqlite_path
+        )
+        if not sqlite_path.exists():
+            logger.info("signal_queue_status 同期: SQLite が未作成のためスキップ (%s)", sqlite_path)
+            return 0
+        sqlite_uri = sqlite_path.resolve().as_uri() + "?mode=ro"
+        with contextlib.closing(sqlite3.connect(sqlite_uri, uri=True)) as sqlite_conn:
+            updated = sync_to_duckdb(conn, sqlite_conn)
+        logger.info("signal_queue_status を DuckDB signal_queue に同期: %d 件", updated)
+        return updated
+    except Exception:
+        logger.warning(
+            "signal_queue_status の DuckDB 同期に失敗しました（処理は続行します）", exc_info=True
+        )
+        return 0
 
 
 def _calc_live_portfolio_value(
@@ -340,6 +367,7 @@ def main() -> None:
     try:
         settings = Settings()
         conn = duckdb.connect(str(settings.duckdb_path))
+        _sync_signal_queue_status(conn, settings)
 
         manual_qty: dict[str, int] = {}
         if settings.manual_trading_enabled:

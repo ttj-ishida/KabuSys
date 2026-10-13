@@ -1,8 +1,9 @@
 # tests/test_run_execution.py
-from datetime import time
+from datetime import date, time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import duckdb
 import pytest
 import yaml as yaml_mod
 
@@ -347,3 +348,63 @@ class TestLoadRiskConfig:
         )
         with pytest.raises(ValueError, match="circuit_breaker_errors"):
             re_mod._load_risk_config(p, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Issue #413: DuckDB read_only + signal_date
+# ---------------------------------------------------------------------------
+
+
+def _run_main_capture(signal_date):
+    """main() を実行し (duckdb.connect モック, ExecutionEngine クラスモック, count モック) を返す。"""
+    mock_broker = MagicMock()
+    mock_broker.get_available_cash.return_value = 10_000_000.0
+    mock_broker.get_positions.return_value = []
+    with (
+        patch("kabusys.run_execution.set_process_priority"),
+        patch("kabusys.run_execution.Settings") as mock_settings_cls,
+        patch("kabusys.run_execution.sqlite3.connect"),
+        patch("kabusys.run_execution.init_monitoring_db"),
+        patch("kabusys.run_execution.duckdb.connect") as mock_duck,
+        patch("kabusys.run_execution.BrokerClientFactory.create", return_value=mock_broker),
+        patch("kabusys.run_execution.OrderRepository"),
+        patch("kabusys.run_execution.OrderManager"),
+        patch("kabusys.run_execution.RiskManager"),
+        patch("kabusys.run_execution.Reconciler", _make_reconciler_mock()),
+        patch("kabusys.run_execution.ExecutionEngine") as mock_engine_cls,
+        patch("kabusys.run_execution._load_risk_config", return_value=MagicMock()),
+        patch("kabusys.run_execution.prev_trading_day", return_value=signal_date),
+        patch("kabusys.run_execution._count_pending_signals", return_value=0) as mock_count,
+    ):
+        settings = MagicMock()
+        settings.is_paper = False
+        settings.sqlite_path = Path("/prod.db")
+        settings.duckdb_path = Path("/data.duckdb")
+        mock_settings_cls.return_value = settings
+        main()
+    return mock_duck, mock_engine_cls, mock_count
+
+
+class TestRunExecutionSignalQueue:
+    def test_duckdb_opened_read_only(self):
+        mock_duck, _, _ = _run_main_capture(date(2026, 3, 27))
+        assert mock_duck.call_count == 1
+        assert mock_duck.call_args.kwargs.get("read_only") is True
+
+    def test_engine_config_uses_prev_trading_day_as_signal_date(self):
+        _, mock_engine_cls, mock_count = _run_main_capture(date(2026, 3, 27))
+        config = mock_engine_cls.call_args.kwargs["config"]
+        assert config.target_date == date.today()
+        assert config.signal_date == date(2026, 3, 27)
+        assert mock_count.call_args.args[1] == date(2026, 3, 27)
+
+    def test_count_pending_signals_counts_signal_date_only(self):
+        conn = duckdb.connect(":memory:")
+        conn.execute("CREATE TABLE signal_queue (signal_id VARCHAR, date DATE, status VARCHAR)")
+        conn.execute(
+            "INSERT INTO signal_queue VALUES"
+            " ('a', '2026-03-27', 'pending'), ('b', '2026-03-27', 'pending'),"
+            " ('c', '2026-03-27', 'filled'), ('d', '2026-03-30', 'pending')"
+        )
+        assert re_mod._count_pending_signals(conn, date(2026, 3, 27)) == 2
+        conn.close()

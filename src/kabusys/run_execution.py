@@ -18,6 +18,8 @@ import duckdb
 import yaml
 
 from kabusys.config import Settings
+from kabusys.data.calendar_management import prev_trading_day
+from kabusys.execution import signal_queue_status
 from kabusys.execution.broker_api import Position
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -58,10 +60,11 @@ def _env_time(name: str, default: time) -> time:
         raise ValueError(f"{name} must be HH:MM or HH:MM:SS, got {raw!r}") from exc
 
 
-def _count_pending_signals(conn: duckdb.DuckDBPyConnection, target_date: date) -> int:
+def _count_pending_signals(conn: duckdb.DuckDBPyConnection, signal_date: date) -> int:
+    """signal_date（前営業日の夜間バッチ日）の pending 件数を返す。"""
     row = conn.execute(
         "SELECT COUNT(*) FROM signal_queue WHERE date = ? AND status = 'pending'",
-        [target_date],
+        [signal_date],
     ).fetchone()
     return int(row[0]) if row else 0
 
@@ -268,7 +271,10 @@ def main() -> None:
     sqlite_conn = sqlite3.connect(str(sqlite_path), timeout=30.0, check_same_thread=False)
     init_monitoring_db(sqlite_conn)  # 監視テーブルが存在することを保証（冪等）
     init_position_entries_db(sqlite_conn)  # position_entries テーブルが存在することを保証（冪等）
-    duckdb_conn = duckdb.connect(str(settings.duckdb_path))
+    # signal_queue の処理状態は SQLite に記録する（Issue #413）
+    signal_queue_status.ensure_schema(sqlite_conn)
+    # DuckDB は read_only で開く（エンジンは DuckDB に書かない。他プロセスの読み取りと共存）
+    duckdb_conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
 
     try:
         # 3. ブローカークライアント（paper mode は前回状態を復元）
@@ -309,6 +315,9 @@ def main() -> None:
 
         # 起動時リコンシリエーション + Execution Startup Summary 生成
         today = date.today()
+        # 読み込む signal_queue の日付 = 前営業日（夜間バッチ日）
+        signal_date = prev_trading_day(duckdb_conn, today)
+        logger.info("執行日=%s, signal_date=%s", today, signal_date)
         reconcile_result = reconciler.run()
         _report = None
         try:
@@ -324,7 +333,7 @@ def main() -> None:
         # 朝の LINE 通知（失敗しても起動を継続する）
         try:
             notifier = build_notifier(settings)
-            pending_count = _count_pending_signals(duckdb_conn, today)
+            pending_count = _count_pending_signals(duckdb_conn, signal_date)
             status = _report.status if _report is not None else "UNKNOWN"
             orders_no_status = _report.orders_no_status if _report is not None else 0
             msg = format_morning_message(
@@ -348,6 +357,7 @@ def main() -> None:
             sqlite_conn=sqlite_conn,
             config=EngineConfig(
                 target_date=today,
+                signal_date=signal_date,
                 signal_send_start=_env_time("KABUSYS_SIGNAL_SEND_START", time(8, 50)),
                 signal_send_end=_env_time("KABUSYS_SIGNAL_SEND_END", time(9, 10)),
                 market_close=_env_time("KABUSYS_MARKET_CLOSE", time(15, 30)),

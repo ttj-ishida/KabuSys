@@ -301,6 +301,10 @@ CREATE TABLE IF NOT EXISTS orders (
                               CHECK (status IN ('created','sent','filled','cancelled','rejected')),
     -- Note: ON DELETE SET NULL は DuckDB 1.5.0 非サポートのため省略。
     --       signal_queue 削除時はアプリ側で orders.signal_id を NULL に更新してから削除すること。
+    -- Note: Execution Engine の注文は SQLite（orders テーブル）に保存しており、この DuckDB orders は
+    --       Execution Engine では使っていない。SQLite orders.signal_id には queue 行 ID ではなく
+    --       業務キー {signal_date}_{code}_{side} が入る。signal_queue の処理状態は SQLite の
+    --       signal_queue_status に記録し、夜間 portfolio_construction で signal_queue に同期する（#413）。
     FOREIGN KEY (signal_id) REFERENCES signal_queue(signal_id)
 )
 """
