@@ -31,7 +31,11 @@ from kabusys.portfolio.portfolio_builder import (
 )
 from kabusys.portfolio.position_sizing import calc_position_sizes
 
-TARGET_DATE = date(2026, 4, 18)
+# Issue #413: エンジンは執行日（EXEC_DATE）の前営業日（TARGET_DATE＝シグナル日）の queue 行を読む。
+# 従来は土曜の TARGET_DATE をそのまま target_date に渡していたが、新しい日付の考え方に合わせ
+# シグナル日=金曜・執行日=翌営業日の月曜とした。
+TARGET_DATE = date(2026, 4, 17)  # シグナル日（金曜）
+EXEC_DATE = date(2026, 4, 20)  # 執行日（月曜）
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +146,7 @@ def _build_engine(
         risk_manager=rm,
         order_manager=om,
         duckdb_conn=duck_conn,
-        config=EngineConfig(target_date=TARGET_DATE),
+        config=EngineConfig(target_date=EXEC_DATE),
         monitoring_db=mdb,
     )
 
