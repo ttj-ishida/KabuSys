@@ -44,11 +44,18 @@ class TestResolveTargetDate:
         d = date(2026, 5, 7)  # 木曜
         assert resolve_target_date(conn, d) == d
 
-    def test_none_returns_next_weekday(self, conn):
-        today = date(2026, 5, 1)  # 金曜
-        result = resolve_target_date(conn, None, today=today)
-        assert result > today
-        assert result.weekday() < 5  # 週末でない
+    def test_none_returns_signal_date_read_by_next_execution(self, conn):
+        """Issue #413: 次回の執行（翌営業日）が読む signal_date（=その前営業日）を返す。
+
+        従来は翌営業日を返していたが、エンジンは執行日の前営業日の行を読むように
+        変わったため、営業日の当日注入なら当日の日付になる。
+        """
+        today = date(2026, 5, 1)  # 金曜（営業日）→ 月曜執行が読むのは金曜の行
+        assert resolve_target_date(conn, None, today=today) == today
+
+    def test_none_on_weekend_returns_previous_friday(self, conn):
+        today = date(2026, 5, 2)  # 土曜 → 次の執行は月曜(5/4) → 読むのは金曜(5/1)
+        assert resolve_target_date(conn, None, today=today) == date(2026, 5, 1)
 
 
 class TestInjectSignal:

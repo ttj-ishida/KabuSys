@@ -15,6 +15,8 @@ from datetime import date, datetime
 from io import StringIO
 from pathlib import Path
 
+from kabusys.data.calendar_management import prev_trading_day
+
 logger = logging.getLogger(__name__)
 
 _FRESHNESS_DAYS = 3  # today との差が 3 日以内なら OK（週末・祝日のギャップを考慮）
@@ -65,11 +67,15 @@ def check_data_freshness(conn: object, today: date) -> bool:
     return (today - last_date).days <= _FRESHNESS_DAYS
 
 
-def check_signal_queue(conn: object, today: date) -> int:
-    """本日の pending シグナル件数を返す。"""
+def check_signal_queue(conn: object, signal_date: date) -> int:
+    """本日執行する pending シグナル件数を返す。
+
+    signal_queue は夜間バッチ日（前営業日）の日付で書かれるため、
+    signal_date（= prev_trading_day(today)）で数える（Issue #413）。
+    """
     row = conn.execute(
         "SELECT COUNT(*) FROM signal_queue WHERE status = 'pending' AND date = ?",
-        (today.isoformat(),),
+        (signal_date.isoformat(),),
     ).fetchone()
     return int(row[0]) if row and row[0] is not None else 0
 
@@ -143,9 +149,11 @@ def collect(
 ) -> PreMarketData:
     """全チェック項目を収集して PreMarketData を返す。"""
     today = today or date.today()
+    data_freshness_ok = check_data_freshness(duckdb_conn, today)
+    signal_date = prev_trading_day(duckdb_conn, today)  # type: ignore[arg-type]
     return PreMarketData(
-        data_freshness_ok=check_data_freshness(duckdb_conn, today),
-        signal_queue_pending=check_signal_queue(duckdb_conn, today),
+        data_freshness_ok=data_freshness_ok,
+        signal_queue_pending=check_signal_queue(duckdb_conn, signal_date),
         position_count=check_position_count(duckdb_conn),
         stop_flag_exists=check_stop_flag(stop_flag_path),
         task_scheduler_ready=check_task_scheduler(),

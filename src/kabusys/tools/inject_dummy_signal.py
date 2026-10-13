@@ -37,18 +37,20 @@ def resolve_target_date(
     explicit_date: Optional[date],
     today: Optional[date] = None,
 ) -> date:
-    """対象日を解決する。
+    """対象日（signal_queue.date）を解決する。
 
     explicit_date が指定されればその値をそのまま返す。
-    None の場合は today（省略時は date.today()）の翌営業日を返す。
+    None の場合は、次回の Execution Engine 実行（today の翌営業日）が読む
+    signal_date（= その前営業日）を返す。エンジンは執行日の前営業日の行を読むため
+    （Issue #413）、営業日に注入すれば today、休日なら直前の営業日になる。
     """
     if explicit_date is not None:
         return explicit_date
 
-    from kabusys.data.calendar_management import next_trading_day
+    from kabusys.data.calendar_management import next_trading_day, prev_trading_day
 
     base = today if today is not None else date.today()
-    return next_trading_day(conn, base)
+    return prev_trading_day(conn, next_trading_day(conn, base))
 
 
 def inject_signal(
@@ -145,7 +147,8 @@ def main() -> None:
         "--date",
         default=None,
         help=(
-            "対象日 YYYY-MM-DD（省略時: 翌営業日）。"
+            "signal_queue の日付 YYYY-MM-DD（省略時: 次回執行が読む日付＝"
+            "翌営業日の前営業日。執行エンジンは執行日の前営業日の行を読む）。"
             "注入後すぐに run_signal_queue_report で確認する場合は"
             " --date に同じ日付を指定すること"
             "（レポートのデフォルトは date.today()）。"
