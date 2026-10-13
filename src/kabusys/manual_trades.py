@@ -12,6 +12,8 @@ import argparse
 from datetime import date
 from typing import Sequence
 
+import duckdb
+
 from kabusys.config import settings
 from kabusys.data.schema import init_schema
 from kabusys.operations.manual_trades import (
@@ -78,6 +80,16 @@ def _make_payload(args: argparse.Namespace) -> ManualTradeInput:
     )
 
 
+def _add_from_args(conn: duckdb.DuckDBPyConnection, payload: ManualTradeInput, args) -> str:
+    # --force は非推奨。--allow-duplicate と同義で、既存の約定は上書きしない。
+    return add_manual_trade(
+        conn,
+        payload,
+        allow_duplicate=args.allow_duplicate or args.force,
+        allow_oversell=args.allow_oversell,
+    )
+
+
 def _cmd_add(args: argparse.Namespace) -> int:
     payload = _make_payload(args)
     _print_trade_preview(payload)
@@ -87,15 +99,14 @@ def _cmd_add(args: argparse.Namespace) -> int:
 
     conn = init_schema(settings.duckdb_path)
     try:
-        trade_id = add_manual_trade(conn, payload, force=args.force)
-    except DuplicateManualTradeError as exc:
+        trade_id = _add_from_args(conn, payload, args)
+    except (DuplicateManualTradeError, ValueError) as exc:
         print(f"ERROR: {exc}")
         return 1
     finally:
         conn.close()
 
-    action = "上書き" if args.force else "登録"
-    print(f"✓ 手動約定を{action}しました: {trade_id}")
+    print(f"✓ 手動約定を登録しました: {trade_id}")
     return 0
 
 
@@ -225,8 +236,8 @@ def _cmd_wizard(args: argparse.Namespace) -> int:
 
     conn = init_schema(settings.duckdb_path)
     try:
-        trade_id = add_manual_trade(conn, payload, force=args.force)
-    except DuplicateManualTradeError as exc:
+        trade_id = _add_from_args(conn, payload, args)
+    except (DuplicateManualTradeError, ValueError) as exc:
         print(f"ERROR: {exc}")
         return 1
     finally:
@@ -234,6 +245,20 @@ def _cmd_wizard(args: argparse.Namespace) -> int:
 
     print(f"✓ 手動約定を登録しました: {trade_id}")
     return 0
+
+
+def _add_registration_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--allow-duplicate", action="store_true", help="同一内容の約定をもう 1 件登録する"
+    )
+    parser.add_argument(
+        "--allow-oversell", action="store_true", help="保有を超える売却の登録を許可する"
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="[非推奨] --allow-duplicate と同じ（既存の約定は上書きしない）",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -250,7 +275,7 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--source-signal-id", default=None, help="対応する Signal Queue ID")
     add.add_argument("--note", default=None, help="メモ")
     add.add_argument("--apply", action="store_true", help="確認だけでなくDBへ保存する")
-    add.add_argument("--force", action="store_true", help="同一IDがある場合に上書きする")
+    _add_registration_flags(add)
     add.set_defaults(func=_cmd_add)
 
     listing = sub.add_parser("list", help="登録済み手動約定を表示する")
@@ -267,7 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     wizard = sub.add_parser("wizard", help="対話式で手動約定を入力する")
     wizard.add_argument("--apply", action="store_true", help="最後の確認を省略して保存する")
-    wizard.add_argument("--force", action="store_true", help="同一IDがある場合に上書きする")
+    _add_registration_flags(wizard)
     wizard.set_defaults(func=_cmd_wizard)
     return parser
 

@@ -8,6 +8,7 @@ import pytest
 from kabusys.operations.manual_trades import (
     DuplicateManualTradeError,
     ManualTradeInput,
+    OversellError,
     add_manual_trade,
     calculate_manual_positions,
     delete_manual_trade,
@@ -60,7 +61,7 @@ def test_add_manual_trade_normalizes_and_persists(conn):
     assert rows[0].note == "morning order"
 
 
-def test_add_manual_trade_rejects_duplicate_without_force(conn):
+def test_add_manual_trade_rejects_duplicate_by_default(conn):
     payload = ManualTradeInput(
         trade_date=date(2026, 9, 18),
         code="7203",
@@ -74,34 +75,119 @@ def test_add_manual_trade_rejects_duplicate_without_force(conn):
         add_manual_trade(conn, payload)
 
 
-def test_add_manual_trade_force_replaces_existing(conn):
-    payload = ManualTradeInput(
-        trade_date=date(2026, 9, 18),
-        code="7203",
-        side="buy",
-        qty=100,
-        price=2850,
-    )
-    add_manual_trade(conn, payload)
+def _p(side="buy", qty=100, price=2850, fees=0.0, d=date(2026, 9, 18)):
+    return ManualTradeInput(trade_date=d, code="7203", side=side, qty=qty, price=price, fees=fees)
 
-    add_manual_trade(
-        conn,
-        ManualTradeInput(
-            trade_date=date(2026, 9, 18),
-            code="7203",
-            side="buy",
-            qty=200,
-            price=2860,
-            fees=55,
-        ),
-        force=True,
-    )
 
-    rows = list_manual_trades(conn)
-    assert len(rows) == 1
-    assert rows[0].qty == 200
-    assert rows[0].price == 2860
-    assert rows[0].fees == 55
+def test_add_manual_trade_has_no_force_argument(conn):
+    with pytest.raises(TypeError):
+        add_manual_trade(conn, _p(), force=True)
+
+
+def test_add_manual_trade_split_fills_get_numbered_ids(conn):
+    id1 = add_manual_trade(conn, _p(qty=100, price=1000))
+    id2 = add_manual_trade(conn, _p(qty=200, price=1300))
+    id3 = add_manual_trade(conn, _p(qty=300, price=1100))
+
+    assert id1 == "MANUAL_2026-09-18_7203_buy"
+    assert id2 == "MANUAL_2026-09-18_7203_buy_2"
+    assert id3 == "MANUAL_2026-09-18_7203_buy_3"
+    pos = calculate_manual_positions(conn, as_of=date(2026, 9, 18))[0]
+    assert pos.qty == 600
+    assert pos.avg_price == pytest.approx((100 * 1000 + 200 * 1300 + 300 * 1100) / 600)
+
+
+def test_add_manual_trade_reuses_smallest_free_number(conn):
+    add_manual_trade(conn, _p(qty=100))
+    id2 = add_manual_trade(conn, _p(qty=200))
+    add_manual_trade(conn, _p(qty=300))
+    delete_manual_trade(conn, id2)
+
+    assert add_manual_trade(conn, _p(qty=400)) == "MANUAL_2026-09-18_7203_buy_2"
+
+
+def test_add_manual_trade_identical_content_raises_duplicate(conn):
+    add_manual_trade(conn, _p())
+    with pytest.raises(DuplicateManualTradeError):
+        add_manual_trade(conn, _p())
+    assert len(list_manual_trades(conn)) == 1
+
+
+def test_add_manual_trade_allow_duplicate_registers_second(conn):
+    add_manual_trade(conn, _p())
+    trade_id = add_manual_trade(conn, _p(), allow_duplicate=True)
+
+    assert trade_id == "MANUAL_2026-09-18_7203_buy_2"
+    assert len(list_manual_trades(conn)) == 2
+
+
+def test_sell_entered_before_buy_on_same_day_is_still_applied(conn):
+    d = date(2026, 9, 18)
+    add_manual_trade(conn, _p(d=date(2026, 9, 17), qty=200, price=1000))
+    add_manual_trade(conn, _p(side="sell", qty=100, price=1200, d=d))
+    add_manual_trade(conn, _p(side="buy", qty=100, price=1000, d=d))
+
+    pos = calculate_manual_positions(conn, as_of=d)[0]
+    assert pos.qty == 200
+
+
+def test_sell_same_day_as_buy_entered_first_in_sell_order(conn):
+    d = date(2026, 9, 18)
+    # SELL を先に入力しても、同日 BUY を含めた保有に対して処理される
+    add_manual_trade(conn, _p(side="buy", qty=100, price=1000, d=date(2026, 9, 1)))
+    add_manual_trade(conn, _p(side="sell", qty=150, price=1000, d=d), allow_oversell=True)
+    add_manual_trade(conn, _p(side="buy", qty=100, price=1000, d=d))
+
+    pos = calculate_manual_positions(conn, as_of=d)[0]
+    assert pos.qty == 50
+
+
+def test_oversell_raises_error(conn):
+    add_manual_trade(conn, _p(qty=100))
+    with pytest.raises(OversellError):
+        add_manual_trade(conn, _p(side="sell", qty=101))
+    assert issubclass(OversellError, ValueError)
+    assert len(list_manual_trades(conn)) == 1
+
+
+def test_oversell_counts_same_day_buy(conn):
+    add_manual_trade(conn, _p(side="sell", qty=100), allow_oversell=True)
+    delete_manual_trade(conn, "MANUAL_2026-09-18_7203_sell")
+    add_manual_trade(conn, _p(side="buy", qty=100))
+    add_manual_trade(conn, _p(side="sell", qty=100))
+
+
+def test_oversell_without_any_holding_raises(conn):
+    with pytest.raises(OversellError):
+        add_manual_trade(conn, _p(side="sell", qty=100))
+
+
+def test_oversell_ignores_later_trades(conn):
+    add_manual_trade(conn, _p(qty=100, d=date(2026, 9, 20)))
+    with pytest.raises(OversellError):
+        add_manual_trade(conn, _p(side="sell", qty=100, d=date(2026, 9, 18)))
+
+
+def test_allow_oversell_registers_and_warns_on_positions(conn, caplog):
+    add_manual_trade(conn, _p(qty=100))
+    add_manual_trade(conn, _p(side="sell", qty=150, price=1000), allow_oversell=True)
+
+    with caplog.at_level("WARNING"):
+        positions = calculate_manual_positions(conn, as_of=date(2026, 9, 18))
+
+    assert positions == []
+    assert any("7203" in r.getMessage() for r in caplog.records if r.levelname == "WARNING")
+
+
+def test_second_fill_is_reflected_in_portfolio_cash(conn):
+    from kabusys.operations.manual_trades import calc_manual_portfolio_value
+
+    add_manual_trade(conn, _p(qty=100, price=1000))
+    add_manual_trade(conn, _p(qty=200, price=1300))
+
+    _, cash = calc_manual_portfolio_value(conn, 1_000_000.0, as_of=date(2026, 9, 18))
+
+    assert cash == pytest.approx(1_000_000.0 - 100_000 - 260_000)
 
 
 def test_add_manual_trade_validates_values(conn):
@@ -578,3 +664,34 @@ def test_merge_current_positions_adds_manual_qty_for_candidates():
         {"7203": 100}, {"7203": 200, "6758": 100, "9984": 100}, ["7203", "6758"]
     )
     assert result == {"7203": 300, "6758": 100}
+
+
+def _cli_add(cli, *extra, side="BUY", qty="100", price="2850"):
+    return cli.main(
+        ["add", "--date", "2026-09-18", "--code", "7203", "--side", side, "--qty", qty]
+        + ["--price", price, "--apply", *extra]
+    )
+
+
+def test_cli_allow_duplicate_and_deprecated_force(tmp_path, monkeypatch, capsys):
+    from kabusys import manual_trades as cli
+
+    monkeypatch.setattr(cli, "settings", _Settings(tmp_path / "m.duckdb"))
+    assert _cli_add(cli) == 0
+    assert _cli_add(cli) == 1  # 同一内容は拒否
+    assert _cli_add(cli, "--allow-duplicate") == 0
+    assert _cli_add(cli, "--force") == 0  # 非推奨だが allow-duplicate と同義
+    assert cli.main(["list"]) == 0
+    out = capsys.readouterr().out
+    assert "MANUAL_2026-09-18_7203_buy_2" in out
+    assert "MANUAL_2026-09-18_7203_buy_3" in out
+    assert "MANUAL_2026-09-18_7203_buy |" in out  # 1 件目は消えない
+
+
+def test_cli_allow_oversell(tmp_path, monkeypatch, capsys):
+    from kabusys import manual_trades as cli
+
+    monkeypatch.setattr(cli, "settings", _Settings(tmp_path / "m.duckdb"))
+    assert _cli_add(cli, side="SELL") == 1
+    assert "ERROR" in capsys.readouterr().out
+    assert _cli_add(cli, "--allow-oversell", side="SELL") == 0

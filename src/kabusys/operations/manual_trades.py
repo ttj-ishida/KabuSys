@@ -20,7 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 class DuplicateManualTradeError(Exception):
-    """同一 manual trade ID が既に存在するときに送出される。"""
+    """同一内容（約定日・銘柄・売買・数量・単価・手数料）の約定が既に存在するときに送出される。"""
+
+
+class OversellError(ValueError):
+    """SELL 数量が約定日時点の手動保有を超えるときに送出される。"""
 
 
 @dataclass(frozen=True)
@@ -122,7 +126,19 @@ def _fetch_manual_trade_rows(
 
 
 def build_manual_trade_id(trade_date: date, code: str, side: str) -> str:
+    """同日・同銘柄・同売買の 1 件目の trade_id を返す（2 件目以降は _allocate_manual_trade_id）。"""
     return f"MANUAL_{trade_date.isoformat()}_{code}_{side.lower()}"
+
+
+def _allocate_manual_trade_id(used_ids: set[str], trade_date: date, code: str, side: str) -> str:
+    """未使用の最小の trade_id を返す。1 件目は無印、2 件目以降は _2, _3, ... を付ける。"""
+    base = build_manual_trade_id(trade_date, code, side)
+    if base not in used_ids:
+        return base
+    n = 2
+    while f"{base}_{n}" in used_ids:
+        n += 1
+    return f"{base}_{n}"
 
 
 def _normalize_input(payload: ManualTradeInput) -> ManualTradeInput:
@@ -154,24 +170,56 @@ def add_manual_trade(
     conn: duckdb.DuckDBPyConnection,
     payload: ManualTradeInput,
     *,
-    force: bool = False,
+    allow_duplicate: bool = False,
+    allow_oversell: bool = False,
 ) -> str:
+    """手動約定を 1 件登録し、割り当てた trade_id を返す。
+
+    同日・同銘柄・同売買の約定は複数登録できる（2 件目以降は _2, _3 ... の ID）。
+    既存の約定は上書き・削除しない。修正したい場合は delete してから登録し直す。
+
+    Raises:
+        DuplicateManualTradeError: 同一内容の約定が既にあり allow_duplicate=False のとき。
+        OversellError: SELL 数量が約定日時点の保有を超え allow_oversell=False のとき。
+    """
     ensure_manual_trade_schema(conn)
     normalized = _normalize_input(payload)
-    trade_id = build_manual_trade_id(normalized.trade_date, normalized.code, normalized.side)
 
     conn.execute("BEGIN")
     try:
-        existing = conn.execute(
-            "SELECT 1 FROM manual_trades WHERE trade_id = ?", [trade_id]
-        ).fetchone()
-        if existing is not None:
-            if not force:
-                raise DuplicateManualTradeError(
-                    f"trade_id={trade_id!r} は既に存在します。上書きするには --force を指定してください。"
-                )
-            conn.execute("DELETE FROM manual_trades WHERE trade_id = ?", [trade_id])
+        same_group = conn.execute(
+            """
+            SELECT trade_id, qty, price, fees FROM manual_trades
+            WHERE trade_date = ? AND code = ? AND side = ?
+            """,
+            [normalized.trade_date, normalized.code, normalized.side],
+        ).fetchall()
+        if not allow_duplicate:
+            for existing_id, qty, price, fees in same_group:
+                if (
+                    int(qty) == normalized.qty
+                    and float(price) == float(normalized.price)
+                    and float(fees) == float(normalized.fees)
+                ):
+                    raise DuplicateManualTradeError(
+                        f"同一内容の約定が既に存在します（trade_id={existing_id!r}）。"
+                        "もう 1 件登録するには --allow-duplicate を指定してください。"
+                    )
 
+        if normalized.side == "sell" and not allow_oversell:
+            held = _held_qty_as_of(conn, normalized.code, normalized.trade_date)
+            if normalized.qty > held:
+                raise OversellError(
+                    f"売却数量 {normalized.qty} が {normalized.trade_date} 時点の保有 {held} を"
+                    "超えています。保有を超える売却を登録するには --allow-oversell を指定してください。"
+                )
+
+        trade_id = _allocate_manual_trade_id(
+            {row[0] for row in same_group},
+            normalized.trade_date,
+            normalized.code,
+            normalized.side,
+        )
         conn.execute(
             """
             INSERT INTO manual_trades (
@@ -254,38 +302,17 @@ def delete_manual_trade(conn: duckdb.DuckDBPyConnection, trade_id: str) -> int:
     return 1
 
 
-def calculate_manual_positions(
-    conn: duckdb.DuckDBPyConnection,
-    *,
-    as_of: date | None = None,
-) -> list[ManualPosition]:
-    """manual_trades から現在の手動保有ポジションを計算する。
+# 同日内は BUY を先・SELL を後に処理する（入力順に依らず同日の SELL が無視されないように）
+_TRADE_ORDER_BY = (
+    "ORDER BY trade_date, CASE WHEN side = 'buy' THEN 0 ELSE 1 END, created_at, trade_id"
+)
 
-    BUY 手数料は取得原価に含め、SELL 手数料は実現損益から控除する。
-    部分売却時は平均単価法で原価を取り崩す。
+
+def _fold_manual_trades(rows: list[tuple[Any, ...]]) -> dict[str, dict[str, Any]]:
+    """約定行 (trade_date, code, side, qty, price, fees) を順に畳み込み、銘柄別の状態を返す。
+
+    保有を超える SELL は保有数量に切り詰め、logger.warning を出す。
     """
-    ensure_manual_trade_schema(conn)
-    if as_of is None:
-        rows = _fetch_manual_trade_rows(
-            conn,
-            """
-            SELECT trade_date, code, side, qty, price, fees
-            FROM manual_trades
-            ORDER BY trade_date, created_at, trade_id
-            """,
-        )
-    else:
-        rows = _fetch_manual_trade_rows(
-            conn,
-            """
-            SELECT trade_date, code, side, qty, price, fees
-            FROM manual_trades
-            WHERE trade_date <= ?
-            ORDER BY trade_date, created_at, trade_id
-            """,
-            [as_of],
-        )
-
     state: dict[str, dict[str, Any]] = {}
     for trade_date, code, side, qty, price, fees in rows:
         qty = int(qty)
@@ -312,6 +339,14 @@ def calculate_manual_positions(
             pos["cost"] = current_cost + (qty * price) + fees
         elif side == "sell":
             sell_qty = min(qty, current_qty)
+            if sell_qty < qty:
+                logger.warning(
+                    "手動約定 %s %s の売却数量 %d が保有 %d を超えるため保有数量に切り詰めます",
+                    code,
+                    trade_date,
+                    qty,
+                    current_qty,
+                )
             avg_cost = current_cost / current_qty if current_qty > 0 else 0.0
             released_cost = avg_cost * sell_qty
             pos["qty"] = current_qty - sell_qty
@@ -320,6 +355,58 @@ def calculate_manual_positions(
                 float(pos["realized_pnl"]) + (sell_qty * price) - released_cost - fees
             )
         pos["last_trade_date"] = trade_date
+    return state
+
+
+def _held_qty_as_of(conn: duckdb.DuckDBPyConnection, code: str, as_of: date) -> int:
+    """code の as_of 以前の約定を calculate_manual_positions と同じ順序・切り詰めで畳んだ保有数量。"""
+    rows = _fetch_manual_trade_rows(
+        conn,
+        f"""
+        SELECT trade_date, code, side, qty, price, fees
+        FROM manual_trades
+        WHERE code = ? AND trade_date <= ?
+        {_TRADE_ORDER_BY}
+        """,
+        [code, as_of],
+    )
+    return int(_fold_manual_trades(rows).get(code, {}).get("qty", 0))
+
+
+def calculate_manual_positions(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    as_of: date | None = None,
+) -> list[ManualPosition]:
+    """manual_trades から現在の手動保有ポジションを計算する。
+
+    BUY 手数料は取得原価に含め、SELL 手数料は実現損益から控除する。
+    部分売却時は平均単価法で原価を取り崩す。同日内は BUY → SELL の順に処理する。
+    保有を超える SELL は保有数量に切り詰め、warning を出す。
+    """
+    ensure_manual_trade_schema(conn)
+    if as_of is None:
+        rows = _fetch_manual_trade_rows(
+            conn,
+            f"""
+            SELECT trade_date, code, side, qty, price, fees
+            FROM manual_trades
+            {_TRADE_ORDER_BY}
+            """,
+        )
+    else:
+        rows = _fetch_manual_trade_rows(
+            conn,
+            f"""
+            SELECT trade_date, code, side, qty, price, fees
+            FROM manual_trades
+            WHERE trade_date <= ?
+            {_TRADE_ORDER_BY}
+            """,
+            [as_of],
+        )
+
+    state = _fold_manual_trades(rows)
 
     positions: list[ManualPosition] = []
     for code, pos in state.items():
@@ -439,6 +526,8 @@ def calc_manual_portfolio_value(
     """手動運用の (総資産, 利用可能現金) を返す。
 
     現金 = 元手 − Σ(BUY 約定額 + 手数料) + Σ(SELL 約定額 − 手数料)
+    現金は実際に受け取った売却代金を全額計上するため、保有を超える SELL があると
+    保有数量の切り詰め（calculate_manual_positions）と食い違う場合がある。
     総資産 = 現金 + Σ(手動保有数量 × as_of 以前の最新終値)。終値なしは時価 0 として warning。
     """
     ensure_manual_trade_schema(conn)
