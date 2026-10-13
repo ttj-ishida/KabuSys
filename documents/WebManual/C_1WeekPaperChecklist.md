@@ -200,6 +200,7 @@ python -m kabusys.run_performance_report --type weekly --env paper_trading --sav
 ## C-10. 関連
 
 - [C_PaperTrading.md](./C_PaperTrading.md)
+- [W1_08 Paper Trading 4週間検証 Runbook](../08_Operations/W1_08_PaperTradingValidationRunbook.md)
 - [D_LiveOperation.md](./D_LiveOperation.md)
 - [documents/08_Operations/TradingRunbook.md](../08_Operations/TradingRunbook.md)
 - [documents/08_Operations/Monitoring.md](../08_Operations/Monitoring.md)
