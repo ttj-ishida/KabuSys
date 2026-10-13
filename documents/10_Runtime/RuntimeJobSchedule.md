@@ -97,7 +97,13 @@ KabuSys は、夜間バッチで翌営業日のシグナルと注文候補を作
 
 主なテーブル:
 
-- `signal_queue`
+- `signal_queue`（`date` = 当日＝夜間バッチ日。翌営業日の執行で読まれる）
+
+補足（Issue #413）:
+
+- 起動直後に、Execution Engine が SQLite の `signal_queue_status` に記録した処理状態
+  （`processing` / `filled` / `cancelled` / `failed`）を DuckDB の `signal_queue.status` と
+  `processed_at` に同期する。`pending` の行には触れない。同期に失敗しても警告ログのみで続行する。
 
 ### 2.6 night_batch_report（21:15）
 
@@ -221,6 +227,11 @@ python scripts\start_system.py --component execution
 - Paper Trading や自動発注検証時のみ使用する
 - `python -m kabusys.run_execution` 実行時に Execution Startup Summary が自動保存される
 - 保存先: `artifacts/execution_startup/{date}/report.md`
+- 執行日（今日）の**前営業日**（`signal_date`）の `signal_queue` 行を読む（夜間バッチの行）。
+  発注の業務キーは `{signal_date}_{code}_{side}`、`position_entries` の約定日は執行日
+- Execution は DuckDB を **read_only** で開く（DuckDB には書かない。ダッシュボード等の読み取りと共存）
+- 各 queue 行の処理状態は SQLite の `signal_queue_status` に記録し、夜間の
+  portfolio_construction で DuckDB `signal_queue` に同期する。再起動時は `pending` 以外の行を再読込しない
 
 ### 5.4 Optional Monitoring Start（検証用）
 
@@ -244,6 +255,9 @@ python -m kabusys.run_performance_report --type daily --save
 - `OK`
 - `BLOCKED`
 
+シグナル件数（pending / filled）は SQLite の `signal_queue_status` から、当日執行分
+（前営業日の `signal_date`）を数える。テーブルがない（Execution 未起動）場合は 0。
+
 出力先:
 
 - `artifacts/market_close/{date}/report.md`
@@ -261,7 +275,7 @@ python -m kabusys.run_performance_report --type daily --save
 
 **メリット:**
 
-- `run_execution` が DuckDB 接続を保持したまま市場終了後も生存し続ける問題（DB ロック競合）を自動解消する。夜間バッチ実行前に execution を自動停止し、完了後に再起動する。
+- `run_execution` が DuckDB 接続（read_only）を保持したまま市場終了後も生存し続ける問題（夜間バッチの書き込みロック競合）を自動解消する。夜間バッチ実行前に execution を自動停止し、完了後に再起動する。
 - `market_calendar` テーブルを参照して**土日・祝日・年末年始をスキップ**する（DB 未初期化時は土日フォールバック）。
 - Task Scheduler へは **「ログオン時に起動」の 1 エントリのみ**登録する。
 
