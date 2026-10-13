@@ -44,7 +44,24 @@ logger = logging.getLogger(__name__)
 _MIN_PRICE: float = 300.0  # ユニバース最低株価（円）
 _MIN_TURNOVER: float = 5e8  # ユニバース最低平均売買代金（円）
 _ZSCORE_CLIP: float = 3.0  # Z スコアクリップ範囲
-_ALLOWED_MARKETS: frozenset[str] = frozenset({"Prime", "Standard", "Growth"})  # ETF/REIT 等を除外
+# 上場株式の市場区分（これ以外＝その他(ETF/REIT 等)・TOKYO PRO MARKET を除外）。
+# J-Quants API 経由（jquants_client）は英語表記、bootstrap ローダー経由は日本語表記で入るため両方を許可する。
+# 旧市場区分（2022/4 再編前）は上場廃止銘柄に残る。除外するとバックテストに生存者バイアスが入るため許可する。
+_ALLOWED_MARKETS: frozenset[str] = frozenset(
+    {
+        "Prime",
+        "Standard",
+        "Growth",
+        "プライム",
+        "スタンダード",
+        "グロース",
+        "東証一部",
+        "東証二部",
+        "マザーズ",
+        "JASDAQ スタンダード",
+        "JASDAQ グロース",
+    }
+)
 _ALLOWED_MARKETS_NORMALIZED: frozenset[str] = frozenset(
     market.casefold() for market in _ALLOWED_MARKETS
 )
