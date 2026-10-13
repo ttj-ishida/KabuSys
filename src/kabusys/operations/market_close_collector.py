@@ -4,8 +4,11 @@ Market Close Summary データ収集モジュール。
 DuckDB（positions, portfolio_performance）と SQLite（signal_queue_status）を
 read-only で参照し、MarketCloseData を返す。
 
-シグナル件数は当日執行分＝前営業日（夜間バッチ日, signal_date）の queue 行を
-Execution Engine が記録した signal_queue_status から数える（Issue #413）。
+シグナル件数は当日執行分＝前営業日（夜間バッチ日, signal_date）の queue 行で数える（Issue #413）。
+  pending: DuckDB signal_queue の pending 行のうち、SQLite signal_queue_status で
+           処理済み（pending 以外）と記録されていない件数。Execution が起動しなかった・
+           行を読まなかった場合も未処理として数える。
+  filled : SQLite signal_queue_status の filled 件数。
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from kabusys.data.calendar_management import prev_trading_day
-from kabusys.execution.signal_queue_status import count_by_status
+from kabusys.execution.signal_queue_status import count_by_status, count_unprocessed_pending
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +36,9 @@ class MarketCloseData:
     equity_prev: float | None  # 前営業日期末資産（存在しなければ None）
 
 
-def check_signal_pending(sqlite_conn, signal_date: date) -> int:
-    """signal_date の pending シグナル件数を返す（テーブルがなければ 0）。"""
-    return count_by_status(sqlite_conn, signal_date, "pending")
+def check_signal_pending(duckdb_conn, sqlite_conn, signal_date: date) -> int:
+    """signal_date の未処理シグナル件数を返す（signal_queue テーブルがなければ 0）。"""
+    return count_unprocessed_pending(duckdb_conn, sqlite_conn, signal_date)
 
 
 def check_signal_filled(sqlite_conn, signal_date: date) -> int:
@@ -89,7 +92,7 @@ def collect_market_close_data(duckdb_conn, sqlite_conn, today: date) -> MarketCl
     daily_return, equity_today = get_performance_row(duckdb_conn, today)
     signal_date = prev_trading_day(duckdb_conn, today)
     return MarketCloseData(
-        signal_pending_count=check_signal_pending(sqlite_conn, signal_date),
+        signal_pending_count=check_signal_pending(duckdb_conn, sqlite_conn, signal_date),
         positions_updated=check_positions_updated(duckdb_conn, today),
         performance_recorded=check_performance_recorded(duckdb_conn, today),
         filled_count=check_signal_filled(sqlite_conn, signal_date),

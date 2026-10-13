@@ -278,8 +278,14 @@ SIGNAL_DATE = date(2026, 4, 27)  # prev_trading_day(TODAY)
 
 @pytest.fixture
 def ddb():
-    """インメモリ DuckDB（positions + portfolio_performance テーブル付き）。"""
+    """インメモリ DuckDB（positions + portfolio_performance + signal_queue テーブル付き）。"""
     conn = _duckdb.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE signal_queue ("
+        "  signal_id VARCHAR PRIMARY KEY, date DATE, code VARCHAR, side VARCHAR,"
+        "  status VARCHAR DEFAULT 'pending'"
+        ")"
+    )
     conn.execute(
         "CREATE TABLE positions ("
         "  date DATE, code VARCHAR, position_size INTEGER,"
@@ -324,6 +330,14 @@ def _insert_signal(sdb, date_str: str, status: str, code: str = "1234") -> None:
     )
 
 
+def _queue(ddb, qid: str, date_val: date, status: str = "pending") -> None:
+    """DuckDB signal_queue に行を入れる（夜間バッチが作る実行キュー）。"""
+    ddb.execute(
+        "INSERT INTO signal_queue VALUES (?, ?, '1234', 'buy', ?)",
+        [qid, date_val, status],
+    )
+
+
 def _insert_position(ddb, date_val: date, code: str = "1234") -> None:
     ddb.execute(
         "INSERT INTO positions VALUES (?, ?, 100, 1500.0, 150000.0)",
@@ -348,31 +362,48 @@ def _insert_performance(
 # ---------------------------------------------------------------------------
 
 
-def test_check_signal_pending_zero_when_empty(sdb):
-    assert check_signal_pending(sdb, SIGNAL_DATE) == 0
+def test_check_signal_pending_zero_when_empty(ddb, sdb):
+    assert check_signal_pending(ddb, sdb, SIGNAL_DATE) == 0
 
 
-def test_check_signal_pending_zero_when_table_missing():
+def test_check_signal_pending_counts_queue_rows_when_engine_never_ran(ddb):
+    """I4: Execution 未起動（SQLite テーブルなし）でも DuckDB の未処理行を pending と数える。"""
+    _queue(ddb, "q1", SIGNAL_DATE)
+    _queue(ddb, "q2", SIGNAL_DATE)
     conn = _sqlite3.connect(":memory:")
-    assert check_signal_pending(conn, SIGNAL_DATE) == 0
+    assert check_signal_pending(ddb, conn, SIGNAL_DATE) == 2
     assert check_signal_filled(conn, SIGNAL_DATE) == 0
     conn.close()
 
 
-def test_check_signal_pending_counts_pending(sdb):
-    _insert_signal(sdb, SIGNAL_DATE.isoformat(), "pending", "1234")
-    _insert_signal(sdb, SIGNAL_DATE.isoformat(), "pending", "5678")
-    assert check_signal_pending(sdb, SIGNAL_DATE) == 2
+def test_check_signal_pending_zero_when_signal_queue_missing(sdb):
+    conn = _duckdb.connect(":memory:")
+    assert check_signal_pending(conn, sdb, SIGNAL_DATE) == 0
+    conn.close()
 
 
-def test_check_signal_pending_ignores_other_status(sdb):
-    _insert_signal(sdb, SIGNAL_DATE.isoformat(), "filled")
-    assert check_signal_pending(sdb, SIGNAL_DATE) == 0
+def test_check_signal_pending_excludes_processed_rows(ddb, sdb):
+    """SQLite で pending 以外（処理済み）の行は数えず、記録なし・pending 記録は数える。"""
+    from kabusys.execution.signal_queue_status import record
+
+    for qid in ("done", "failed", "left", "unseen"):
+        _queue(ddb, qid, SIGNAL_DATE)
+    for qid, st in (("done", "filled"), ("failed", "failed"), ("left", "pending")):
+        record(
+            sdb,
+            queue_signal_id=qid,
+            signal_date=SIGNAL_DATE,
+            code="1234",
+            side="buy",
+            status=st,
+        )
+    assert check_signal_pending(ddb, sdb, SIGNAL_DATE) == 2  # left + unseen
 
 
-def test_check_signal_pending_ignores_other_date(sdb):
-    _insert_signal(sdb, TODAY.isoformat(), "pending")
-    assert check_signal_pending(sdb, SIGNAL_DATE) == 0
+def test_check_signal_pending_ignores_other_date_and_synced_rows(ddb, sdb):
+    _queue(ddb, "today", TODAY)  # 当日分（翌営業日執行）は数えない
+    _queue(ddb, "synced", SIGNAL_DATE, status="filled")  # 夜間同期済み
+    assert check_signal_pending(ddb, sdb, SIGNAL_DATE) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -490,7 +521,8 @@ def test_collect_market_close_data_all_ok(ddb, sdb):
 
 
 def test_collect_market_close_data_blocked(ddb, sdb):
-    _insert_signal(sdb, SIGNAL_DATE.isoformat(), "pending")
+    """Execution が行を処理しなかった場合（SQLite 記録なし）も pending として BLOCKED。"""
+    _queue(ddb, "q1", SIGNAL_DATE)
     data = collect_market_close_data(ddb, sdb, TODAY)
     assert data.signal_pending_count == 1
     assert data.positions_updated is False
