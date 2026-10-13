@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-_SELL_REASON_LABELS: dict[str, str] = {
+SELL_REASON_LABELS: dict[str, str] = {
     "stop_loss": "損切り",
     "trailing_stop": "トレーリング",
     "time_exit": "保有期限",
@@ -194,7 +194,7 @@ def format_evening_message(
                 if s.get("qty"):
                     line += f"  {s['qty']}株"
                 if s.get("reason"):
-                    line += f" ({_SELL_REASON_LABELS.get(s['reason'], s['reason'])})"
+                    line += f" ({SELL_REASON_LABELS.get(s['reason'], s['reason'])})"
                 if s.get("manual"):
                     line += " [手動保有]"
                 lines.append(line)

@@ -193,6 +193,15 @@ def _build_job_schedule() -> list[JobSpec]:
         # --- 朝のレポート (execution 起動前なので DB 競合なし) ---
         JobSpec("pre_market_report", "run_pre_market_report.py", [], 8, 0, False),
         JobSpec("signal_queue_report", "run_signal_queue_report.py", [], 8, 2, False),
+        # 手動注文候補レポート（当日朝・LINE 通知あり / DuckDB read-only）
+        JobSpec(
+            "manual_order_report_morning",
+            "run_manual_order_report.py",
+            ["--phase", "morning"],
+            8,
+            5,
+            False,
+        ),
         # --- システム起動 ---
         JobSpec(
             "execution_start",
@@ -228,6 +237,14 @@ def _build_job_schedule() -> list[JobSpec]:
         JobSpec("ai_analysis", "run_ai_analysis.py", [], 19, 0, True, enable_ai),
         JobSpec("strategy_signal", "run_strategy_signal.py", [], 20, 0, True),
         JobSpec("portfolio_construction", "run_portfolio_construction.py", [], 21, 0, True),
+        JobSpec(
+            "manual_order_report_evening",
+            "run_manual_order_report.py",
+            ["--phase", "evening"],
+            21,
+            10,
+            True,
+        ),
         JobSpec("night_batch_report", "run_night_batch_report.py", [], 21, 15, True),
     ]
 
