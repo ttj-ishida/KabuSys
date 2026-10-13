@@ -130,7 +130,8 @@ python -m kabusys.run_execution
 
 # 別の日付の signal_queue 行を読ませたい場合（検証用）
 python -m kabusys.run_execution --signal-date 2026-05-27
-# または環境変数 KABUSYS_SIGNAL_DATE=2026-05-27 を設定して起動
+# ※ 上書きはコマンドライン引数のみ（環境変数・.env では指定できない）。
+#   既定（前営業日）と異なる日付を指定すると WARNING ログと朝の LINE 通知に表示される
 ```
 
 起動すると、Signal Queue の `pending` シグナルを処理し始めます。ログに注文・約定の記録が流れれば正常動作しています。
@@ -162,7 +163,7 @@ python scripts/stop_system.py
 | コマンド | 日付の省略時のデフォルト |
 |---|---|
 | `inject_dummy_signal --date` | **今日の前営業日**（今日の執行で読まれる） |
-| `run_execution --signal-date` / `KABUSYS_SIGNAL_DATE` | **今日の前営業日** |
+| `run_execution --signal-date`（CLI のみ） | **今日の前営業日** |
 | `scripts/run_signal_queue_report.py --date`（08:02 自動） | **今日の前営業日** |
 | `python -m kabusys.run_signal_queue_report --date` | **今日**（手動確認時は前営業日を明示） |
 

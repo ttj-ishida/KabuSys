@@ -61,9 +61,6 @@ def _env_time(name: str, default: time) -> time:
         raise ValueError(f"{name} must be HH:MM or HH:MM:SS, got {raw!r}") from exc
 
 
-_SIGNAL_DATE_ENV = "KABUSYS_SIGNAL_DATE"
-
-
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="ExecutionEngine を起動する")
     parser.add_argument(
@@ -71,8 +68,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         metavar="YYYY-MM-DD",
         help=(
-            "読み込む signal_queue の日付（省略時: 環境変数 KABUSYS_SIGNAL_DATE、"
-            "それもなければ今日の前営業日）。Paper E2E・ダミーシグナル検証用"
+            "読み込む signal_queue の日付（省略時: 今日の前営業日）。Paper E2E・"
+            "ダミーシグナル検証用。環境変数では指定できない（.env への置き忘れで"
+            "毎日の自動発注が止まるのを防ぐため）"
         ),
     )
     # argv=None はテスト等からの直接呼び出し。CLI 引数は __main__ から明示的に渡す。
@@ -82,18 +80,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 def _resolve_signal_date(
     conn: duckdb.DuckDBPyConnection, today: date, cli_value: str | None
 ) -> date:
-    """読み込む signal_queue の日付を決める（CLI > 環境変数 > prev_trading_day(today)）。"""
+    """読み込む signal_queue の日付を決める（CLI --signal-date > prev_trading_day(today)）。
+
+    上書きは CLI 引数のみ受け付ける。環境変数は .env 経由で残り続け、
+    毎日の自動発注を黙って止める恐れがあるため使わない。
+    """
     if cli_value:
         try:
             return date.fromisoformat(cli_value.strip())
         except ValueError as exc:
             raise ValueError(f"--signal-date must be YYYY-MM-DD, got {cli_value!r}") from exc
-    raw = os.environ.get(_SIGNAL_DATE_ENV)
-    if raw:
-        try:
-            return date.fromisoformat(raw.strip())
-        except ValueError as exc:
-            raise ValueError(f"{_SIGNAL_DATE_ENV} must be YYYY-MM-DD, got {raw!r}") from exc
     return prev_trading_day(conn, today)
 
 
@@ -353,8 +349,17 @@ def main(argv: list[str] | None = None) -> None:
 
         # 起動時リコンシリエーション + Execution Startup Summary 生成
         today = date.today()
-        # 読み込む signal_queue の日付 = 前営業日（夜間バッチ日）。CLI / 環境変数で上書き可
+        # 読み込む signal_queue の日付 = 前営業日（夜間バッチ日）。CLI --signal-date で上書き可
+        default_signal_date = prev_trading_day(duckdb_conn, today)
         signal_date = _resolve_signal_date(duckdb_conn, today, args.signal_date)
+        signal_date_note: str | None = None
+        if signal_date != default_signal_date:
+            signal_date_note = f"signal_date 上書き: {signal_date}（既定 {default_signal_date}）"
+            logger.warning(
+                "--signal-date により signal_date=%s を読みます（既定の前営業日は %s）",
+                signal_date,
+                default_signal_date,
+            )
         logger.info("執行日=%s, signal_date=%s", today, signal_date)
         reconcile_result = reconciler.run()
         _report = None
@@ -388,6 +393,8 @@ def main(argv: list[str] | None = None) -> None:
                 pending_count=pending_count,
                 report_date=today.isoformat(),
             )
+            if signal_date_note is not None:
+                msg += "\n⚠ " + signal_date_note
             notifier.send(msg)
         except Exception:
             logger.warning("朝の LINE 通知に失敗しました（起動を続行します）", exc_info=True)

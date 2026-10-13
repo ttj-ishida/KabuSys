@@ -441,26 +441,42 @@ class TestRunExecutionFailureAndOverride:
         assert mock_engine_cls.call_args.kwargs["config"].signal_date == date(2026, 3, 20)
         assert mock_count.call_args.args[1] == date(2026, 3, 20)
 
-    def test_env_signal_date_overrides_default(self, monkeypatch):
+    def test_env_signal_date_has_no_effect(self, monkeypatch):
+        """Round 2: .env に残った KABUSYS_SIGNAL_DATE で自動発注が止まらないよう、環境変数は無視する。"""
         monkeypatch.setenv("KABUSYS_SIGNAL_DATE", "2026-03-19")
         _, mock_engine_cls, _ = _run_main_capture(date(2026, 3, 27))
-        assert mock_engine_cls.call_args.kwargs["config"].signal_date == date(2026, 3, 19)
+        assert mock_engine_cls.call_args.kwargs["config"].signal_date == date(2026, 3, 27)
 
-    def test_cli_wins_over_env(self, monkeypatch):
-        monkeypatch.setenv("KABUSYS_SIGNAL_DATE", "2026-03-19")
-        _, mock_engine_cls, _ = _run_main_capture(
-            date(2026, 3, 27), argv=["--signal-date", "2026-03-20"]
-        )
-        assert mock_engine_cls.call_args.kwargs["config"].signal_date == date(2026, 3, 20)
-
-    def test_invalid_env_signal_date_raises(self, monkeypatch):
-        monkeypatch.setenv("KABUSYS_SIGNAL_DATE", "2026/03/19")
-        with pytest.raises(ValueError, match="KABUSYS_SIGNAL_DATE"):
-            re_mod._resolve_signal_date(MagicMock(), date(2026, 3, 30), None)
+    def test_invalid_cli_signal_date_raises(self):
+        with pytest.raises(ValueError, match="--signal-date"):
+            re_mod._resolve_signal_date(MagicMock(), date(2026, 3, 30), "2026/03/19")
 
     def test_default_uses_prev_trading_day(self, monkeypatch):
-        monkeypatch.delenv("KABUSYS_SIGNAL_DATE", raising=False)
+        monkeypatch.setenv("KABUSYS_SIGNAL_DATE", "2026-03-19")  # 無視される
         with patch("kabusys.run_execution.prev_trading_day", return_value=date(2026, 3, 27)):
             assert re_mod._resolve_signal_date(MagicMock(), date(2026, 3, 30), None) == date(
                 2026, 3, 27
             )
+
+    def test_override_different_from_default_warns_and_is_in_morning_message(self):
+        """上書きが既定（前営業日）と異なるときは WARNING を出し、朝の LINE にも載せる。"""
+        with (
+            patch("kabusys.run_execution.build_notifier") as mock_build,
+            patch.object(re_mod.logger, "warning") as mock_warn,
+        ):
+            _run_main_capture(date(2026, 3, 27), argv=["--signal-date", "2026-03-20"])
+        warned = [c for c in mock_warn.call_args_list if "--signal-date" in str(c.args[0])]
+        assert warned
+        assert date(2026, 3, 20) in warned[0].args
+        sent = mock_build.return_value.send.call_args.args[0]
+        assert "2026-03-20" in sent
+        assert "2026-03-27" in sent
+
+    def test_override_equal_to_default_does_not_warn(self):
+        with (
+            patch("kabusys.run_execution.build_notifier") as mock_build,
+            patch.object(re_mod.logger, "warning") as mock_warn,
+        ):
+            _run_main_capture(date(2026, 3, 27), argv=["--signal-date", "2026-03-27"])
+        assert not [c for c in mock_warn.call_args_list if "--signal-date" in str(c.args[0])]
+        assert "上書き" not in mock_build.return_value.send.call_args.args[0]
