@@ -19,12 +19,12 @@ from pathlib import Path
 import duckdb
 
 from kabusys.config import settings
-from kabusys.data.calendar_management import next_trading_day
+from kabusys.data.calendar_management import prev_trading_day
+from kabusys.execution import signal_queue_status as sqs
 from kabusys.execution.broker_api import BrokerAPIProtocol, OrderSentPendingError
 
 # DuplicateOrderError は _process_signals() (Task 7) で使用
 from kabusys.execution.order_manager import DuplicateOrderError, OrderManager
-from kabusys.execution.order_record import OrderState
 from kabusys.execution.order_repository import OrderRepository
 from kabusys.execution.reconciler import Reconciler
 from kabusys.execution.risk_manager import RiskManager, RiskRejectReason
@@ -35,7 +35,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class EngineConfig:
+    """エンジン設定。
+
+    target_date: 執行日（今日）。position_entries の fill_date に使う。
+    signal_date: 読み込む signal_queue の日付（夜間バッチ日）。
+                 None なら prev_trading_day(target_date)（Issue #413）。
+    """
+
     target_date: date
+    signal_date: date | None = None
     signal_send_start: time = time(8, 50)  # 発注開始時刻
     signal_send_end: time = time(9, 10)  # 発注締切時刻
     market_close: time = time(15, 30)  # セッション終了時刻
@@ -54,6 +62,7 @@ class ExecutionEngine:
         reconciler: Reconciler | None = None,
         pid_file: Path | None = None,
         monitoring_db: MonitoringDB | None = None,
+        notifier: object | None = None,
     ) -> None:
         self._broker = broker
         self._repo = repo
@@ -65,9 +74,159 @@ class ExecutionEngine:
         self._reconciler = reconciler
         self._pid_file: Path | None = pid_file
         self._monitoring_db = monitoring_db
+        # send(text) を持つ通知オブジェクト（LINE 等）。None なら通知しない。
+        self._notifier = notifier
+        # シグナル処理が例外で中断された場合 True（発注は停止、push/Gate 3 は継続）
+        self._signal_processing_failed = False
         self._columns_cache: dict[str, set[str]] = {}
         self._stop_event = threading.Event()
         self._push_queue: queue.Queue[dict] = queue.Queue()
+        # signal_queue の日付（夜間バッチ日）。業務キーと読み込み条件に使う。
+        self._signal_date: date = (
+            config.signal_date
+            if config.signal_date is not None
+            else prev_trading_day(duckdb_conn, config.target_date)
+        )
+        if self._sqlite_conn is not None:
+            try:
+                sqs.ensure_schema(self._sqlite_conn)
+            except Exception as exc:
+                logger.warning("signal_queue_status スキーマ作成に失敗: %s", exc)
+
+    @property
+    def signal_date(self) -> date:
+        return self._signal_date
+
+    @property
+    def signal_processing_failed(self) -> bool:
+        """シグナル処理が例外で中断されたか（run_execution がジョブ失敗の判定に使う）。"""
+        return self._signal_processing_failed
+
+    def _on_signal_processing_failure(self, exc: BaseException) -> None:
+        """シグナル処理の例外を記録・通知する。発注は止めるがセッションは継続する。"""
+        self._signal_processing_failed = True
+        logger.critical(
+            "シグナル処理が失敗しました。本日の発注を停止します（push 監視・Gate 3 は継続）: %s",
+            exc,
+            exc_info=exc,
+        )
+        if self._notifier is None:
+            return
+        try:
+            self._notifier.send(  # type: ignore[attr-defined]
+                "[KabuSys] シグナル処理失敗: 本日の自動発注を停止しました"
+                f"（push 監視・ドローダウン監視は継続）\n"
+                f"signal_date={self._signal_date}\n理由: {exc}"
+            )
+        except Exception:
+            logger.warning("シグナル処理失敗の通知に失敗しました", exc_info=True)
+
+    def _record_status(
+        self,
+        queue_signal_id: str,
+        code: str,
+        side: str,
+        status: str,
+        *,
+        reason: str | None = None,
+        client_order_id: str | None = None,
+    ) -> None:
+        """signal_queue_status（SQLite）に状態を記録する。失敗しても発注フローは止めない。"""
+        if self._sqlite_conn is None:
+            return
+        try:
+            sqs.record(
+                self._sqlite_conn,
+                queue_signal_id=queue_signal_id,
+                signal_date=self._signal_date,
+                code=code,
+                side=side,
+                status=status,
+                reason=reason,
+                client_order_id=client_order_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "signal_queue_status 記録失敗（発注フローは継続）: queue_signal_id=%s status=%s: %s",
+                queue_signal_id,
+                status,
+                exc,
+            )
+
+    def _sync_status_from_order(self, record) -> None:
+        """注文の状態を signal_queue_status に反映する（client_order_id で紐付け）。"""
+        if self._sqlite_conn is None or record is None:
+            return
+        status, reason = sqs.status_for_order_state(record.state)
+        try:
+            sqs.update_by_client_order_id(
+                self._sqlite_conn, record.client_order_id, status, reason=reason
+            )
+        except Exception as exc:
+            logger.warning(
+                "signal_queue_status 更新失敗（継続）: client_order_id=%s: %s",
+                record.client_order_id,
+                exc,
+            )
+
+    def sync_queue_statuses_from_orders(self) -> int:
+        """約定待ち（processing/failed）の行を注文の現在状態に合わせて更新する。
+
+        起動時リコンシリエーションの後に呼び、再起動で状態が取り残されないようにする。
+        """
+        if self._sqlite_conn is None:
+            return 0
+        updated = 0
+        try:
+            links = sqs.list_open_order_links(self._sqlite_conn)
+        except Exception as exc:
+            logger.warning("signal_queue_status 読み込み失敗（同期をスキップ）: %s", exc)
+            return 0
+        for _queue_signal_id, client_order_id in links:
+            try:
+                record = self._repo.get(client_order_id)
+            except Exception as exc:
+                logger.warning("注文取得失敗（スキップ）: %s: %s", client_order_id, exc)
+                continue
+            if record is None:
+                continue
+            status, reason = sqs.status_for_order_state(record.state)
+            try:
+                updated += sqs.update_by_client_order_id(
+                    self._sqlite_conn, client_order_id, status, reason=reason
+                )
+            except Exception as exc:
+                logger.warning("signal_queue_status 更新失敗（継続）: %s: %s", client_order_id, exc)
+        if updated:
+            logger.info("signal_queue_status を注文状態に同期: %d 件", updated)
+        self._report_orphan_processing_rows()
+        return updated
+
+    def _report_orphan_processing_rows(self) -> None:
+        """注文に紐付かない processing 行（発注直前のクラッシュ等）を ERROR ログで可視化する。
+
+        これらの行は再起動時に再読込されない（二重発注防止）ため、発注漏れの可能性がある。
+        """
+        if self._sqlite_conn is None:
+            return
+        try:
+            rows = sqs.list_processing_without_order_id(self._sqlite_conn)
+        except Exception as exc:
+            logger.warning("signal_queue_status 読み込み失敗（孤立行の確認をスキップ）: %s", exc)
+            return
+        for queue_signal_id, business_key in rows:
+            try:
+                has_order = bool(self._repo.get_by_signal(business_key))
+            except Exception as exc:
+                logger.warning("注文取得失敗（スキップ）: %s: %s", business_key, exc)
+                continue
+            if not has_order:
+                logger.error(
+                    "processing のまま注文が存在しない queue 行があります（発注漏れの可能性。"
+                    "手動確認要）: queue_signal_id=%s business_key=%s",
+                    queue_signal_id,
+                    business_key,
+                )
 
     def _log_trade_event(
         self,
@@ -97,7 +256,7 @@ class ExecutionEngine:
             logger.warning("monitoring DB write failed; order flow continues: %s", exc)
 
     def _process_signals(self) -> None:
-        """今日のシグナルを読み込み、Gate 1/2 を通して発注する。"""
+        """signal_date（前営業日の夜間バッチ）のシグナルを読み込み、Gate 1/2 を通して発注する。"""
         from kabusys.execution.broker_api import OrderRequest
 
         # 1. メソッド先頭チェック
@@ -123,10 +282,10 @@ class ExecutionEngine:
             queue_signal_id: str = sig["signal_id"]
             code: str = sig["code"]
             side: str = sig["side"]
-            # signal_id: 発注の業務キー（date_code_side）。Gate 1 重複検査と
-            # create_order の DuplicateOrderError に使い、同一日・銘柄・売買方向の
+            # signal_id: 発注の業務キー（signal_date_code_side）。Gate 1 重複検査と
+            # create_order の DuplicateOrderError に使い、同一夜間バッチ・銘柄・売買方向の
             # 二重発注を queue 行の ID に依存せず防ぐ。
-            signal_id = f"{self._config.target_date.isoformat()}_{code}_{side}"
+            signal_id = sqs.business_key(self._signal_date, code, side)
             raw_qty: int = sig["qty"]
             price: float = sig["price"]
 
@@ -141,6 +300,7 @@ class ExecutionEngine:
                         code,
                         sm,
                     )
+                    self._record_status(queue_signal_id, code, side, "cancelled", reason="qty_zero")
                     continue
             else:
                 qty = raw_qty
@@ -151,7 +311,14 @@ class ExecutionEngine:
             g1 = self._risk_manager.check_signal(signal_id, code, order_value, side=side)
             if not g1.passed:
                 logger.info("Gate 1 NG - signal_id=%s: %s", signal_id, g1.reason)
-                self._update_signal_queue_status(queue_signal_id, "failed")
+                if g1.reject_reason == RiskRejectReason.DUPLICATE_ORDER:
+                    self._record_status(
+                        queue_signal_id, code, side, "cancelled", reason="duplicate"
+                    )
+                else:
+                    self._record_status(
+                        queue_signal_id, code, side, "failed", reason=g1.reason or None
+                    )
                 continue
 
             # Gate 2: エグゼキューションレベル検査（レート制限: リトライ最大3回）
@@ -168,13 +335,14 @@ class ExecutionEngine:
                 self._stop_event.wait(timeout=0.2)
 
             if not g2_passed:
-                logger.info("Gate 2 NG - signal_id=%s: %s", signal_id, g2.reason)
-                self._update_signal_queue_status(queue_signal_id, "failed")
+                # レート制限: 記録しない（pending のまま）。同日中の再起動で再試行される。
+                logger.info("Gate 2 NG（pending のまま）- signal_id=%s: %s", signal_id, g2.reason)
                 continue
 
-            # 発注
+            # 発注直前に processing を記録する。ここでクラッシュしても再起動時は再読込されない
+            # （発注漏れはあり得るが二重発注は起きない側に倒す）。
+            self._record_status(queue_signal_id, code, side, "processing")
             try:
-                self._update_signal_queue_status(queue_signal_id, "processing")
                 order_type = "market" if price == 0.0 else "limit"
                 record = self._order_manager.create_order(
                     signal_id,
@@ -189,8 +357,15 @@ class ExecutionEngine:
                 self._log_trade_event("Created", record)
             except DuplicateOrderError:
                 logger.info("DuplicateOrderError - skip: signal_id=%s", signal_id)
-                self._update_signal_queue_status(queue_signal_id, "processing")
+                self._record_status(queue_signal_id, code, side, "cancelled", reason="duplicate")
                 continue
+            self._record_status(
+                queue_signal_id,
+                code,
+                side,
+                "processing",
+                client_order_id=record.client_order_id,
+            )
 
             t0 = _time_module.perf_counter()
             latency_ms: float | None = None
@@ -211,20 +386,35 @@ class ExecutionEngine:
                 self._risk_manager.record_api_success()
                 _order_sent = True
                 _order_pending = True
-                self._update_signal_queue_status(queue_signal_id, "processing")
+                self._record_status(
+                    queue_signal_id,
+                    code,
+                    side,
+                    "processing",
+                    reason="sent_pending",
+                    client_order_id=record.client_order_id,
+                )
                 logger.info("発注保留（pending）: signal_id=%s", signal_id)
             except Exception as exc:
                 self._risk_manager.record_api_error()
-                self._update_signal_queue_status(queue_signal_id, "failed")
+                self._record_status(
+                    queue_signal_id,
+                    code,
+                    side,
+                    "failed",
+                    reason=str(exc) or type(exc).__name__,
+                    client_order_id=record.client_order_id,
+                )
                 logger.error("発注失敗: signal_id=%s: %s", signal_id, exc)
 
             # position_entries に約定を記録（最低保有日数・再エントリー制限用）
-            # fill_date: 発注当日の翌営業日（バックテストと整合させるため）
+            # fill_date: 執行日（target_date）。夜間シグナルの翌営業日寄付で約定する想定で、
+            # バックテストの「シグナル翌日の寄付でエントリー」と一致する（Issue #413）。
             # BUY pending も記録する（発注確約済みとして扱う。キャンセル時はリコンシリエーションで回収）
             # SELL pending は記録しない（保有中のポジションのクローズ確定前のため）
             if _order_sent and self._sqlite_conn is not None:
                 try:
-                    fill_date = next_trading_day(self._duckdb_conn, self._config.target_date)
+                    fill_date = self._config.target_date
                     if side == "buy":
                         self._sqlite_conn.execute(
                             # INSERT OR IGNORE: 同一 (code, entry_date) の重複エントリーは無視する
@@ -265,10 +455,15 @@ class ExecutionEngine:
                     status = self._broker.get_order_status(record.broker_order_id)
                     if status is not None:
                         updated_record = self._order_manager.sync_order(record.client_order_id)
-                        if updated_record.state == OrderState.Filled:
-                            self._update_signal_queue_status(queue_signal_id, "filled")
-                        else:
-                            self._update_signal_queue_status(queue_signal_id, "processing")
+                        new_status, new_reason = sqs.status_for_order_state(updated_record.state)
+                        self._record_status(
+                            queue_signal_id,
+                            code,
+                            side,
+                            new_status,
+                            reason=new_reason,
+                            client_order_id=record.client_order_id,
+                        )
                     if status is not None and status.status == "filled":
                         self._log_trade_event(
                             "Filled",
@@ -301,8 +496,9 @@ class ExecutionEngine:
         for order in active_orders:
             if order.broker_order_id == str(order_id):
                 try:
-                    self._order_manager.sync_order(order.client_order_id)
+                    synced = self._order_manager.sync_order(order.client_order_id)
                     logger.debug("sync_order: client_order_id=%s", order.client_order_id)
+                    self._sync_status_from_order(synced)
                 except Exception as exc:
                     logger.error("sync_order 失敗: %s", exc)
                 break
@@ -335,8 +531,9 @@ class ExecutionEngine:
 
         for order in self._repo.list_active():
             try:
-                self._order_manager.cancel_order(order.client_order_id)
+                cancelled = self._order_manager.cancel_order(order.client_order_id)
                 logger.info("注文キャンセル: client_order_id=%s", order.client_order_id)
+                self._sync_status_from_order(cancelled)
             except (InvalidStateTransitionError, RuntimeError) as exc:
                 logger.debug("cancel_order スキップ: %s - %s", order.client_order_id, exc)
             except BrokerAPIError as exc:
@@ -371,7 +568,11 @@ class ExecutionEngine:
         8:50 でシグナル処理 → 9:10 で発注締切 → 15:30 でセッション終了。
         テスト環境では _process_signals() と _drain_push_queue() を直接呼ぶこと。
         """
-        logger.info("ExecutionEngine: セッション開始 target_date=%s", self._config.target_date)
+        logger.info(
+            "ExecutionEngine: セッション開始 target_date=%s signal_date=%s",
+            self._config.target_date,
+            self._signal_date,
+        )
 
         # 起動時リコンシリエーション（reconciler が設定されている場合のみ）
         if self._reconciler is not None:
@@ -385,6 +586,10 @@ class ExecutionEngine:
                 )
             except Exception:
                 logger.exception("Reconciliation 実行中に予期せぬ例外。セッションは続行します。")
+
+        # リコンシリエーション後、約定待ちだった queue 行を注文状態に同期する
+        # （run_execution では reconciler.run() をエンジン生成前に実行済み）
+        self.sync_queue_statuses_from_orders()
 
         # kill.flag 検査（PID 書き込みより先に実施して残留を防ぐ）
         if settings.kill_flag_path.exists():
@@ -424,7 +629,12 @@ class ExecutionEngine:
             # 現在時刻が signal_send_end を超えている場合はシグナル処理をスキップ
             current_time = _now_time()
             if not self._stop_event.is_set() and current_time < self._config.signal_send_end:
-                self._process_signals()
+                # 例外でセッション（daemon スレッド）を落とさない。発注は止め、
+                # push ドレイン（sync_order + Gate 3 ドローダウン監視）は継続する。
+                try:
+                    self._process_signals()
+                except Exception as exc:
+                    self._on_signal_processing_failure(exc)
             elif not self._stop_event.is_set():
                 logger.warning(
                     "Signal processing skipped: now=%s is at or after signal_send_end=%s",
@@ -463,41 +673,54 @@ class ExecutionEngine:
         return columns
 
     def _read_signals(self) -> list[dict]:
-        """DuckDB から今日の発注対象シグナルを返す。"""
-        rows = self._read_signal_queue_rows()
-        return [
-            {
-                "signal_id": r[0],
-                "code": r[1],
-                "side": r[2],
-                "qty": int(r[3]),
-                "price": float(r[4]),
-                "size_multiplier": float(r[5]),
-            }
-            for r in rows
-        ]
+        """DuckDB から signal_date の発注対象シグナルを返す。
 
-    def _update_signal_queue_status(self, signal_id: str, status: str) -> None:
-        """signal_queue の処理状態を更新する。失敗しても発注フローは止めない。"""
-        try:
-            queue_columns = self._duckdb_columns("signal_queue")
-            if "processed_at" in queue_columns and status in {"filled", "failed", "error"}:
-                self._duckdb_conn.execute(
-                    "UPDATE signal_queue SET status = ?, processed_at = current_timestamp WHERE signal_id = ?",
-                    [status, signal_id],
-                )
-            else:
-                self._duckdb_conn.execute(
-                    "UPDATE signal_queue SET status = ? WHERE signal_id = ?",
-                    [status, signal_id],
-                )
-        except Exception as exc:
-            logger.warning(
-                "signal_queue status update failed: signal_id=%s status=%s: %s",
-                signal_id,
-                status,
-                exc,
+        SQLite の signal_queue_status に pending 以外で記録済みの行は除外する
+        （再起動時の再読込防止。業務キーの重複判定と合わせて二重発注を二重に防ぐ）。
+        処理済み判定が読めない場合は発注しない（RuntimeError）。
+        """
+        rows = self._read_signal_queue_rows()
+        processed: set[str] = set()
+        if self._sqlite_conn is not None:
+            try:
+                statuses = sqs.get_statuses(self._sqlite_conn, self._signal_date)
+            except Exception as exc:
+                logger.error("signal_queue_status 読み込み失敗。シグナル処理を中止します: %s", exc)
+                raise RuntimeError("signal_queue_status read failed") from exc
+            processed = {qid for qid, st in statuses.items() if st != "pending"}
+
+        signals: list[dict] = []
+        for r in rows:
+            queue_signal_id = str(r[0])
+            if queue_signal_id in processed:
+                logger.info("処理済みのため再読込しない: queue_signal_id=%s", queue_signal_id)
+                continue
+            signals.append(
+                {
+                    "signal_id": queue_signal_id,
+                    "code": r[1],
+                    "side": r[2],
+                    "qty": int(r[3]),
+                    "price": float(r[4]),
+                    "size_multiplier": float(r[5]),
+                }
             )
+            if self._sqlite_conn is not None:
+                try:
+                    sqs.register_pending(
+                        self._sqlite_conn,
+                        queue_signal_id=queue_signal_id,
+                        signal_date=self._signal_date,
+                        code=r[1],
+                        side=r[2],
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "signal_queue_status pending 登録失敗（継続）: %s: %s",
+                        queue_signal_id,
+                        exc,
+                    )
+        return signals
 
     def _read_signal_queue_rows(self) -> list[tuple]:
         queue_columns = self._duckdb_columns("signal_queue")
@@ -540,8 +763,8 @@ class ExecutionEngine:
                 WHERE q.date = ? AND q.status = 'pending'
                 ORDER BY {rank_expr}q.code ASC
                 """,
-                [self._config.target_date],
+                [self._signal_date],
             ).fetchall()
         except duckdb.Error as exc:
-            logger.warning("signal_queue read failed for %s: %s", self._config.target_date, exc)
+            logger.warning("signal_queue read failed for %s: %s", self._signal_date, exc)
             raise RuntimeError("signal_queue read failed") from exc

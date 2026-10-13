@@ -9,6 +9,7 @@ from unittest.mock import patch
 import duckdb
 import pytest
 
+from kabusys.execution import signal_queue_status as sqs
 from kabusys.execution.execution_engine import EngineConfig, ExecutionEngine
 from kabusys.execution.mock_client import MockBrokerClient
 from kabusys.execution.order_manager import OrderManager
@@ -17,8 +18,13 @@ from kabusys.execution.order_repository import OrderRepository
 from kabusys.execution.risk_manager import RiskConfig, RiskManager
 from kabusys.monitoring.monitoring_db import MonitoringDB
 
-TARGET_DATE = date(2026, 3, 29)
-FILL_DATE = date(2026, 3, 30)  # next_trading_day(TARGET_DATE) — 月曜
+# Issue #413: signal_queue の日付は夜間バッチ日（シグナル日）、エンジンの target_date は執行日。
+# TARGET_DATE はシグナル日（金曜）、EXEC_DATE は執行日（翌営業日の月曜）。
+# 従来は TARGET_DATE=日曜の行をそのまま読み fill_date=翌営業日としていたが、
+# 新仕様では執行日の前営業日（signal_date）の行を読み、fill_date=執行日となる。
+TARGET_DATE = date(2026, 3, 27)  # シグナル日（金曜）= prev_trading_day(EXEC_DATE)
+EXEC_DATE = date(2026, 3, 30)  # 執行日（月曜）
+FILL_DATE = EXEC_DATE  # 当日寄付で約定する想定（fill_date = 執行日）
 
 
 def _make_engine(
@@ -28,7 +34,7 @@ def _make_engine(
     risk_config = RiskConfig(initial_portfolio_value=10_000_000.0)
     rm = RiskManager(broker=broker, repo=repo, config=risk_config)
     order_manager = OrderManager(broker=broker, repo=repo)
-    cfg = config or EngineConfig(target_date=TARGET_DATE)
+    cfg = config or EngineConfig(target_date=EXEC_DATE)
     return ExecutionEngine(
         broker=broker,
         repo=repo,
@@ -280,12 +286,12 @@ class TestProcessSignals:
         orders = engine._repo.list_active()
         assert len(orders) == 1
         assert orders[0].signal_id == f"{TARGET_DATE.isoformat()}_1234_buy"
-        statuses = dict(
-            duckdb_conn.execute("SELECT signal_id, status FROM signal_queue").fetchall()
-        )
+        # Issue #413: ステータスは DuckDB ではなく SQLite の signal_queue_status に記録する。
+        # 重複行は従来 failed だったが、重複は cancelled/duplicate に統一した。
+        statuses = sqs.get_statuses(sqlite_conn, TARGET_DATE)
         assert statuses["uuid-aaaa"] == "filled"
-        # 2行目は Gate 1 の重複検査で拒否され、pending のまま再試行され続けない
-        assert statuses["uuid-bbbb"] == "failed"
+        # 2行目は Gate 1 の重複検査で cancelled となり、pending のまま再試行され続けない
+        assert statuses["uuid-bbbb"] == "cancelled"
 
         # 再実行しても注文は増えない
         engine._process_signals()
@@ -320,7 +326,7 @@ class TestProcessSignals:
         broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
         # signal_send_end=00:00 → 現在時刻は常に超過
         cfg = EngineConfig(
-            target_date=TARGET_DATE,
+            target_date=EXEC_DATE,
             signal_send_start=time(0, 0),
             signal_send_end=time(0, 0),
         )
@@ -365,9 +371,13 @@ class TestProcessSignals:
         assert "Sent" in events
         assert "Filled" in events
 
-    def test_instant_fill_syncs_order_and_signal_queue(self, sqlite_conn, duckdb_conn):
-        """即時約定した Paper 注文は orders と signal_queue の両方に反映される。"""
-        queue_signal_id = "QUEUE_CUSTOM_2026-03-29_1234_buy"
+    def test_instant_fill_syncs_order_and_signal_queue_status(self, sqlite_conn, duckdb_conn):
+        """即時約定した Paper 注文は orders と SQLite signal_queue_status の両方に反映される。
+
+        Issue #413: エンジンは DuckDB に書かない（read_only）。DuckDB signal_queue は
+        夜間 sync_to_duckdb で反映されるため、ここでは pending のままであることを確認する。
+        """
+        queue_signal_id = "QUEUE_CUSTOM_2026-03-27_1234_buy"
         _insert_signal(duckdb_conn, "1234")
         _insert_target(
             duckdb_conn,
@@ -389,12 +399,18 @@ class TestProcessSignals:
         assert orders[0].filled_qty == 100
         assert orders[0].avg_fill_price == 1500.0
 
-        row = duckdb_conn.execute(
-            "SELECT status, processed_at FROM signal_queue WHERE signal_id = ?",
+        row = sqlite_conn.execute(
+            "SELECT status, client_order_id FROM signal_queue_status WHERE queue_signal_id = ?",
             [queue_signal_id],
         ).fetchone()
         assert row[0] == "filled"
-        assert row[1] is not None
+        assert row[1] == orders[0].client_order_id
+
+        duck_row = duckdb_conn.execute(
+            "SELECT status, processed_at FROM signal_queue WHERE signal_id = ?",
+            [queue_signal_id],
+        ).fetchone()
+        assert duck_row == ("pending", None)
 
     def test_latency_ms_recorded_for_pending_order(self, sqlite_conn, duckdb_conn, monitoring_conn):
         """fill_mode=never (OrderSentPendingError) でも latency_ms が記録される"""
@@ -651,7 +667,9 @@ class TestPositionEntriesOnFill:
             "SELECT entry_date FROM position_entries WHERE code = '9999'"
         ).fetchone()
         assert row is not None, "BUY 発注後に position_entries が挿入されるべき"
-        assert str(row[0]) == str(FILL_DATE), "entry_date は約定日（翌営業日）であるべき"
+        assert str(row[0]) == str(FILL_DATE), (
+            "entry_date は執行日（当日寄付で約定、#413）であるべき"
+        )
 
     def test_buy_signal_pending_inserts_position_entry(self, sqlite_conn, duckdb_conn):
         """BUY 発注保留（OrderSentPendingError）でも position_entries（SQLite）に entry_date が挿入される。"""
@@ -666,7 +684,9 @@ class TestPositionEntriesOnFill:
             "SELECT entry_date FROM position_entries WHERE code = '8888'"
         ).fetchone()
         assert row is not None, "発注保留（pending）後も position_entries が挿入されるべき"
-        assert str(row[0]) == str(FILL_DATE), "entry_date は約定日（翌営業日）であるべき"
+        assert str(row[0]) == str(FILL_DATE), (
+            "entry_date は執行日（当日寄付で約定、#413）であるべき"
+        )
 
     def test_buy_signal_idempotent(self, sqlite_conn, duckdb_conn):
         """同一 code/date の BUY を2回処理しても position_entries（SQLite）は1行のみ（冪等性）。"""
@@ -701,7 +721,7 @@ class TestPositionEntriesOnFill:
             "SELECT sell_date FROM position_entries WHERE code = '6666'"
         ).fetchone()
         assert row is not None
-        assert str(row[0]) == str(FILL_DATE), "sell_date は約定日（翌営業日）であるべき"
+        assert str(row[0]) == str(FILL_DATE), "sell_date は執行日（当日寄付で約定、#413）であるべき"
 
     def test_sell_signal_pending_does_not_update_sell_date(self, sqlite_conn, duckdb_conn):
         """SELL 発注保留（pending）では sell_date を書かない（ポジションはまだ保有中）。"""
@@ -777,3 +797,537 @@ class TestPositionEntriesOnFill:
         # 発注がスキップされて注文が0件であること
         orders = engine._repo.list_active()
         assert len(orders) == 0, "size_multiplier=0.0 適用後は発注がスキップされるべき"
+
+
+# ---------------------------------------------------------------------------
+# Issue #413: signal_queue ステータス遷移（SQLite signal_queue_status）
+# ---------------------------------------------------------------------------
+
+
+class _StatusAfterSendBroker(MockBrokerClient):
+    """send_order は受付（order_id 発行）し、直後の照会で指定 status を返すブローカー。"""
+
+    def __init__(self, post_status: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._post_status = post_status
+
+    def send_order(self, order):
+        from kabusys.execution.broker_api import OrderResponse, OrderStatus
+
+        order_id = self._next_order_id()
+        self._orders[order_id] = OrderStatus(
+            order_id=order_id,
+            code=order.code,
+            side=order.side,
+            qty=order.qty,
+            filled_qty=0,
+            status=self._post_status,
+            price=None,
+        )
+        return OrderResponse(order_id=order_id)
+
+
+def _status_row(sqlite_conn, queue_signal_id: str):
+    row = sqlite_conn.execute(
+        "SELECT status, reason, client_order_id FROM signal_queue_status WHERE queue_signal_id = ?",
+        [queue_signal_id],
+    ).fetchone()
+    return tuple(row) if row is not None else None
+
+
+QID = f"{TARGET_DATE}_1234_buy"  # _insert_target の既定 queue 行 ID
+
+
+def _add_queue_row(conn, qid: str, d: date, code: str = "1234") -> None:
+    conn.execute(
+        "INSERT INTO signal_queue (signal_id, date, code, side, size, order_type, price, status)"
+        " VALUES (?, ?, ?, 'buy', 100, 'limit', 1500.0, 'pending')",
+        [qid, d, code],
+    )
+
+
+class TestSignalQueueStatusTransitions:
+    def test_gate1_failure_records_failed_with_reason(self, sqlite_conn, duckdb_conn):
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        engine = _make_engine(MockBrokerClient(available_cash=0.0), sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        status, reason, coid = _status_row(sqlite_conn, QID)
+        assert status == "failed"
+        assert reason  # Gate 1 の理由
+        assert coid is None
+
+    def test_gate1_duplicate_records_cancelled_duplicate(self, sqlite_conn, duckdb_conn):
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0, signal_id="uuid-1")
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._process_signals()
+        # 同じ業務キーの別 queue 行（uuid 違い）を後から追加
+        _add_queue_row(duckdb_conn, "uuid-2", TARGET_DATE)
+
+        engine._process_signals()
+
+        assert _status_row(sqlite_conn, "uuid-2")[:2] == ("cancelled", "duplicate")
+        assert len(engine._repo.list_active()) == 1
+
+    def test_duplicate_order_error_records_cancelled_duplicate(self, sqlite_conn, duckdb_conn):
+        """Gate 1 を素通りしても create_order の DuplicateOrderError で cancelled/duplicate。"""
+        from kabusys.execution.risk_manager import RiskResult
+
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0, signal_id="uuid-1")
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._process_signals()
+        _add_queue_row(duckdb_conn, "uuid-2", TARGET_DATE)
+        engine._risk_manager.check_signal = lambda *a, **k: RiskResult(passed=True)
+
+        engine._process_signals()
+
+        assert _status_row(sqlite_conn, "uuid-2")[:2] == ("cancelled", "duplicate")
+        assert len(engine._repo.list_active()) == 1
+
+    def test_gate2_rate_limit_leaves_pending_and_retries_on_restart(self, sqlite_conn, duckdb_conn):
+        from kabusys.execution.risk_manager import RiskRejectReason, RiskResult
+
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._risk_manager.check_execution = lambda: RiskResult(
+            passed=False, reason="rate", reject_reason=RiskRejectReason.RATE_LIMIT
+        )
+
+        engine._process_signals()
+
+        assert _status_row(sqlite_conn, QID)[0] == "pending"
+        assert engine._repo.list_active() == []
+
+        # 同日中の再起動で再試行される（問題 4）
+        engine2 = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine2._process_signals()
+        assert len(engine2._repo.list_active()) == 1
+        assert _status_row(sqlite_conn, QID)[0] == "filled"
+
+    def test_gate2_circuit_breaker_leaves_pending(self, sqlite_conn, duckdb_conn):
+        from kabusys.execution.risk_manager import RiskRejectReason, RiskResult
+
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        engine = _make_engine(
+            MockBrokerClient(available_cash=5_000_000.0), sqlite_conn, duckdb_conn
+        )
+        engine._risk_manager.check_execution = lambda: RiskResult(
+            passed=False, reason="cb", reject_reason=RiskRejectReason.CIRCUIT_BREAKER
+        )
+
+        engine._process_signals()
+
+        assert _status_row(sqlite_conn, QID)[0] == "pending"
+        assert engine._repo.list_active() == []
+
+    def test_api_failure_records_failed_with_message(self, sqlite_conn, duckdb_conn):
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="reject")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        status, reason, coid = _status_row(sqlite_conn, QID)
+        assert status == "failed"
+        assert "fill_mode=reject" in reason
+        assert coid is not None
+
+    def test_sent_pending_records_processing(self, sqlite_conn, duckdb_conn):
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        status, reason, coid = _status_row(sqlite_conn, QID)
+        assert (status, reason) == ("processing", "sent_pending")
+        assert coid == engine._repo.list_active()[0].client_order_id
+
+    def test_filled_records_filled(self, sqlite_conn, duckdb_conn):
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        assert _status_row(sqlite_conn, QID)[:2] == ("filled", None)
+
+    def test_partial_fill_records_processing(self, sqlite_conn, duckdb_conn):
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="partial")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        assert _status_row(sqlite_conn, QID)[:2] == ("processing", None)
+
+    @pytest.mark.parametrize(
+        "post_status, expected",
+        [("rejected", ("failed", "rejected")), ("cancelled", ("cancelled", "cancelled"))],
+    )
+    def test_sync_after_send_maps_terminal_states(
+        self, sqlite_conn, duckdb_conn, post_status, expected
+    ):
+        """sync_order の結果が Rejected/Cancelled なら processing にしない（問題 2）。"""
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = _StatusAfterSendBroker(post_status, available_cash=5_000_000.0)
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        assert _status_row(sqlite_conn, QID)[:2] == expected
+
+    def test_push_fill_updates_status_to_filled(self, sqlite_conn, duckdb_conn):
+        """PUSH 経由の約定でも signal_queue_status が filled になる（問題 1）。"""
+        from kabusys.execution.broker_api import OrderStatus
+
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._process_signals()
+        assert _status_row(sqlite_conn, QID)[0] == "processing"
+        order = engine._repo.list_uncertain()[0]
+        broker._orders[order.broker_order_id] = OrderStatus(
+            order_id=order.broker_order_id,
+            code="1234",
+            side="buy",
+            qty=100,
+            filled_qty=100,
+            status="filled",
+            price=1500.0,
+        )
+
+        engine._push_queue.put({"OrderID": order.broker_order_id})
+        engine._drain_push_queue()
+
+        assert _status_row(sqlite_conn, QID)[:2] == ("filled", None)
+
+    def test_kill_switch_marks_cancelled(self, sqlite_conn, duckdb_conn):
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._process_signals()
+
+        engine.kill_switch()
+
+        assert _status_row(sqlite_conn, QID)[:2] == ("cancelled", "cancelled")
+
+    def test_status_write_failure_does_not_stop_order_flow(self, sqlite_conn, duckdb_conn):
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        sqlite_conn.execute("DROP TABLE signal_queue_status")
+        sqlite_conn.commit()
+
+        engine._process_signals()  # 例外を出さない
+
+        assert len(engine._repo.list_active()) == 1
+
+    def test_status_read_failure_aborts_signal_processing(self, sqlite_conn, duckdb_conn):
+        """処理済み判定が読めないときは発注しない（再起動時の二重発注防止を優先）。"""
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        with (
+            patch(
+                "kabusys.execution.execution_engine.sqs.get_statuses",
+                side_effect=sqlite3.OperationalError("database is locked"),
+            ),
+            pytest.raises(RuntimeError, match="signal_queue_status"),
+        ):
+            engine._process_signals()
+
+        assert broker._orders == {}
+
+
+class TestRestartDoesNotReprocess:
+    def test_processed_rows_are_not_reread(self, sqlite_conn, duckdb_conn):
+        """再起動時、SQLite で pending 以外の行は DuckDB 側が pending でも再読込しない。"""
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        _make_engine(broker, sqlite_conn, duckdb_conn)._process_signals()
+
+        engine2 = _make_engine(broker, sqlite_conn, duckdb_conn)
+        assert engine2._read_signals() == []
+
+    def test_rejected_order_is_not_reordered_after_restart(self, sqlite_conn, duckdb_conn):
+        """拒否（終端）注文は業務キー重複判定をすり抜けるが、status で再発注を防ぐ。"""
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        _make_engine(
+            MockBrokerClient(available_cash=5_000_000.0, fill_mode="reject"),
+            sqlite_conn,
+            duckdb_conn,
+        )._process_signals()
+
+        broker2 = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine2 = _make_engine(broker2, sqlite_conn, duckdb_conn)
+        engine2._process_signals()
+
+        assert broker2._orders == {}
+        assert engine2._repo.list_active() == []
+
+    def test_startup_sync_updates_processing_rows_from_orders(self, sqlite_conn, duckdb_conn):
+        """リコンシリエーション後、約定待ちだった行が注文の状態に合わせて更新される。"""
+        from kabusys.execution.broker_api import OrderStatus
+
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._process_signals()
+        order = engine._repo.list_uncertain()[0]
+        broker._orders[order.broker_order_id] = OrderStatus(
+            order_id=order.broker_order_id,
+            code="1234",
+            side="buy",
+            qty=100,
+            filled_qty=100,
+            status="filled",
+            price=1500.0,
+        )
+        # 再起動: リコンシリエーション（run_execution 側）で注文が Filled に同期される
+        engine._order_manager.sync_order(order.client_order_id)
+        assert _status_row(sqlite_conn, QID)[0] == "processing"
+
+        engine2 = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine2.sync_queue_statuses_from_orders()
+
+        assert _status_row(sqlite_conn, QID)[:2] == ("filled", None)
+
+    def test_run_session_syncs_statuses_after_reconcile(self, sqlite_conn, duckdb_conn, tmp_path):
+        broker = MockBrokerClient()
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._pid_file = tmp_path / "execution.pid"
+        with (
+            patch("kabusys.execution.execution_engine.settings") as mock_settings,
+            patch.object(engine, "_websocket_worker"),
+            patch.object(engine, "_process_signals"),
+            patch.object(engine, "_drain_push_queue"),
+            patch.object(engine, "sync_queue_statuses_from_orders") as mock_sync,
+        ):
+            mock_settings.kill_flag_path = tmp_path / "kill.flag"
+            engine._stop_event.set()
+            engine.run_session()
+
+        mock_sync.assert_called_once()
+
+
+class TestQueueDateAlignment:
+    def test_monday_reads_friday_rows_not_today(self, sqlite_conn, duckdb_conn):
+        _add_queue_row(duckdb_conn, "fri", date(2026, 3, 27), "1111")
+        _add_queue_row(duckdb_conn, "mon", date(2026, 3, 30), "2222")
+        engine = _make_engine(MockBrokerClient(), sqlite_conn, duckdb_conn)
+
+        assert engine.signal_date == date(2026, 3, 27)
+        assert [s["signal_id"] for s in engine._read_signals()] == ["fri"]
+
+    def test_signal_date_defaults_to_prev_trading_day_with_calendar(self, sqlite_conn, duckdb_conn):
+        duckdb_conn.execute(
+            "CREATE TABLE market_calendar (date DATE PRIMARY KEY, is_trading_day BOOLEAN)"
+        )
+        # 2026-04-01(水) 執行 / 2026-03-31(火) は休場扱い → signal_date は 03-30(月)
+        duckdb_conn.execute(
+            "INSERT INTO market_calendar VALUES ('2026-03-30', true), ('2026-03-31', false),"
+            " ('2026-04-01', true)"
+        )
+        engine = _make_engine(
+            MockBrokerClient(),
+            sqlite_conn,
+            duckdb_conn,
+            config=EngineConfig(target_date=date(2026, 4, 1)),
+        )
+        assert engine.signal_date == date(2026, 3, 30)
+
+    def test_explicit_signal_date_overrides_default(self, sqlite_conn, duckdb_conn):
+        _add_queue_row(duckdb_conn, "today", EXEC_DATE, "2222")
+        engine = _make_engine(
+            MockBrokerClient(),
+            sqlite_conn,
+            duckdb_conn,
+            config=EngineConfig(target_date=EXEC_DATE, signal_date=EXEC_DATE),
+        )
+        assert [s["signal_id"] for s in engine._read_signals()] == ["today"]
+
+    def test_business_key_uses_signal_date_and_fill_date_is_exec_date(
+        self, sqlite_conn, duckdb_conn
+    ):
+        _add_queue_row(duckdb_conn, "fri", TARGET_DATE, "1111")
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        order = engine._repo.list_active()[0]
+        assert order.signal_id == "2026-03-27_1111_buy"
+        row = sqlite_conn.execute(
+            "SELECT entry_date FROM position_entries WHERE code = '1111'"
+        ).fetchone()
+        assert row[0] == "2026-03-30"
+
+
+class TestReadOnlyDuckDB:
+    def test_engine_runs_on_read_only_duckdb(self, sqlite_conn, tmp_path):
+        """DuckDB を read_only で開いてもエンジンが発注まで動く（問題 6）。"""
+        path = tmp_path / "ro.duckdb"
+        rw = duckdb.connect(str(path))
+        rw.execute(
+            "CREATE TABLE signals (date DATE, code VARCHAR, side VARCHAR, score FLOAT,"
+            " signal_rank INTEGER, size_multiplier DOUBLE NOT NULL DEFAULT 1.0)"
+        )
+        rw.execute(
+            "CREATE TABLE signal_queue (signal_id VARCHAR PRIMARY KEY, date DATE NOT NULL,"
+            " code VARCHAR NOT NULL, side VARCHAR NOT NULL, size BIGINT NOT NULL,"
+            " order_type VARCHAR NOT NULL, price DECIMAL(18,4),"
+            " status VARCHAR NOT NULL DEFAULT 'pending', processed_at TIMESTAMP)"
+        )
+        rw.execute(
+            "INSERT INTO signal_queue (signal_id, date, code, side, size, order_type, price)"
+            " VALUES ('q1', ?, '1234', 'buy', 100, 'limit', 1500.0)",
+            [TARGET_DATE],
+        )
+        rw.close()
+
+        ro = duckdb.connect(str(path), read_only=True)
+        try:
+            broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="instant")
+            engine = _make_engine(broker, sqlite_conn, ro)
+            engine._process_signals()
+
+            assert len(engine._repo.list_active()) == 1
+            assert _status_row(sqlite_conn, "q1")[0] == "filled"
+            assert ro.execute("SELECT status FROM signal_queue").fetchone()[0] == "pending"
+        finally:
+            ro.close()
+
+
+# ---------------------------------------------------------------------------
+# Issue #413 fix round 1
+# ---------------------------------------------------------------------------
+
+
+class TestSignalProcessingFailureKeepsSession:
+    """I1: シグナル処理の例外でセッションを落とさず、発注だけ止めて push/Gate 3 は継続する。"""
+
+    def _run(self, engine, tmp_path):
+        engine._pid_file = tmp_path / "execution.pid"
+        drained = []
+        with (
+            patch("kabusys.execution.execution_engine.settings") as mock_settings,
+            patch.object(engine, "_websocket_worker"),
+            patch.object(
+                engine,
+                "_process_signals",
+                side_effect=RuntimeError("signal_queue_status read failed"),
+            ),
+            patch.object(
+                engine,
+                "_drain_push_queue",
+                side_effect=lambda: (drained.append(1), engine._stop_event.set()),
+            ),
+            patch.object(engine._config, "signal_send_start", time(0, 0)),
+            patch.object(engine._config, "signal_send_end", time(23, 59, 59)),
+            patch.object(engine._config, "market_close", time(23, 59, 59)),
+        ):
+            mock_settings.kill_flag_path = tmp_path / "kill.flag"
+            engine.run_session()  # 例外を外に出さない
+        return drained
+
+    def test_failure_logged_flagged_and_drain_continues(self, sqlite_conn, duckdb_conn, tmp_path):
+        engine = _make_engine(MockBrokerClient(), sqlite_conn, duckdb_conn)
+        drained = self._run(engine, tmp_path)
+        assert engine.signal_processing_failed is True
+        assert drained, "push ドレインループ（Gate 3）は継続するべき"
+
+    def test_failure_sends_notification(self, sqlite_conn, duckdb_conn, tmp_path):
+        from unittest.mock import MagicMock
+
+        engine = _make_engine(MockBrokerClient(), sqlite_conn, duckdb_conn)
+        notifier = MagicMock()
+        engine._notifier = notifier
+        self._run(engine, tmp_path)
+        notifier.send.assert_called_once()
+        assert "signal_queue_status read failed" in notifier.send.call_args.args[0]
+
+    def test_notification_failure_is_swallowed(self, sqlite_conn, duckdb_conn, tmp_path):
+        from unittest.mock import MagicMock
+
+        engine = _make_engine(MockBrokerClient(), sqlite_conn, duckdb_conn)
+        engine._notifier = MagicMock()
+        engine._notifier.send.side_effect = RuntimeError("LINE down")
+        self._run(engine, tmp_path)
+        assert engine.signal_processing_failed is True
+
+    def test_flag_false_on_normal_session(self, sqlite_conn, duckdb_conn):
+        engine = _make_engine(MockBrokerClient(), sqlite_conn, duckdb_conn)
+        assert engine.signal_processing_failed is False
+
+
+class TestQtyZeroAndOrphanProcessing:
+    def test_qty_zero_records_cancelled(self, sqlite_conn, duckdb_conn):
+        """Minor 1: size_multiplier 適用後 qty=0 のスキップは cancelled/qty_zero。"""
+        duckdb_conn.execute(
+            "INSERT INTO signals (date, code, side, score, signal_rank, size_multiplier)"
+            " VALUES (?, '4444', 'buy', 0.8, 1, 0.0)",
+            [TARGET_DATE],
+        )
+        _insert_target(duckdb_conn, "4444", qty=50, price=1000.0)
+        engine = _make_engine(MockBrokerClient(), sqlite_conn, duckdb_conn)
+
+        engine._process_signals()
+
+        assert _status_row(sqlite_conn, f"{TARGET_DATE}_4444_buy")[:2] == (
+            "cancelled",
+            "qty_zero",
+        )
+
+    def test_orphan_processing_row_logs_error(self, sqlite_conn, duckdb_conn, caplog):
+        """Minor 5: client_order_id なし・注文なしの processing 行は起動時に ERROR ログ。"""
+        sqs.ensure_schema(sqlite_conn)
+        sqs.record(
+            sqlite_conn,
+            queue_signal_id="orphan",
+            signal_date=TARGET_DATE,
+            code="1234",
+            side="buy",
+            status="processing",
+        )
+        engine = _make_engine(MockBrokerClient(), sqlite_conn, duckdb_conn)
+        with caplog.at_level("ERROR", logger="kabusys.execution.execution_engine"):
+            engine.sync_queue_statuses_from_orders()
+        assert any("orphan" in r.getMessage() for r in caplog.records if r.levelname == "ERROR")
+
+    def test_processing_row_with_existing_order_not_reported(
+        self, sqlite_conn, duckdb_conn, caplog
+    ):
+        _insert_signal(duckdb_conn, "1234")
+        _insert_target(duckdb_conn, "1234", qty=100, price=1500.0)
+        broker = MockBrokerClient(available_cash=5_000_000.0, fill_mode="never")
+        engine = _make_engine(broker, sqlite_conn, duckdb_conn)
+        engine._process_signals()
+        # client_order_id が無い processing 行だが、業務キーの注文は存在する
+        sqlite_conn.execute("UPDATE signal_queue_status SET client_order_id = NULL")
+        sqlite_conn.commit()
+        with caplog.at_level("ERROR", logger="kabusys.execution.execution_engine"):
+            engine.sync_queue_statuses_from_orders()
+        assert not [r for r in caplog.records if r.levelname == "ERROR"]

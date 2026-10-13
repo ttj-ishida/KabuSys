@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -185,6 +186,100 @@ def test_portfolio_construction_no_signals_exits_0(tmp_path: Path):
     ):
         _mock_paper_settings(mock_settings, tmp_path)
         run_portfolio_construction.main()  # SystemExit が起きないこと
+
+
+# ---------- Issue #413: signal_queue_status の夜間同期 ----------
+
+
+def test_sync_signal_queue_status_updates_duckdb(tmp_path: Path):
+    """SQLite signal_queue_status の非 pending 行を DuckDB signal_queue に反映する。"""
+    import sqlite3
+    from datetime import date
+
+    import duckdb
+    import run_portfolio_construction
+
+    from kabusys.execution import signal_queue_status as sqs
+
+    sqlite_path = tmp_path / "paper.db"
+    sconn = sqlite3.connect(str(sqlite_path))
+    sqs.ensure_schema(sconn)
+    for qid, status in (("q-filled", "filled"), ("q-pending", "pending")):
+        sqs.record(
+            sconn,
+            queue_signal_id=qid,
+            signal_date=date(2026, 3, 27),
+            code="1234",
+            side="buy",
+            status=status,
+        )
+    sconn.close()
+
+    dconn = duckdb.connect(":memory:")
+    dconn.execute(
+        "CREATE TABLE signal_queue (signal_id VARCHAR, status VARCHAR, processed_at TIMESTAMP)"
+    )
+    dconn.execute("INSERT INTO signal_queue VALUES ('q-filled', 'pending', NULL)")
+    dconn.execute("INSERT INTO signal_queue VALUES ('q-pending', 'pending', NULL)")
+
+    settings = MagicMock()
+    settings.is_paper = True
+    settings.paper_sqlite_path = sqlite_path
+
+    n = run_portfolio_construction._sync_signal_queue_status(dconn, settings)
+
+    assert n == 1
+    rows = dict(dconn.execute("SELECT signal_id, status FROM signal_queue").fetchall())
+    assert rows == {"q-filled": "filled", "q-pending": "pending"}
+
+
+def test_sync_signal_queue_status_missing_sqlite_is_noop(tmp_path: Path):
+    import run_portfolio_construction
+
+    mock_conn = MagicMock()
+    settings = MagicMock()
+    settings.is_paper = False
+    settings.sqlite_path = tmp_path / "missing.db"
+
+    assert run_portfolio_construction._sync_signal_queue_status(mock_conn, settings) == 0
+    mock_conn.execute.assert_not_called()
+    assert not (tmp_path / "missing.db").exists()
+
+
+def test_sync_signal_queue_status_failure_only_warns(tmp_path: Path):
+    import sqlite3
+
+    import run_portfolio_construction
+
+    sqlite_path = tmp_path / "prod.db"
+    sqlite3.connect(str(sqlite_path)).close()
+    settings = MagicMock()
+    settings.is_paper = False
+    settings.sqlite_path = sqlite_path
+
+    with patch("run_portfolio_construction.sync_to_duckdb", side_effect=RuntimeError("boom")):
+        assert run_portfolio_construction._sync_signal_queue_status(MagicMock(), settings) == 0
+
+
+def test_portfolio_construction_calls_status_sync_first(tmp_path: Path):
+    import run_portfolio_construction
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchall.return_value = []
+    mock_cursor.description = [("code",), ("side",), ("score",), ("signal_rank",)]
+    mock_conn.execute.return_value = mock_cursor
+
+    with (
+        patch("run_portfolio_construction.Settings") as mock_settings,
+        patch("run_portfolio_construction.duckdb.connect", return_value=mock_conn),
+        patch("run_portfolio_construction._sync_signal_queue_status") as mock_sync,
+    ):
+        _mock_paper_settings(mock_settings, tmp_path)
+        run_portfolio_construction.main()
+
+    mock_sync.assert_called_once()
+    assert mock_sync.call_args.args[0] is mock_conn
 
 
 # ---------- _calc_paper_portfolio_value ----------
@@ -591,3 +686,252 @@ def test_run_edinet_collection_exits_when_api_key_missing():
 
     assert exc_info.value.code == 1
     mock_fn.assert_not_called()
+
+
+# ---------- Issue #413 fix round 1: 夜間バッチの --date 再実行 ----------
+
+
+def test_run_strategy_signal_date_arg_is_used():
+    """I2: 翌朝の再実行用に --date で対象日（前営業日）を指定できる。"""
+    from datetime import date
+
+    import run_strategy_signal
+
+    with (
+        patch("run_strategy_signal.Settings") as mock_settings,
+        patch("run_strategy_signal.duckdb.connect"),
+        patch("run_strategy_signal.sqlite3.connect"),
+        patch("run_strategy_signal.init_position_entries_db"),
+        patch("run_strategy_signal.init_monitoring_db"),
+        patch("run_strategy_signal.MonitoringDB") as mock_mdb,
+        patch("run_strategy_signal.run_manual_signal_step", return_value=(0, 0)) as mock_step,
+        patch("run_strategy_signal._print_signal_report"),
+    ):
+        mock_settings.return_value.manual_trading_enabled = False
+        mock_mdb.return_value.get_dashboard.return_value = None
+        run_strategy_signal.main(["--date", "2026-03-27"])
+
+    assert mock_step.call_args.args[1] == date(2026, 3, 27)
+
+
+def test_run_strategy_signal_default_date_is_today():
+    from datetime import date
+
+    import run_strategy_signal
+
+    assert run_strategy_signal._parse_args([]).date == date.today()
+    assert run_strategy_signal._parse_args(["--date", "2026-03-27"]).date == date(2026, 3, 27)
+    with pytest.raises(SystemExit):
+        run_strategy_signal._parse_args(["--date", "2026/03/27"])
+
+
+def test_portfolio_construction_date_arg_is_used(tmp_path: Path):
+    """I2: --date 指定時は signals 読み込み・signal_queue 書き込みがその日付になる。"""
+    from datetime import date
+
+    import run_portfolio_construction
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchall.return_value = []
+    mock_cursor.description = [("code",), ("side",), ("score",), ("signal_rank",)]
+    mock_conn.execute.return_value = mock_cursor
+
+    with (
+        patch("run_portfolio_construction.Settings") as mock_settings,
+        patch("run_portfolio_construction.duckdb.connect", return_value=mock_conn),
+        patch("run_portfolio_construction._sync_signal_queue_status"),
+    ):
+        _mock_paper_settings(mock_settings, tmp_path)
+        run_portfolio_construction.main(["--date", "2026-03-27"])
+
+    date_params = [
+        c.args[1]
+        for c in mock_conn.execute.call_args_list
+        if len(c.args) > 1 and "signals" in str(c.args[0])
+    ]
+    assert date_params and all(date(2026, 3, 27) in p for p in date_params)
+
+
+def test_portfolio_construction_default_date_is_today():
+    from datetime import date
+
+    import run_portfolio_construction
+
+    assert run_portfolio_construction._parse_args([]).date == date.today()
+    assert run_portfolio_construction._parse_args(["--date", "2026-03-27"]).date == date(
+        2026, 3, 27
+    )
+
+
+# ---------- Issue #413 fix round 1: run_signal_queue_report の既定日付 ----------
+
+
+def _run_sq_report(argv):
+    from datetime import date
+
+    import run_signal_queue_report
+
+    with (
+        patch("run_signal_queue_report.Settings"),
+        patch("run_signal_queue_report.duckdb.connect"),
+        patch("run_signal_queue_report.register_process", return_value=None),
+        patch("run_signal_queue_report.collect_signals", return_value=[]) as mock_collect,
+        patch("run_signal_queue_report.build_report") as mock_build,
+        patch("run_signal_queue_report.save_report"),
+        patch("run_signal_queue_report.format_cli_summary", return_value=""),
+        patch("run_signal_queue_report.build_notifier"),
+        patch("run_signal_queue_report.format_signal_queue_message", return_value=""),
+        patch(
+            "run_signal_queue_report.prev_trading_day", return_value=date(2026, 3, 27)
+        ) as mock_prev,
+    ):
+        mock_build.return_value.status = "READY"
+        run_signal_queue_report.main(argv)
+    return mock_collect, mock_prev
+
+
+def test_signal_queue_report_defaults_to_prev_trading_day():
+    """Minor 2: 08:02 のレポートは前営業日（夜間バッチ日）の signal_queue を読む。"""
+    from datetime import date
+
+    mock_collect, mock_prev = _run_sq_report([])
+    mock_prev.assert_called_once()
+    assert mock_prev.call_args.args[1] == date.today()
+    assert mock_collect.call_args.args[1] == date(2026, 3, 27)
+
+
+def test_signal_queue_report_date_arg():
+    from datetime import date
+
+    mock_collect, mock_prev = _run_sq_report(["--date", "2026-03-20"])
+    mock_prev.assert_not_called()
+    assert mock_collect.call_args.args[1] == date(2026, 3, 20)
+
+
+# ---------- Issue #413 fix round 2: --date 指定時の価格参照を target_date 以前に限定 ----------
+
+
+def _price_db():
+    import duckdb
+
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE prices_daily (date DATE, code VARCHAR, close DOUBLE)")
+    conn.execute(
+        "INSERT INTO prices_daily VALUES"
+        " ('2026-03-26', '7203', 900.0), ('2026-03-27', '7203', 1000.0),"
+        " ('2026-03-30', '7203', 2000.0)"  # target_date より後（未来）の行
+    )
+    return conn
+
+
+def test_fetch_close_prices_ignores_rows_after_target_date():
+    from datetime import date
+
+    import run_portfolio_construction
+
+    conn = _price_db()
+    prices = run_portfolio_construction._fetch_close_prices(conn, ["7203"], date(2026, 3, 27))
+    assert prices == {"7203": 1000.0}
+
+
+def test_calc_paper_portfolio_value_uses_price_as_of_target_date(tmp_path: Path):
+    import sqlite3
+    from datetime import date
+
+    import run_portfolio_construction
+
+    db_path = tmp_path / "paper_trading.db"
+    with sqlite3.connect(str(db_path)) as db:
+        db.execute(
+            "CREATE TABLE orders (side TEXT, code TEXT, filled_qty INTEGER, avg_fill_price REAL)"
+        )
+        db.execute("INSERT INTO orders VALUES ('buy', '7203', 100, 800.0)")
+    settings = MagicMock()
+    settings.paper_trading_initial_cash = 1_000_000.0
+    settings.paper_sqlite_path = db_path
+
+    pv, _ = run_portfolio_construction._calc_paper_portfolio_value(
+        settings, _price_db(), as_of=date(2026, 3, 27)
+    )
+
+    # 現金 920,000 + 100 × 1,000（3/27 終値。3/30 の 2,000 は使わない）
+    assert pv == pytest.approx(1_020_000.0)
+
+
+def test_calc_live_portfolio_value_uses_equity_as_of_target_date():
+    from datetime import date
+
+    import duckdb
+    import run_portfolio_construction
+
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE portfolio_performance (date DATE, env VARCHAR, equity DOUBLE)")
+    conn.execute(
+        "INSERT INTO portfolio_performance VALUES"
+        " ('2026-03-27', 'live', 5000000.0), ('2026-03-30', 'live', 9000000.0)"
+    )
+    settings = MagicMock()
+    settings.portfolio_value = 1_000_000.0
+    with patch("kabusys.execution.kabu_client.KabuStationClient", side_effect=RuntimeError):
+        pv, _ = run_portfolio_construction._calc_live_portfolio_value(
+            settings, conn, as_of=date(2026, 3, 27)
+        )
+    assert pv == pytest.approx(5_000_000.0)
+
+
+def test_portfolio_construction_passes_target_date_to_valuation(tmp_path: Path):
+    from datetime import date
+
+    import run_portfolio_construction
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchall.return_value = []
+    mock_cursor.description = [("code",), ("side",), ("score",), ("signal_rank",)]
+    mock_conn.execute.return_value = mock_cursor
+
+    with (
+        patch("run_portfolio_construction.Settings") as mock_settings,
+        patch("run_portfolio_construction.duckdb.connect", return_value=mock_conn),
+        patch("run_portfolio_construction._sync_signal_queue_status"),
+        patch(
+            "run_portfolio_construction._calc_paper_portfolio_value",
+            return_value=(1_000_000.0, 1_000_000.0),
+        ) as mock_calc,
+    ):
+        _mock_paper_settings(mock_settings, tmp_path)
+        run_portfolio_construction.main(["--date", "2026-03-27"])
+
+    assert mock_calc.call_args.kwargs["as_of"] == date(2026, 3, 27)
+
+
+def test_portfolio_construction_sizing_prices_bounded_by_target_date(tmp_path: Path):
+    """サイジング用終値クエリにも target_date が渡る。"""
+    from datetime import date
+
+    import run_portfolio_construction
+
+    with (
+        patch("run_portfolio_construction._fetch_close_prices", return_value={}) as mock_fetch,
+    ):
+        mock_conn = MagicMock()
+        signals_cur = MagicMock()
+        signals_cur.fetchall.return_value = [("7203", "buy", 0.8, 1)]
+        signals_cur.description = [("code",), ("side",), ("score",), ("signal_rank",)]
+        mock_conn.execute.return_value = signals_cur
+        with (
+            patch("run_portfolio_construction.Settings") as mock_settings,
+            patch("run_portfolio_construction.duckdb.connect", return_value=mock_conn),
+            patch("run_portfolio_construction._sync_signal_queue_status"),
+            patch(
+                "run_portfolio_construction._calc_paper_portfolio_value",
+                return_value=(1_000_000.0, 1_000_000.0),
+            ),
+        ):
+            _mock_paper_settings(mock_settings, tmp_path)
+            # MagicMock 接続のため後段（サイジング以降）は失敗し得る。価格参照の引数だけ確認する
+            with contextlib.suppress(SystemExit):
+                run_portfolio_construction.main(["--date", "2026-03-27"])
+
+    assert mock_fetch.call_args.args[2] == date(2026, 3, 27)

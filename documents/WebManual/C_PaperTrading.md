@@ -104,16 +104,20 @@ python -m kabusys.validate_config
 夜間バッチの代わりに、手動でダミーシグナルを入れます。
 
 ```powershell
-# 例: トヨタ（7203）を 100 株 BUY するシグナルを「今日の日付」で注入
-python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100 --date 2026-05-28
+# 例: トヨタ（7203）を 100 株 BUY するシグナルを注入（--date 省略時は「今日の前営業日」）
+python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100
 ```
 
-> `--date` は今日の日付を入力してください（`YYYY-MM-DD` 形式）。
+> Execution Engine は「執行日（今日）の前営業日」の日付の `signal_queue` 行を読みます。
+> `--date` を省略すると前営業日の日付で入るので、今日の執行でそのまま拾われます。
+> また、21:00 の夜間バッチ（当日日付の pending 行を削除）にも消されません。
+> 同じ銘柄・売買方向を入れ直すときは `--force`（新しい signal_id で再注入されます）。
 
-シグナルが入ったか確認します。
+シグナルが入ったか確認します（`--date` には注入時に表示された日付＝前営業日を指定）。
 
 ```powershell
-python -m kabusys.run_signal_queue_report
+# 例: 今日が 2026-05-28（木）なら前営業日は 2026-05-27
+python -m kabusys.run_signal_queue_report --date 2026-05-27
 ```
 
 `pending` 状態で表示されれば成功です。
@@ -123,6 +127,11 @@ python -m kabusys.run_signal_queue_report
 ```powershell
 # .env に KABUSYS_ENV=paper_trading が設定済みの場合
 python -m kabusys.run_execution
+
+# 別の日付の signal_queue 行を読ませたい場合（検証用）
+python -m kabusys.run_execution --signal-date 2026-05-27
+# ※ 上書きはコマンドライン引数のみ（環境変数・.env では指定できない）。
+#   既定（前営業日）と異なる日付を指定すると WARNING ログと朝の LINE 通知に表示される
 ```
 
 起動すると、Signal Queue の `pending` シグナルを処理し始めます。ログに注文・約定の記録が流れれば正常動作しています。
@@ -148,45 +157,41 @@ python scripts/stop_system.py
 
 ### 日付のルール（ハマりやすいポイント）
 
-`inject_dummy_signal` と `run_signal_queue_report` でデフォルトの日付が異なります。
+`signal_queue.date` は「夜間バッチを実行した日（シグナル日）」で、Execution Engine は
+**執行日（今日）の前営業日** の行を読みます（Issue #413）。
 
-| コマンド | `--date` 省略時のデフォルト |
+| コマンド | 日付の省略時のデフォルト |
 |---|---|
-| `inject_dummy_signal` | **翌営業日** |
-| `run_signal_queue_report` | **今日** |
+| `inject_dummy_signal --date` | **今日の前営業日**（今日の執行で読まれる） |
+| `run_execution --signal-date`（CLI のみ） | **今日の前営業日** |
+| `scripts/run_signal_queue_report.py --date`（08:02 自動） | **今日の前営業日** |
+| `python -m kabusys.run_signal_queue_report --date` | **今日**（手動確認時は前営業日を明示） |
 
-`--date` を省略して注入した直後にレポートを実行すると日付がずれて **EMPTY** になります。**迷ったら両方に同じ日付を明示してください。**
+`python -m kabusys.run_signal_queue_report` を `--date` なしで実行すると日付がずれて **EMPTY** になります。**迷ったら注入とレポートに同じ日付を明示してください。**
 
 ### よく使うパターン
 
-**今日すぐ確認したい（推奨：初回テスト時）**
+**今日すぐ執行させたい（推奨：初回テスト時）**
 
 ```powershell
-# 今日の日付でシグナルを注入（日付は今日に合わせること）
+# 前営業日の日付で注入（--date 省略でよい。例: 今日が 2026-05-28 なら 2026-05-27）
+python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100
+
+# レポートで確認（注入時に表示された日付を指定）
+python -m kabusys.run_signal_queue_report --date 2026-05-27
+
+# 今日の執行で拾われる
+python -m kabusys.run_execution
+```
+
+**夜に注入して翌営業日の朝に執行させたい**
+
+```powershell
+# 夜：今日（翌営業日から見た前営業日）の日付を明示して注入
+# ※ 21:00 の夜間バッチは当日日付の pending 行を削除するため、夜間バッチ後に注入すること
 python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100 --date 2026-05-28
 
-# レポートで確認（date.today() = 今日なのでそのまま実行でよい）
-python -m kabusys.run_signal_queue_report
-```
-
-**夜間に注入して翌朝確認する（本来の用途）**
-
-```powershell
-# 夜間：翌営業日向けシグナルを注入（--date 省略でよい）
-python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100
-
-# 翌朝：日付が変わった後にそのまま実行
-python -m kabusys.run_signal_queue_report
-```
-
-**夜間に注入してすぐ翌営業日のレポートも確認したい**
-
-```powershell
-# 翌営業日で注入
-python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100
-
-# レポートにも翌営業日を明示（例: 明日が 2026-05-29 の場合）
-python -m kabusys.run_signal_queue_report --date 2026-05-29
+# 翌朝：08:02 の自動レポート（scripts/run_signal_queue_report.py）は前営業日を読むのでそのまま確認できる
 ```
 
 ### コマンド一覧
@@ -201,7 +206,7 @@ python -m kabusys.tools.inject_dummy_signal --code 7203 --side SELL --qty 100
 # 日付を明示して注入
 python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --qty 100 --date 2026-05-28
 
-# 既存シグナルを上書き
+# 既存シグナルを入れ直す（新しい signal_id で再注入。処理済み記録に読み飛ばされない）
 python -m kabusys.tools.inject_dummy_signal --code 7203 --side BUY --force
 
 # 特定日付のシグナルをレポートで確認

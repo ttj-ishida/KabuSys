@@ -7,6 +7,7 @@ data/paper_trading.db に記録する（本番 DB と完全分離）。
 
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sqlite3
@@ -18,6 +19,8 @@ import duckdb
 import yaml
 
 from kabusys.config import Settings
+from kabusys.data.calendar_management import prev_trading_day
+from kabusys.execution import signal_queue_status
 from kabusys.execution.broker_api import Position
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -58,10 +61,43 @@ def _env_time(name: str, default: time) -> time:
         raise ValueError(f"{name} must be HH:MM or HH:MM:SS, got {raw!r}") from exc
 
 
-def _count_pending_signals(conn: duckdb.DuckDBPyConnection, target_date: date) -> int:
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="ExecutionEngine を起動する")
+    parser.add_argument(
+        "--signal-date",
+        default=None,
+        metavar="YYYY-MM-DD",
+        help=(
+            "読み込む signal_queue の日付（省略時: 今日の前営業日）。Paper E2E・"
+            "ダミーシグナル検証用。環境変数では指定できない（.env への置き忘れで"
+            "毎日の自動発注が止まるのを防ぐため）"
+        ),
+    )
+    # argv=None はテスト等からの直接呼び出し。CLI 引数は __main__ から明示的に渡す。
+    return parser.parse_args(argv if argv is not None else [])
+
+
+def _resolve_signal_date(
+    conn: duckdb.DuckDBPyConnection, today: date, cli_value: str | None
+) -> date:
+    """読み込む signal_queue の日付を決める（CLI --signal-date > prev_trading_day(today)）。
+
+    上書きは CLI 引数のみ受け付ける。環境変数は .env 経由で残り続け、
+    毎日の自動発注を黙って止める恐れがあるため使わない。
+    """
+    if cli_value:
+        try:
+            return date.fromisoformat(cli_value.strip())
+        except ValueError as exc:
+            raise ValueError(f"--signal-date must be YYYY-MM-DD, got {cli_value!r}") from exc
+    return prev_trading_day(conn, today)
+
+
+def _count_pending_signals(conn: duckdb.DuckDBPyConnection, signal_date: date) -> int:
+    """signal_date（前営業日の夜間バッチ日）の pending 件数を返す。"""
     row = conn.execute(
         "SELECT COUNT(*) FROM signal_queue WHERE date = ? AND status = 'pending'",
-        [target_date],
+        [signal_date],
     ).fetchone()
     return int(row[0]) if row else 0
 
@@ -247,7 +283,8 @@ _APP_NAME = "execution"
 _JOB_NAME = "execution_job"
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    args = _parse_args(argv)
     _run_log = setup_logging(app_name=_APP_NAME, capture_stdio=True)
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
@@ -268,7 +305,10 @@ def main() -> None:
     sqlite_conn = sqlite3.connect(str(sqlite_path), timeout=30.0, check_same_thread=False)
     init_monitoring_db(sqlite_conn)  # 監視テーブルが存在することを保証（冪等）
     init_position_entries_db(sqlite_conn)  # position_entries テーブルが存在することを保証（冪等）
-    duckdb_conn = duckdb.connect(str(settings.duckdb_path))
+    # signal_queue の処理状態は SQLite に記録する（Issue #413）
+    signal_queue_status.ensure_schema(sqlite_conn)
+    # DuckDB は read_only で開く（エンジンは DuckDB に書かない。他プロセスの読み取りと共存）
+    duckdb_conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
 
     try:
         # 3. ブローカークライアント（paper mode は前回状態を復元）
@@ -309,6 +349,18 @@ def main() -> None:
 
         # 起動時リコンシリエーション + Execution Startup Summary 生成
         today = date.today()
+        # 読み込む signal_queue の日付 = 前営業日（夜間バッチ日）。CLI --signal-date で上書き可
+        default_signal_date = prev_trading_day(duckdb_conn, today)
+        signal_date = _resolve_signal_date(duckdb_conn, today, args.signal_date)
+        signal_date_note: str | None = None
+        if signal_date != default_signal_date:
+            signal_date_note = f"signal_date 上書き: {signal_date}（既定 {default_signal_date}）"
+            logger.warning(
+                "--signal-date により signal_date=%s を読みます（既定の前営業日は %s）",
+                signal_date,
+                default_signal_date,
+            )
+        logger.info("執行日=%s, signal_date=%s", today, signal_date)
         reconcile_result = reconciler.run()
         _report = None
         try:
@@ -321,10 +373,18 @@ def main() -> None:
                 exc_info=True,
             )
 
-        # 朝の LINE 通知（失敗しても起動を継続する）
+        # 通知（LINE 等）。生成に失敗しても起動を継続する
+        notifier = None
         try:
             notifier = build_notifier(settings)
-            pending_count = _count_pending_signals(duckdb_conn, today)
+        except Exception:
+            logger.warning("通知の初期化に失敗しました（起動を続行します）", exc_info=True)
+
+        # 朝の LINE 通知（失敗しても起動を継続する）
+        try:
+            if notifier is None:
+                raise RuntimeError("notifier unavailable")
+            pending_count = _count_pending_signals(duckdb_conn, signal_date)
             status = _report.status if _report is not None else "UNKNOWN"
             orders_no_status = _report.orders_no_status if _report is not None else 0
             msg = format_morning_message(
@@ -333,6 +393,8 @@ def main() -> None:
                 pending_count=pending_count,
                 report_date=today.isoformat(),
             )
+            if signal_date_note is not None:
+                msg += "\n⚠ " + signal_date_note
             notifier.send(msg)
         except Exception:
             logger.warning("朝の LINE 通知に失敗しました（起動を続行します）", exc_info=True)
@@ -348,6 +410,7 @@ def main() -> None:
             sqlite_conn=sqlite_conn,
             config=EngineConfig(
                 target_date=today,
+                signal_date=signal_date,
                 signal_send_start=_env_time("KABUSYS_SIGNAL_SEND_START", time(8, 50)),
                 signal_send_end=_env_time("KABUSYS_SIGNAL_SEND_END", time(9, 10)),
                 market_close=_env_time("KABUSYS_MARKET_CLOSE", time(15, 30)),
@@ -355,6 +418,7 @@ def main() -> None:
             reconciler=None,
             pid_file=_EXECUTION_PID,
             monitoring_db=monitoring_db,
+            notifier=notifier,
         )
         # 停止フラグが既に立っている場合は起動せず終了
         if _STOP_FLAG.exists():
@@ -371,6 +435,11 @@ def main() -> None:
                 break
             thread.join(timeout=1.0)
         thread.join(timeout=30.0)
+        if engine.signal_processing_failed is True:
+            # シグナル処理が例外で中断された日はジョブ失敗として終了する（Issue #413）
+            logger.critical("本日のシグナル処理は失敗しました。ジョブを failed で終了します。")
+            log_run_end(_APP_NAME, status="failed", started_at=started_at)
+            raise SystemExit(1)
         log_run_end(_APP_NAME, status="success", started_at=started_at)
         _exec_status = "success"
     except Exception:
@@ -387,4 +456,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    main(sys.argv[1:])

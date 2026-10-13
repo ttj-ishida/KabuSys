@@ -2,8 +2,9 @@
 
 Signal Queue Report の生成ランナー（Task Scheduler 用）。
 
-毎朝 08:02 に自動実行し、当日の pending シグナルをレポート・保存した上で LINE 通知を送信する。
-手動実行も可能（引数なし）。
+毎朝 08:02 に自動実行し、当日執行分の pending シグナルをレポート・保存した上で LINE 通知を送信する。
+signal_queue は夜間バッチ日の日付で書かれるため、既定では前営業日（prev_trading_day(today)）の
+行を対象にする（Issue #413）。`--date YYYY-MM-DD` で対象日を指定できる。
 
 Task Scheduler 登録:
     KabuSys_SignalQueueReport  08:02  -> scripts/run_signal_queue_report.py
@@ -11,6 +12,7 @@ Task Scheduler 登録:
 
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 from datetime import date, datetime, timezone
@@ -20,6 +22,7 @@ import duckdb
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from kabusys.config import Settings
+from kabusys.data.calendar_management import prev_trading_day
 from kabusys.operations.line_reports import format_signal_queue_message
 from kabusys.operations.notifier import build_notifier
 from kabusys.operations.process_registry import register_process, update_process
@@ -38,7 +41,21 @@ _JOB_NAME = "signal_queue_report_job"
 _APP_NAME = "signal_queue_report"
 
 
-def main() -> None:
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """argv=None（テスト等の直接呼び出し）は引数なしとして扱う。"""
+    parser = argparse.ArgumentParser(description="Signal Queue Report を生成する")
+    parser.add_argument(
+        "--date",
+        type=date.fromisoformat,
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="signal_queue の対象日（省略時: 今日の前営業日＝当日執行分）",
+    )
+    return parser.parse_args(argv if argv is not None else [])
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = _parse_args(argv)
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
     run_id: int | None = None
@@ -53,9 +70,11 @@ def main() -> None:
     conn = None
     try:
         conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
+        # 当日執行分 = 前営業日（夜間バッチ日）の signal_queue
+        queue_date = args.date if args.date is not None else prev_trading_day(conn, today)
 
-        signals = collect_signals(conn, today)
-        report = build_report(signals, report_date=today)
+        signals = collect_signals(conn, queue_date)
+        report = build_report(signals, report_date=queue_date)
 
         saved_path = save_report(report)
         logger.info("レポート保存: %s", saved_path)
@@ -69,7 +88,7 @@ def main() -> None:
                 buy_count=report.buy_count,
                 sell_count=report.sell_count,
                 signals=report.signals,
-                report_date=today.isoformat(),
+                report_date=queue_date.isoformat(),
             )
             notifier.send(msg)
         except Exception:
@@ -92,4 +111,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

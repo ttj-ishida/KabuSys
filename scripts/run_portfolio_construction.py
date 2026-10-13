@@ -16,6 +16,7 @@ signals テーブルから当日の BUY シグナルを読み込み、
 
 from __future__ import annotations
 
+import argparse
 import calendar
 import contextlib
 import logging
@@ -31,6 +32,7 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from kabusys.config import Settings
+from kabusys.execution.signal_queue_status import sync_to_duckdb
 from kabusys.operations.job_run_recorder import write_job_result
 from kabusys.operations.line_reports import (
     format_evening_message,
@@ -66,9 +68,63 @@ _JOB_NAME = "portfolio_construction_job"
 _APP_NAME = "portfolio_construction"
 
 
+def _sync_signal_queue_status(conn: duckdb.DuckDBPyConnection, settings: Settings) -> int:
+    """Execution Engine が SQLite に記録した signal_queue の状態を DuckDB に反映する（Issue #413）。
+
+    夜間バッチは DuckDB を排他利用する時間帯に動くため、ここで反映する。
+    pending の行には触れない。失敗しても警告ログだけ出して処理を続ける。
+    Execution Engine と同じく paper_trading では paper 用 SQLite を参照する。
+    """
+    try:
+        sqlite_path = Path(
+            settings.paper_sqlite_path if settings.is_paper else settings.sqlite_path
+        )
+        if not sqlite_path.exists():
+            logger.info("signal_queue_status 同期: SQLite が未作成のためスキップ (%s)", sqlite_path)
+            return 0
+        sqlite_uri = sqlite_path.resolve().as_uri() + "?mode=ro"
+        with contextlib.closing(sqlite3.connect(sqlite_uri, uri=True)) as sqlite_conn:
+            updated = sync_to_duckdb(conn, sqlite_conn)
+        logger.info("signal_queue_status を DuckDB signal_queue に同期: %d 件", updated)
+        return updated
+    except Exception:
+        logger.warning(
+            "signal_queue_status の DuckDB 同期に失敗しました（処理は続行します）", exc_info=True
+        )
+        return 0
+
+
+def _fetch_close_prices(
+    conn: duckdb.DuckDBPyConnection, codes: list[str], as_of: date
+) -> dict[str, float]:
+    """各銘柄の as_of 以前で最新の終値を返す。
+
+    --date で過去日を指定して再実行した場合に、それより後の価格（未来情報）を
+    参照しないよう date <= as_of で制限する（Issue #413 / Look-ahead Bias 防止）。
+    """
+    if not codes:
+        return {}
+    code_params = ",".join(["?"] * len(codes))
+    rows = conn.execute(
+        f"""
+        SELECT p.code, p.close
+        FROM prices_daily p
+        INNER JOIN (
+            SELECT code, MAX(date) AS max_date
+            FROM prices_daily
+            WHERE code IN ({code_params}) AND date <= ?
+            GROUP BY code
+        ) latest ON p.code = latest.code AND p.date = latest.max_date
+        """,
+        [*codes, as_of],
+    ).fetchall()
+    return {r[0]: float(r[1]) for r in rows if r[1] is not None}
+
+
 def _calc_live_portfolio_value(
     settings: Settings,
     duckdb_conn: duckdb.DuckDBPyConnection,
+    as_of: date | None = None,
 ) -> tuple[float, float]:
     """Live モード用 (portfolio_value, available_cash) を算出する。
 
@@ -76,11 +132,14 @@ def _calc_live_portfolio_value(
     available_cash:  カブステーション /wallet/cash API → portfolio_value × max_utilization
     """
     fallback_pv = settings.portfolio_value
+    as_of = as_of or date.today()
 
     portfolio_value = fallback_pv
     try:
         row = duckdb_conn.execute(
-            "SELECT equity FROM portfolio_performance WHERE env = 'live' ORDER BY date DESC LIMIT 1"
+            "SELECT equity FROM portfolio_performance WHERE env = 'live' AND date <= ?"
+            " ORDER BY date DESC LIMIT 1",
+            [as_of],
         ).fetchone()
         if row and row[0] is not None:
             equity = float(row[0])
@@ -136,6 +195,7 @@ def _calc_live_portfolio_value(
 def _calc_paper_portfolio_value(
     settings: Settings,
     duckdb_conn: duckdb.DuckDBPyConnection,
+    as_of: date | None = None,
 ) -> tuple[float, float]:
     """Paper モード用 (portfolio_value, available_cash) を算出する。
 
@@ -148,6 +208,7 @@ def _calc_paper_portfolio_value(
     """
     initial_cash = settings.paper_trading_initial_cash
     sqlite_path = settings.paper_sqlite_path
+    as_of = as_of or date.today()
 
     if not sqlite_path.exists():
         logger.info(
@@ -198,25 +259,11 @@ def _calc_paper_portfolio_value(
 
     market_value = 0.0
     if positions:
-        codes = list(positions.keys())
-        code_params = ",".join(["?"] * len(codes))
         try:
-            price_rows = duckdb_conn.execute(
-                f"""
-                SELECT p.code, p.close
-                FROM prices_daily p
-                INNER JOIN (
-                    SELECT code, MAX(date) AS max_date
-                    FROM prices_daily
-                    WHERE code IN ({code_params})
-                    GROUP BY code
-                ) latest ON p.code = latest.code AND p.date = latest.max_date
-                """,
-                codes,
-            ).fetchall()
-            for pcode, price in price_rows:
-                if price is not None and pcode in positions:
-                    market_value += positions[pcode] * float(price)
+            prices = _fetch_close_prices(duckdb_conn, list(positions.keys()), as_of)
+            for pcode, price in prices.items():
+                if pcode in positions:
+                    market_value += positions[pcode] * price
         except Exception:
             logger.warning(
                 "ポジション時価計算に失敗。現金のみで portfolio_value を算出します", exc_info=True
@@ -323,7 +370,25 @@ def _collect_evening_signals(
     return buy, sell
 
 
-def main() -> None:
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """CLI 引数を解析する。argv=None（テスト等の直接呼び出し）は引数なしとして扱う。
+
+    --date: 対象日（既定: 今日）。夜間バッチが失敗した翌朝に、前営業日を指定して
+            再実行するために使う（signal_queue.date がその日付になり、当日の執行で読まれる）。
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--date",
+        type=date.fromisoformat,
+        default=date.today(),
+        metavar="YYYY-MM-DD",
+        help="対象日（省略時: 今日）。翌朝の再実行時は前営業日を指定する",
+    )
+    return parser.parse_args(argv if argv is not None else [])
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = _parse_args(argv)
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
     run_id: int | None = None
@@ -332,7 +397,7 @@ def main() -> None:
     except Exception:
         logger.warning("process_registry 登録に失敗しました", exc_info=True)
     conn = None
-    target_date = date.today()
+    target_date = args.date
     _failed = False
     _errors: list[str] = []
     _updated_rows: dict[str, int] = {}
@@ -340,6 +405,7 @@ def main() -> None:
     try:
         settings = Settings()
         conn = duckdb.connect(str(settings.duckdb_path))
+        _sync_signal_queue_status(conn, settings)
 
         manual_qty: dict[str, int] = {}
         if settings.manual_trading_enabled:
@@ -354,9 +420,13 @@ def main() -> None:
                 len(manual_qty),
             )
         elif settings.is_live:
-            portfolio_value, available_cash = _calc_live_portfolio_value(settings, conn)
+            portfolio_value, available_cash = _calc_live_portfolio_value(
+                settings, conn, as_of=target_date
+            )
         elif settings.is_paper or settings.is_dev:
-            portfolio_value, available_cash = _calc_paper_portfolio_value(settings, conn)
+            portfolio_value, available_cash = _calc_paper_portfolio_value(
+                settings, conn, as_of=target_date
+            )
         else:
             portfolio_value = settings.portfolio_value
             available_cash = portfolio_value * _MAX_UTILIZATION
@@ -396,22 +466,7 @@ def main() -> None:
                 else:
                     codes = [c["code"] for c in candidates]
                     code_params = ",".join(["?"] * len(codes))
-                    price_cur = conn.execute(
-                        f"""
-                        SELECT p.code, p.close
-                        FROM prices_daily p
-                        INNER JOIN (
-                            SELECT code, MAX(date) AS max_date
-                            FROM prices_daily
-                            WHERE code IN ({code_params})
-                            GROUP BY code
-                        ) latest ON p.code = latest.code AND p.date = latest.max_date
-                        """,
-                        codes,
-                    )
-                    close_prices = {
-                        r[0]: float(r[1]) for r in price_cur.fetchall() if r[1] is not None
-                    }
+                    close_prices = _fetch_close_prices(conn, codes, target_date)
 
                     pos_cur = conn.execute(
                         "SELECT code, position_size FROM positions WHERE code IN ("
@@ -577,4 +632,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

@@ -1,8 +1,9 @@
 # tests/test_run_execution.py
-from datetime import time
+from datetime import date, time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import duckdb
 import pytest
 import yaml as yaml_mod
 
@@ -347,3 +348,135 @@ class TestLoadRiskConfig:
         )
         with pytest.raises(ValueError, match="circuit_breaker_errors"):
             re_mod._load_risk_config(p, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Issue #413: DuckDB read_only + signal_date
+# ---------------------------------------------------------------------------
+
+
+def _run_main_capture(signal_date, argv=None, engine_failed=False):
+    """main() を実行し (duckdb.connect モック, ExecutionEngine クラスモック, count モック) を返す。"""
+    mock_broker = MagicMock()
+    mock_broker.get_available_cash.return_value = 10_000_000.0
+    mock_broker.get_positions.return_value = []
+    with (
+        patch("kabusys.run_execution.set_process_priority"),
+        patch("kabusys.run_execution.Settings") as mock_settings_cls,
+        patch("kabusys.run_execution.sqlite3.connect"),
+        patch("kabusys.run_execution.init_monitoring_db"),
+        patch("kabusys.run_execution.duckdb.connect") as mock_duck,
+        patch("kabusys.run_execution.BrokerClientFactory.create", return_value=mock_broker),
+        patch("kabusys.run_execution.OrderRepository"),
+        patch("kabusys.run_execution.OrderManager"),
+        patch("kabusys.run_execution.RiskManager"),
+        patch("kabusys.run_execution.Reconciler", _make_reconciler_mock()),
+        patch("kabusys.run_execution.ExecutionEngine") as mock_engine_cls,
+        patch("kabusys.run_execution._load_risk_config", return_value=MagicMock()),
+        patch("kabusys.run_execution.prev_trading_day", return_value=signal_date),
+        patch("kabusys.run_execution._count_pending_signals", return_value=0) as mock_count,
+    ):
+        mock_engine_cls.return_value.signal_processing_failed = engine_failed
+        settings = MagicMock()
+        settings.is_paper = False
+        settings.sqlite_path = Path("/prod.db")
+        settings.duckdb_path = Path("/data.duckdb")
+        mock_settings_cls.return_value = settings
+        main(argv)
+    return mock_duck, mock_engine_cls, mock_count
+
+
+class TestRunExecutionSignalQueue:
+    def test_duckdb_opened_read_only(self):
+        mock_duck, _, _ = _run_main_capture(date(2026, 3, 27))
+        assert mock_duck.call_count == 1
+        assert mock_duck.call_args.kwargs.get("read_only") is True
+
+    def test_engine_config_uses_prev_trading_day_as_signal_date(self):
+        _, mock_engine_cls, mock_count = _run_main_capture(date(2026, 3, 27))
+        config = mock_engine_cls.call_args.kwargs["config"]
+        assert config.target_date == date.today()
+        assert config.signal_date == date(2026, 3, 27)
+        assert mock_count.call_args.args[1] == date(2026, 3, 27)
+
+    def test_count_pending_signals_counts_signal_date_only(self):
+        conn = duckdb.connect(":memory:")
+        conn.execute("CREATE TABLE signal_queue (signal_id VARCHAR, date DATE, status VARCHAR)")
+        conn.execute(
+            "INSERT INTO signal_queue VALUES"
+            " ('a', '2026-03-27', 'pending'), ('b', '2026-03-27', 'pending'),"
+            " ('c', '2026-03-27', 'filled'), ('d', '2026-03-30', 'pending')"
+        )
+        assert re_mod._count_pending_signals(conn, date(2026, 3, 27)) == 2
+        conn.close()
+
+
+class TestRunExecutionFailureAndOverride:
+    def test_signal_processing_failure_ends_with_failed_status(self):
+        """I1: エンジンのシグナル処理が失敗したら、ジョブは failed・非ゼロ終了。"""
+        with patch("kabusys.run_execution.update_process") as mock_update:
+            with patch("kabusys.run_execution.register_process", return_value=7):
+                with pytest.raises(SystemExit) as exc_info:
+                    _run_main_capture(date(2026, 3, 27), engine_failed=True)
+        assert exc_info.value.code == 1
+        mock_update.assert_called_once_with(7, status="failed")
+
+    def test_success_when_signal_processing_ok(self):
+        with patch("kabusys.run_execution.update_process") as mock_update:
+            with patch("kabusys.run_execution.register_process", return_value=7):
+                _run_main_capture(date(2026, 3, 27), engine_failed=False)
+        mock_update.assert_called_once_with(7, status="success")
+
+    def test_notifier_passed_to_engine(self):
+        with patch("kabusys.run_execution.build_notifier") as mock_build:
+            _, mock_engine_cls, _ = _run_main_capture(date(2026, 3, 27))
+        assert mock_engine_cls.call_args.kwargs["notifier"] is mock_build.return_value
+
+    def test_cli_signal_date_overrides_default(self, monkeypatch):
+        """I3: --signal-date で読む queue 日付を上書きできる（Paper E2E・注入用）。"""
+        monkeypatch.delenv("KABUSYS_SIGNAL_DATE", raising=False)
+        _, mock_engine_cls, mock_count = _run_main_capture(
+            date(2026, 3, 27), argv=["--signal-date", "2026-03-20"]
+        )
+        assert mock_engine_cls.call_args.kwargs["config"].signal_date == date(2026, 3, 20)
+        assert mock_count.call_args.args[1] == date(2026, 3, 20)
+
+    def test_env_signal_date_has_no_effect(self, monkeypatch):
+        """Round 2: .env に残った KABUSYS_SIGNAL_DATE で自動発注が止まらないよう、環境変数は無視する。"""
+        monkeypatch.setenv("KABUSYS_SIGNAL_DATE", "2026-03-19")
+        _, mock_engine_cls, _ = _run_main_capture(date(2026, 3, 27))
+        assert mock_engine_cls.call_args.kwargs["config"].signal_date == date(2026, 3, 27)
+
+    def test_invalid_cli_signal_date_raises(self):
+        with pytest.raises(ValueError, match="--signal-date"):
+            re_mod._resolve_signal_date(MagicMock(), date(2026, 3, 30), "2026/03/19")
+
+    def test_default_uses_prev_trading_day(self, monkeypatch):
+        monkeypatch.setenv("KABUSYS_SIGNAL_DATE", "2026-03-19")  # 無視される
+        with patch("kabusys.run_execution.prev_trading_day", return_value=date(2026, 3, 27)):
+            assert re_mod._resolve_signal_date(MagicMock(), date(2026, 3, 30), None) == date(
+                2026, 3, 27
+            )
+
+    def test_override_different_from_default_warns_and_is_in_morning_message(self):
+        """上書きが既定（前営業日）と異なるときは WARNING を出し、朝の LINE にも載せる。"""
+        with (
+            patch("kabusys.run_execution.build_notifier") as mock_build,
+            patch.object(re_mod.logger, "warning") as mock_warn,
+        ):
+            _run_main_capture(date(2026, 3, 27), argv=["--signal-date", "2026-03-20"])
+        warned = [c for c in mock_warn.call_args_list if "--signal-date" in str(c.args[0])]
+        assert warned
+        assert date(2026, 3, 20) in warned[0].args
+        sent = mock_build.return_value.send.call_args.args[0]
+        assert "2026-03-20" in sent
+        assert "2026-03-27" in sent
+
+    def test_override_equal_to_default_does_not_warn(self):
+        with (
+            patch("kabusys.run_execution.build_notifier") as mock_build,
+            patch.object(re_mod.logger, "warning") as mock_warn,
+        ):
+            _run_main_capture(date(2026, 3, 27), argv=["--signal-date", "2026-03-27"])
+        assert not [c for c in mock_warn.call_args_list if "--signal-date" in str(c.args[0])]
+        assert "上書き" not in mock_build.return_value.send.call_args.args[0]

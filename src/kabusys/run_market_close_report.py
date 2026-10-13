@@ -32,6 +32,19 @@ from kabusys.operations.market_close_report import (
 logger = logging.getLogger(__name__)
 
 
+def _sqlite_path(settings: Settings) -> Path:
+    """run_execution と同じく、paper_trading では paper 用 SQLite を使う（Issue #413）。"""
+    return Path(settings.paper_sqlite_path if settings.is_paper else settings.sqlite_path)
+
+
+def _open_sqlite_readonly(path: Path) -> sqlite3.Connection:
+    """SQLite を read-only で開く。ファイルがなければ空のインメモリ DB を返す（作成しない）。"""
+    if not path.exists():
+        logger.warning("SQLite が見つかりません（Execution 未起動）: %s", path)
+        return sqlite3.connect(":memory:")
+    return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Market Close Summary を生成する")
     parser.add_argument(
@@ -57,8 +70,7 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = Settings()
     duckdb_conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
-    sqlite_uri = Path(settings.sqlite_path).resolve().as_uri() + "?mode=ro"
-    sqlite_conn = sqlite3.connect(sqlite_uri, uri=True)
+    sqlite_conn = _open_sqlite_readonly(_sqlite_path(settings))
 
     try:
         data = collect_market_close_data(duckdb_conn, sqlite_conn, args.date)

@@ -96,6 +96,29 @@ total_assets = cash + sum(_pos_value(p) for p in positions)
 2. **リコンシリエーション (突合)**: 各レコードに対して `OrderManager.sync_order()` を呼び、kabuステーション「注文照会API」（`GET /orders`）で実際の状態を照合する。broker が `"open"` を返せば `OrderAccepted`、`"filled"` なら `Filled`、`"cancelled"` なら `Cancelled` に遷移して SQLite を更新する。broker が `None`（注文が見つからない）を返した場合は状態を変えず、ログに記録して手動確認待ちとする。
 3. **残高照合**: `GET /positions` で実際の口座ポジションを確認し、ローカルの想定ポジションとの差分をログに記録する。
 4. **再開**: 正しい状態に同期した後、`signal_queue` の `pending` キューの消化を再開する。
+   処理済みの queue 行（SQLite `signal_queue_status` で `pending` 以外）は再読込しない。
+   約定待ちだった行は、注文の現在状態に合わせて `signal_queue_status` を更新する。
+
+### signal_queue の処理状態（Issue #413）
+
+Execution Engine は DuckDB を read_only で開き、`signal_queue` の処理状態を SQLite の
+`signal_queue_status` に記録する（夜間の portfolio_construction で DuckDB に同期）。
+読み込むのは執行日の前営業日（`signal_date`）の行で、業務キーは `{signal_date}_{code}_{side}`。
+
+| 事象 | status | reason |
+|---|---|---|
+| Gate 1 不合格（重複以外） | failed | Gate 1 の理由 |
+| 重複（Gate 1 DUPLICATE_ORDER / DuplicateOrderError） | cancelled | duplicate |
+| Gate 2 レート制限・サーキットブレーカー | pending のまま（同日中の再起動で再試行） | — |
+| 発注直前 | processing | — |
+| 発注 API の失敗 | failed | 例外メッセージ |
+| OrderSentPendingError | processing | sent_pending |
+| 注文状態 Filled / Rejected / Cancelled | filled / failed / cancelled | — / rejected / cancelled |
+| それ以外（Accepted・PartialFill・Sent） | processing | — |
+
+PUSH 通知・キルスイッチ・起動時リコンシリエーション後も、注文の状態に合わせて同じ変換で更新する。
+状態の記録に失敗しても警告ログのみで発注フローは止めない。処理済み判定（読み込み）に失敗した場合は
+二重発注を避けるためシグナル処理を中止する。
 
 > **実装**: Issue #32 にて実装済み（PR #133）。`Reconciler` クラスが上記フローを担う。
 

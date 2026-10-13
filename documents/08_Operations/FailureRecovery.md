@@ -213,6 +213,11 @@ python scripts\stop_system.py
    python scripts\run_strategy_signal.py
    python scripts\run_portfolio_construction.py
 
+   ※ 翌朝（日付が変わった後）に再実行する場合は、必ず --date <前営業日> を付ける
+     （例: python scripts\run_portfolio_construction.py --date 2026-03-27）。
+     Execution は「執行日の前営業日」の signal_queue を読むため、--date なしで
+     翌朝に実行すると当日日付の行になり、当日の執行で拾われない（Issue #413）。
+
 4. 生成されたシグナルを確認
    └─ signal_queue に pending シグナルが入っていること
 
@@ -351,6 +356,18 @@ python scripts\run_feature_gen.py
 python scripts\run_ai_analysis.py
 python scripts\run_strategy_signal.py
 python scripts\run_portfolio_construction.py
+```
+
+**翌朝に再実行する場合（日付が変わった後）:** シグナル生成とポートフォリオ構築は
+`--date <前営業日>` を付けて再実行する。Execution Engine は執行日の前営業日
+（`signal_date`）の `signal_queue` 行を読むため、`--date` なしだと当日日付の行になり
+当日の執行・08:02 の Signal Queue Report で拾われない（Issue #413）。
+
+```cmd
+REM 例: 夜間バッチ（2026-03-27 金曜分）が失敗し、月曜の朝に再実行する
+python scripts\run_strategy_signal.py --date 2026-03-27
+python scripts\run_portfolio_construction.py --date 2026-03-27
+python scripts\run_signal_queue_report.py --date 2026-03-27
 ```
 
 ### 10.3 Monitoring プロセス停止

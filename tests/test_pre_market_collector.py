@@ -70,17 +70,33 @@ def test_data_freshness_iso8601_t_separator():
 
 
 def test_signal_queue_pending_count():
+    """Issue #413: 引数は当日ではなく signal_date（前営業日の夜間バッチ日）。"""
     mock_conn = MagicMock()
     mock_conn.execute.return_value.fetchone.return_value = (7,)
-    result = check_signal_queue(mock_conn, today=date(2026, 4, 27))
+    result = check_signal_queue(mock_conn, signal_date=date(2026, 4, 24))
     assert result == 7
+    assert mock_conn.execute.call_args.args[1] == ("2026-04-24",)
 
 
 def test_signal_queue_zero():
     mock_conn = MagicMock()
     mock_conn.execute.return_value.fetchone.return_value = (0,)
-    result = check_signal_queue(mock_conn, today=date(2026, 4, 27))
+    result = check_signal_queue(mock_conn, signal_date=date(2026, 4, 24))
     assert result == 0
+
+
+def test_signal_queue_counts_signal_date_rows_only():
+    """前営業日（金曜）の pending を数え、当日（月曜）の行は数えない。"""
+    import duckdb
+
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE signal_queue (signal_id VARCHAR, date DATE, status VARCHAR)")
+    conn.execute(
+        "INSERT INTO signal_queue VALUES ('a', '2026-04-24', 'pending'),"
+        " ('b', '2026-04-24', 'filled'), ('c', '2026-04-27', 'pending')"
+    )
+    assert check_signal_queue(conn, signal_date=date(2026, 4, 24)) == 1
+    conn.close()
 
 
 # --- check_position_count ---
@@ -207,9 +223,16 @@ def test_collect_returns_pre_market_data(tmp_path):
 
     stop_flag = tmp_path / "stop_requested.flag"
 
-    with patch(
-        "kabusys.operations.pre_market_collector.check_task_scheduler",
-        return_value=True,
+    # Issue #413: pending 件数は前営業日（signal_date）基準で数える
+    with (
+        patch(
+            "kabusys.operations.pre_market_collector.check_task_scheduler",
+            return_value=True,
+        ),
+        patch(
+            "kabusys.operations.pre_market_collector.prev_trading_day",
+            return_value=date(2026, 4, 24),
+        ) as mock_prev,
     ):
         data = collect(
             duckdb_conn=mock_duckdb,
@@ -221,5 +244,9 @@ def test_collect_returns_pre_market_data(tmp_path):
     assert isinstance(data, PreMarketData)
     assert data.data_freshness_ok is True
     assert data.signal_queue_pending == 5
+    mock_prev.assert_called_once_with(mock_duckdb, date(2026, 4, 27))
+    count_call = mock_duckdb.execute.call_args_list[1]
+    assert "signal_queue" in count_call.args[0]
+    assert count_call.args[1] == ("2026-04-24",)
     assert data.stop_flag_exists is False
     assert data.task_scheduler_ready is True
