@@ -94,9 +94,37 @@ def _sync_signal_queue_status(conn: duckdb.DuckDBPyConnection, settings: Setting
         return 0
 
 
+def _fetch_close_prices(
+    conn: duckdb.DuckDBPyConnection, codes: list[str], as_of: date
+) -> dict[str, float]:
+    """各銘柄の as_of 以前で最新の終値を返す。
+
+    --date で過去日を指定して再実行した場合に、それより後の価格（未来情報）を
+    参照しないよう date <= as_of で制限する（Issue #413 / Look-ahead Bias 防止）。
+    """
+    if not codes:
+        return {}
+    code_params = ",".join(["?"] * len(codes))
+    rows = conn.execute(
+        f"""
+        SELECT p.code, p.close
+        FROM prices_daily p
+        INNER JOIN (
+            SELECT code, MAX(date) AS max_date
+            FROM prices_daily
+            WHERE code IN ({code_params}) AND date <= ?
+            GROUP BY code
+        ) latest ON p.code = latest.code AND p.date = latest.max_date
+        """,
+        [*codes, as_of],
+    ).fetchall()
+    return {r[0]: float(r[1]) for r in rows if r[1] is not None}
+
+
 def _calc_live_portfolio_value(
     settings: Settings,
     duckdb_conn: duckdb.DuckDBPyConnection,
+    as_of: date | None = None,
 ) -> tuple[float, float]:
     """Live モード用 (portfolio_value, available_cash) を算出する。
 
@@ -104,11 +132,14 @@ def _calc_live_portfolio_value(
     available_cash:  カブステーション /wallet/cash API → portfolio_value × max_utilization
     """
     fallback_pv = settings.portfolio_value
+    as_of = as_of or date.today()
 
     portfolio_value = fallback_pv
     try:
         row = duckdb_conn.execute(
-            "SELECT equity FROM portfolio_performance WHERE env = 'live' ORDER BY date DESC LIMIT 1"
+            "SELECT equity FROM portfolio_performance WHERE env = 'live' AND date <= ?"
+            " ORDER BY date DESC LIMIT 1",
+            [as_of],
         ).fetchone()
         if row and row[0] is not None:
             equity = float(row[0])
@@ -164,6 +195,7 @@ def _calc_live_portfolio_value(
 def _calc_paper_portfolio_value(
     settings: Settings,
     duckdb_conn: duckdb.DuckDBPyConnection,
+    as_of: date | None = None,
 ) -> tuple[float, float]:
     """Paper モード用 (portfolio_value, available_cash) を算出する。
 
@@ -176,6 +208,7 @@ def _calc_paper_portfolio_value(
     """
     initial_cash = settings.paper_trading_initial_cash
     sqlite_path = settings.paper_sqlite_path
+    as_of = as_of or date.today()
 
     if not sqlite_path.exists():
         logger.info(
@@ -226,25 +259,11 @@ def _calc_paper_portfolio_value(
 
     market_value = 0.0
     if positions:
-        codes = list(positions.keys())
-        code_params = ",".join(["?"] * len(codes))
         try:
-            price_rows = duckdb_conn.execute(
-                f"""
-                SELECT p.code, p.close
-                FROM prices_daily p
-                INNER JOIN (
-                    SELECT code, MAX(date) AS max_date
-                    FROM prices_daily
-                    WHERE code IN ({code_params})
-                    GROUP BY code
-                ) latest ON p.code = latest.code AND p.date = latest.max_date
-                """,
-                codes,
-            ).fetchall()
-            for pcode, price in price_rows:
-                if price is not None and pcode in positions:
-                    market_value += positions[pcode] * float(price)
+            prices = _fetch_close_prices(duckdb_conn, list(positions.keys()), as_of)
+            for pcode, price in prices.items():
+                if pcode in positions:
+                    market_value += positions[pcode] * price
         except Exception:
             logger.warning(
                 "ポジション時価計算に失敗。現金のみで portfolio_value を算出します", exc_info=True
@@ -401,9 +420,13 @@ def main(argv: list[str] | None = None) -> None:
                 len(manual_qty),
             )
         elif settings.is_live:
-            portfolio_value, available_cash = _calc_live_portfolio_value(settings, conn)
+            portfolio_value, available_cash = _calc_live_portfolio_value(
+                settings, conn, as_of=target_date
+            )
         elif settings.is_paper or settings.is_dev:
-            portfolio_value, available_cash = _calc_paper_portfolio_value(settings, conn)
+            portfolio_value, available_cash = _calc_paper_portfolio_value(
+                settings, conn, as_of=target_date
+            )
         else:
             portfolio_value = settings.portfolio_value
             available_cash = portfolio_value * _MAX_UTILIZATION
@@ -443,22 +466,7 @@ def main(argv: list[str] | None = None) -> None:
                 else:
                     codes = [c["code"] for c in candidates]
                     code_params = ",".join(["?"] * len(codes))
-                    price_cur = conn.execute(
-                        f"""
-                        SELECT p.code, p.close
-                        FROM prices_daily p
-                        INNER JOIN (
-                            SELECT code, MAX(date) AS max_date
-                            FROM prices_daily
-                            WHERE code IN ({code_params})
-                            GROUP BY code
-                        ) latest ON p.code = latest.code AND p.date = latest.max_date
-                        """,
-                        codes,
-                    )
-                    close_prices = {
-                        r[0]: float(r[1]) for r in price_cur.fetchall() if r[1] is not None
-                    }
+                    close_prices = _fetch_close_prices(conn, codes, target_date)
 
                     pos_cur = conn.execute(
                         "SELECT code, position_size FROM positions WHERE code IN ("

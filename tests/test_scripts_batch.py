@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -806,3 +807,131 @@ def test_signal_queue_report_date_arg():
     mock_collect, mock_prev = _run_sq_report(["--date", "2026-03-20"])
     mock_prev.assert_not_called()
     assert mock_collect.call_args.args[1] == date(2026, 3, 20)
+
+
+# ---------- Issue #413 fix round 2: --date 指定時の価格参照を target_date 以前に限定 ----------
+
+
+def _price_db():
+    import duckdb
+
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE prices_daily (date DATE, code VARCHAR, close DOUBLE)")
+    conn.execute(
+        "INSERT INTO prices_daily VALUES"
+        " ('2026-03-26', '7203', 900.0), ('2026-03-27', '7203', 1000.0),"
+        " ('2026-03-30', '7203', 2000.0)"  # target_date より後（未来）の行
+    )
+    return conn
+
+
+def test_fetch_close_prices_ignores_rows_after_target_date():
+    from datetime import date
+
+    import run_portfolio_construction
+
+    conn = _price_db()
+    prices = run_portfolio_construction._fetch_close_prices(conn, ["7203"], date(2026, 3, 27))
+    assert prices == {"7203": 1000.0}
+
+
+def test_calc_paper_portfolio_value_uses_price_as_of_target_date(tmp_path: Path):
+    import sqlite3
+    from datetime import date
+
+    import run_portfolio_construction
+
+    db_path = tmp_path / "paper_trading.db"
+    with sqlite3.connect(str(db_path)) as db:
+        db.execute(
+            "CREATE TABLE orders (side TEXT, code TEXT, filled_qty INTEGER, avg_fill_price REAL)"
+        )
+        db.execute("INSERT INTO orders VALUES ('buy', '7203', 100, 800.0)")
+    settings = MagicMock()
+    settings.paper_trading_initial_cash = 1_000_000.0
+    settings.paper_sqlite_path = db_path
+
+    pv, _ = run_portfolio_construction._calc_paper_portfolio_value(
+        settings, _price_db(), as_of=date(2026, 3, 27)
+    )
+
+    # 現金 920,000 + 100 × 1,000（3/27 終値。3/30 の 2,000 は使わない）
+    assert pv == pytest.approx(1_020_000.0)
+
+
+def test_calc_live_portfolio_value_uses_equity_as_of_target_date():
+    from datetime import date
+
+    import duckdb
+    import run_portfolio_construction
+
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE portfolio_performance (date DATE, env VARCHAR, equity DOUBLE)")
+    conn.execute(
+        "INSERT INTO portfolio_performance VALUES"
+        " ('2026-03-27', 'live', 5000000.0), ('2026-03-30', 'live', 9000000.0)"
+    )
+    settings = MagicMock()
+    settings.portfolio_value = 1_000_000.0
+    with patch("kabusys.execution.kabu_client.KabuStationClient", side_effect=RuntimeError):
+        pv, _ = run_portfolio_construction._calc_live_portfolio_value(
+            settings, conn, as_of=date(2026, 3, 27)
+        )
+    assert pv == pytest.approx(5_000_000.0)
+
+
+def test_portfolio_construction_passes_target_date_to_valuation(tmp_path: Path):
+    from datetime import date
+
+    import run_portfolio_construction
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchall.return_value = []
+    mock_cursor.description = [("code",), ("side",), ("score",), ("signal_rank",)]
+    mock_conn.execute.return_value = mock_cursor
+
+    with (
+        patch("run_portfolio_construction.Settings") as mock_settings,
+        patch("run_portfolio_construction.duckdb.connect", return_value=mock_conn),
+        patch("run_portfolio_construction._sync_signal_queue_status"),
+        patch(
+            "run_portfolio_construction._calc_paper_portfolio_value",
+            return_value=(1_000_000.0, 1_000_000.0),
+        ) as mock_calc,
+    ):
+        _mock_paper_settings(mock_settings, tmp_path)
+        run_portfolio_construction.main(["--date", "2026-03-27"])
+
+    assert mock_calc.call_args.kwargs["as_of"] == date(2026, 3, 27)
+
+
+def test_portfolio_construction_sizing_prices_bounded_by_target_date(tmp_path: Path):
+    """サイジング用終値クエリにも target_date が渡る。"""
+    from datetime import date
+
+    import run_portfolio_construction
+
+    with (
+        patch("run_portfolio_construction._fetch_close_prices", return_value={}) as mock_fetch,
+    ):
+        mock_conn = MagicMock()
+        signals_cur = MagicMock()
+        signals_cur.fetchall.return_value = [("7203", "buy", 0.8, 1)]
+        signals_cur.description = [("code",), ("side",), ("score",), ("signal_rank",)]
+        mock_conn.execute.return_value = signals_cur
+        with (
+            patch("run_portfolio_construction.Settings") as mock_settings,
+            patch("run_portfolio_construction.duckdb.connect", return_value=mock_conn),
+            patch("run_portfolio_construction._sync_signal_queue_status"),
+            patch(
+                "run_portfolio_construction._calc_paper_portfolio_value",
+                return_value=(1_000_000.0, 1_000_000.0),
+            ),
+        ):
+            _mock_paper_settings(mock_settings, tmp_path)
+            # MagicMock 接続のため後段（サイジング以降）は失敗し得る。価格参照の引数だけ確認する
+            with contextlib.suppress(SystemExit):
+                run_portfolio_construction.main(["--date", "2026-03-27"])
+
+    assert mock_fetch.call_args.args[2] == date(2026, 3, 27)
