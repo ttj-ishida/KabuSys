@@ -171,6 +171,15 @@ def test_backfilled_sell_that_clamps_later_sell_is_rejected(conn):
     assert trade_id == "MANUAL_2026-09-18_7203_sell"
 
 
+def test_earlier_allowed_oversell_does_not_block_later_sells(conn):
+    add_manual_trade(conn, _p(side="sell", qty=100, d=date(2026, 9, 1)), allow_oversell=True)
+    add_manual_trade(conn, _p(qty=100, d=date(2026, 9, 10)))
+
+    trade_id = add_manual_trade(conn, _p(side="sell", qty=100, d=date(2026, 9, 15)))
+
+    assert trade_id == "MANUAL_2026-09-15_7203_sell"
+
+
 def test_oversell_message_mentions_gui_label_and_buy_first(conn):
     with pytest.raises(OversellError) as ei:
         add_manual_trade(conn, _p(side="sell", qty=100))

@@ -310,12 +310,12 @@ _TRADE_ORDER_BY = (
 
 
 def _fold_manual_trades(
-    rows: list[tuple[Any, ...]], clamped: list[str] | None = None
+    rows: list[tuple[Any, ...]], clamped: list[str] | None = None, *, log: bool = True
 ) -> dict[str, dict[str, Any]]:
     """約定行 (trade_id, trade_date, code, side, qty, price, fees) を順に畳み込み、銘柄別の状態を返す。
 
     保有を超える SELL は保有数量に切り詰め、logger.warning を出す。
-    clamped を渡すと、切り詰めが発生した約定の trade_id を追記する。
+    clamped を渡すと、切り詰めが発生した約定の trade_id を追記する。log=False で warning を抑止する。
     """
     state: dict[str, dict[str, Any]] = {}
     for trade_id, trade_date, code, side, qty, price, fees in rows:
@@ -346,14 +346,15 @@ def _fold_manual_trades(
             if sell_qty < qty:
                 if clamped is not None:
                     clamped.append(trade_id)
-                logger.warning(
-                    "手動約定 %s（%s %s）の売却数量 %d が保有 %d を超えるため保有数量に切り詰めます",
-                    trade_id,
-                    code,
-                    trade_date,
-                    qty,
-                    current_qty,
-                )
+                if log:
+                    logger.warning(
+                        "手動約定 %s（%s %s）の売却数量 %d が保有 %d を超えるため保有数量に切り詰めます",
+                        trade_id,
+                        code,
+                        trade_date,
+                        qty,
+                        current_qty,
+                    )
             avg_cost = current_cost / current_qty if current_qty > 0 else 0.0
             released_cost = avg_cost * sell_qty
             pos["qty"] = current_qty - sell_qty
@@ -368,7 +369,7 @@ def _fold_manual_trades(
 def _oversold_trade_ids(
     conn: duckdb.DuckDBPyConnection, new_trade_id: str, new: ManualTradeInput
 ) -> list[str]:
-    """new を加えた code の全履歴を畳み、切り詰めが発生する約定（新規・既存の後日 SELL）の ID を返す。"""
+    """new を加えることで新たに切り詰められる約定（新規・既存の後日 SELL）の ID を返す。"""
     rows = _fetch_manual_trade_rows(
         conn,
         f"""
@@ -386,10 +387,13 @@ def _oversold_trade_ids(
         if (row[1], 0 if row[3] == "buy" else 1) > (new.trade_date, 1):
             idx = i
             break
+    baseline: list[str] = []
+    _fold_manual_trades(rows, baseline, log=False)
     rows.insert(idx, new_row)
-    clamped: list[str] = []
-    _fold_manual_trades(rows, clamped)
-    return clamped
+    with_new: list[str] = []
+    _fold_manual_trades(rows, with_new, log=False)
+    # 既に許可済みの売り過ぎ（allow_oversell）は除き、今回の登録で新たに切り詰められる約定だけ返す
+    return [t for t in with_new if t not in set(baseline)]
 
 
 def calculate_manual_positions(
