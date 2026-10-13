@@ -355,7 +355,7 @@ class TestLoadRiskConfig:
 # ---------------------------------------------------------------------------
 
 
-def _run_main_capture(signal_date):
+def _run_main_capture(signal_date, argv=None, engine_failed=False):
     """main() を実行し (duckdb.connect モック, ExecutionEngine クラスモック, count モック) を返す。"""
     mock_broker = MagicMock()
     mock_broker.get_available_cash.return_value = 10_000_000.0
@@ -376,12 +376,13 @@ def _run_main_capture(signal_date):
         patch("kabusys.run_execution.prev_trading_day", return_value=signal_date),
         patch("kabusys.run_execution._count_pending_signals", return_value=0) as mock_count,
     ):
+        mock_engine_cls.return_value.signal_processing_failed = engine_failed
         settings = MagicMock()
         settings.is_paper = False
         settings.sqlite_path = Path("/prod.db")
         settings.duckdb_path = Path("/data.duckdb")
         mock_settings_cls.return_value = settings
-        main()
+        main(argv)
     return mock_duck, mock_engine_cls, mock_count
 
 
@@ -408,3 +409,58 @@ class TestRunExecutionSignalQueue:
         )
         assert re_mod._count_pending_signals(conn, date(2026, 3, 27)) == 2
         conn.close()
+
+
+class TestRunExecutionFailureAndOverride:
+    def test_signal_processing_failure_ends_with_failed_status(self):
+        """I1: エンジンのシグナル処理が失敗したら、ジョブは failed・非ゼロ終了。"""
+        with patch("kabusys.run_execution.update_process") as mock_update:
+            with patch("kabusys.run_execution.register_process", return_value=7):
+                with pytest.raises(SystemExit) as exc_info:
+                    _run_main_capture(date(2026, 3, 27), engine_failed=True)
+        assert exc_info.value.code == 1
+        mock_update.assert_called_once_with(7, status="failed")
+
+    def test_success_when_signal_processing_ok(self):
+        with patch("kabusys.run_execution.update_process") as mock_update:
+            with patch("kabusys.run_execution.register_process", return_value=7):
+                _run_main_capture(date(2026, 3, 27), engine_failed=False)
+        mock_update.assert_called_once_with(7, status="success")
+
+    def test_notifier_passed_to_engine(self):
+        with patch("kabusys.run_execution.build_notifier") as mock_build:
+            _, mock_engine_cls, _ = _run_main_capture(date(2026, 3, 27))
+        assert mock_engine_cls.call_args.kwargs["notifier"] is mock_build.return_value
+
+    def test_cli_signal_date_overrides_default(self, monkeypatch):
+        """I3: --signal-date で読む queue 日付を上書きできる（Paper E2E・注入用）。"""
+        monkeypatch.delenv("KABUSYS_SIGNAL_DATE", raising=False)
+        _, mock_engine_cls, mock_count = _run_main_capture(
+            date(2026, 3, 27), argv=["--signal-date", "2026-03-20"]
+        )
+        assert mock_engine_cls.call_args.kwargs["config"].signal_date == date(2026, 3, 20)
+        assert mock_count.call_args.args[1] == date(2026, 3, 20)
+
+    def test_env_signal_date_overrides_default(self, monkeypatch):
+        monkeypatch.setenv("KABUSYS_SIGNAL_DATE", "2026-03-19")
+        _, mock_engine_cls, _ = _run_main_capture(date(2026, 3, 27))
+        assert mock_engine_cls.call_args.kwargs["config"].signal_date == date(2026, 3, 19)
+
+    def test_cli_wins_over_env(self, monkeypatch):
+        monkeypatch.setenv("KABUSYS_SIGNAL_DATE", "2026-03-19")
+        _, mock_engine_cls, _ = _run_main_capture(
+            date(2026, 3, 27), argv=["--signal-date", "2026-03-20"]
+        )
+        assert mock_engine_cls.call_args.kwargs["config"].signal_date == date(2026, 3, 20)
+
+    def test_invalid_env_signal_date_raises(self, monkeypatch):
+        monkeypatch.setenv("KABUSYS_SIGNAL_DATE", "2026/03/19")
+        with pytest.raises(ValueError, match="KABUSYS_SIGNAL_DATE"):
+            re_mod._resolve_signal_date(MagicMock(), date(2026, 3, 30), None)
+
+    def test_default_uses_prev_trading_day(self, monkeypatch):
+        monkeypatch.delenv("KABUSYS_SIGNAL_DATE", raising=False)
+        with patch("kabusys.run_execution.prev_trading_day", return_value=date(2026, 3, 27)):
+            assert re_mod._resolve_signal_date(MagicMock(), date(2026, 3, 30), None) == date(
+                2026, 3, 27
+            )

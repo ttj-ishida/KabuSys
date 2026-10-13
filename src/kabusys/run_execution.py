@@ -7,6 +7,7 @@ data/paper_trading.db に記録する（本番 DB と完全分離）。
 
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sqlite3
@@ -58,6 +59,42 @@ def _env_time(name: str, default: time) -> time:
         return time.fromisoformat(raw.strip())
     except ValueError as exc:
         raise ValueError(f"{name} must be HH:MM or HH:MM:SS, got {raw!r}") from exc
+
+
+_SIGNAL_DATE_ENV = "KABUSYS_SIGNAL_DATE"
+
+
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="ExecutionEngine を起動する")
+    parser.add_argument(
+        "--signal-date",
+        default=None,
+        metavar="YYYY-MM-DD",
+        help=(
+            "読み込む signal_queue の日付（省略時: 環境変数 KABUSYS_SIGNAL_DATE、"
+            "それもなければ今日の前営業日）。Paper E2E・ダミーシグナル検証用"
+        ),
+    )
+    # argv=None はテスト等からの直接呼び出し。CLI 引数は __main__ から明示的に渡す。
+    return parser.parse_args(argv if argv is not None else [])
+
+
+def _resolve_signal_date(
+    conn: duckdb.DuckDBPyConnection, today: date, cli_value: str | None
+) -> date:
+    """読み込む signal_queue の日付を決める（CLI > 環境変数 > prev_trading_day(today)）。"""
+    if cli_value:
+        try:
+            return date.fromisoformat(cli_value.strip())
+        except ValueError as exc:
+            raise ValueError(f"--signal-date must be YYYY-MM-DD, got {cli_value!r}") from exc
+    raw = os.environ.get(_SIGNAL_DATE_ENV)
+    if raw:
+        try:
+            return date.fromisoformat(raw.strip())
+        except ValueError as exc:
+            raise ValueError(f"{_SIGNAL_DATE_ENV} must be YYYY-MM-DD, got {raw!r}") from exc
+    return prev_trading_day(conn, today)
 
 
 def _count_pending_signals(conn: duckdb.DuckDBPyConnection, signal_date: date) -> int:
@@ -250,7 +287,8 @@ _APP_NAME = "execution"
 _JOB_NAME = "execution_job"
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    args = _parse_args(argv)
     _run_log = setup_logging(app_name=_APP_NAME, capture_stdio=True)
     started_at = datetime.now(timezone.utc)
     log_run_start(_APP_NAME)
@@ -315,8 +353,8 @@ def main() -> None:
 
         # 起動時リコンシリエーション + Execution Startup Summary 生成
         today = date.today()
-        # 読み込む signal_queue の日付 = 前営業日（夜間バッチ日）
-        signal_date = prev_trading_day(duckdb_conn, today)
+        # 読み込む signal_queue の日付 = 前営業日（夜間バッチ日）。CLI / 環境変数で上書き可
+        signal_date = _resolve_signal_date(duckdb_conn, today, args.signal_date)
         logger.info("執行日=%s, signal_date=%s", today, signal_date)
         reconcile_result = reconciler.run()
         _report = None
@@ -330,9 +368,17 @@ def main() -> None:
                 exc_info=True,
             )
 
-        # 朝の LINE 通知（失敗しても起動を継続する）
+        # 通知（LINE 等）。生成に失敗しても起動を継続する
+        notifier = None
         try:
             notifier = build_notifier(settings)
+        except Exception:
+            logger.warning("通知の初期化に失敗しました（起動を続行します）", exc_info=True)
+
+        # 朝の LINE 通知（失敗しても起動を継続する）
+        try:
+            if notifier is None:
+                raise RuntimeError("notifier unavailable")
             pending_count = _count_pending_signals(duckdb_conn, signal_date)
             status = _report.status if _report is not None else "UNKNOWN"
             orders_no_status = _report.orders_no_status if _report is not None else 0
@@ -365,6 +411,7 @@ def main() -> None:
             reconciler=None,
             pid_file=_EXECUTION_PID,
             monitoring_db=monitoring_db,
+            notifier=notifier,
         )
         # 停止フラグが既に立っている場合は起動せず終了
         if _STOP_FLAG.exists():
@@ -381,6 +428,11 @@ def main() -> None:
                 break
             thread.join(timeout=1.0)
         thread.join(timeout=30.0)
+        if engine.signal_processing_failed is True:
+            # シグナル処理が例外で中断された日はジョブ失敗として終了する（Issue #413）
+            logger.critical("本日のシグナル処理は失敗しました。ジョブを failed で終了します。")
+            log_run_end(_APP_NAME, status="failed", started_at=started_at)
+            raise SystemExit(1)
         log_run_end(_APP_NAME, status="success", started_at=started_at)
         _exec_status = "success"
     except Exception:
@@ -397,4 +449,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    main(sys.argv[1:])
