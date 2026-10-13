@@ -21,6 +21,7 @@ from kabusys.monitoring.dashboard_data import (
     load_manual_positions,
 )
 from kabusys.monitoring.db_connect import connect_duckdb_ro
+from kabusys.operations.line_reports import SELL_REASON_LABELS
 from kabusys.operations.manual_trades import (
     DuplicateManualTradeError,
     ManualTradeInput,
@@ -88,7 +89,8 @@ with tab_add:
 
         source_signal_id = st.text_input("Signal ID（任意）")
         note = st.text_input("メモ（任意）")
-        force = st.checkbox("同一IDがある場合は上書きする")
+        allow_duplicate = st.checkbox("同じ内容の約定をもう 1 件登録する")
+        allow_oversell = st.checkbox("保有を超える売却を許可する")
         submitted = st.form_submit_button("登録")
 
     if submitted:
@@ -106,7 +108,14 @@ with tab_add:
                 note=note.strip() or None,
             )
             try:
-                ok, trade_id = _run_write(lambda c: add_manual_trade(c, payload, force=force))
+                ok, trade_id = _run_write(
+                    lambda c: add_manual_trade(
+                        c,
+                        payload,
+                        allow_duplicate=allow_duplicate,
+                        allow_oversell=allow_oversell,
+                    )
+                )
             except (DuplicateManualTradeError, ValueError) as exc:
                 st.error(str(exc))
             else:
@@ -141,14 +150,6 @@ with tab_positions:
         col3.metric("合計損益", f"{total_pnl:,.0f}円" if total_pnl == total_pnl else "-")
         st.dataframe(df, use_container_width=True)
 
-_REASON_LABELS = {
-    "stop_loss": "損切り",
-    "trailing_stop": "トレーリング",
-    "time_exit": "保有期限",
-    "score_drop": "スコア低下",
-    "earnings_avoidance": "決算回避",
-}
-
 with tab_actions:
     st.subheader("手動売却候補")
     st.caption(
@@ -177,7 +178,7 @@ with tab_actions:
         st.info("売却候補はありません。")
     else:
         for row in actions.itertuples():
-            reason = _REASON_LABELS.get(row.reason, row.reason)
+            reason = SELL_REASON_LABELS.get(row.reason, row.reason)
             cols = st.columns([4, 1, 1])
             cols[0].write(f"{row.date} **{row.code}** {row.qty}株 — {reason}（{row.status}）")
             for col, label, new_status in (

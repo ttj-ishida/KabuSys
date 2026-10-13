@@ -289,6 +289,7 @@ python -m kabusys.run_performance_report --type daily --env paper_trading
 
 ## 10. 参考
 
+- [W1_08 Paper Trading 4週間検証 Runbook](./W1_08_PaperTradingValidationRunbook.md)
 - `documents/08_Operations/FailureRecovery.md`
 - `documents/08_Operations/Monitoring.md`
 - `documents/10_Runtime/RuntimeJobSchedule.md`
