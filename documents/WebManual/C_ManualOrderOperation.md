@@ -26,10 +26,25 @@ Execution Engine は残すが、この運用では起動しない。
 
 夜間バッチ後に、翌営業日の注文候補を確認する。
 
+21:10 に手動注文候補レポート（前日夜）が自動生成される（スケジューラ `manual_order_report_evening` / Task Scheduler `KabuSys_ManualOrderReportEvening`）。
+
+- 出力: `artifacts/manual_orders/{date}/evening.md`（と `evening.json`）
+- LINE は送らない（21:00 の夜 LINE に BUY/SELL 詳細が出る）
+
+手動で作り直す場合:
+
 ```powershell
+python scripts/run_manual_order_report.py --phase evening
 python scripts/run_night_batch_report.py
 python -m kabusys.run_signal_queue_report --save
 ```
+
+レポートの内容:
+
+- BUY 候補: 銘柄名・推奨株数・参考価格（前日終値）・想定金額・スコア/順位。手動保有・自動保有がある銘柄は「保有 X 株 → 目標 X+N 株（差分 N 株を買う）」と表示
+- SELL 候補: 株数・理由（損切り / トレーリング / 保有期限 / スコア低下 / 決算回避）・`[手動保有]`
+- 資金: 総資産・利用可能現金（`MANUAL_TRADING_ENABLED=true` のとき）・1 銘柄上限（総資産の 10%）・想定投下額と利用率
+- 見送りルール: 寄り付きが前日終値比 +5% 超 / −3% 以下なら見送り。寄り前の気配は取得できないため、銘柄ごとの「見送り上限 / 見送り下限」価格と寄り付きを見比べる
 
 見るもの:
 
@@ -51,10 +66,22 @@ python -m kabusys.run_signal_queue_report --save
 
 当日朝は、実際に注文するかを最終判断する。
 
+08:05 に手動注文候補レポート（当日朝）が自動生成され、LINE にも通知される（スケジューラ `manual_order_report_morning` / Task Scheduler `KabuSys_ManualOrderReportMorning`）。
+
+- 出力: `artifacts/manual_orders/{date}/morning.md`（と `morning.json`）
+- 「今日注文すべき候補（BUY・SELL）」と「見送り候補（理由付き）」に分かれる
+- 停止フラグ・DD 停止があるとき、または前営業日のシグナルがない（夜間バッチ欠落の疑い）ときは、BUY をすべて見送り候補に移す。SELL は常に表示する
+- LINE のステータス: `OK` / `警告あり` / `BUY 見送り`
+
+手動で作り直す場合:
+
 ```powershell
+python scripts/run_manual_order_report.py --phase morning
 python scripts/run_pre_market_report.py
 python scripts/run_signal_queue_report.py
 ```
+
+`pre_market_report` との関係: `pre_market_report` は「自動執行（Execution Engine）を起動してよいか」を判定するレポートで、Execution Engine を起動しない手動運用では `BLOCKED` や警告になることがある。手動注文の判断には `manual_order_report`（当日朝）を使う。
 
 見るもの:
 
@@ -183,7 +210,7 @@ python -m kabusys.run_performance_report --type daily --save
 - 手動ポジション評価レポートの SELL 助言接続
 - 日次評価レポートへの手動ポジション統合
 - 手動ポジション向け SELL 候補レポート
-- 前日夜・当日朝の注文候補レポート強化
+- ~~前日夜・当日朝の注文候補レポート強化~~（#412 で `run_manual_order_report.py` を追加）
 - 自動発注を使わない運用モードの明示
 
 関連TODO: [TODO_ManualTradeImportAdvisoryMode.md](../08_Operations/TODO_ManualTradeImportAdvisoryMode.md)

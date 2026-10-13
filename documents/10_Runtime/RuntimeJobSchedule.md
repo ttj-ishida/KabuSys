@@ -18,10 +18,12 @@ KabuSys は、夜間バッチで翌営業日のシグナルと注文候補を作
 19:00  ai_analysis（AI Addon — ENABLE_AI_SENTIMENT=true のみ）
 20:00  strategy_signal
 21:00  portfolio_construction
+21:10  manual_order_report --phase evening（自動・手動注文候補）
 21:15  night_batch_report（自動生成）
 21:30  night batch status confirmation（オペレーター確認）
 08:00  pre_market_report（自動）
 08:02  signal_queue_report（自動）
+08:05  manual_order_report --phase morning（自動・LINE 通知）
 08:05  manual order final check（手動）
 08:30  broker web/order screen preparation（手動）
 09:00  manual order entry（手動）
@@ -119,6 +121,30 @@ KabuSys は、夜間バッチで翌営業日のシグナルと注文候補を作
 - `src/kabusys/operations/night_batch_report.py`
 - `src/kabusys/operations/job_run_recorder.py`
 
+### 2.7 manual_order_report evening（21:10）
+
+役割:
+
+- 手動注文メイン運用（#412）向けに、ユーザーが証券画面で注文するための BUY / SELL 候補を出力する
+- DuckDB は読み取り専用。発注・kabu API 呼び出しはしない
+- BUY: `signal_queue`（pending）に銘柄名・推奨株数・参考価格・想定金額・スコア/順位・保有株数・買い増し表記を付与
+- SELL: `signals`（sell）に `manual_action_queue` の株数・理由・`[手動保有]` を付与。自動分は `positions` の最新株数
+- 総資産・利用可能現金（`MANUAL_TRADING_ENABLED=true` 時）・1 銘柄上限（総資産の 10%）・想定投下額・利用率
+- ギャップ見送りルール（`strategy_config.yaml` の `gap_up_threshold` / `gap_down_threshold`）と、銘柄ごとの見送り上限/下限価格
+- LINE は送らない（portfolio_construction の夜 LINE に BUY/SELL 詳細が出るため）
+- スケジューラでは `needs_exclusive_db=True`（execution 停止後に read-only で読む）
+
+主なアーティファクト:
+
+- `artifacts/manual_orders/{date}/evening.md`
+- `artifacts/manual_orders/{date}/evening.json`
+
+関連モジュール:
+
+- `scripts/run_manual_order_report.py`
+- `src/kabusys/operations/manual_order_report.py`（収集）
+- `src/kabusys/operations/manual_order_report_format.py`（Markdown / JSON / CLI / LINE）
+
 ---
 
 ## 3. Night Batch 状態確認（21:15 以降）
@@ -159,13 +185,14 @@ Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object 
 
 ## 4. Pre-Market（08:00〜08:05）
 
-2 本のレポートが Task Scheduler により自動実行される。手動注文メイン運用では、証券口座との自動リコンシリエーションは必須にしない。
+3 本のレポートが Task Scheduler により自動実行される。手動注文メイン運用では、証券口座との自動リコンシリエーションは必須にしない。
 
 | 時刻 | タスク名 | スクリプト | 出力先 |
 |------|----------|------------|--------|
 | 08:00 | `KabuSys_PreMarketReport` | `scripts/run_pre_market_report.py` | `artifacts/pre_market/{date}/report.md` |
 | 08:02 | `KabuSys_SignalQueueReport` | `scripts/run_signal_queue_report.py` | `artifacts/signal_queue/{date}/report.md` |
-| 08:05 | 手動確認 | WebManual / Signal Queue Report | `artifacts/signal_queue/{date}/report.md` |
+| 08:05 | `KabuSys_ManualOrderReportMorning` | `scripts/run_manual_order_report.py --phase morning` | `artifacts/manual_orders/{date}/morning.md` |
+| 08:05 | 手動確認 | WebManual / Manual Order Report | `artifacts/manual_orders/{date}/morning.md` |
 
 判定（pre_market_report）:
 
@@ -180,11 +207,22 @@ Get-ScheduledTask -TaskName "KabuSys_*" | Get-ScheduledTaskInfo | Select-Object 
 - Signal Queue
 - データ鮮度
 
+確認対象（manual_order_report morning）:
+
+- 前営業日のシグナル（`signal_date` が前営業日より古い場合は警告し、BUY を全件見送り）
+- データ鮮度（`check_data_freshness`）
+- stop flag（`data/stop_requested.flag`。ありなら BUY を全件見送り）
+- DD 停止（監視 SQLite `dashboard.dd_stop_blocked_since`。ありなら BUY を全件見送り、読めなければ「不明」で警告のみ）
+- 出力は「今日注文すべき候補（BUY・SELL）」と「見送り候補（理由付き）」に分かれる。SELL は常に表示
+- LINE: ステータス（OK / 警告あり / BUY 見送り）、BUY 上位 10 件、SELL 一覧、警告。送信失敗は無視
+
 手動再実行（デバッグ時）:
 
 ```cmd
 python scripts/run_pre_market_report.py
 python scripts/run_signal_queue_report.py
+python scripts/run_manual_order_report.py --phase morning
+python scripts/run_manual_order_report.py --phase evening --date 2026-10-13
 ```
 
 ---
@@ -315,9 +353,11 @@ python scripts\run_scheduler.py --once
 | 18:30 | `KabuSys_FeatureGen` | `scripts\run_feature_gen.py` |
 | 20:00 | `KabuSys_StrategySignal` | `scripts\run_strategy_signal.py` |
 | 21:00 | `KabuSys_PortfolioConstruction` | `scripts\run_portfolio_construction.py` |
+| 21:10 | `KabuSys_ManualOrderReportEvening` | `scripts\run_manual_order_report.py --phase evening` |
 | 21:15 | `KabuSys_NightBatchReport` | `scripts\run_night_batch_report.py` |
 | 08:00 | `KabuSys_PreMarketReport` | `scripts\run_pre_market_report.py` |
 | 08:02 | `KabuSys_SignalQueueReport` | `scripts\run_signal_queue_report.py` |
+| 08:05 | `KabuSys_ManualOrderReportMorning` | `scripts\run_manual_order_report.py --phase morning` |
 | 08:05 | `KabuSys_PositionReconciliationReport` | `scripts\run_position_reconciliation_report.py` |
 | 08:30 | `KabuSys_ExecutionStart` | `scripts\start_system.py --component execution` |
 | 09:00 | `KabuSys_MonitoringStart` | `scripts\start_system.py --component monitoring` |
