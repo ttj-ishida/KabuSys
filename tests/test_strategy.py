@@ -401,6 +401,36 @@ def test_build_features_market_filter_normalizes_market_and_code(conn):
     assert {r[0] for r in rows} == {"1301"}
 
 
+def test_build_features_market_filter_accepts_japanese_market_names(conn):
+    """実 DB（bootstrap）の stocks.market は日本語表記。上場株の市場は通過し、
+    その他（ETF/REIT 等）と TOKYO PRO MARKET だけを除外する。
+
+    旧市場区分（東証一部・マザーズ・JASDAQ 等）の上場廃止銘柄も通常の株式なので通過させる
+    （除外するとバックテストに生存者バイアスが入るため）。
+    """
+    markets = {
+        "1001": "プライム",
+        "1002": "スタンダード",
+        "1003": "グロース",
+        "1004": "東証一部",
+        "1005": "東証二部",
+        "1006": "マザーズ",
+        "1007": "JASDAQ スタンダード",
+        "1008": "JASDAQ グロース",
+        "1009": "その他",
+        "1010": "TOKYO PRO MARKET",
+        "1011": "Other",
+        "1012": "ＪＡＳＤＡＱ　スタンダード",  # 全角英字・全角スペース（NFKC で吸収）
+    }
+    _insert_price_history(conn, [(code, 1000.0, 6e8) for code in markets])
+    conn.executemany(
+        "INSERT INTO stocks (code, market) VALUES (?, ?)", [list(kv) for kv in markets.items()]
+    )
+    build_features(conn, TARGET_DATE)
+    rows = conn.execute("SELECT code FROM features WHERE date = ?", [TARGET_DATE]).fetchall()
+    assert {r[0] for r in rows} == {f"100{i}" for i in range(1, 9)} | {"1012"}
+
+
 def test_build_features_zscore_clipped(conn):
     """Z スコア値は ±3 内に収まる"""
     _insert_price_history(conn, [("A", 1000.0, 6e8), ("B", 500.0, 6e8), ("C", 800.0, 6e8)])
