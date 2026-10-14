@@ -188,7 +188,7 @@ def _build_job_schedule() -> list[JobSpec]:
     enable_yahoonews = _parse_env_flag("ENABLE_YAHOONEWS")
     enable_ai = _parse_env_flag("ENABLE_AI_SENTIMENT")
     enable_tdnet = _parse_env_flag("ENABLE_TDNET")
-    # 手動注文メイン運用では false にし、執行起動とかぶステ API 必須のレポートを止める
+    # 手動注文メイン運用では false にし、執行起動・かぶステ API 必須のレポート・執行監視を止める
     enable_auto_execution = _parse_env_flag("ENABLE_AUTO_EXECUTION", default=True)
 
     return [
@@ -224,7 +224,16 @@ def _build_job_schedule() -> list[JobSpec]:
             False,
             enable_auto_execution,
         ),
-        JobSpec("monitoring_start", "start_system.py", ["--component", "monitoring"], 9, 0, False),
+        # 監視は Execution プロセスの死活を前提に CRITICAL 通知するため、自動執行停止時は起動しない
+        JobSpec(
+            "monitoring_start",
+            "start_system.py",
+            ["--component", "monitoring"],
+            9,
+            0,
+            False,
+            enable_auto_execution,
+        ),
         # --- 夜間バッチ (DuckDB 書き込みが必要 → execution を事前停止) ---
         JobSpec("tdnet_collection", "run_tdnet_collection.py", [], 15, 35, True, enable_tdnet),
         JobSpec("data_update", "run_data_update.py", [], 17, 30, True),

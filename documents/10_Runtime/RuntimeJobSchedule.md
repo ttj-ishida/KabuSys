@@ -417,4 +417,4 @@ python -m kabusys.run_process_monitor --hours 48
 
 ## 自動執行の停止（手動注文メイン運用）
 
-`.env` に `ENABLE_AUTO_EXECUTION=false` を設定すると、スケジューラーデーモンは 08:30 `execution_start` と 08:35 `position_reconciliation_report`（かぶステ API 必須）を実行しない。夜間バッチ・手動注文候補レポート・その他のレポートは従来どおり動く。未設定時は `true`（従来動作）。設定はデーモンの起動時と日付変更時に再読込される。
+`.env` に `ENABLE_AUTO_EXECUTION=false` を設定すると、スケジューラーデーモンは 08:30 `execution_start` 、08:35 `position_reconciliation_report`（かぶステ API 必須）、09:00 `monitoring_start`（Execution プロセスの死活監視。停止中は CRITICAL 通知が続くため）を実行しない。夜間バッチ・手動注文候補レポート・その他のレポートは従来どおり動く。未設定時は `true`（従来動作）。設定はデーモンの起動時と日付変更時に再読込される。

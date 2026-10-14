@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import run_scheduler  # noqa: E402
 
-_AUTO_EXEC_JOBS = {"execution_start", "position_reconciliation_report"}
+_AUTO_EXEC_JOBS = {"execution_start", "position_reconciliation_report", "monitoring_start"}
 
 
 def _jobs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env_text: str | None) -> dict:
@@ -28,7 +28,7 @@ def test_auto_execution_enabled_by_default(monkeypatch, tmp_path):
 
 
 def test_auto_execution_disabled_by_flag(monkeypatch, tmp_path):
-    """ENABLE_AUTO_EXECUTION=false で執行起動とかぶステ必須のレポートを無効化する。"""
+    """ENABLE_AUTO_EXECUTION=false で執行起動・かぶステ必須のレポート・執行監視を無効化する。"""
     jobs = _jobs(monkeypatch, tmp_path, "ENABLE_AUTO_EXECUTION=false\n")
     assert not any(jobs[name].enabled for name in _AUTO_EXEC_JOBS)
     # 手動運用で必要なジョブは引き続き有効
