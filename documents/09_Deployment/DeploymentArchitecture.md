@@ -193,6 +193,10 @@ OS
     ↓
     証券会社
 
+> **現在は停止中。** 運用は手動注文メイン（`.env` の `ENABLE_AUTO_EXECUTION=false`）で、
+> Execution Engine は起動しない。自動執行を再開した場合も、自動で発注するのは
+> `signal_queue` の BUY だけ（自動売却の機能はない）。
+
 ------------------------------------------------------------------------
 
 ## 5.8 Monitoring System
@@ -220,7 +224,19 @@ OS
     ↓
     Portfolio Construction
     ↓
-    Execution Engine
+    【手動注文メイン（現在の運用）】
+    夜 LINE / 朝の手動注文レポート
+    ↓
+    ユーザーが証券画面で発注
+    ↓
+    約定を manual_trades に入力
+    ↓
+    保有評価・売却候補（manual_action_queue）
+
+    【自動執行（現在停止中）】
+    Execution Engine（signal_queue の BUY のみ）
+    ↓
+    kabuステーション API
     ↓
     Broker
 
@@ -256,21 +272,60 @@ OS
     ↓
     production deploy
 
+## 8.1 運用フォルダと開発フォルダ
+
+開発と運用は **同じ PC の別フォルダ** に分ける。
+
+  フォルダ                              用途
+  ------------------------------------- ------------------------------------------------------------
+  `C:\Projects\KabuSys`                 運用フォルダ（git clone、origin = github.com/ttj-ishida/KabuSys）
+  `C:\Users\tetsu\Projects\KabuSys`     開発フォルダ（例。ブランチ作業・テストはこちら）
+
+-   DB（`data/kabusys.duckdb`・`data/monitoring.db`）・ログ（`logs/`）・`artifacts/`・`.env` は**運用フォルダ側**にある
+-   スケジューラーと手動注文の作業（約定入力・レポート確認）はすべて運用フォルダで行う
+-   production deploy = 運用フォルダで `main` を pull すること
+
+## 8.2 Python 環境
+
+-   Python 3.13.5
+-   運用用の仮想環境: `C:\Projects\KabuSys\.venv`
+-   `requirements.txt` / `constraints.txt` は Python 3.13 と非互換（**Issue #422**）。
+    `pip install -c constraints.txt -r requirements.txt` は失敗するため、運用 `.venv` には
+    動作確認済みのバージョン（numpy 2.4.4、pandas 2.3.3、pyarrow 23.0.1、duckdb 1.5.0、
+    streamlit 1.55.0、openai 1.109.1、pytest 9.0.2、ruff 0.15.11 など）を暫定的に入れている
+-   現状、`KabuSys_Scheduler` タスクの実行ファイルは `python`（グローバルの `C:\Python313`）。
+    `.venv` への切り替えは予定（管理者 PowerShell で `Set-ScheduledTask` によりアクションを変更）
+
 ------------------------------------------------------------------------
 
 # 9. 自動起動
 
-Windows Task Scheduler により以下を自動実行する。
+運用では **スケジューラーデーモン方式** を使う。Windows タスク `KabuSys_Scheduler`
+（ログオン時トリガー）が `scripts\run_scheduler.py` を常駐起動し、すべてのジョブを
+一元管理する（登録: `scripts\setup_scheduler_daemon.ps1`）。
 
-  時刻    内容
-  ------- -----------------------------------
-  15:30   market data ingestion
-  16:00   feature generation
-  18:00   AI analysis (news + regime)
-  20:00   strategy signal generation
-  21:00   portfolio construction
-  08:30   execution_service 起動
-  09:00   monitoring_service 起動
+-   非営業日（土日・祝日・年末年始）は全ジョブをスキップする
+-   起動時刻を過ぎたジョブは、起動直後に順次実行する（追いつき）
+-   設定は起動時と日付変更時に `.env` から再読込する
+-   個別タスク方式（`scripts\setup_task_scheduler.ps1`）は従来方式で、現在は使っていない
+
+  時刻    ジョブ                           手動運用中
+  ------- -------------------------------- ----------------------------------------------------------
+  08:00   pre_market_report                実行（自動執行の可否判定。BLOCKED でも問題なし）
+  08:02   signal_queue_report              実行
+  08:05   manual_order_report（朝）        実行（朝 LINE）
+  08:30   execution_start                  **無効**（`ENABLE_AUTO_EXECUTION=false`）
+  08:35   position_reconciliation_report   **無効**
+  09:00   monitoring_start                 **無効**
+  15:35   tdnet_collection                 実行（`ENABLE_TDNET=true`）
+  17:30   data_update                      実行
+  17:33   yahoonews_collection             実行（`ENABLE_YAHOONEWS=true`）
+  18:30   feature_gen                      実行
+  19:00   ai_analysis                      実行（`ENABLE_AI_SENTIMENT=true`。スコア未出力: Issue #419）
+  20:00   strategy_signal                  実行
+  21:00   portfolio_construction           実行（夜 LINE）
+  21:10   manual_order_report（夜）        実行
+  21:15   night_batch_report               実行
 
 **初期セットアップ（初回のみ）:**
 
@@ -284,11 +339,12 @@ python scripts\generate_config.py
 :: 3. 設定検証
 python -m kabusys.validate_config
 
-:: 4a. スケジューラーデーモン登録（推奨: DB ロック問題を自動解消）
+:: 4a. スケジューラーデーモン登録（運用で使用中）
 ::     ログオン時に run_scheduler.py が起動し、全ジョブを一元管理する
-powershell -File scripts\setup_scheduler_daemon.ps1
+::     .venv の python を使う場合は -PythonPath で指定する
+powershell -File scripts\setup_scheduler_daemon.ps1 -PythonPath C:\Projects\KabuSys\.venv\Scripts\python.exe
 
-:: 4b. 個別タスク登録（従来方式）
+:: 4b. 個別タスク登録（従来方式・未使用。ENABLE_AUTO_EXECUTION を参照しない）
 :: powershell -File scripts\setup_task_scheduler.ps1
 ```
 
@@ -307,9 +363,9 @@ powershell -File scripts\setup_scheduler_daemon.ps1
 
   スクリプト                          用途
   ----------------------------------- -------------------------------------------------
-  scripts\run_scheduler.py            スケジューラーデーモン本体（常駐・推奨）
+  scripts\run_scheduler.py            スケジューラーデーモン本体（常駐・運用で使用中）
   scripts\setup_scheduler_daemon.ps1  デーモンを Task Scheduler に登録（ログオン時起動）
-  scripts\setup_task_scheduler.ps1    個別タスクを Task Scheduler に登録（従来方式）
+  scripts\setup_task_scheduler.ps1    個別タスクを Task Scheduler に登録（従来方式・未使用）
   scripts\remove_task_scheduler.ps1   KabuSys_* タスクを一括削除
   scripts\rebuild_features.py         特徴量を手動再計算（データ確認付き）
   scripts\reset_signals.py            signal_queue をクリア（取引時間外のみ）
