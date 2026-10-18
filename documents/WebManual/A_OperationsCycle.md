@@ -67,7 +67,7 @@ KabuSys は、**市場が閉まっている時間に翌営業日の売買候補�
 
 **夜間バッチ結果（21:15）**
 
-`artifacts/reports/{日付}/report.md` に night_batch_report が出ます。確認するのは、必須ジョブ（`data_update` / `feature_gen` / `ai_analysis` / `strategy_signal` / `portfolio_construction`）がすべて `success` かどうかです。
+`artifacts/reports/{日付}/report.md` に night_batch_report が出ます。確認するのは、レポートの「Job Status」で必須ジョブ（`data_update_job` / `feature_generation_job` / `ai_analysis_job` / `strategy_signal_job` / `portfolio_construction_job`）がすべて `success` かどうかです。
 
 | 判定 | 意味 | 手動運用での扱い |
 |---|---|---|
@@ -258,6 +258,8 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 3. 原因を解消して、必要なジョブを手動で再実行する
 4. 翌朝に復旧する場合は `--date <前営業日>` を付けて `strategy_signal` と `portfolio_construction` を再実行する
 
+> ⚠️ `run_feature_gen.py` には `--date` がなく、常に今日の日付で特徴量を作ります。`data_update` / `feature_gen` が失敗した場合は翌朝にそのまま再実行せず、`documents/08_Operations/FailureRecovery.md` の手順（`build_features(conn, <前営業日>)` で日付指定して再生成）に従ってください。
+
 詳細は [E_FailureRecovery.md](./E_FailureRecovery.md) と `documents/08_Operations/FailureRecovery.md` を参照してください。
 
 ### 代表的な異常
@@ -288,7 +290,7 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 ### 夜（21:30 頃）
 
 - 夜 LINE が届いたか（翌営業日の BUY / SELL）
-- night_batch_report の必須ジョブがすべて `success` か
+- night_batch_report の必須ジョブ（`*_job`）がすべて `success` か
 - 失敗があれば `logs/scheduler.log` を確認
 
 ### 朝（08:05〜）

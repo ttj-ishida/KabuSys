@@ -160,7 +160,7 @@ python scripts\run_manual_order_report.py --phase morning
 
 入力時の注意:
 
-- 同日・同銘柄・同売買の 2 件目以降は ID に `_2`、`_3`… が付く（分割約定はそのまま複数件入力してよい）
+- 同日・同銘柄・同売買の 2 件目以降は ID に `_2`、`_3`… が付く（分割約定はそのまま複数件入力してよい。ただし数量・単価・手数料がすべて同じ分割約定は重複エラーになるので `--allow-duplicate` を付ける）
 - 全く同じ内容を 2 回入れると重複エラーになる。意図的なら `--allow-duplicate`
 - 保有を超える売却はエラーになる。記録開始前から持っていた株などは `--allow-oversell`
 - `--force` は非推奨（`--allow-duplicate` と同じ動作で、既存の約定を上書きはしない）
@@ -192,6 +192,8 @@ Get-ChildItem logs\data_update_*.log | Sort-Object LastWriteTime -Descending | S
 ```
 
 **夜間バッチが失敗した場合（翌朝に復旧する）:** 夜間バッチは D 日夜に `signals` / `signal_queue` を `date = D` で書き、翌朝のレポートは前営業日の分を読む。日付が変わってから再実行する場合は、必ず `--date <前営業日>` を付ける。
+
+> ⚠️ `run_feature_gen.py` には `--date` がなく、常に今日の日付で特徴量を作る。`data_update` / `feature_gen` が失敗した場合は、翌朝にそのまま再実行せず、`documents/08_Operations/FailureRecovery.md` の手順（`build_features(conn, <前営業日>)` で日付指定して再生成）に従う。下のコマンドは特徴量が揃っている場合（`strategy_signal` 以降の失敗）のもの。
 
 ```cmd
 python scripts\run_strategy_signal.py --date 2026-10-16
@@ -244,7 +246,7 @@ python -m kabusys.run_performance_report --type daily --env paper_trading
 
 - `artifacts/performance/{env}/{type}/{period}/report.md`
 
-> 手動運用の損益・保有は Streamlit **Manual Trades > 手動ポジション** と `manual_trades positions` で確認する。
+> ⚠️ **現在、成績レポートは空になる。** `portfolio_performance` テーブルに書き込む処理が src/・scripts/ になく（運用 DB でも 0 行）、レポートは空で終了コード 1 を返す。また `--env` の既定は `live` だが、現在の `KABUSYS_ENV` は `paper_trading`。手動運用の損益・保有は Streamlit **Manual Trades > 手動ポジション** と `manual_trades positions` で確認する。
 
 ---
 
@@ -289,7 +291,7 @@ python -m kabusys.run_performance_report --type daily --env paper_trading
 |------|--------|--------|
 | 08:00 | `pre_market_report` | `artifacts/pre_market/{date}/report.md` |
 | 08:02 | `signal_queue_report` | `artifacts/signal_queue/{date}/report.md`（`{date}` は queue の日付） |
-| 08:35 | `position_reconciliation_report`（Execution 起動後・kabu API 必須） | `artifacts/position_reconciliation/{date}/report.json` |
+| 08:35 | `position_reconciliation_report`（Execution 起動後・kabu API 必須） | `artifacts/position_reconciliation/{date}/report.md`（と `summary.json` / `warnings.json`） |
 
 確認項目:
 
@@ -323,7 +325,7 @@ Streamlit の Signal Queue ページに表示される CLI コマンドをター
 python scripts\cancel_signal_queue.py --date 2026-05-12
 
 :: 銘柄コードで絞る場合
-python scripts\cancel_signal_queue.py --date 2026-05-12 --code 7203
+python scripts\cancel_signal_queue.py --date 2026-05-12 --code 72030
 
 :: 全 pending をキャンセル（慎重に）
 python scripts\cancel_signal_queue.py --all
@@ -417,6 +419,8 @@ python scripts\start_system.py --dry-run
 python -m kabusys.run_market_close_report --save
 python -m kabusys.run_performance_report --type daily --save
 ```
+
+> ⚠️ `run_performance_report` は現在空のレポートを出して終了コード 1 を返す（`portfolio_performance` に書き込む処理がないため。`--env` の既定は `live`）。自動執行を再開しても、この状況は変わらない。
 
 当日 pending が残っている場合 / cancelled レコードの定期掃除:
 

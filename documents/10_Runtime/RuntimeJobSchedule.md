@@ -354,6 +354,8 @@ python -m kabusys.run_market_close_report --save
 python -m kabusys.run_performance_report --type daily --save
 ```
 
+> ⚠️ `run_performance_report` は現在空のレポートを出して終了コード 1 を返す（`portfolio_performance` に書き込む処理がないため。`--env` の既定は `live`）。自動執行を再開しても、この状況は変わらない。
+
 判定:
 
 - `OK`
@@ -402,7 +404,10 @@ powershell -File scripts\setup_scheduler_daemon.ps1 -PythonPath C:\Projects\Kabu
 # スケジュール一覧の表示（無効なジョブは enabled 列が skip）
 python scripts\run_scheduler.py --list
 
-# 1 回チェックして終了（テスト用。時刻を過ぎた未実行ジョブは実行される点に注意）
+# 1 回チェックして終了（テスト用）
+# - 時刻を過ぎた未実行ジョブは実際に実行され、data/scheduler_ran_today.json に記録されるため、
+#   その日はデーモンが同じジョブを再実行しない
+# - デーモン稼働中は PID ロック（data/scheduler.pid）により起動せず終了する
 python scripts\run_scheduler.py --once
 
 # タスクの状態・手動起動

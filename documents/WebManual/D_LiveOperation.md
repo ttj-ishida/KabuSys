@@ -52,7 +52,7 @@ python scripts\run_scheduler.py --list
 | 08:02 | Signal Queue レポート | 自動 | `scripts/run_signal_queue_report.py` |
 | 08:05 | 手動注文候補レポート（朝）・**朝 LINE** | 自動 | `scripts/run_manual_order_report.py --phase morning` |
 | 08:05〜寄り付き | 朝のレポート確認・手動発注 | **手動** | 証券会社画面 |
-| 約定後 | 約定の入力 | **手動** | `python -m kabusys.manual_trades` / Streamlit Manual Trades |
+| 約定後 | 約定の入力 | **手動** | `.venv\Scripts\python.exe -m kabusys.manual_trades` / Streamlit Manual Trades |
 | 随時 | 売却候補への対応 | **手動** | 証券会社画面 / Streamlit Manual Trades |
 
 非営業日（土日・祝日・年末年始）はすべての自動ジョブがスキップされます。
@@ -212,7 +212,7 @@ python -m kabusys.run_performance_report --type monthly --save
 - `artifacts/performance/{env}/weekly/...`
 - `artifacts/performance/{env}/monthly/...`
 
-> 手動保有の損益は Streamlit **Manual Trades > 手動ポジション** と `manual_trades positions` で確認します。
+> ⚠️ **現在、成績レポートは空になる。** `portfolio_performance` テーブルに書き込む処理が src/・scripts/ になく（運用 DB でも 0 行）、レポートは空で終了コード 1 を返す。また `--env` の既定は `live` だが、現在の `KABUSYS_ENV` は `paper_trading`。手動運用の損益・保有は Streamlit **Manual Trades > 手動ポジション** と `manual_trades positions` で確認する。
 
 ---
 
@@ -221,6 +221,8 @@ python -m kabusys.run_performance_report --type monthly --save
 1. `logs\scheduler.log` で失敗したジョブを特定する
 2. `logs\<job_name>.log` でエラー内容を確認する
 3. 原因を解消して再実行する。翌朝に復旧する場合は `--date <前営業日>` を付ける
+
+> ⚠️ `run_feature_gen.py` には `--date` がなく、常に今日の日付で特徴量を作ります。`data_update` / `feature_gen` が失敗した場合は翌朝にそのまま再実行せず、`documents/08_Operations/FailureRecovery.md` の手順（`build_features(conn, <前営業日>)` で日付指定して再生成）に従ってください。下のコマンドは特徴量が揃っている場合（`strategy_signal` 以降の失敗）のものです。
 
 ```powershell
 python scripts\run_strategy_signal.py --date 2026-10-16
@@ -308,6 +310,8 @@ python -m kabusys.run_intraday_monitor --watch
 python -m kabusys.run_market_close_report --save
 python -m kabusys.run_performance_report --type daily --save
 ```
+
+> ⚠️ `run_performance_report` は現在空のレポートを出して終了コード 1 を返す（`portfolio_performance` に書き込む処理がないため。`--env` の既定は `live`）。自動執行を再開しても、この状況は変わらない。
 
 | 判定 | 対応 |
 |------|------|

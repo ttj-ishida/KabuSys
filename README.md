@@ -20,7 +20,7 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
 設定は環境変数（.env）で行い、DuckDB / SQLite をデータ参照先として使用します。
 
-> **現在の運用方式: 手動注文メイン。** KabuSys は夜間バッチで翌営業日の BUY / SELL 候補を作り、夜 LINE・朝の手動注文レポート（08:05、朝 LINE）で提示するだけで、発注はユーザーが証券画面で行います。約定は `python -m kabusys.manual_trades` で入力します。
+> **現在の運用方式: 手動注文メイン。** KabuSys は夜間バッチで翌営業日の BUY / SELL 候補を作り、夜 LINE・朝の手動注文レポート（08:05、朝 LINE）で提示するだけで、発注はユーザーが証券画面で行います。約定は運用フォルダで `.venv\Scripts\python.exe -m kabusys.manual_trades` で入力します。
 > 自動執行（ExecutionEngine）は `.env` の `ENABLE_AUTO_EXECUTION=false` で停止中です。**自動売却の機能はありません**（`signal_queue` には BUY しか入らず、自動執行を再開しても自動で発注されるのは BUY だけ）。
 > 日々の手順は `documents/08_Operations/TradingRunbook.md` を参照してください。
 
@@ -65,7 +65,7 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
 - Signal Queue 操作（書き込みは CLI のみ）:
   - `python scripts/cancel_signal_queue.py --date 2026-05-12`（日付指定でキャンセル）
-  - `python scripts/cancel_signal_queue.py --date 2026-05-12 --code 7203`（銘柄コードで絞り込み）
+  - `python scripts/cancel_signal_queue.py --date 2026-05-12 --code 72030`（銘柄コードで絞り込み。コードは 5 桁）
   - `python scripts/cancel_signal_queue.py --all`（全 pending をキャンセル）
   - `python scripts/cancel_signal_queue.py --delete-cancelled`（cancelled レコードを物理削除）
 
@@ -258,7 +258,7 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
     # 動作確認
     python scripts/run_scheduler.py --list
-    python scripts/run_scheduler.py --once   # 時刻を過ぎた未実行ジョブは実際に実行される
+    python scripts/run_scheduler.py --once   # 時刻を過ぎた未実行ジョブは実際に実行され scheduler_ran_today.json に記録（その日はデーモンが再実行しない）。デーモン稼働中は PID ロックで終了する
     ```
 
     **方式 B: 個別タスク登録（従来方式・未使用）**
@@ -317,7 +317,7 @@ KabuSys は**日足スイング戦略**専用の設計です。夜間バッチ�
   ↓
 09:00  寄り付き → ユーザーが証券画面で手動注文（寄り付き価格と BUY 表の上限・下限を比較）
   ↓
-約定後  python -m kabusys.manual_trades add ... --apply で約定を入力
+約定後  .venv\Scripts\python.exe -m kabusys.manual_trades add ... --apply で約定を入力
 随時    売却候補に対応（証券画面で売却 → SELL を入力 → Streamlit Manual Trades で「対応済み」）
 ```
 
@@ -531,7 +531,8 @@ python -m kabusys.run_intraday_monitor --watch --interval 30
 各レポートは `--save` で `artifacts/` 以下に Markdown と JSON を保存します。
 
 **Pre-Market Report**（08:00 自動実行）
-市場開始前に当日の自動執行の準備が整っているか確認します（手動運用中は `BLOCKED` でも問題ありません）。Signal Queue の状態・リスク上限・接続状況などを READY / BLOCKED で判定します。
+市場開始前に当日の自動執行の準備が整っているか確認します（手動運用中は `BLOCKED` でも問題ありません）。  
+チェック項目は、前営業日の `signal_queue` の pending 件数・停止フラグ・スケジューラー稼働（`KabuSys_Scheduler`）・データ鮮度（`prices_daily` の最終日）です。pending 0 件・停止フラグあり・スケジューラー未稼働なら `BLOCKED`、データが古ければ `READY_WITH_WARNINGS` と判定します。
 
 ```
 python -m kabusys.run_pre_market_report --save
@@ -556,6 +557,8 @@ python -m kabusys.run_position_reconciliation_report --watch --interval 600
 
 **Performance Report**（任意）  
 日次・週次・月次の運用成績（損益・勝率・シャープ比など）を集計します。本番とペーパーを別々に確認できます。
+
+> ⚠️ 現在は空のレポートになり、終了コード 1 を返します（`portfolio_performance` に書き込む処理がなく、運用 DB でも 0 行。`--env` の既定は `live`）。手動運用の損益・保有は Streamlit **Manual Trades > 手動ポジション** と `manual_trades positions` で確認してください。
 
 ```
 python -m kabusys.run_performance_report --type daily --env live --save

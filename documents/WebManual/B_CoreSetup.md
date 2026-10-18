@@ -47,7 +47,7 @@ git clone https://github.com/ttj-ishida/KabuSys.git C:\Projects\KabuSys
 cd C:\Projects\KabuSys
 ```
 
-以降のコマンドはすべて運用フォルダで実行します。
+以降のコマンドはすべて運用フォルダで実行します。仮想環境を有効化していない場合は `python` を `.venv\Scripts\python.exe` に読み替えてください。
 
 ### B-1-2. 仮想環境の構築と依存パッケージのインストール
 
@@ -253,7 +253,9 @@ powershell -File scripts\setup_scheduler_daemon.ps1 -PythonPath C:\Projects\Kabu
 # 動作確認（スケジュール一覧表示）
 python scripts\run_scheduler.py --list
 
-# 動作確認（1 回チェックして終了。時刻を過ぎた未実行ジョブは実際に実行されるので注意）
+# 動作確認（1 回チェックして終了）
+# 注意: 時刻を過ぎた未実行ジョブは実際に実行され、data/scheduler_ran_today.json に記録されるため、
+#       その日はデーモンが同じジョブを再実行しない。デーモン稼働中は PID ロックにより起動せず終了する
 python scripts\run_scheduler.py --once
 ```
 
@@ -468,7 +470,7 @@ ENABLE_YAHOONEWS=true
 - [ ] `.env` に `KABUSYS_ENV=paper_trading`・`MANUAL_TRADING_ENABLED=true`・`MANUAL_TRADING_INITIAL_CASH`・`ENABLE_AUTO_EXECUTION=false` が設定されている
 - [ ] `python -m kabusys.run_pre_market_report` が正常に動作する
 - [ ] `python scripts/run_manual_order_report.py --phase morning` が正常に動作する
-- [ ] `python -m kabusys.manual_trades list` が正常に動作する
+- [ ] `.venv\Scripts\python.exe -m kabusys.manual_trades list` が正常に動作する
 - [ ] （自動執行を使う場合のみ）`python -m kabusys.run_execution`（別ターミナルで起動）が起動エラーなく動く
 
 ### Addon 有効化時の追加チェック
