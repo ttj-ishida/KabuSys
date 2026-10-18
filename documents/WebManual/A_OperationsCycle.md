@@ -259,6 +259,14 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 4. 翌朝に復旧する場合は `--date <前営業日>` を付けて `strategy_signal` と `portfolio_construction` を再実行する
 
 > ⚠️ `run_feature_gen.py` には `--date` がなく、常に今日の日付で特徴量を作ります。`data_update` / `feature_gen` が失敗した場合は翌朝にそのまま再実行せず、`documents/08_Operations/FailureRecovery.md` の手順（`build_features(conn, <前営業日>)` で日付指定して再生成）に従ってください。
+>
+> 特徴量（と TOPIX MA）を前営業日の日付で作り直す例（運用フォルダで実行。`2026-10-14` を前営業日に置き換える）:
+>
+> ```powershell
+> .venv\Scripts\python.exe -c "import sys; sys.path.insert(0, 'scripts'); from datetime import date; import duckdb; from kabusys.config import Settings; from kabusys.strategy.feature_engineering import build_features; import run_feature_gen as rf; d = date(2026, 10, 14); c = duckdb.connect(str(Settings().duckdb_path)); print(build_features(c, d), rf.update_topix_ma(c, d)); c.close()"
+> ```
+>
+> `scripts\rebuild_features.py --date <日付>` でも特徴量は作り直せるが、TOPIX MA は更新しない。
 
 詳細は [E_FailureRecovery.md](./E_FailureRecovery.md) と `documents/08_Operations/FailureRecovery.md` を参照してください。
 

@@ -194,6 +194,14 @@ Get-ChildItem logs\data_update_*.log | Sort-Object LastWriteTime -Descending | S
 **夜間バッチが失敗した場合（翌朝に復旧する）:** 夜間バッチは D 日夜に `signals` / `signal_queue` を `date = D` で書き、翌朝のレポートは前営業日の分を読む。日付が変わってから再実行する場合は、必ず `--date <前営業日>` を付ける。
 
 > ⚠️ `run_feature_gen.py` には `--date` がなく、常に今日の日付で特徴量を作る。`data_update` / `feature_gen` が失敗した場合は、翌朝にそのまま再実行せず、`documents/08_Operations/FailureRecovery.md` の手順（`build_features(conn, <前営業日>)` で日付指定して再生成）に従う。下のコマンドは特徴量が揃っている場合（`strategy_signal` 以降の失敗）のもの。
+>
+> 特徴量（と TOPIX MA）を前営業日の日付で作り直す例（運用フォルダで実行。`2026-10-14` を前営業日に置き換える）:
+>
+> ```powershell
+> .venv\Scripts\python.exe -c "import sys; sys.path.insert(0, 'scripts'); from datetime import date; import duckdb; from kabusys.config import Settings; from kabusys.strategy.feature_engineering import build_features; import run_feature_gen as rf; d = date(2026, 10, 14); c = duckdb.connect(str(Settings().duckdb_path)); print(build_features(c, d), rf.update_topix_ma(c, d)); c.close()"
+> ```
+>
+> `scripts\rebuild_features.py --date <日付>` でも特徴量は作り直せるが、TOPIX MA は更新しない。
 
 ```cmd
 python scripts\run_strategy_signal.py --date 2026-10-16
