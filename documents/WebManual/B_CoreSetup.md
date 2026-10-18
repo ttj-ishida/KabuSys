@@ -326,7 +326,7 @@ powershell -File scripts\remove_task_scheduler.ps1
 
 > ℹ️ **スケジュール設計の根拠**: J-Quants の日足データは東証引け（15:30）直後ではなく 16:30〜17:00 頃に公開されます。17:30 に data_update を実行することで当日データを確実に取得してから feature_gen（18:30）を起動できます。
 
-> **補足:** `market_close_report`（15:00）は自動執行時にオペレーターが手動で実行するコマンドです（`python -m kabusys.run_market_close_report`）。詳細は [D_LiveOperation.md](./D_LiveOperation.md) を参照してください。
+> **補足:** `market_close_report`（15:30 以降）は自動執行時にオペレーターが手動で実行するコマンドです（`python -m kabusys.run_market_close_report`）。詳細は [D_LiveOperation.md](./D_LiveOperation.md) を参照してください。
 
 > 詳細は `documents/10_Runtime/RuntimeJobSchedule.md` を参照してください。
 

@@ -345,7 +345,7 @@ python scripts\start_system.py --component monitoring
 
 ---
 
-## 6. Market Close（15:00・自動執行時）
+## 6. Market Close（15:30・自動執行時）
 
 手動運用では必須ではない（手動保有の確認は Streamlit **Manual Trades** と `manual_trades positions` で行う）。
 

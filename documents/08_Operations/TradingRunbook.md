@@ -361,7 +361,7 @@ python scripts\start_system.py --component execution
 - 業務キー `{signal_date}_{code}_{side}` による二重発注防止がある
 - `python -m kabusys.run_execution` 実行時に Execution Startup Summary が自動生成される（`artifacts/execution_startup/{date}/report.md`）
 
-### 10.4 ザラ場監視（09:00-15:00）
+### 10.4 ザラ場監視（09:00-15:30）
 
 見るもの:
 
@@ -415,7 +415,7 @@ python scripts\stop_system.py
 python scripts\start_system.py --dry-run
 ```
 
-### 10.6 Market Close（15:00）
+### 10.6 Market Close（15:30）
 
 確認項目:
 

@@ -288,7 +288,7 @@ python scripts\start_system.py --component execution
 
 > `orders_no_status > 0` は執行継続不可の扱いにする。
 
-### D-10-4. ザラ場監視（09:00〜15:00）
+### D-10-4. ザラ場監視（09:00〜15:30）
 
 ```powershell
 python -m kabusys.run_intraday_monitor --watch
@@ -304,7 +304,7 @@ python -m kabusys.run_intraday_monitor --watch
 | `Performance` | エクイティカーブ・ポジション・取引履歴 |
 | `Failure Recovery` | 障害イベント集約・復旧ガイド |
 
-### D-10-5. 引け後の確認（15:00 手動）
+### D-10-5. 引け後の確認（15:30 以降・手動）
 
 ```powershell
 python -m kabusys.run_market_close_report --save
