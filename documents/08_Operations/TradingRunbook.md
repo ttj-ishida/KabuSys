@@ -219,7 +219,7 @@ python scripts\run_scheduler.py --list
 python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db
 ```
 
-Home と 11 ページ（Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Signal Queue / Performance / Failure Recovery / WebManual / Strategy Lab / Process Monitor / Manual Trades）。手動運用で主に使うのは次のページ。
+全 12 ページ（Home と、Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Signal Queue / Performance / Failure Recovery / WebManual / Strategy Lab / Process Monitor / Manual Trades）。手動運用で主に使うのは次のページ。
 
 - `Manual Trades`（約定入力・手動ポジション（評価日の終値で評価）・売却候補・履歴）
 - `Signal Queue`（翌営業日の候補・シグナル。参照専用）

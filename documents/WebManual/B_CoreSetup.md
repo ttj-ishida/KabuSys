@@ -275,6 +275,16 @@ python scripts\run_scheduler.py --once
 | `EXCLUSIVE_DB_STOP_WAIT_SEC` | `20` | execution 停止後の追加待機上限（秒）。環境に合わせて調整可能。 |
 
 > ℹ️ 現状、運用環境の `KabuSys_Scheduler` の実行ファイルは `python`（グローバルの `C:\Python313`）です。`.venv` への切り替えは、管理者 PowerShell で `Set-ScheduledTask` によりアクションを変更する予定です。
+>
+> 既存タスクを `.venv` の Python に切り替える手順（PowerShell を「管理者として実行」で開いて実行）:
+>
+> ```powershell
+> $a = New-ScheduledTaskAction -Execute 'C:\Projects\KabuSys\.venv\Scripts\python.exe' -Argument 'scripts\run_scheduler.py' -WorkingDirectory 'C:\Projects\KabuSys'
+> Set-ScheduledTask -TaskName KabuSys_Scheduler -Action $a
+> (Get-ScheduledTask -TaskName KabuSys_Scheduler).Actions | Format-List Execute,Arguments,WorkingDirectory
+> ```
+>
+> 変更は次回のスケジューラー起動（ログオン時）から有効です。すぐ反映する場合は、動作中のデーモンを停止してから `Start-ScheduledTask -TaskName KabuSys_Scheduler` を実行します。
 
 ---
 
