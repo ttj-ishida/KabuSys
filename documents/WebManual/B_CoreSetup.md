@@ -253,7 +253,7 @@ powershell -File scripts\setup_scheduler_daemon.ps1 -PythonPath C:\Projects\Kabu
 # 動作確認（スケジュール一覧表示）
 python scripts\run_scheduler.py --list
 
-# 動作確認（1 回チェックして終了）
+# 動作確認（1 回チェックして終了。時刻を過ぎた未実行ジョブは実際に実行されるので注意）
 python scripts\run_scheduler.py --once
 ```
 

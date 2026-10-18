@@ -258,7 +258,7 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
     # 動作確認
     python scripts/run_scheduler.py --list
-    python scripts/run_scheduler.py --once
+    python scripts/run_scheduler.py --once   # 時刻を過ぎた未実行ジョブは実際に実行される
     ```
 
     **方式 B: 個別タスク登録（従来方式・未使用）**

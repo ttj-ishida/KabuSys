@@ -193,8 +193,9 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 
 #### 17:30 `data_update`
 
-- J-Quants から株価・財務・TOPIX などを取得
-- 更新テーブル: `prices_daily` / `fundamentals` / `raw_news` / `topix_daily`
+- J-Quants から取引カレンダー・株価・財務・TOPIX・決算カレンダーなどを取得し、市場 breadth を計算
+- 更新テーブル: `market_calendar` / `prices_daily` / `fundamentals` / `topix_daily` / `market_breadth` など
+- ニュース（`raw_news`）は 17:33 の `yahoonews_collection` が収集する
 
 #### 18:30 `feature_gen`
 
