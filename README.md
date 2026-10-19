@@ -20,6 +20,10 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
 設定は環境変数（.env）で行い、DuckDB / SQLite をデータ参照先として使用します。
 
+> **現在の運用方式: 手動注文メイン。** KabuSys は夜間バッチで翌営業日の BUY / SELL 候補を作り、夜 LINE・朝の手動注文レポート（08:05、朝 LINE）で提示するだけで、発注はユーザーが証券画面で行います。約定は運用フォルダで `.venv\Scripts\python.exe -m kabusys.manual_trades` で入力します。
+> 自動執行（ExecutionEngine）は `.env` の `ENABLE_AUTO_EXECUTION=false` で停止中です。**自動売却の機能はありません**（`signal_queue` には BUY しか入らず、自動執行を再開しても自動で発注されるのは BUY だけ）。
+> 日々の手順は `documents/08_Operations/TradingRunbook.md` を参照してください。
+
 ---
 
 ## 主な機能一覧
@@ -42,7 +46,8 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
   - 単発または監視モード（`--watch`）で実行状態 / リスク / システム指標を表示
 
 - Streamlit 監視ダッシュボード: `python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db data/monitoring.db`
-  - 11ページ構成（Home / Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Signal Queue / Performance / Failure Recovery / WebManual / Process Monitor / Strategy Lab）
+  - 12 ページ構成（Home を含む。Home 以外の 11 ページ：Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Signal Queue / Performance / Failure Recovery / WebManual / Strategy Lab / Process Monitor / Manual Trades）
+  - Manual Trades: 手動約定の入力・手動ポジション（評価日の終値で評価）・売却候補（対応済み・見送りに更新）・履歴（DuckDB）
   - Home: Kill Switch・Execution / Monitoring プロセス状態・エラーログ（SQLite）
   - Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Failure Recovery: 運用フロー確認ページ（SQLite `monitoring.db`、`operations_data.py` 経由）
   - Process Monitor: バッチジョブ実行状況・孤立プロセス検知（SQLite `process_runs`）
@@ -60,7 +65,7 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
 - Signal Queue 操作（書き込みは CLI のみ）:
   - `python scripts/cancel_signal_queue.py --date 2026-05-12`（日付指定でキャンセル）
-  - `python scripts/cancel_signal_queue.py --date 2026-05-12 --code 7203`（銘柄コードで絞り込み）
+  - `python scripts/cancel_signal_queue.py --date 2026-05-12 --code 72030`（銘柄コードで絞り込み。コードは 5 桁）
   - `python scripts/cancel_signal_queue.py --all`（全 pending をキャンセル）
   - `python scripts/cancel_signal_queue.py --delete-cancelled`（cancelled レコードを物理削除）
 
@@ -93,6 +98,11 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 - EDINET_API_KEY（ENABLE_EDINET=true 時に必須; EDINET API サブスクリプションキー）
 - ENABLE_YAHOONEWS（`true` で Yahoo News RSS 収集を有効化; デフォルト `false`）
 
+手動注文メイン運用（現在の運用で必須。`config_setup` ウィザードでは設定されないため `.env` に追記）:
+- MANUAL_TRADING_ENABLED（`true` で手動約定の保有を SELL 判定・BUY 株数計算・資金計算に含める; デフォルト `false`; 運用値 `true`）
+- MANUAL_TRADING_INITIAL_CASH（手動運用の元手（円）; 未設定時は `PORTFOLIO_VALUE`; 運用値 `1000000`）
+- ENABLE_AUTO_EXECUTION（`false` でスケジューラーデーモンが 08:30 execution_start / 08:35 position_reconciliation_report / 09:00 monitoring_start を実行しない; デフォルト `true`; 運用値 `false`）
+
 その他:
 - MONITOR_POLL_INTERVAL（run_monitoring のポーリング間隔、秒; デフォルト 60）
 - EXCLUSIVE_DB_STOP_WAIT_SEC（スケジューラーデーモンが execution 停止を待つ上限秒数; デフォルト 20）
@@ -110,7 +120,13 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
 1. リポジトリをクローン / 展開
 
-2. 仮想環境を作成してアクティベート
+   運用と開発は別フォルダに分けます。運用フォルダは `C:\Projects\KabuSys`（git clone、origin = github.com/ttj-ishida/KabuSys）で、DB・ログ・artifacts・`.env` は運用フォルダ側に置きます。開発は別フォルダ（例: `C:\Users\<ユーザー>\Projects\KabuSys`）で行います。
+
+   ```
+   git clone https://github.com/ttj-ishida/KabuSys.git C:\Projects\KabuSys
+   ```
+
+2. 仮想環境を作成してアクティベート（運用環境は Python 3.13.5、仮想環境は `C:\Projects\KabuSys\.venv`）
 
    ```
    python -m venv .venv
@@ -126,6 +142,8 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
    pip install -r requirements.txt
    ```
 
+   > ⚠️ **Issue #422:** `requirements.txt` / `constraints.txt` は Python 3.13 と非互換です（上限・固定値のバージョンに Python 3.13 用の wheel がなく、ソースビルドになって失敗する）。運用 `.venv` には動作確認済みのバージョン（numpy 2.4.4、pandas 2.3.3、pyarrow 23.0.1、duckdb 1.5.0、streamlit 1.55.0、openai 1.109.1、pytest 9.0.2、ruff 0.15.11 など）を暫定的に入れています。
+
 4. 環境変数の設定（.env ウィザード）
 
    対話形式で `.env` を作成します:
@@ -135,6 +153,14 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
    ```
 
    必須項目: `JQUANTS_BULK_API_KEY`, `KABU_API_PASSWORD`
+
+   手動注文メイン運用では、ウィザードの後に `.env` へ以下を追記します:
+
+   ```
+   MANUAL_TRADING_ENABLED=true
+   MANUAL_TRADING_INITIAL_CASH=1000000
+   ENABLE_AUTO_EXECUTION=false
+   ```
 
 5. 設定の検証
 
@@ -204,9 +230,9 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
    python scripts/run_portfolio_construction.py
    ```
 
-9. システム起動確認（ペーパートレード）
+9. システム起動確認（ペーパートレード・自動執行を使う場合のみ）
 
-   本番前にペーパートレードモードで Execution と Monitoring を起動します:
+   手動注文メイン運用では不要です。自動執行を検証する場合に、ペーパートレードモードで Execution と Monitoring を起動します:
 
    ```powershell
    $env:KABUSYS_ENV="paper_trading"; python -m kabusys.run_execution
@@ -216,22 +242,28 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
 10. 夜間バッチの自動化設定（本番運用時）
 
-    夜間バッチの自動実行には **2 つの方式**があります。
+    夜間バッチの自動実行には **2 つの方式**があります。**運用では方式 A を使っています。**
 
-    **方式 A: スケジューラーデーモン（推奨）**
+    **方式 A: スケジューラーデーモン（運用で使用中）**
 
+    Windows タスク `KabuSys_Scheduler`（ログオン時トリガー）が `scripts/run_scheduler.py` を常駐起動します。
     `run_execution` による DuckDB ロック競合を自動解消。土日・祝日はジョブをスキップ。
-    Task Scheduler への登録は 1 エントリのみ（ログオン時起動）。
+    起動時刻を過ぎたジョブは起動直後に順次実行し（追いつき）、`.env` は起動時と日付変更時に再読込します。
+    現状、タスクの実行ファイルは `python`（グローバル `C:\Python313`）で、`.venv` への切り替えを予定しています（`-PythonPath` で指定可能）。
 
     ```powershell
     powershell -ExecutionPolicy Bypass -File scripts/setup_scheduler_daemon.ps1
+    # .venv の python を使う場合
+    powershell -ExecutionPolicy Bypass -File scripts/setup_scheduler_daemon.ps1 -PythonPath C:\Projects\KabuSys\.venv\Scripts\python.exe
 
     # 動作確認
     python scripts/run_scheduler.py --list
-    python scripts/run_scheduler.py --once
+    python scripts/run_scheduler.py --once   # 時刻を過ぎた未実行ジョブは実際に実行され scheduler_ran_today.json に記録（その日はデーモンが再実行しない）。デーモン稼働中は PID ロックで終了する
     ```
 
-    **方式 B: 個別タスク登録（従来方式）**
+    **方式 B: 個別タスク登録（従来方式・未使用）**
+
+    `ENABLE_AUTO_EXECUTION` を参照しないため、手動運用中に使うと 08:30 の Execution 起動なども登録されます。
 
     ```powershell
     powershell -ExecutionPolicy Bypass -File scripts/setup_task_scheduler.ps1
@@ -259,23 +291,44 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
 
 ### 1 日の運用フロー
 
-KabuSys は**日足スイング戦略**専用の設計です。夜間バッチでシグナルを生成し、翌営業日の寄付きで執行します。ザラ場中はシグナル生成を行いません。
+KabuSys は**日足スイング戦略**専用の設計です。夜間バッチでシグナルを生成し、翌営業日の寄付きで注文します。ザラ場中はシグナル生成を行いません。
+
+**手動注文メイン運用（現在）:**
 
 ```
 15:30  市場クローズ
   ↓
-夜間バッチ（17:30〜21:15）
-  ├─ 17:30  データ更新   scripts/run_data_update.py
-  ├─ 18:30  特徴量生成   scripts/run_feature_gen.py
-  ├─ 19:00  AI 分析      scripts/run_ai_analysis.py  ← AI Addon 有効時のみ
-  ├─ 20:00  シグナル生成 scripts/run_strategy_signal.py
-  ├─ 21:00  ポートフォリオ構築 scripts/run_portfolio_construction.py
+夜間バッチ（15:35〜21:15、スケジューラーデーモンが実行）
+  ├─ 15:35  TDnet 収集      scripts/run_tdnet_collection.py   ← ENABLE_TDNET=true のみ
+  ├─ 17:30  データ更新      scripts/run_data_update.py
+  ├─ 17:33  Yahoo News 収集 scripts/run_yahoonews_collection.py ← ENABLE_YAHOONEWS=true のみ
+  ├─ 18:30  特徴量生成      scripts/run_feature_gen.py
+  ├─ 19:00  AI 分析         scripts/run_ai_analysis.py  ← ENABLE_AI_SENTIMENT=true のみ（現在スコアが出ていない: Issue #419）
+  ├─ 20:00  シグナル生成    scripts/run_strategy_signal.py（手動保有の売却候補も記録）
+  ├─ 21:00  ポートフォリオ構築 scripts/run_portfolio_construction.py（夜 LINE）
+  ├─ 21:10  手動注文候補レポート（夜） scripts/run_manual_order_report.py --phase evening
   └─ 21:15  バッチ結果レポート scripts/run_night_batch_report.py
   ↓
-21:30  夜間バッチ結果確認（レポート参照）
+21:30  夜 LINE・夜間バッチ結果確認
   ↓
-08:30  Execution 起動
-09:00  市場オープン → 寄付き発注
+08:00  pre_market_report（自動執行の可否判定。手動運用中は BLOCKED でも問題なし）
+08:02  signal_queue_report
+08:05  手動注文候補レポート（朝）・朝 LINE「【KabuSys 手動注文 当日朝】」
+  ↓
+09:00  寄り付き → ユーザーが証券画面で手動注文（寄り付き価格と BUY 表の上限・下限を比較）
+  ↓
+約定後  .venv\Scripts\python.exe -m kabusys.manual_trades add ... --apply で約定を入力
+随時    売却候補に対応（証券画面で売却 → SELL を入力 → Streamlit Manual Trades で「対応済み」）
+```
+
+> 既知の誤警告（Issue #421）: シグナル 0 件の正常な日でも朝のレポートに「シグナルが古い」と出ます。夜間バッチの成否は `logs/scheduler.log` と night_batch_report で確認してください。
+
+**自動執行モード（現在停止中。`ENABLE_AUTO_EXECUTION=true` で再開）:**
+
+```
+08:30  Execution 起動（前営業日の signal_queue の BUY を 08:50〜09:10 に発注）
+08:35  Position Reconciliation レポート（kabu API 必須）
+09:00  Monitoring 起動
   ↓
 ザラ場中
   ├─ Execution ループ（発注・約定確認・ポジション更新）
@@ -288,7 +341,7 @@ KabuSys は**日足スイング戦略**専用の設計です。夜間バッチ�
 
 ### 夜間バッチスクリプト
 
-夜間バッチは Windows タスクスケジューラで自動実行します（`scripts/setup_task_scheduler.ps1` 参照）。手動実行も可能です。
+夜間バッチはスケジューラーデーモン（Windows タスク `KabuSys_Scheduler`、`scripts/run_scheduler.py`）が自動実行します。手動実行も可能です。
 
 **データ更新**（17:30 実行）
 
@@ -296,8 +349,8 @@ KabuSys は**日足スイング戦略**専用の設計です。夜間バッチ�
 python scripts/run_data_update.py
 ```
 
-J-Quants から当日の株価・財務・銘柄マスタを取得し `prices_daily` 等を更新します。  
-ニュース記事（Yahoo RSS）も収集します。翌日のすべての処理はこのデータを起点とします。
+J-Quants から取引カレンダー・当日の株価・財務・TOPIX・決算カレンダーなどを取得し `prices_daily` 等を更新し、`market_breadth` を計算します。  
+ニュース記事（Yahoo RSS）は 17:33 の `run_yahoonews_collection.py` が収集します。翌日のすべての処理はこのデータを起点とします。
 
 **特徴量生成**（18:30 実行）
 
@@ -308,7 +361,7 @@ python scripts/run_feature_gen.py
 `prices_daily` をもとにモメンタム・ボラティリティ・出来高指標などを計算し `features` テーブルに保存します。  
 シグナル生成の入力となる数値データを整備するステップです。
 
-**AI 分析**（18:00 実行）
+**AI 分析**（19:00 実行）
 
 ```
 python scripts/run_ai_analysis.py
@@ -316,6 +369,7 @@ python scripts/run_ai_analysis.py
 
 ニュースのセンチメント分析（GPT-4o-mini）と市場レジーム判定（ETF/LLM ハイブリッド）を実行します。  
 各銘柄の `ai_scores` と当日の `market_regime`（bull/bear）を生成します。
+> ⚠️ Issue #419: 現在スコアが出ていません（ニューススコア 0 件・レジーム常に neutral）。ジョブ自体は成功します。
 
 **シグナル生成**（20:00 実行）
 
@@ -333,8 +387,19 @@ Bear レジーム判定は `RegimeProvider` プロトコル経由で行われ、
 python scripts/run_portfolio_construction.py
 ```
 
-シグナルからポジションサイズを計算し、リスク制御を適用して `signal_queue` に翌日の発注キューを生成します。  
-このテーブルが Execution エンジンの入力になります。
+シグナルからポジションサイズを計算し、リスク制御を適用して `signal_queue` に翌日の BUY 候補を生成します（`signal_queue` には BUY だけが入る）。  
+このテーブルが手動注文候補レポートと（自動執行時の）Execution エンジンの入力になります。完了後に夜 LINE（翌営業日の BUY / SELL、`[手動保有]`・`[買い増し]` 表示）を送ります。  
+
+**手動注文候補レポート**（21:10 夜 / 08:05 朝 自動実行）
+
+```
+python scripts/run_manual_order_report.py --phase evening
+python scripts/run_manual_order_report.py --phase morning
+```
+
+証券画面で手動注文するための BUY / SELL 候補・資金・上限・見送りルールを出力します（発注はしません）。朝のみ LINE「【KabuSys 手動注文 当日朝】」を送ります。  
+
+出力先: `artifacts/manual_orders/{date}/evening.md` / `morning.md`（と `.json`）
 
 **バッチ結果レポート**（21:15 自動実行）
 
@@ -343,9 +408,9 @@ python scripts/run_night_batch_report.py
 ```
 
 各ジョブの実行結果 (`artifacts/job_runs/{date}/`) を読み込み、DB からカウントを集計して READY / READY_WITH_WARNINGS / BLOCKED を判定します。  
-`KabuSys_NightBatchReport` タスクが 21:15 に自動実行します。手動確認・再生成にも使用できます。
+スケジューラーデーモンが 21:15 に自動実行します。手動確認・再生成にも使用できます。
 
-出力先: `artifacts/night_batch/{date}/summary.json`, `report.md`, `warnings.json`
+出力先: `artifacts/reports/{date}/summary.json`, `report.md`, `warnings.json`（`scripts/run_night_batch_report.py` の既定。`--output-dir` で変更可）
 
 ---
 
@@ -368,12 +433,16 @@ python scripts/run_night_batch_report.py
   - `prices_daily == 0`（価格データ未取得）
   - `features == 0`（特徴量未生成）
 
+手動運用では、必須ジョブがすべて成功していて BUY が 0 件なだけ（例: `breadth_stop`）の `BLOCKED` は正常です。ジョブ失敗の場合のみ復旧します。
+
 ---
 
 ### Execution（自動執行エンジン）
 
-**目的:** `signal_queue` の発注キューを読み込み、市場開始後に実際の注文を送信します。  
-約定確認・ポジション更新・リコンシリエーションを担います。
+> **現在は停止中**（手動注文メイン運用。`ENABLE_AUTO_EXECUTION=false`）。  
+
+**目的:** `signal_queue` の発注キュー（BUY のみ）を読み込み、市場開始後に実際の注文を送信します。  
+約定確認・ポジション更新・リコンシリエーションを担います。SELL は発注しません（自動売却の機能はない）。  
 
 ```
 python -m kabusys.run_execution
@@ -395,7 +464,8 @@ $env:KABUSYS_ENV="paper_trading"; python -m kabusys.run_execution
 ### Monitoring（バックグラウンド監視）
 
 **目的:** Execution プロセスとシステムリソースを定期ポーリングで監視します。  
-ドローダウン超過・API 切断・プロセス停止を検知すると LINE アラートと Kill Switch を発動します。
+ドローダウン超過・API 切断・プロセス停止を検知すると LINE アラートと Kill Switch を発動します（Kill Switch は未約定注文の取消のみで、保有は売却しません）。  
+自動執行モード専用で、手動運用中（`ENABLE_AUTO_EXECUTION=false`）は起動しません。  
 
 ```
 python -m kabusys.run_monitoring
@@ -430,6 +500,8 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 | **Failure Recovery** | 障害イベント集約 / 復旧ガイド |
 | **WebManual** | 運用マニュアル閲覧ビュー |
 | **Strategy Lab** | 市場レジームスコア / AI スコアランキング / シグナル推移 / 🤖 AI Co-Pilot（GPT-4o チャット） |
+| **Process Monitor** | バッチジョブ実行状況 / 孤立プロセス検知 |
+| **Manual Trades** | 手動約定の入力 / 手動ポジション（評価日の終値で評価）/ 売却候補（対応済み・見送りに更新、日付で絞り込み）/ 履歴 |
 
 - Home は SQLite `monitoring.db`（read-only）。
 - Initial Setup / Pre-Market / Execution Startup / Intraday Monitor / Failure Recovery は `operations_data.py` 経由で SQLite `monitoring.db`（read-only）。
@@ -458,8 +530,9 @@ python -m kabusys.run_intraday_monitor --watch --interval 30
 
 各レポートは `--save` で `artifacts/` 以下に Markdown と JSON を保存します。
 
-**Pre-Market Report**（08:30 頃）  
-市場開始前に当日の執行準備が整っているか確認します。Signal Queue の状態・リスク上限・接続状況などを READY / BLOCKED で判定します。
+**Pre-Market Report**（08:00 自動実行）
+市場開始前に当日の自動執行の準備が整っているか確認します（手動運用中は `BLOCKED` でも問題ありません）。  
+チェック項目は、前営業日の `signal_queue` の pending 件数・停止フラグ・スケジューラー稼働（`KabuSys_Scheduler`）・データ鮮度（`prices_daily` の最終日）です。pending 0 件・停止フラグあり・スケジューラー未稼働なら `BLOCKED`、データが古ければ `READY_WITH_WARNINGS` と判定します。
 
 ```
 python -m kabusys.run_pre_market_report --save
@@ -484,6 +557,8 @@ python -m kabusys.run_position_reconciliation_report --watch --interval 600
 
 **Performance Report**（任意）  
 日次・週次・月次の運用成績（損益・勝率・シャープ比など）を集計します。本番とペーパーを別々に確認できます。
+
+> ⚠️ 現在は空のレポートになり、終了コード 1 を返します（`portfolio_performance` に書き込む処理がなく、運用 DB でも 0 行。`--env` の既定は `live`）。手動運用の損益・保有は Streamlit **Manual Trades > 手動ポジション** と `manual_trades positions` で確認してください。
 
 ```
 python -m kabusys.run_performance_report --type daily --env live --save
@@ -550,8 +625,10 @@ touch data/stop_requested.flag
   - summary.json, report.md, warnings.json
 - Job Runs: artifacts/job_runs/YYYY-MM-DD/
   - {job_name}.json（各夜間バッチジョブの実行結果）
-- Night Batch: artifacts/night_batch/YYYY-MM-DD/
+- Night Batch: artifacts/reports/YYYY-MM-DD/（`scripts/run_night_batch_report.py` の既定）
   - summary.json, report.md, warnings.json
+- Manual Orders（手動注文候補）: artifacts/manual_orders/YYYY-MM-DD/
+  - evening.md / evening.json, morning.md / morning.json
 - Execution Startup: artifacts/execution_startup/YYYY-MM-DD/
 - Pre-Market: artifacts/pre_market/YYYY-MM-DD/
 - Market Close: artifacts/market_close/YYYY-MM-DD/
@@ -641,7 +718,8 @@ touch data/stop_requested.flag
   - market_close/
   - performance/
   - execution_startup/
-  - night_batch/
+  - reports/（night_batch_report の既定の保存先）
+  - manual_orders/（手動注文候補レポート）
 
 ---
 

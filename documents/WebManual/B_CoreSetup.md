@@ -22,10 +22,11 @@ KabuSys を動かすには以下がすべて揃っている必要があります
 | ソフトウェア | 用途 | 入手方法 |
 |---|---|---|
 | kabuステーション® | 発注用ローカル API サーバー | auカブコム証券マイページからダウンロード |
-| Python 3.11 以上 | システムの実行環境 | [python.org](https://www.python.org/) |
+| Python 3.13（運用環境は 3.13.5） | システムの実行環境 | [python.org](https://www.python.org/) |
 | Git | ソースコード管理 | [git-scm.com](https://git-scm.com/) |
 
 > ⚠️ kabuステーションは **Windows 専用**です。Linux・Mac では動作しません。
+> ℹ️ 現在の運用（手動注文メイン）では kabuステーションは使いません。自動執行を再開する場合のみ必要です。
 
 ---
 
@@ -33,11 +34,20 @@ KabuSys を動かすには以下がすべて揃っている必要があります
 
 ### B-1-1. リポジトリのクローン
 
+運用と開発は **別フォルダ** に分けます。
+
+| フォルダ | 用途 |
+|---|---|
+| `C:\Projects\KabuSys` | **運用フォルダ**。スケジューラー・DB・ログ・artifacts・`.env` はここ |
+| 開発フォルダ（例: `C:\Users\<ユーザー>\Projects\KabuSys`） | ブランチ作業・テスト用 |
+
 ```powershell
-# プロジェクトを配置したいディレクトリで実行
-git clone https://github.com/your-org/KabuSys.git
-cd KabuSys
+# 運用フォルダとしてクローン
+git clone https://github.com/ttj-ishida/KabuSys.git C:\Projects\KabuSys
+cd C:\Projects\KabuSys
 ```
+
+以降のコマンドはすべて運用フォルダで実行します。仮想環境を有効化していない場合は `python` を `.venv\Scripts\python.exe` に読み替えてください。
 
 ### B-1-2. 仮想環境の構築と依存パッケージのインストール
 
@@ -51,6 +61,8 @@ python -m venv .venv
 # 依存パッケージをインストール
 pip install -e .
 ```
+
+> ⚠️ **Issue #422:** `requirements.txt` / `constraints.txt` は Python 3.13 と非互換です（上限・固定値のバージョンに Python 3.13 用の wheel がない）。`pip install -c constraints.txt -r requirements.txt` は失敗します。運用 `.venv` には動作確認済みのバージョン（numpy 2.4.4、pandas 2.3.3、pyarrow 23.0.1、duckdb 1.5.0、streamlit 1.55.0、openai 1.109.1、pytest 9.0.2、ruff 0.15.11 など）を暫定的に入れています。
 
 > ⚠️ PowerShell でスクリプト実行が禁止されている場合は、管理者権限で以下を実行してください。
 > ```powershell
@@ -97,6 +109,24 @@ python -m kabusys.config_setup
 | `KABU_SANDBOX_API_PASSWORD` | kabu検証環境用 API パスワード（`KABU_USE_SANDBOX=true` 時） | （空） |
 | `JQUANTS_ENABLE_DIVIDENDS` | 配当データETLの有効化。J-Quants **Premium プラン以上**が必要。Standard プランでは `false` のまま使用する。`true` にすると `div_yield` 特徴量が更新される。 | `false` |
 | `LOG_LEVEL` | ログの詳細レベル | `INFO` |
+| `DUCKDB_PATH` | DuckDB のパス | `data/kabusys.duckdb` |
+| `SQLITE_PATH` | 監視用 SQLite のパス | `data/monitoring.db` |
+
+**手動注文メイン運用の設定:**（現在の運用で使用。ウィザードでは設定されないため `.env` に追記します）
+
+| 環境変数 | 説明 | デフォルト | 現在の運用値 |
+|---|---|---|---|
+| `MANUAL_TRADING_ENABLED` | 手動約定の保有を SELL 判定・BUY 株数計算・資金計算に含める | `false` | `true` |
+| `MANUAL_TRADING_INITIAL_CASH` | 手動運用の元手（円）。未設定時は `PORTFOLIO_VALUE` を使う | （`PORTFOLIO_VALUE`） | `1000000` |
+| `ENABLE_AUTO_EXECUTION` | `false` にするとスケジューラーデーモンが 08:30 `execution_start`・08:35 `position_reconciliation_report`・09:00 `monitoring_start` を実行しない | `true` | `false` |
+
+```env
+MANUAL_TRADING_ENABLED=true
+MANUAL_TRADING_INITIAL_CASH=1000000
+ENABLE_AUTO_EXECUTION=false
+```
+
+> ℹ️ `ENABLE_AUTO_EXECUTION` を参照するのはスケジューラーデーモン（`scripts/run_scheduler.py`）だけです。デーモンは起動時と日付変更時に `.env` を再読込します。
 
 **Addon 任意設定:**（未設定でも Core の自動売買フローには影響しません）
 
@@ -109,6 +139,8 @@ python -m kabusys.config_setup
 | `ENABLE_EDINET` | Disclosure Addon | EDINET 法定開示収集の有効化 | `false` |
 | `EDINET_API_KEY` | Disclosure Addon | EDINET API サブスクリプションキー（`ENABLE_EDINET=true` 時に必須） | （空） |
 | `ENABLE_YAHOONEWS` | News Addon | Yahoo News RSS 収集の有効化 | `false` |
+
+> 現在の運用値: `KABUSYS_ENV=paper_trading`、`KABU_USE_SANDBOX=true`、`LINE_NOTIFY_ENABLED=true`、`ENABLE_TDNET` / `ENABLE_EDINET` / `ENABLE_YAHOONEWS` / `ENABLE_AI_SENTIMENT` はすべて `true`。
 
 ### B-1-4. 設定の検証
 
@@ -196,27 +228,34 @@ python scripts/run_portfolio_construction.py
 ### B-1-7. スケジュール自動化の設定（夜間バッチ）
 
 KabuSys は引け後〜翌朝にかけて複数のバッチ処理を自動実行します。
-自動化の方式は **2 種類**あります。
+自動化の方式は **2 種類**あります。**運用では方式 A（スケジューラーデーモン）を使っています。**
 
 ---
 
-#### 方式 A: スケジューラーデーモン（推奨）
+#### 方式 A: スケジューラーデーモン（運用で使用中）
 
 1 つの Python プロセスが常駐してすべてのジョブを一元管理します。
 
 **選ぶ理由:**
 - `run_execution` が DuckDB 接続を保持したまま市場終了後も動き続けることで夜間バッチが **DB ロックエラーで失敗する問題**を自動解消します。各バッチ実行前に execution を自動停止し、完了後（取引時間内であれば）再起動します。
 - `market_calendar` テーブルを参照して**土日・祝日・年末年始は全ジョブをスキップ**します。
-- Task Scheduler への登録は **「ログオン時起動」の 1 エントリのみ**。管理が簡単です。
+- Task Scheduler への登録は **「ログオン時起動」の 1 エントリのみ**（タスク名 `KabuSys_Scheduler`）。管理が簡単です。
+- 起動時刻を過ぎたジョブは、起動直後に順次実行します（追いつき）。
+- `.env` の設定は起動時と日付変更時に再読込します。
 
 ```powershell
-# スケジューラーデーモンを Task Scheduler に登録
+# スケジューラーデーモンを Task Scheduler に登録（python は既定でグローバルの python）
 powershell -File scripts\setup_scheduler_daemon.ps1
+
+# .venv の python を使う場合
+powershell -File scripts\setup_scheduler_daemon.ps1 -PythonPath C:\Projects\KabuSys\.venv\Scripts\python.exe
 
 # 動作確認（スケジュール一覧表示）
 python scripts\run_scheduler.py --list
 
 # 動作確認（1 回チェックして終了）
+# 注意: 時刻を過ぎた未実行ジョブは実際に実行され、data/scheduler_ran_today.json に記録されるため、
+#       その日はデーモンが同じジョブを再実行しない。デーモン稼働中は PID ロックにより起動せず終了する
 python scripts\run_scheduler.py --once
 ```
 
@@ -235,11 +274,23 @@ python scripts\run_scheduler.py --once
 |---|---|---|
 | `EXCLUSIVE_DB_STOP_WAIT_SEC` | `20` | execution 停止後の追加待機上限（秒）。環境に合わせて調整可能。 |
 
+> ℹ️ 現状、運用環境の `KabuSys_Scheduler` の実行ファイルは `python`（グローバルの `C:\Python313`）です。`.venv` への切り替えは、管理者 PowerShell で `Set-ScheduledTask` によりアクションを変更する予定です。
+>
+> 既存タスクを `.venv` の Python に切り替える手順（PowerShell を「管理者として実行」で開いて実行）:
+>
+> ```powershell
+> $a = New-ScheduledTaskAction -Execute 'C:\Projects\KabuSys\.venv\Scripts\python.exe' -Argument 'scripts\run_scheduler.py' -WorkingDirectory 'C:\Projects\KabuSys'
+> Set-ScheduledTask -TaskName KabuSys_Scheduler -Action $a
+> (Get-ScheduledTask -TaskName KabuSys_Scheduler).Actions | Format-List Execute,Arguments,WorkingDirectory
+> ```
+>
+> 変更は次回のスケジューラー起動（ログオン時）から有効です。すぐ反映する場合は、動作中のデーモンを停止してから `Start-ScheduledTask -TaskName KabuSys_Scheduler` を実行します。
+
 ---
 
-#### 方式 B: 個別タスク登録（従来方式）
+#### 方式 B: 個別タスク登録（従来方式・未使用）
 
-各ジョブを個別に Task Scheduler へ登録します。DB ロック問題が発生する場合は方式 A を推奨します。
+各ジョブを個別に Task Scheduler へ登録します。現在は使っていません。`ENABLE_AUTO_EXECUTION` を参照しないため、手動運用中に使うと 08:30 の Execution 起動なども登録されます。
 
 ```powershell
 # Core ジョブは常時登録。Addon ジョブは .env フラグが true のときのみ登録される。
@@ -251,28 +302,31 @@ powershell -File scripts\remove_task_scheduler.ps1
 
 ---
 
-**ジョブスケジュール一覧（方式 A・B 共通）:**
+**ジョブスケジュール一覧（方式 A のデーモン定義）:**
 
-| 時刻 | 処理 | スクリプト | 区分 |
-|---|---|---|---|
-| 08:00 | Pre-Market レポート | `scripts/run_pre_market_report.py` | Core |
-| 08:02 | Signal Queue レポート | `scripts/run_signal_queue_report.py` | Core |
-| 08:05 | Position Reconciliation レポート | `scripts/run_position_reconciliation_report.py` | Core |
-| 08:10〜08:50 | 注文候補の最終確認・手動発注 | 証券会社画面 | 手動 |
-| 08:30 | Execution Engine 起動 | `scripts/start_system.py --component execution` | 任意（自動発注検証時のみ） |
-| 09:00 | Monitoring 起動 | `scripts/start_system.py --component monitoring` | 任意 |
-| 15:35 | TDnet 適時開示収集 | `scripts/run_tdnet_collection.py` | Addon（`ENABLE_TDNET=true`） |
-| 17:30 | 市場データ更新 | `scripts/run_data_update.py` | Core |
-| 17:33 | Yahoo News RSS 収集 | `scripts/run_yahoonews_collection.py` | Addon（`ENABLE_YAHOONEWS=true`） |
-| 18:30 | 特徴量計算 | `scripts/run_feature_gen.py` | Core |
-| 19:00 | AI 分析 | `scripts/run_ai_analysis.py` | Addon（`ENABLE_AI_SENTIMENT=true`） |
-| 20:00 | 売買シグナル生成 | `scripts/run_strategy_signal.py` | Core |
-| 21:00 | ポートフォリオ構築 | `scripts/run_portfolio_construction.py` | Core |
-| 21:15 | 夜間バッチ結果レポート | `scripts/run_night_batch_report.py` | Core |
+| 時刻 | 処理 | スクリプト | 区分 | 手動運用中 |
+|---|---|---|---|---|
+| 08:00 | Pre-Market レポート | `scripts/run_pre_market_report.py` | Core | 実行（自動執行の可否判定。`BLOCKED` でも問題なし） |
+| 08:02 | Signal Queue レポート | `scripts/run_signal_queue_report.py` | Core | 実行 |
+| 08:05 | 手動注文候補レポート（朝・LINE あり） | `scripts/run_manual_order_report.py --phase morning` | Core | 実行 |
+| 08:30 | Execution Engine 起動 | `scripts/start_system.py --component execution --clear-stop-flag` | 自動執行 | **無効** |
+| 08:35 | Position Reconciliation レポート | `scripts/run_position_reconciliation_report.py` | 自動執行 | **無効** |
+| 09:00 | Monitoring 起動 | `scripts/start_system.py --component monitoring` | 自動執行 | **無効** |
+| 15:35 | TDnet 適時開示収集 | `scripts/run_tdnet_collection.py` | Addon（`ENABLE_TDNET=true`） | 実行 |
+| 17:30 | 市場データ更新 | `scripts/run_data_update.py` | Core | 実行 |
+| 17:33 | Yahoo News RSS 収集 | `scripts/run_yahoonews_collection.py` | Addon（`ENABLE_YAHOONEWS=true`） | 実行 |
+| 18:30 | 特徴量計算 | `scripts/run_feature_gen.py` | Core | 実行 |
+| 19:00 | AI 分析 | `scripts/run_ai_analysis.py` | Addon（`ENABLE_AI_SENTIMENT=true`） | 実行（現在スコアが出ていない：Issue #419） |
+| 20:00 | 売買シグナル生成 | `scripts/run_strategy_signal.py` | Core | 実行 |
+| 21:00 | ポートフォリオ構築（夜 LINE） | `scripts/run_portfolio_construction.py` | Core | 実行 |
+| 21:10 | 手動注文候補レポート（夜） | `scripts/run_manual_order_report.py --phase evening` | Core | 実行 |
+| 21:15 | 夜間バッチ結果レポート | `scripts/run_night_batch_report.py` | Core | 実行 |
+
+> ℹ️ 方式 B（個別タスク）でも同じ時刻で登録されます（Addon は `.env` フラグが `true` のときのみ）。EDINET 収集（`run_edinet_collection.py`）と開示分類（`run_disclosure_classification.py`）は、どちらの方式でもスケジュール登録されません。
 
 > ℹ️ **スケジュール設計の根拠**: J-Quants の日足データは東証引け（15:30）直後ではなく 16:30〜17:00 頃に公開されます。17:30 に data_update を実行することで当日データを確実に取得してから feature_gen（18:30）を起動できます。
 
-> **補足:** `market_close_report`（15:00）はオペレーターが手動で実行するコマンドです（`python -m kabusys.run_market_close_report`）。詳細は [D_LiveOperation.md](./D_LiveOperation.md) を参照してください。
+> **補足:** `market_close_report`（15:30 以降）は自動執行時にオペレーターが手動で実行するコマンドです（`python -m kabusys.run_market_close_report`）。詳細は [D_LiveOperation.md](./D_LiveOperation.md) を参照してください。
 
 > 詳細は `documents/10_Runtime/RuntimeJobSchedule.md` を参照してください。
 
@@ -343,14 +397,14 @@ TDnet（適時開示情報閲覧サービス）から当日の開示一覧を自
 ENABLE_TDNET=true
 ```
 
-有効化すると以下の2ジョブが毎日自動実行されます。
+関連ジョブは次の 2 つです。
 
-| 時刻 | 処理 | 保存先 |
-|---|---|---|
-| 15:35 | TDnet から当日の開示一覧を取得・保存 | `raw_disclosures` |
-| 17:00 | 開示タイトルを分類してイベントスコアを付与 | `disclosure_events` |
+| 時刻 | 処理 | 保存先 | スケジュール |
+|---|---|---|---|
+| 15:35 | TDnet から当日の開示一覧を取得・保存（`run_tdnet_collection.py`） | `raw_disclosures` | 自動実行 |
+| — | 開示タイトルを分類してイベントスコアを付与（`run_disclosure_classification.py`） | `disclosure_events` | **スケジュール未登録**（必要なら手動実行） |
 
-> ℹ️ `ENABLE_TDNET=false`（デフォルト）の場合、両ジョブは即座にスキップされ Core 機能（自動売買）に影響しません。
+> ℹ️ `ENABLE_TDNET=false`（デフォルト）の場合、両ジョブは即座にスキップされ Core 機能に影響しません。
 
 ### B-2-4. EDINET 法定開示収集の設定（Disclosure Addon — 任意）
 
@@ -368,11 +422,11 @@ ENABLE_EDINET=true
 EDINET_API_KEY=your_subscription_key
 ```
 
-有効化すると以下のジョブが毎日自動実行されます。
+関連ジョブ:
 
-| 時刻 | 処理 | 保存先 |
-|---|---|---|
-| 15:40 | EDINET から当日の法定開示一覧を取得・保存 | `raw_disclosures`（source='edinet'） |
+| 時刻 | 処理 | 保存先 | スケジュール |
+|---|---|---|---|
+| — | EDINET から当日の法定開示一覧を取得・保存（`run_edinet_collection.py`） | `raw_disclosures`（source='edinet'） | **スケジュール未登録**（スケジューラーデーモン・個別タスクのどちらにも登録されていない。必要なら手動実行） |
 
 **収集対象書類種別:**
 - 有価証券報告書（120）
@@ -421,10 +475,13 @@ ENABLE_YAHOONEWS=true
 - [ ] `python scripts/setup_db.py` で `data/kabusys.duckdb` と `data/monitoring.db` が作成されている
 - [ ] `python scripts/setup_db.py --paper` で `data/paper_trading.db` が作成されている
 - [ ] DuckDB に市場データ（`prices_daily`, `stocks` など）が存在する
-- [ ] Task Scheduler に Core 標準ジョブが登録されている
-- [ ] `.env` に `KABUSYS_ENV=paper_trading` が設定されている
+- [ ] Task Scheduler に `KabuSys_Scheduler`（スケジューラーデーモン）が登録されている
+- [ ] `python scripts\run_scheduler.py --list` で 08:30 / 08:35 / 09:00 のジョブが `skip` になっている（手動運用時）
+- [ ] `.env` に `KABUSYS_ENV=paper_trading`・`MANUAL_TRADING_ENABLED=true`・`MANUAL_TRADING_INITIAL_CASH`・`ENABLE_AUTO_EXECUTION=false` が設定されている
 - [ ] `python -m kabusys.run_pre_market_report` が正常に動作する
-- [ ] `python -m kabusys.run_execution`（別ターミナルで起動）が起動エラーなく動く
+- [ ] `python scripts/run_manual_order_report.py --phase morning` が正常に動作する
+- [ ] `.venv\Scripts\python.exe -m kabusys.manual_trades list` が正常に動作する
+- [ ] （自動執行を使う場合のみ）`python -m kabusys.run_execution`（別ターミナルで起動）が起動エラーなく動く
 
 ### Addon 有効化時の追加チェック
 

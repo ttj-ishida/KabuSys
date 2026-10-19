@@ -17,6 +17,12 @@ Runtime Architecture は以下を定義する。
 サーバー分離ではなく **プロセス分離 + スケジューリング設計**
 により安全性を確保する。
 
+> **現在の運用方式（2026-10 時点）:** 手動注文メイン。夜間バッチと朝・夜のレポートは
+> 自動で動くが、発注はユーザーが証券画面で行い、約定を `manual_trades` に入力する。
+> 自動執行（execution_service / monitoring_service の起動）は `.env` の
+> `ENABLE_AUTO_EXECUTION=false` で停止中。**自動売却の機能はない**（`signal_queue` には
+> BUY しか入らず、自動執行を再開しても自動で発注されるのは BUY だけ）。
+
 ------------------------------------------------------------------------
 
 # 2. プロセス構成
@@ -65,7 +71,20 @@ Windows PC 上では以下のプロセスが独立して稼働する。
 
 夜間処理時間
 
-    17:30 〜 08:30
+    15:35 〜 21:15（tdnet_collection 〜 night_batch_report）
+
+夜間バッチの後に、手動注文向けのレポートと LINE を出す。
+
+    portfolio_construction（21:00、夜 LINE）
+          ↓
+    manual_order_report --phase evening（21:10）
+          ↓
+    night_batch_report（21:15）
+          ↓
+    manual_order_report --phase morning（翌 08:05、朝 LINE）
+
+日付の決まり: D 日夜のバッチは `signals` / `signal_queue` を `date = D` で書き、
+翌朝のレポート・執行は前営業日（`prev_trading_day`）の分を読む。
 
 ------------------------------------------------------------------------
 
@@ -96,11 +115,19 @@ Signal内容
   order_type   limit/market
   price        指値
 
+> 実装では DuckDB の `signal_queue` テーブルで、運用ジョブのうち書き込むのは
+> `scripts/run_portfolio_construction.py` のみ（BUY だけを INSERT。検証用ツール
+> `kabusys.tools.inject_dummy_signal` を除く）。SELL シグナルは `signals` テーブル・LINE・売却候補
+> （`manual_action_queue`）に出るだけで、`signal_queue` には入らない。
+
 ------------------------------------------------------------------------
 
 # 5. ザラ場処理（Market Hours）
 
-ザラ場では **Execution と Monitoring のみ稼働**する。**intraday のシグナル生成は行わない。**
+> 以下は自動執行モードの構成。**現在は停止中**で、手動運用ではザラ場中に KabuSys の
+> プロセスは動かない（ユーザーが証券画面で発注し、約定を入力する）。
+
+自動執行モードでは、ザラ場で **Execution と Monitoring のみ稼働**する。**intraday のシグナル生成は行わない。**
 
     Signal Queue（夜間バッチで生成済み）
          ↓
@@ -139,7 +166,9 @@ Execution層では以下を確認する。
 
 # 7. Monitoringプロセス
 
-monitoring_service は常時稼働する。
+monitoring_service は自動執行モードで稼働する（09:00 起動）。手動運用中
+（`ENABLE_AUTO_EXECUTION=false`）は Execution プロセスの死活を前提に CRITICAL 通知が
+続くため起動しない。Kill Switch は未約定注文の取消のみで、保有の売却はしない。
 
 監視対象
 
@@ -157,23 +186,32 @@ monitoring_service は常時稼働する。
 
 # 8. スケジューラ
 
-ジョブ自動実行の方式は 2 通りある。
+ジョブ自動実行の方式は 2 通りある。**運用では方式 A（スケジューラーデーモン）を使っている。**
 
-## 方式 A: スケジューラーデーモン（推奨）
+## 方式 A: スケジューラーデーモン（運用で使用中）
 
 単一の Python プロセスが常駐してすべてのジョブを一元管理する。
-`run_execution` が DuckDB 接続を保持したまま市場終了後も生存し続けることで
-夜間バッチが DB ロックで失敗する問題を自動解消する。
-取引カレンダーを参照し、非営業日（土日・祝日）は全ジョブをスキップする。
+Windows タスク `KabuSys_Scheduler`（ログオン時トリガー）が
+運用フォルダ `C:\Projects\KabuSys` で `scripts\run_scheduler.py` を起動する。
+
+- `run_execution` が DuckDB 接続を保持したまま市場終了後も生存し続けることで
+  夜間バッチが DB ロックで失敗する問題を自動解消する（DuckDB に書くジョブの前に execution を停止）
+- 取引カレンダーを参照し、非営業日（土日・祝日・年末年始）は全ジョブをスキップする
+- 起動時刻を過ぎたジョブは、起動直後に順次実行する（追いつき）。実行済みは
+  `data/scheduler_ran_today.json` に記録し、再起動しても当日分は重複実行しない
+- 設定（`ENABLE_AUTO_EXECUTION` / `ENABLE_TDNET` / `ENABLE_YAHOONEWS` / `ENABLE_AI_SENTIMENT` など）は
+  起動時と日付変更時に `.env` から再読込する
+- 現状、タスクの実行ファイルは `python`（グローバル `C:\Python313`）。`.venv` への切り替えを予定
 
   スクリプト                                用途
   ----------------------------------------- ------------------------------------------------
   scripts\run_scheduler.py                  スケジューラーデーモン本体（常駐）
   scripts\setup_scheduler_daemon.ps1        Task Scheduler に「ログオン時起動」で 1 エントリ登録
 
-## 方式 B: 個別タスク登録
+## 方式 B: 個別タスク登録（従来方式・未使用）
 
-従来方式。DB ロック問題が発生する場合は方式 A を推奨する。
+従来方式で、現在は使っていない。`ENABLE_AUTO_EXECUTION` を参照しないため、
+手動運用中に使うと 08:30 の Execution 起動なども登録される。
 
   スクリプト                              用途
   --------------------------------------- -----------------------------------------------
@@ -237,9 +275,8 @@ Runtime Architecture は以下で構成される。
        ↓
     Signal Queue
        ↓
-    Execution
-       ↓
-    Monitoring
+    手動注文レポート / LINE → ユーザーが発注 → 約定入力（現在の運用）
+    Execution → Monitoring（自動執行モード・現在停止中）
 
 この設計により **Single Windows Node でも安全で安定した自動売買運用**
 を実現する。
