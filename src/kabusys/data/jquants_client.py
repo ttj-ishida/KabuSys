@@ -392,7 +392,8 @@ def save_daily_quotes(
 ) -> int:
     """株価日足を raw_prices テーブルに保存する（冪等）。
 
-    v2 フィールドマッピング: O→open, H→high, L→low, C→close, Vo→volume, Va→turnover
+    v2 フィールドマッピング: O→open, H→high, L→low, C→close, Vo→volume, Va→turnover,
+    AdjFactor→adj_factor（キーなし・数値に変換できない値は NULL。Issue #424）
 
     Args:
         conn: DuckDB 接続。
@@ -415,6 +416,7 @@ def save_daily_quotes(
             _to_float(r.get("C")),
             _to_int(r.get("Vo")),
             _to_int(r.get("Va")),
+            _to_float(r.get("AdjFactor")),
             fetched_at,
         )
         for r in records
@@ -427,8 +429,8 @@ def save_daily_quotes(
     conn.executemany(
         """
         INSERT INTO raw_prices
-            (date, code, open, high, low, close, volume, turnover, fetched_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (date, code, open, high, low, close, volume, turnover, adj_factor, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (date, code) DO UPDATE SET
             open       = excluded.open,
             high       = excluded.high,
@@ -436,6 +438,7 @@ def save_daily_quotes(
             close      = excluded.close,
             volume     = excluded.volume,
             turnover   = excluded.turnover,
+            adj_factor = excluded.adj_factor,
             fetched_at = excluded.fetched_at
         """,
         rows,
