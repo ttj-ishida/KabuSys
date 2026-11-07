@@ -25,8 +25,10 @@ excl = 実行前に Execution を停止し、DuckDB を排他利用するジョ�
 | 08:35 | `position_reconciliation_report` | `run_position_reconciliation_report.py`（kabu API 必須） | - | **無効** |
 | 09:00 | `monitoring_start` | `start_system.py --component monitoring` | - | **無効** |
 | 15:35 | `tdnet_collection`（`ENABLE_TDNET=true`） | `run_tdnet_collection.py` | YES | 実行 |
+| 15:45 | `disclosure_classification`（`ENABLE_TDNET=true`） | `run_disclosure_classification.py` | YES | 実行 |
 | 17:30 | `data_update` | `run_data_update.py` | YES | 実行 |
 | 17:33 | `yahoonews_collection`（`ENABLE_YAHOONEWS=true`） | `run_yahoonews_collection.py` | YES | 実行 |
+| 17:45 | `edinet_collection`（`ENABLE_EDINET=true`） | `run_edinet_collection.py` | YES | 実行 |
 | 18:30 | `feature_gen` | `run_feature_gen.py` | YES | 実行 |
 | 19:00 | `ai_analysis`（`ENABLE_AI_SENTIMENT=true`） | `run_ai_analysis.py` | YES | 実行（ただし現在スコアが出ていない：Issue #419） |
 | 20:00 | `strategy_signal` | `run_strategy_signal.py [--date]` | YES | 実行（手動保有の SELL 候補を `manual_action_queue` に記録） |
@@ -46,7 +48,7 @@ excl = 実行前に Execution を停止し、DuckDB を排他利用するジョ�
 
 - 非営業日（土日・祝日・年末年始）は全ジョブをスキップする
 - `ENABLE_TDNET` / `ENABLE_YAHOONEWS` / `ENABLE_AI_SENTIMENT` が `true` でないジョブ、`ENABLE_AUTO_EXECUTION=false` のときの 08:30 / 08:35 / 09:00 は実行しない（`run_scheduler.py --list` で `skip` と表示される）
-- EDINET 収集（`run_edinet_collection.py`）と開示分類（`run_disclosure_classification.py`）はスケジュールに含まれていない（必要なら手動実行）
+- 15:45 開示分類（`run_disclosure_classification.py`、`ENABLE_TDNET=true` のとき）と 17:45 EDINET 収集（`run_edinet_collection.py`、`ENABLE_EDINET=true` のとき）を実行する（excl）。どちらも研究用のデータ蓄積で、現状の戦略・AI 分析では使っていない
 
 > **スケジュール設計の根拠**: J-Quants の日足株価データ（`daily_quotes`）は東証引け（15:30）直後ではなく 16:30〜17:00 頃に公開される。15:30 に data_update を実行すると当日データを取得できず feature_gen が 0 件になる。17:30 に遅延することでデータ確実取得後に実行できる。
 
@@ -466,6 +468,8 @@ Start-ScheduledTask -TaskName "KabuSys_Scheduler"
 | 時刻 | タスク名 | スクリプト | 条件 |
 |---|---|---|---|
 | 15:35 | `KabuSys_TdnetCollection` | `scripts\run_tdnet_collection.py` | `ENABLE_TDNET=true` |
+| 15:45 | `KabuSys_DisclosureClassification` | `scripts\run_disclosure_classification.py` | `ENABLE_TDNET=true` |
+| 17:45 | `KabuSys_EdinetCollection` | `scripts\run_edinet_collection.py` | `ENABLE_EDINET=true` |
 | 17:33 | `KabuSys_YahooNewsCollection` | `scripts\run_yahoonews_collection.py` | `ENABLE_YAHOONEWS=true` |
 | 19:00 | `KabuSys_AiAnalysis` | `scripts\run_ai_analysis.py` | `ENABLE_AI_SENTIMENT=true` |
 
