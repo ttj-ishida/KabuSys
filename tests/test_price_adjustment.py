@@ -38,8 +38,7 @@ def _raw(
 
 def _pd(conn, code: str) -> dict[str, tuple[float, float, int, float | None]]:
     rows = conn.execute(
-        "SELECT date, open, close, volume, turnover FROM prices_daily WHERE code = ? "
-        "ORDER BY date",
+        "SELECT date, open, close, volume, turnover FROM prices_daily WHERE code = ? ORDER BY date",
         [code],
     ).fetchall()
     return {

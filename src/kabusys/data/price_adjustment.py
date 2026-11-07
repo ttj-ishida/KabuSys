@@ -36,8 +36,7 @@ QUALITY_FILTER = """
 
 # 調整係数として有効な値（NULL・0 以下は 1 とみなす）
 _FACTOR_EXPR = (
-    "CASE WHEN adj_factor IS NULL OR adj_factor <= 0 THEN 1.0 "
-    "ELSE CAST(adj_factor AS DOUBLE) END"
+    "CASE WHEN adj_factor IS NULL OR adj_factor <= 0 THEN 1.0 ELSE CAST(adj_factor AS DOUBLE) END"
 )
 
 # 1 以外の有効な係数を持つ行
@@ -168,9 +167,7 @@ def rebuild_codes(conn: duckdb.DuckDBPyConnection, codes: list[str]) -> int:
         conn.execute("DROP TABLE IF EXISTS _adj_codes")
 
 
-def rebuild_adjusted_prices(
-    conn: duckdb.DuckDBPyConnection, codes: list[str] | None = None
-) -> int:
+def rebuild_adjusted_prices(conn: duckdb.DuckDBPyConnection, codes: list[str] | None = None) -> int:
     """指定銘柄の prices_daily を補正済みの値で作り直す（冪等）。
 
     Args:
