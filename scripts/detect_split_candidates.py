@@ -22,7 +22,7 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 RATIOS = (2, 3, 4, 5, 10)
-DEFAULT_TOLERANCE = 0.1  # 比率からの相対誤差（±10%）
+DEFAULT_TOLERANCE = 0.1  # 判定基準: abs(前日比 × n − 1) <= tolerance（n は 2/3/4/5/10。実質 ±10% の相対誤差）
 # 前日の終値を探すため、期間開始より前に遡る日数
 _LOOKBACK_DAYS = 31
 
