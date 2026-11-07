@@ -334,6 +334,7 @@ def calc_value(
                             THEN l.eps
                        WHEN l.ptype IN ('1Q', '2Q', '3Q') AND a.report_date IS NOT NULL
                             AND p.report_date IS NOT NULL AND a.report_date > p.report_date
+                            AND a.report_date >= CAST(? AS DATE) - INTERVAL 456 DAY
                             THEN l.eps + a.eps - p.eps
                        WHEN a.report_date >= CAST(? AS DATE) - INTERVAL 456 DAY THEN a.eps
                    END AS eps
@@ -369,7 +370,7 @@ def calc_value(
         LEFT JOIN annual_div d ON p.code = d.code
         ORDER BY p.code
         """,
-        [target_date] * 8,
+        [target_date] * 9,
     ).fetchall()
 
     cols = ["date", "code", "per", "roe", "pbr", "div_yield"]

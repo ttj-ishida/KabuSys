@@ -340,6 +340,21 @@ class TestCalcValue:
         row = next(r for r in calc_value(db, d) if r["code"] == code)
         assert row["per"] == pytest.approx(15.0)
 
+    def test_per_none_when_ttm_inputs_are_stale(self, db):
+        """決算が途絶えて四半期・通期とも古い場合は TTM を作らず None（古い EPS で PER を出さない）。"""
+        d = date(2026, 10, 1)
+        _insert_prices(db, [(d, "72037", 3000.0, 3010.0, 2990.0, 3000.0, 1000, 3000000.0)])
+        _insert_financials(
+            db,
+            [
+                ("72037", date(2023, 8, 7), "1Q", 0, 0, 0, 50.0, 0.1),
+                ("72037", date(2024, 5, 8), "FY", 0, 0, 0, 200.0, 0.1),
+                ("72037", date(2024, 8, 7), "1Q", 0, 0, 0, 60.0, 0.1),
+            ],
+        )
+        row = next(r for r in calc_value(db, d) if r["code"] == "72037")
+        assert row["per"] is None
+
     def test_per_uses_annual_eps_when_latest_is_annual(self, db):
         d = date(2026, 6, 1)
         _insert_prices(db, [(d, "72031", 3000.0, 3010.0, 2990.0, 3000.0, 1000, 3000000.0)])
