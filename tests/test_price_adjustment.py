@@ -354,3 +354,44 @@ def test_daily_etl_syncs_all_fetched_dates_after_outage(conn, monkeypatch):
     assert pd["2026-09-29"][1] == pytest.approx(2185.0)
     assert pd["2026-09-22"][1] == pytest.approx(2200.0)  # 係数で過去分も作り直し
     assert pd["2026-10-09"][1] == pytest.approx(2300.0)
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1 / I2・Minor 1: バリュー指標・300 円足切りは補正前の株価を使う
+# ---------------------------------------------------------------------------
+
+
+def _split_with_fin(conn):
+    _raw(conn, "2026-09-25", "83880", 11000.0, volume=100)
+    _raw(conn, "2026-09-26", "83880", 11130.0, volume=200, adj=1.0)
+    conn.execute(
+        "INSERT INTO raw_financials (code, report_date, period_type, eps, roe, bps) "
+        "VALUES ('83880', '2026-08-01', 'FY', 556.5, 0.1, 5565)"
+    )
+
+
+def test_calc_value_per_unchanged_by_later_split(conn):
+    from kabusys.research.factor_research import calc_value
+
+    _split_with_fin(conn)
+    sync_raw_prices_to_prices_daily(conn, date(2026, 9, 25), date(2026, 9, 26))  # 分割前の状態
+    before = {r["code"]: r for r in calc_value(conn, date(2026, 9, 26))}["83880"]
+    # 後日 1:5 分割が判明し、過去の prices_daily が作り直される
+    _raw(conn, "2026-09-29", "83880", 2185.0, volume=1500, adj=0.2)
+    sync_raw_prices_to_prices_daily(conn, date(2026, 9, 29), date(2026, 9, 29))
+    assert _pd(conn, "83880")["2026-09-26"][1] == pytest.approx(2226.0)
+    after = {r["code"]: r for r in calc_value(conn, date(2026, 9, 26))}["83880"]
+
+    assert float(before["per"]) == pytest.approx(20.0)  # 11,130 / 556.5
+    assert float(after["per"]) == pytest.approx(float(before["per"]))
+    assert float(after["pbr"]) == pytest.approx(float(before["pbr"]))
+
+
+def test_universe_price_map_uses_unadjusted_close(conn):
+    from kabusys.strategy.feature_engineering import _load_universe_price_map
+
+    _split_series(conn)
+    rebuild_adjusted_prices(conn, ["83880"])
+    pm = _load_universe_price_map(conn, date(2026, 9, 26))
+    assert pm["83880"] == pytest.approx(11130.0)  # 補正済み 2,226 ではない
+    assert _load_universe_price_map(conn, date(2026, 9, 30))["83880"] == pytest.approx(2200.0)
