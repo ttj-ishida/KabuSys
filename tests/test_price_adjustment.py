@@ -281,3 +281,76 @@ def test_rebuild_removes_rows_whose_raw_fails_quality_filter(conn):
     pd = _pd(conn, "83880")
     assert "2026-09-24" not in pd
     assert pd["2026-09-01"][1] == pytest.approx(9000.0)
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1 / I1: ETL 停止後、同期範囲より前に取得した raw 行も同期・補正する
+# ---------------------------------------------------------------------------
+
+
+def test_daily_etl_syncs_all_fetched_dates_after_outage(conn, monkeypatch):
+    from unittest import mock
+
+    from kabusys.data import pipeline
+
+    # 最後に取得した日は 2026-09-22（その後 ETL が止まっていた）
+    _raw(conn, "2026-09-22", "83880", 11000.0, volume=100)
+    sync_raw_prices_to_prices_daily(conn, date(2026, 9, 22), date(2026, 9, 22))
+
+    def fake_fetch(code=None, date_from=None, date_to=None):
+        assert date_from == date(2026, 9, 20)  # last(9/22) - (backfill 3 - 1)
+        return [
+            {
+                "Date": "2026-09-28",
+                "Code": "83880",
+                "O": 11130,
+                "H": 11130,
+                "L": 11130,
+                "C": 11130,
+                "Vo": 200,
+                "Va": 1,
+                "AdjFactor": 1.0,
+            },
+            # 分割の係数は trading_day - 2 より前の日付にある
+            {
+                "Date": "2026-09-29",
+                "Code": "83880",
+                "O": 2185,
+                "H": 2185,
+                "L": 2185,
+                "C": 2185,
+                "Vo": 1500,
+                "Va": 1,
+                "AdjFactor": 0.2,
+            },
+            {
+                "Date": "2026-10-09",
+                "Code": "83880",
+                "O": 2300,
+                "H": 2300,
+                "L": 2300,
+                "C": 2300,
+                "Vo": 1000,
+                "Va": 1,
+                "AdjFactor": 1.0,
+            },
+        ]
+
+    monkeypatch.setattr(pipeline.jq, "fetch_daily_quotes", fake_fetch)
+    with (
+        mock.patch.object(pipeline, "run_calendar_etl", return_value=(0, 0)),
+        mock.patch.object(pipeline, "run_financials_etl", return_value=(0, 0)),
+        mock.patch.object(pipeline, "run_topix_etl", return_value=(0, 0)),
+        mock.patch.object(pipeline, "run_dividends_etl", return_value=(0, 0)),
+        mock.patch.object(pipeline.jq, "fetch_earnings_calendar", return_value=[]),
+    ):
+        result = pipeline.run_daily_etl(
+            conn, target_date=date(2026, 10, 9), run_quality_checks=False
+        )
+
+    pd = _pd(conn, "83880")
+    assert result.prices_daily_synced == 4  # 9/22（backfill 再取得範囲）を含む
+    assert pd["2026-09-28"][1] == pytest.approx(2226.0)  # 範囲外の古い行も同期・補正
+    assert pd["2026-09-29"][1] == pytest.approx(2185.0)
+    assert pd["2026-09-22"][1] == pytest.approx(2200.0)  # 係数で過去分も作り直し
+    assert pd["2026-10-09"][1] == pytest.approx(2300.0)

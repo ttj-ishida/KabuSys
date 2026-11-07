@@ -294,6 +294,14 @@ def get_last_topix_date(conn: duckdb.DuckDBPyConnection) -> date | None:
 # ---------------------------------------------------------------------------
 
 
+def _prices_fetch_from(conn: duckdb.DuckDBPyConnection, backfill_days: int) -> date:
+    """run_prices_etl が date_from 省略時に使う取得開始日（最終取得日 - backfill_days + 1）。"""
+    last = get_last_price_date(conn)
+    if last is not None:
+        return max(_MIN_DATA_DATE, last - timedelta(days=backfill_days - 1))
+    return _MIN_DATA_DATE
+
+
 def run_prices_etl(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
@@ -315,11 +323,7 @@ def run_prices_etl(
         (取得レコード数, 保存レコード数) のタプル。
     """
     if date_from is None:
-        last = get_last_price_date(conn)
-        if last is not None:
-            date_from = max(_MIN_DATA_DATE, last - timedelta(days=backfill_days - 1))
-        else:
-            date_from = _MIN_DATA_DATE
+        date_from = _prices_fetch_from(conn, backfill_days)
 
     if date_from > target_date:
         logger.info(
@@ -637,6 +641,12 @@ def run_daily_etl(
     trading_day = _adjust_to_trading_day(conn, today)
 
     # 2. 株価日足ETL
+    # 同期範囲は今回取得する全日付を含める（ETL 停止後の取得分も同期・補正する。Issue #424）
+    try:
+        prices_fetch_from: date | None = _prices_fetch_from(conn, backfill_days)
+    except Exception:
+        logger.exception("株価の取得開始日の算出に失敗")
+        prices_fetch_from = None
     try:
         fetched, saved = run_prices_etl(conn, trading_day, backfill_days=backfill_days)
         result.prices_fetched = fetched
@@ -648,6 +658,8 @@ def run_daily_etl(
     # 2b. raw_prices -> prices_daily 同期
     try:
         sync_date_from = trading_day - timedelta(days=backfill_days - 1)
+        if prices_fetch_from is not None:
+            sync_date_from = min(sync_date_from, prices_fetch_from)
         synced = sync_raw_prices_to_prices_daily(conn, sync_date_from, trading_day)
         result.prices_daily_synced = synced
     except Exception:

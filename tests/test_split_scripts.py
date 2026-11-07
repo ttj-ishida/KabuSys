@@ -60,8 +60,20 @@ def _split_series(conn, code="83880"):
 
 def test_rebuild_script_rebuilds_all_codes_with_factors(conn):
     _split_series(conn)
-    n = rebuild_script.run(conn, codes=None, dry_run=False)
+    n = rebuild_script.run(conn, codes=None, dry_run=False, all_dates=False)
     assert n == 2
+    assert _close(conn, "2026-09-26", "83880") == pytest.approx(2226.0)
+
+
+def test_rebuild_script_all_dates_syncs_every_raw_row_for_all_codes(conn):
+    """移行（既定）: 係数のない銘柄も含め、未同期の raw 日付をすべて埋める。"""
+    _split_series(conn)
+    _raw(conn, "2026-08-24", "7203", 3000.0)  # 一度も同期されていない日
+    _raw(conn, "2026-09-29", "7203", 3010.0)
+    n = rebuild_script.run(conn, codes=None, dry_run=False)
+    assert n == 4
+    assert _close(conn, "2026-08-24", "7203") == pytest.approx(3000.0)
+    assert _close(conn, "2026-09-29", "7203") == pytest.approx(3010.0)
     assert _close(conn, "2026-09-26", "83880") == pytest.approx(2226.0)
 
 
