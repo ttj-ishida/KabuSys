@@ -8,6 +8,8 @@ BacktestFramework.md Section 6〜8 に従い、全体ループと補助関数を
 from __future__ import annotations
 
 import logging
+import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Literal
@@ -69,12 +71,17 @@ class BacktestResult:
 # ---------------------------------------------------------------------------
 
 
+def _quote_ident(name: str) -> str:
+    """SQL 識別子をダブルクオートで囲む（内部の " は "" にエスケープ）。"""
+    return '"' + name.replace('"', '""') + '"'
+
+
 def _copy_query_into(
     source_conn: duckdb.DuckDBPyConnection,
     bt_conn: duckdb.DuckDBPyConnection,
     table: str,
     select_sql: str,
-    params: list[Any] | None = None,
+    params: Sequence[Any] | None = None,
 ) -> None:
     """source_conn で select_sql を実行し、結果を bt_conn の table に一括挿入する。
 
@@ -82,12 +89,14 @@ def _copy_query_into(
     Arrow のレコードバッチで受け渡して ``INSERT ... SELECT`` で一括挿入する（#420）。
     列は select_sql の結果の列名で対応付ける。
     """
-    reader = source_conn.execute(select_sql, params or []).arrow()
-    cols = ", ".join(f'"{name}"' for name in reader.schema.names)
-    view = "_bt_copy_src"
+    reader = source_conn.execute(select_sql, list(params or [])).arrow()
+    cols = ", ".join(_quote_ident(name) for name in reader.schema.names)
+    view = f"_bt_copy_src_{uuid.uuid4().hex}"
     bt_conn.register(view, reader)
     try:
-        bt_conn.execute(f"INSERT INTO {table} ({cols}) SELECT {cols} FROM {view}")
+        bt_conn.execute(
+            f"INSERT INTO {_quote_ident(table)} ({cols}) SELECT {cols} FROM {_quote_ident(view)}"
+        )
     finally:
         bt_conn.unregister(view)
 

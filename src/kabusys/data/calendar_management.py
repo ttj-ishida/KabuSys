@@ -64,7 +64,7 @@ def _table_exists(conn: duckdb.DuckDBPyConnection, table: str) -> bool:
     """
     row = conn.execute(
         """
-        SELECT 1 FROM duckdb_tables() WHERE lower(table_name) = lower(?)
+        SELECT 1 FROM duckdb_tables() WHERE lower(table_name) = lower(?) AND NOT internal
         UNION ALL
         SELECT 1 FROM duckdb_views() WHERE lower(view_name) = lower(?) AND NOT internal
         LIMIT 1

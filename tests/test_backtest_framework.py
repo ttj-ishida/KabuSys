@@ -283,11 +283,12 @@ def test_build_backtest_conn_copies_prices(conn):
 
 def test_build_backtest_conn_copies_rows_exactly_within_window(conn):
     """_build_backtest_conn → 期間内の行だけを値（NULL 含む）そのままにコピーする（#420）。"""
-    from datetime import date
+    from datetime import date, timedelta
 
     from kabusys.backtest.engine import _build_backtest_conn
 
     start, end = date(2024, 6, 3), date(2024, 6, 7)
+    data_start = start - timedelta(days=300)  # コピー対象の開始日（2023-08-08）
     _insert_price(conn, "1234", date(2024, 6, 3), open_=1000.5, close=1010.25)
     _insert_price(conn, "1234", date(2023, 1, 4), open_=1.0, close=1.0)  # 300 日より前
     _insert_price(conn, "1234", date(2024, 6, 10), open_=2.0, close=2.0)  # end より後
@@ -306,7 +307,7 @@ def test_build_backtest_conn_copies_rows_exactly_within_window(conn):
     try:
         src = conn.execute(
             "SELECT * FROM prices_daily WHERE date BETWEEN ? AND ? ORDER BY date, code",
-            [date(2023, 8, 8), end],
+            [data_start, end],
         ).fetchall()
         dst = bt_conn.execute("SELECT * FROM prices_daily ORDER BY date, code").fetchall()
         assert dst == src
@@ -1081,3 +1082,10 @@ def test_build_backtest_conn_populates_breadth(conn):
     bt_conn.close()
 
     assert row is not None, "_build_backtest_conn 後に market_breadth が存在するべき"
+
+
+def test_quote_ident_escapes_double_quotes():
+    from kabusys.backtest.engine import _quote_ident
+
+    assert _quote_ident("prices_daily") == '"prices_daily"'
+    assert _quote_ident('a"b') == '"a""b"'
