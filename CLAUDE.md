@@ -48,7 +48,7 @@ KabuSys/
 
 実装フェーズ（Pythonコーディング等）においては以下を標準とします。
 
-- **Language / Environment**: Python 3.10以降推奨, Windows OS (API制限等により必須)
+- **Language / Environment**: Python 3.11以降（運用・CI は 3.13）, Windows OS (API制限等により必須)
 - **Database**: 分析用には `DuckDB` (+ Parquet)、軽量トランザクション・監視ログ用には `SQLite`
 - **Code Rules (Recommended)**:
   - PEP 8 に準拠。`black`, `isort`, `flake8` (または `ruff`) を用いてフォーマットとLintを徹底する。

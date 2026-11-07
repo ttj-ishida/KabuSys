@@ -142,7 +142,7 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
    pip install -r requirements.txt
    ```
 
-   > ⚠️ **Issue #422:** `requirements.txt` / `constraints.txt` は Python 3.13 と非互換です（上限・固定値のバージョンに Python 3.13 用の wheel がなく、ソースビルドになって失敗する）。運用 `.venv` には動作確認済みのバージョン（numpy 2.4.4、pandas 2.3.3、pyarrow 23.0.1、duckdb 1.5.0、streamlit 1.55.0、openai 1.109.1、pytest 9.0.2、ruff 0.15.11 など）を暫定的に入れています。
+   > ℹ️ `requirements.txt` / `constraints.txt` は Python 3.13 用に更新済み（#422）。`pip install -c constraints.txt -r requirements-dev.txt -r requirements-extras.txt` でインストールできる（CI も Python 3.13 で同じ固定版を使って検証）。Python は 3.11 以上（運用は 3.13）。
 
 4. 環境変数の設定（.env ウィザード）
 

@@ -264,7 +264,6 @@ python -m kabusys.run_performance_report --type daily --env paper_trading
 |---|---|---|
 | #419 | AI 分析のスコアが出ていない（ニューススコア 0 件・レジーム常に neutral） | `ai_analysis` ジョブ自体は成功する。AI の影響がない状態で候補が出ていると理解する |
 | #421 | シグナル 0 件の正常日に朝のレポートが「シグナルが古い」と誤警告する | 夜間バッチの成否は `logs\scheduler.log` と night_batch_report で確認する |
-| #422 | `requirements.txt` / `constraints.txt` が Python 3.13 と非互換 | 運用 `.venv` は動作確認済みのバージョンを暫定的に入れている。`pip install -c constraints.txt -r requirements.txt` は失敗する |
 
 ---
 
