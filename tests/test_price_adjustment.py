@@ -395,3 +395,46 @@ def test_universe_price_map_uses_unadjusted_close(conn):
     pm = _load_universe_price_map(conn, date(2026, 9, 26))
     assert pm["83880"] == pytest.approx(11130.0)  # 補正済み 2,226 ではない
     assert _load_universe_price_map(conn, date(2026, 9, 30))["83880"] == pytest.approx(2200.0)
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1 / Minor 2・3
+# ---------------------------------------------------------------------------
+
+
+def test_save_daily_quotes_refetch_without_key_keeps_stored_factor(conn):
+    jquants.save_daily_quotes(conn, [_rec(0.2)])
+    jquants.save_daily_quotes(conn, [_rec(with_key=False)])
+    jquants.save_daily_quotes(conn, [_rec("abc")])
+    assert float(_adj(conn)) == pytest.approx(0.2)
+
+
+def test_rebuild_snaps_truncated_factor_to_exact_ratio(conn):
+    """485A0 のような 0.333333（1:3）は厳密な 1/3 として扱う。"""
+    _raw(conn, "2026-05-27", "485A0", 13590.0, volume=519400)
+    _raw(conn, "2026-05-28", "485A0", 4340.0, volume=2114400, adj=0.333333)
+    rebuild_adjusted_prices(conn, ["485A0"])
+    pd = _pd(conn, "485A0")
+    assert pd["2026-05-27"][1] == 4530.0
+    assert pd["2026-05-27"][2] == 1558200
+
+
+def test_rebuild_snaps_consolidation_factor_and_keeps_irregular_ratio(conn):
+    _raw(conn, "2026-01-05", "5555", 100.0, volume=1000)
+    _raw(conn, "2026-01-06", "5555", 1000.0, volume=100, adj=10.000001)  # 10:1 併合
+    _raw(conn, "2026-01-05", "6666", 300.0, volume=1000)
+    _raw(conn, "2026-01-06", "6666", 200.0, volume=1500, adj=0.666667)  # 2:3（スナップしない）
+    rebuild_adjusted_prices(conn, ["5555", "6666"])
+    assert _pd(conn, "5555")["2026-01-05"][1] == 1000.0
+    assert _pd(conn, "6666")["2026-01-05"][1] == pytest.approx(300 * 0.666667, abs=1e-4)
+
+
+def test_snap_factor():
+    from kabusys.data.price_adjustment import snap_factor
+
+    assert snap_factor(0.333333) == 1 / 3
+    assert snap_factor(0.2) == 0.2
+    assert snap_factor(2.0000001) == 2.0
+    assert snap_factor(0.666667) == 0.666667
+    assert snap_factor(None) == 1.0
+    assert snap_factor(0) == 1.0

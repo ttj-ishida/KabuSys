@@ -438,7 +438,8 @@ def save_daily_quotes(
             close      = excluded.close,
             volume     = excluded.volume,
             turnover   = excluded.turnover,
-            adj_factor = excluded.adj_factor,
+            -- 再取得で AdjFactor がない場合も、保存済みの係数を消さない（Issue #424）
+            adj_factor = COALESCE(excluded.adj_factor, raw_prices.adj_factor),
             fetched_at = excluded.fetched_at
         """,
         rows,

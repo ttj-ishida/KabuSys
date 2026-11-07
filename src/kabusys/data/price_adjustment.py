@@ -34,10 +34,45 @@ QUALITY_FILTER = """
     AND low <= high
 """
 
-# 調整係数として有効な値（NULL・0 以下は 1 とみなす）
-_FACTOR_EXPR = (
-    "CASE WHEN adj_factor IS NULL OR adj_factor <= 0 THEN 1.0 ELSE CAST(adj_factor AS DOUBLE) END"
-)
+# 係数のスナップ許容誤差。J-Quants の AdjFactor は小数 6 桁（1:3 → 0.333333）のため、
+# 整数比に十分近い値は厳密な比率（1/3 や 10）として扱う。
+SNAP_TOLERANCE = 1e-5
+
+# 調整係数として有効な値（NULL・0 以下は 1 とみなし、整数比に近い値はスナップする）。
+# snap_factor() と同じ規則。
+_RAW_F = "CAST(adj_factor AS DOUBLE)"
+_FACTOR_EXPR = f"""
+    CASE
+        WHEN adj_factor IS NULL OR adj_factor <= 0 THEN 1.0
+        WHEN {_RAW_F} < 1 AND ABS({_RAW_F} - 1.0 / ROUND(1.0 / {_RAW_F}))
+             < {SNAP_TOLERANCE} THEN 1.0 / ROUND(1.0 / {_RAW_F})
+        WHEN {_RAW_F} > 1 AND ABS({_RAW_F} - ROUND({_RAW_F})) < {SNAP_TOLERANCE}
+             THEN ROUND({_RAW_F})
+        ELSE {_RAW_F}
+    END
+"""
+
+
+def snap_factor(f: float | None) -> float:
+    """調整係数を正規化する（_FACTOR_EXPR と同じ規則。手動保有の換算で使う）。
+
+    NULL・0 以下 → 1。1 未満で 1/n に近い → 1/n。1 より大きく整数 n に近い → n。
+    """
+    if f is None:
+        return 1.0
+    f = float(f)
+    if f <= 0:
+        return 1.0
+    if f < 1:
+        n = round(1.0 / f)
+        if abs(f - 1.0 / n) < SNAP_TOLERANCE:
+            return 1.0 / n
+    elif f > 1:
+        n = round(f)
+        if abs(f - n) < SNAP_TOLERANCE:
+            return float(n)
+    return f
+
 
 # 1 以外の有効な係数を持つ行
 NONTRIVIAL_FACTOR_PRED = "adj_factor IS NOT NULL AND adj_factor > 0 AND adj_factor <> 1"
