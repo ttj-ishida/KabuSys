@@ -632,3 +632,57 @@ def test_truncate_data_clears_all_tables(conn, tmp_path):
 
     assert conn.execute("SELECT COUNT(*) FROM bootstrap_load_history").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# Issue #424: bootstrap 後の prices_daily は分割補正済み
+# ---------------------------------------------------------------------------
+
+
+def _gz_split_prices() -> bytes:
+    import csv
+    import io
+
+    buf = io.StringIO()
+    w = csv.DictWriter(
+        buf, fieldnames=["Date", "Code", "O", "H", "L", "C", "Vo", "Va", "AdjFactor"]
+    )
+    w.writeheader()
+    for d, c, vo, adj in [
+        ("2024-01-10", "11130", "200", "1.0"),
+        ("2024-01-11", "2185", "1500", "0.2"),
+    ]:
+        w.writerow(
+            {
+                "Date": d,
+                "Code": "83880",
+                "O": c,
+                "H": c,
+                "L": c,
+                "C": c,
+                "Vo": vo,
+                "Va": "",
+                "AdjFactor": adj,
+            }
+        )
+    return gzip.compress(buf.getvalue().encode())
+
+
+def test_run_bootstrap_rebuilds_split_adjusted_prices(conn, tmp_path):
+    ep_dir = tmp_path / "equities" / "bars" / "daily"
+    ep_dir.mkdir(parents=True)
+    (ep_dir / "equities_bars_daily_202401.csv.gz").write_bytes(_gz_split_prices())
+
+    result = run_bootstrap(
+        conn=conn,
+        api_key="unused",
+        raw_dir=tmp_path,
+        endpoints=["/equities/bars/daily"],
+        local=True,
+    )
+
+    assert result.loaded_files == 1
+    rows = conn.execute(
+        "SELECT date, close, volume FROM prices_daily WHERE code='83880' ORDER BY date"
+    ).fetchall()
+    assert [(float(r[1]), int(r[2])) for r in rows] == [(2226.0, 1000), (2185.0, 1500)]
