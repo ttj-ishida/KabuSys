@@ -143,6 +143,8 @@ KabuSys は自動売買システムの運用周り（Execution、Monitoring、�
    pip install -c constraints.txt -r requirements.txt
    # 開発環境（テスト・監視 UI 含む）
    pip install -c constraints.txt -r requirements-dev.txt -r requirements-extras.txt
+   # kabusys パッケージ本体を登録（依存は上で入れたものを使う）
+   pip install -e . --no-deps
    ```
 
    > ℹ️ `constraints.txt` は Python 3.13 で動作確認した固定版（#422）。CI も Python 3.13 で同じ固定版を使って検証する。Python は 3.11 以上（運用は 3.13）。
