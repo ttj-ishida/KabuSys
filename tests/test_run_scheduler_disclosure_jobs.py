@@ -50,3 +50,12 @@ def test_task_scheduler_ps1_registers_disclosure_jobs():
     )
     assert "run_disclosure_classification.py" in ps1 and '"15:45"' in ps1
     assert "run_edinet_collection.py" in ps1 and '"17:45"' in ps1
+
+
+def test_job_schedule_is_in_time_order(monkeypatch, tmp_path):
+    # デーモンはリスト順に 1 件ずつ実行する（遅れて起動した日の追いつき実行も同じ順）。
+    # 時刻順が崩れると、依存する後続ジョブが先に走るため、並び順を固定する。
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    monkeypatch.setattr(run_scheduler, "_PROJECT_ROOT", tmp_path)
+    times = [(j.trigger_hour, j.trigger_minute) for j in run_scheduler._build_job_schedule()]
+    assert times == sorted(times)
