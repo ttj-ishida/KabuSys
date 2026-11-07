@@ -670,6 +670,31 @@ def test_morning_zero_signal_day_batch_succeeded(conn, tmp_path):
     assert "シグナルは 0 件" in format_cli_summary(r)
 
 
+@pytest.mark.parametrize("batch_ok", [True, False])
+def test_morning_no_signals_at_all(conn, tmp_path, batch_ok):
+    """シグナルが 1 件も存在しない（signal_date None）場合も、前営業日のバッチ成否で判定する。"""
+    jr = tmp_path / "job_runs"
+    if batch_ok:
+        _write_batch(jr, date(2020, 1, 6))
+    r = _collect(
+        conn,
+        phase="morning",
+        report_date=date(2020, 1, 7),  # fixture のシグナルより前の日付（シグナルなし）
+        stop_flag_path=tmp_path / "x",
+        job_runs_dir=jr,
+        sqlite_path=_monitoring_db(tmp_path),
+        now=datetime(2020, 1, 7, 8, 5),
+    )
+    if batch_ok:
+        assert r.signal_date == date(2020, 1, 6)
+        assert any("シグナルは 0 件" in n for n in r.notes)
+        assert not any("シグナルがありません" in w for w in r.warnings)
+    else:
+        assert r.signal_date is None
+        assert any("シグナルがありません" in w for w in r.warnings)
+        assert r.notes == []
+
+
 def test_morning_zero_signal_day_still_honours_stop_flag(conn, tmp_path):
     jr = tmp_path / "job_runs"
     _write_batch(jr, date(2026, 10, 14), status="warning")

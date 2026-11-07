@@ -253,6 +253,10 @@ def _collect_sells(
     ]
 
 
+def _no_signals_warning(report_date: date) -> str:
+    return f"{report_date} 以前のシグナルがありません"
+
+
 def _apply_zero_signal_day(report: ManualOrderReport, batch_date: date, note: str) -> None:
     """正常終了・シグナル 0 件の日: 古いバッチの候補を捨て、注記を付ける。"""
     report.buy_candidates = []
@@ -306,7 +310,18 @@ def _apply_morning_checks(
     if report.dd_stop:
         reasons.append(f"DD 停止中です（{report.dd_stop_since} から）")
     expected = prev_trading_day(conn, report_date)
-    if report.signal_date is not None and report.signal_date < expected:
+    if report.signal_date is None:
+        # シグナルが 1 件も無い場合も、前営業日のバッチが正常終了していれば「0 件の正常日」
+        if signal_batch_succeeded(expected, job_runs_dir):
+            report.warnings[:] = [
+                w for w in report.warnings if w != _no_signals_warning(report_date)
+            ]
+            _apply_zero_signal_day(
+                report,
+                expected,
+                f"前営業日 {expected} の夜間バッチは正常終了し、シグナルは 0 件でした",
+            )
+    elif report.signal_date < expected:
         if signal_batch_succeeded(expected, job_runs_dir):
             _apply_zero_signal_day(
                 report,
@@ -394,7 +409,7 @@ def collect_manual_order_report(
         )
 
     if report.signal_date is None:
-        rd.warn(f"{report_date} 以前のシグナルがありません")
+        rd.warn(_no_signals_warning(report_date))
     else:
         sig = report.signal_date
         names = _stock_names(rd)
