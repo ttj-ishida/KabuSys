@@ -1,7 +1,7 @@
 # scripts/run_edinet_collection.py
 """Night batch: EDINET 法定開示収集 (edinet_collection_job)。
 
-スケジューラーデーモンから 17:45 に起動される（ENABLE_EDINET=true のとき）。
+スケジューラーデーモン（または個別タスク方式の Task Scheduler）から 17:45 に起動される（ENABLE_EDINET=true のとき）。
 """
 
 from __future__ import annotations

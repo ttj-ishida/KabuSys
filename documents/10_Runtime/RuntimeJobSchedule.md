@@ -469,8 +469,8 @@ Start-ScheduledTask -TaskName "KabuSys_Scheduler"
 |---|---|---|---|
 | 15:35 | `KabuSys_TdnetCollection` | `scripts\run_tdnet_collection.py` | `ENABLE_TDNET=true` |
 | 15:45 | `KabuSys_DisclosureClassification` | `scripts\run_disclosure_classification.py` | `ENABLE_TDNET=true` |
-| 17:45 | `KabuSys_EdinetCollection` | `scripts\run_edinet_collection.py` | `ENABLE_EDINET=true` |
 | 17:33 | `KabuSys_YahooNewsCollection` | `scripts\run_yahoonews_collection.py` | `ENABLE_YAHOONEWS=true` |
+| 17:45 | `KabuSys_EdinetCollection` | `scripts\run_edinet_collection.py` | `ENABLE_EDINET=true` |
 | 19:00 | `KabuSys_AiAnalysis` | `scripts\run_ai_analysis.py` | `ENABLE_AI_SENTIMENT=true` |
 
 ---

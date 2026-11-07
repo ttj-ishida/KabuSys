@@ -1,7 +1,7 @@
 # scripts/run_disclosure_classification.py
 """Night batch: 適時開示イベント分類 (disclosure_classification_job)。
 
-スケジューラーデーモンから 15:45 に起動される（ENABLE_TDNET=true のとき）。
+スケジューラーデーモン（または個別タスク方式の Task Scheduler）から 15:45 に起動される（ENABLE_TDNET=true のとき）。
 """
 
 from __future__ import annotations

@@ -248,8 +248,6 @@ def _build_job_schedule() -> list[JobSpec]:
             enable_tdnet,
         ),
         JobSpec("data_update", "run_data_update.py", [], 17, 30, True),
-        # EDINET 法定開示の収集。研究用のデータ蓄積（現状、戦略・AI では未使用）
-        JobSpec("edinet_collection", "run_edinet_collection.py", [], 17, 45, True, enable_edinet),
         JobSpec(
             "yahoonews_collection",
             "run_yahoonews_collection.py",
@@ -259,6 +257,8 @@ def _build_job_schedule() -> list[JobSpec]:
             True,
             enable_yahoonews,
         ),
+        # EDINET 法定開示の収集。研究用のデータ蓄積（現状、戦略・AI では未使用）
+        JobSpec("edinet_collection", "run_edinet_collection.py", [], 17, 45, True, enable_edinet),
         JobSpec("feature_gen", "run_feature_gen.py", [], 18, 30, True),
         JobSpec("ai_analysis", "run_ai_analysis.py", [], 19, 0, True, enable_ai),
         JobSpec("strategy_signal", "run_strategy_signal.py", [], 20, 0, True),
