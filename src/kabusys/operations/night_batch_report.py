@@ -391,7 +391,9 @@ def format_markdown(report: NightBatchReport) -> str:
             "- 基本的な処理は完了していますが、警告があります。",
             *(
                 ["- 翌営業日の BUY シグナルは 0 件です（発注対象なし。夜間バッチは正常終了）。"]
-                if report.next_day_summary.buy_count == 0 and report.update_counts.signal_queue == 0
+                if report.next_day_summary is not None
+                and report.next_day_summary.buy_count == 0
+                and report.update_counts.signal_queue == 0
                 else []
             ),
             "- 上記 Warnings を確認し、問題がなければ自動執行を開始できます。",
