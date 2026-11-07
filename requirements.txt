@@ -1,4 +1,4 @@
-# 実行時依存（バージョン固定）
+# 実行時依存（上限制御。厳密な固定版は constraints.txt を参照）
 pandas>=2.2,<3
 numpy>=1.26,<3
 scikit-learn>=1.4,<2

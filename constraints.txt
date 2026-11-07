@@ -1,6 +1,8 @@
 # 依存バージョン制約（サプライチェーンリスク低減）
-# 使用方法: pip install -c constraints.txt -r requirements.txt
-# 更新方法: pip-compile requirements.txt --output-file constraints.txt
+# 使用方法:
+#   実行環境（最小）: pip install -c constraints.txt -r requirements.txt
+#   開発環境（テスト・監視 UI 含む）: pip install -c constraints.txt -r requirements-dev.txt -r requirements-extras.txt
+# 更新方法: 手動メンテナンス（運用環境で動作確認したバージョンを反映し、CI で検証する）
 pandas==2.3.3
 numpy==2.4.4
 scikit-learn==1.8.0
