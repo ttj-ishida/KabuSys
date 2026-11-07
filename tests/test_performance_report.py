@@ -632,8 +632,47 @@ def test_cli_returns_0_when_data_exists(tmp_path, monkeypatch):
     conn.close()
 
     monkeypatch.setenv("DUCKDB_PATH", str(db_path))
-    result = main(["--type", "daily", "--from", "2026-04-21", "--to", "2026-04-21"])
+    result = main(
+        ["--type", "daily", "--env", "live", "--from", "2026-04-21", "--to", "2026-04-21"]
+    )
     assert result == 0
+
+
+def test_cli_env_defaults_to_settings_env(tmp_path, monkeypatch):
+    """--env 省略時は Settings().env（KABUSYS_ENV）を対象にする（Issue #427）。"""
+    import duckdb as _duckdb
+
+    from kabusys.run_performance_report import main
+
+    db_path = tmp_path / "test.duckdb"
+    conn = _duckdb.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE portfolio_performance (
+            date DATE NOT NULL, env VARCHAR NOT NULL DEFAULT 'live',
+            equity DECIMAL(20,4) NOT NULL, cash DECIMAL(20,4) NOT NULL DEFAULT 0,
+            drawdown DOUBLE, daily_return DOUBLE, PRIMARY KEY (date, env)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE market_calendar (
+            date DATE NOT NULL PRIMARY KEY, is_trading_day BOOLEAN NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO portfolio_performance (date, equity, cash, env)"
+        " VALUES ('2026-04-21', 5000000, 0, 'paper_trading')"
+    )
+    conn.close()
+
+    monkeypatch.setenv("DUCKDB_PATH", str(db_path))
+    monkeypatch.setenv("KABUSYS_ENV", "paper_trading")
+    assert main(["--type", "daily", "--from", "2026-04-21", "--to", "2026-04-21"]) == 0
+    monkeypatch.setenv("KABUSYS_ENV", "live")
+    assert main(["--type", "daily", "--from", "2026-04-21", "--to", "2026-04-21"]) == 1
 
 
 # ---------------------------------------------------------------------------
