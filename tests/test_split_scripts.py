@@ -209,3 +209,22 @@ def test_detect_split_candidates_uses_previous_close_before_range(conn):
     _raw(conn, "2026-10-01", "83880", 3700.0)  # 1:3 相当
     found = detect_script.detect_split_candidates(conn, date(2026, 10, 1), date(2026, 10, 31))
     assert [(c["code"], c["label"]) for c in found] == [("83880", "1:3 分割")]
+
+
+def test_backfill_warns_and_falls_back_when_calendar_partially_covers_range(conn, caplog):
+    # カレンダーは 10/1〜10/2 だけ（10/2 は休日扱い）
+    conn.execute(
+        "INSERT INTO market_calendar (date, is_trading_day, is_half_day, is_sq_day) VALUES "
+        "('2026-10-01', true, false, false), ('2026-10-02', false, false, false)"
+    )
+    calls: list[date] = []
+
+    def fake_fetch(code=None, date_from=None, date_to=None):
+        calls.append(date_from)
+        return []
+
+    backfill_script.backfill(conn, date(2026, 9, 30), date(2026, 10, 6), fetch=fake_fetch)
+
+    # 9/30（カレンダー外・平日）、10/1（営業日）、10/5・10/6（カレンダー外・平日）
+    assert calls == [date(2026, 9, 30), date(2026, 10, 1), date(2026, 10, 5), date(2026, 10, 6)]
+    assert "market_calendar" in caplog.text

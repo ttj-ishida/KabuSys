@@ -35,19 +35,36 @@ FetchFn = Callable[..., list[dict[str, Any]]]
 
 
 def _target_dates(conn: duckdb.DuckDBPyConnection, date_from: date, date_to: date) -> list[date]:
-    """期間内の営業日。market_calendar に期間のデータがなければ平日で代用する。"""
+    """期間内の営業日。
+
+    market_calendar にある日付はその is_trading_day に従う。カレンダーにない日付は
+    平日で代用し、その旨を警告する。
+    """
     rows = conn.execute(
         "SELECT date, is_trading_day FROM market_calendar WHERE date BETWEEN ? AND ? ORDER BY date",
         [date_from, date_to],
     ).fetchall()
-    if rows:
-        return [r[0] for r in rows if r[1]]
+    calendar = {r[0]: bool(r[1]) for r in rows}
     days: list[date] = []
+    uncovered: list[date] = []
     d = date_from
     while d <= date_to:
-        if d.weekday() < 5:
-            days.append(d)
+        if d in calendar:
+            if calendar[d]:
+                days.append(d)
+        else:
+            uncovered.append(d)
+            if d.weekday() < 5:
+                days.append(d)
         d += timedelta(days=1)
+    if uncovered:
+        logger.warning(
+            "market_calendar が期間の一部（%d 日: %s 〜 %s）をカバーしていないため、"
+            "その日付は平日を営業日として扱います",
+            len(uncovered),
+            uncovered[0],
+            uncovered[-1],
+        )
     return days
 
 
