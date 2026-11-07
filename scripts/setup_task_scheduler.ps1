@@ -94,6 +94,7 @@ function Register-KabuSysTask {
 Write-Host ""
 Write-Host "[Core jobs]"
 Register-KabuSysTask -TaskName "KabuSys_DataUpdate"            -Script "run_data_update.py"            -TriggerTime "17:30"
+Register-KabuSysTask -TaskName "KabuSys_PerformanceRecord"      -Script "run_performance_record.py"     -TriggerTime "18:00"
 Register-KabuSysTask -TaskName "KabuSys_FeatureGen"            -Script "run_feature_gen.py"            -TriggerTime "18:30"
 Register-KabuSysTask -TaskName "KabuSys_StrategySignal"        -Script "run_strategy_signal.py"        -TriggerTime "20:00"
 Register-KabuSysTask -TaskName "KabuSys_PortfolioConstruction" -Script "run_portfolio_construction.py" -TriggerTime "21:00"

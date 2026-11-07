@@ -626,3 +626,10 @@ def test_script_line_failure_ignored(conn, tmp_path):
         patch.object(mod, "log_run_end"),
     ):
         mod.main(["--phase", "morning"])  # 例外・SystemExit なし
+
+
+def test_task_scheduler_ps1_registers_performance_record():
+    ps1 = (Path(__file__).resolve().parents[1] / "scripts" / "setup_task_scheduler.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "run_performance_record.py" in ps1 and '"18:00"' in ps1
