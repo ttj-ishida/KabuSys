@@ -27,6 +27,7 @@ excl = 実行前に Execution を停止し、DuckDB を排他利用するジョ�
 | 15:35 | `tdnet_collection`（`ENABLE_TDNET=true`） | `run_tdnet_collection.py` | YES | 実行 |
 | 17:30 | `data_update` | `run_data_update.py` | YES | 実行 |
 | 17:33 | `yahoonews_collection`（`ENABLE_YAHOONEWS=true`） | `run_yahoonews_collection.py` | YES | 実行 |
+| 18:00 | `performance_record` | `run_performance_record.py [--date]`（日次の総資産・現金を `portfolio_performance` に記録） | YES | 実行（`live` は対象外） |
 | 18:30 | `feature_gen` | `run_feature_gen.py` | YES | 実行 |
 | 19:00 | `ai_analysis`（`ENABLE_AI_SENTIMENT=true`） | `run_ai_analysis.py` | YES | 実行（ただし現在スコアが出ていない：Issue #419） |
 | 20:00 | `strategy_signal` | `run_strategy_signal.py [--date]` | YES | 実行（手動保有の SELL 候補を `manual_action_queue` に記録） |
@@ -354,7 +355,7 @@ python -m kabusys.run_market_close_report --save
 python -m kabusys.run_performance_report --type daily --save
 ```
 
-> ⚠️ `run_performance_report` は現在空のレポートを出して終了コード 1 を返す（`portfolio_performance` に書き込む処理がないため。`--env` の既定は `live`）。自動執行を再開しても、この状況は変わらない。
+> `run_performance_report` は `performance_record`（18:00）が記録した `portfolio_performance` を読む（`--env` の既定は `KABUSYS_ENV`）。
 
 判定:
 

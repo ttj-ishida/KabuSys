@@ -41,6 +41,7 @@ python scripts\run_scheduler.py --list
 | 15:35 | TDnet 適時開示収集（`ENABLE_TDNET=true`） | 自動 | `scripts/run_tdnet_collection.py` |
 | 17:30 | 市場データ更新 | 自動 | `scripts/run_data_update.py` |
 | 17:33 | Yahoo News 収集（`ENABLE_YAHOONEWS=true`） | 自動 | `scripts/run_yahoonews_collection.py` |
+| 18:00 | 日次成績の記録 | 自動 | `scripts/run_performance_record.py` |
 | 18:30 | 特徴量計算 | 自動 | `scripts/run_feature_gen.py` |
 | 19:00 | AI 分析（`ENABLE_AI_SENTIMENT=true`。現在スコアが出ていない：Issue #419） | 自動 | `scripts/run_ai_analysis.py` |
 | 20:00 | 売買シグナル生成（手動保有の売却候補も記録） | 自動 | `scripts/run_strategy_signal.py` |
@@ -212,7 +213,7 @@ python -m kabusys.run_performance_report --type monthly --save
 - `artifacts/performance/{env}/weekly/...`
 - `artifacts/performance/{env}/monthly/...`
 
-> ⚠️ **現在、成績レポートは空になる。** `portfolio_performance` テーブルに書き込む処理が src/・scripts/ になく（運用 DB でも 0 行）、レポートは空で終了コード 1 を返す。また `--env` の既定は `live` だが、現在の `KABUSYS_ENV` は `paper_trading`。手動運用の損益・保有は Streamlit **Manual Trades > 手動ポジション** と `manual_trades positions` で確認する。
+> 18:00 に `performance_record` が日次の成績を記録し、成績レポートで確認できる（手動運用は元手＋手動約定ベース。`--env` の既定は `KABUSYS_ENV`、`live` の記録は未対応）。手動運用の損益・保有は Streamlit **Manual Trades > 手動ポジション** と `manual_trades positions` でも確認できる。
 
 ---
 
@@ -311,7 +312,7 @@ python -m kabusys.run_market_close_report --save
 python -m kabusys.run_performance_report --type daily --save
 ```
 
-> ⚠️ `run_performance_report` は現在空のレポートを出して終了コード 1 を返す（`portfolio_performance` に書き込む処理がないため。`--env` の既定は `live`）。自動執行を再開しても、この状況は変わらない。
+> `run_performance_report` は 18:00 の `performance_record` が記録した成績を読む。記録がない日は `python scripts/run_performance_record.py --date YYYY-MM-DD` で手動記録できる。
 
 | 判定 | 対応 |
 |------|------|
