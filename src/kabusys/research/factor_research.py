@@ -256,7 +256,8 @@ def calc_value(
     """バリューファクターを計算する。
 
     raw_financials テーブルから target_date 以前の最新財務データを取得し、
-    prices_daily の株価と組み合わせて以下を計算する。
+    株価（prices_daily の日付選択で、値は分割補正前の raw_prices.close）と組み合わせて
+    以下を計算する。
       - per       : 株価 / EPS（EPS が 0 または欠損の場合は None）。EPS は TTM（直近 4 四半期）を優先する:
                     最新が通期（FY/4Q）ならその EPS、最新が四半期累計（1Q〜3Q）なら
                     「最新累計 + 直近通期 − 前年同期累計」。TTM を作れない場合は 15 か月以内の
@@ -343,9 +344,13 @@ def calc_value(
             LEFT JOIN prior_same p ON p.code = l.code
         ),
         price_on_date AS (
-            SELECT code, close
-            FROM prices_daily
-            WHERE date = (SELECT MAX(date) FROM prices_daily WHERE date <= ?)
+            -- バリュー指標は報告ベースの EPS/BPS/配当と比べるため、分割補正前の株価を使う
+            -- （prices_daily は後日の分割で過去分が変わるため。Issue #424）。
+            -- raw_prices に対応行がない場合のみ prices_daily の値を使う。
+            SELECT p.code, COALESCE(r.close, p.close) AS close
+            FROM prices_daily p
+            LEFT JOIN raw_prices r ON r.date = p.date AND r.code = p.code
+            WHERE p.date = (SELECT MAX(date) FROM prices_daily WHERE date <= ?)
         ),
         annual_div AS (
             SELECT code, SUM(div_rate) AS annual_div

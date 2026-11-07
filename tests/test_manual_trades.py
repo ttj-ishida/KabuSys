@@ -735,3 +735,162 @@ def test_cli_allow_oversell(tmp_path, monkeypatch, capsys):
     assert _cli_add(cli, side="SELL") == 1
     assert "ERROR" in capsys.readouterr().out
     assert _cli_add(cli, "--allow-oversell", side="SELL") == 0
+
+
+# ---------------------------------------------------------------------------
+# Issue #424: 手動保有の分割補正
+# ---------------------------------------------------------------------------
+
+
+def _raw_prices_with_split(conn, code="83880", ex_date=date(2026, 9, 29), factor=0.2):
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS raw_prices (date DATE, code VARCHAR, adj_factor DECIMAL(18,6))"
+    )
+    conn.execute(
+        "INSERT INTO raw_prices VALUES (?, ?, NULL), (?, ?, 1.0), (?, ?, ?)",
+        [date(2026, 9, 25), code, date(2026, 9, 26), code, ex_date, code, factor],
+    )
+
+
+def test_manual_position_converted_by_split(conn):
+    _raw_prices_with_split(conn)
+    _buy(conn, date(2026, 9, 25), code="83880", qty=100, price=10000.0)
+
+    [pos] = calculate_manual_positions(conn, as_of=date(2026, 9, 30))
+
+    assert pos.qty == 500
+    assert pos.avg_price == pytest.approx(2000.0)
+
+
+def test_manual_split_keeps_fees_and_raw_rows(conn):
+    _raw_prices_with_split(conn)
+    add_manual_trade(
+        conn,
+        ManualTradeInput(
+            trade_date=date(2026, 9, 25), code="83880", side="buy", qty=100, price=10000, fees=500
+        ),
+    )
+
+    [pos] = calculate_manual_positions(conn, as_of=date(2026, 9, 30))
+    [row] = list_manual_trades(conn)
+
+    assert pos.qty == 500
+    assert pos.avg_price * pos.qty == pytest.approx(100 * 10000 + 500)
+    # DB の約定の生データは変えない
+    assert (row.qty, row.price, row.fees) == (100, 10000, 500)
+
+
+def test_manual_sell_after_split_offsets_converted_qty(conn):
+    _raw_prices_with_split(conn)
+    _buy(conn, date(2026, 9, 25), code="83880", qty=100, price=10000.0)
+    # 分割後に 300 株売る（生データの買い 100 株を超えるが、換算後は 500 株）
+    _sell(conn, date(2026, 9, 30), code="83880", qty=300, price=2200.0)
+
+    [pos] = calculate_manual_positions(conn, as_of=date(2026, 9, 30))
+
+    assert pos.qty == 200
+    assert pos.avg_price == pytest.approx(2000.0)
+    assert pos.realized_pnl == pytest.approx(300 * 2200 - 300 * 2000)
+
+
+def test_manual_sell_after_split_beyond_converted_qty_is_oversell(conn):
+    _raw_prices_with_split(conn)
+    _buy(conn, date(2026, 9, 25), code="83880", qty=100, price=10000.0)
+
+    with pytest.raises(OversellError):
+        add_manual_trade(
+            conn,
+            ManualTradeInput(
+                trade_date=date(2026, 9, 30), code="83880", side="sell", qty=600, price=2200
+            ),
+        )
+
+
+def test_manual_trade_on_or_after_ex_date_is_not_converted(conn):
+    _raw_prices_with_split(conn)
+    _buy(conn, date(2026, 9, 29), code="83880", qty=500, price=2185.0)
+
+    [pos] = calculate_manual_positions(conn, as_of=date(2026, 9, 30))
+
+    assert pos.qty == 500
+    assert pos.avg_price == pytest.approx(2185.0)
+
+
+def test_manual_split_evaluation_uses_adjusted_close(conn):
+    _raw_prices_with_split(conn)
+    _prices_table(conn)
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, close) VALUES (?, '83880', 2200)",
+        [date(2026, 9, 30)],
+    )
+    _buy(conn, date(2026, 9, 25), code="83880", qty=100, price=10000.0)
+
+    [val] = evaluate_manual_positions(conn, as_of=date(2026, 9, 30))
+
+    assert val.qty == 500
+    assert val.market_value == pytest.approx(500 * 2200)
+    assert val.unrealized_pnl_pct == pytest.approx(10.0)
+
+
+def test_manual_split_without_factors_is_unchanged(conn):
+    conn.execute("CREATE TABLE raw_prices (date DATE, code VARCHAR, adj_factor DECIMAL(18,6))")
+    conn.execute("INSERT INTO raw_prices VALUES ('2026-09-29', '83880', NULL)")
+    _buy(conn, date(2026, 9, 25), code="83880", qty=100, price=10000.0)
+
+    [pos] = calculate_manual_positions(conn, as_of=date(2026, 9, 30))
+
+    assert (pos.qty, pos.avg_price) == (100, pytest.approx(10000.0))
+
+
+def test_manual_split_uses_same_share_basis_as_prices_daily_for_past_as_of(conn):
+    """過去の as_of でも prices_daily（DB の最新係数で後方補正）と同じ株数ベースで返す。"""
+    _raw_prices_with_split(conn)
+    _buy(conn, date(2026, 9, 25), code="83880", qty=100, price=10000.0)
+
+    [pos] = calculate_manual_positions(conn, as_of=date(2026, 9, 26))
+
+    assert pos.qty == 500
+    assert pos.avg_price == pytest.approx(2000.0)
+
+
+def test_manual_consolidation_floors_quantity(conn):
+    """10:1 併合で 155 株は 15 株（端数は切り捨て。ブローカーは整数株のみ保持）。"""
+    _raw_prices_with_split(conn, factor=10.0)
+    _buy(conn, date(2026, 9, 25), code="83880", qty=155, price=100.0)
+
+    [pos] = calculate_manual_positions(conn, as_of=date(2026, 9, 30))
+
+    assert pos.qty == 15
+
+
+def test_manual_split_with_truncated_factor_is_exact(conn):
+    _raw_prices_with_split(conn, factor=0.333333)
+    _buy(conn, date(2026, 9, 25), code="83880", qty=300, price=13590.0)
+
+    [pos] = calculate_manual_positions(conn, as_of=date(2026, 9, 30))
+
+    assert pos.qty == 900
+    assert pos.avg_price == pytest.approx(4530.0)
+
+
+@pytest.mark.parametrize(
+    ("qty", "factor", "expected"),
+    [(100, 0.909091, 110), (300, 0.666667, 450), (100, 0.769231, 130), (100, 0.952381, 105)],
+)
+def test_manual_split_with_unsnapped_six_digit_factor_is_not_undercounted(
+    conn, qty, factor, expected
+):
+    _raw_prices_with_split(conn, factor=factor)
+    _buy(conn, date(2026, 9, 25), code="83880", qty=qty, price=1000.0)
+
+    [pos] = calculate_manual_positions(conn, as_of=date(2026, 9, 30))
+
+    assert pos.qty == expected
+
+
+def test_manual_full_sell_after_unsnapped_split_is_not_oversell(conn):
+    _raw_prices_with_split(conn, factor=0.909091)
+    _buy(conn, date(2026, 9, 25), code="83880", qty=100, price=1000.0)
+    _sell(conn, date(2026, 9, 30), code="83880", qty=110, price=950.0)
+
+    assert calculate_manual_positions(conn, as_of=date(2026, 9, 30)) == []

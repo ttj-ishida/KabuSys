@@ -27,6 +27,12 @@ import duckdb
 
 from kabusys.data import jquants_client as jq
 from kabusys.data import quality
+from kabusys.data.price_adjustment import (
+    QUALITY_FILTER,
+    codes_with_factors,
+    rebuild_codes,
+    upsert_adjusted_range,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +294,14 @@ def get_last_topix_date(conn: duckdb.DuckDBPyConnection) -> date | None:
 # ---------------------------------------------------------------------------
 
 
+def _prices_fetch_from(conn: duckdb.DuckDBPyConnection, backfill_days: int) -> date:
+    """run_prices_etl が date_from 省略時に使う取得開始日（最終取得日 - backfill_days + 1）。"""
+    last = get_last_price_date(conn)
+    if last is not None:
+        return max(_MIN_DATA_DATE, last - timedelta(days=backfill_days - 1))
+    return _MIN_DATA_DATE
+
+
 def run_prices_etl(
     conn: duckdb.DuckDBPyConnection,
     target_date: date,
@@ -309,11 +323,7 @@ def run_prices_etl(
         (取得レコード数, 保存レコード数) のタプル。
     """
     if date_from is None:
-        last = get_last_price_date(conn)
-        if last is not None:
-            date_from = max(_MIN_DATA_DATE, last - timedelta(days=backfill_days - 1))
-        else:
-            date_from = _MIN_DATA_DATE
+        date_from = _prices_fetch_from(conn, backfill_days)
 
     if date_from > target_date:
         logger.info(
@@ -347,6 +357,10 @@ def sync_raw_prices_to_prices_daily(
 
     既存行は ON CONFLICT DO UPDATE で上書きする。
 
+    分割・併合の後方補正（Issue #424）:
+      - 書き込む値は raw × M(d)（volume は ÷ M(d)）。M(d) は d より後の adj_factor の積。
+      - 範囲内に 1 以外の adj_factor が現れた銘柄は、rebuild でその銘柄の全期間を作り直す。
+
     Args:
         conn:      DuckDB 接続。
         date_from: 同期開始日（含む）。
@@ -358,47 +372,33 @@ def sync_raw_prices_to_prices_daily(
     """
     conn.execute("BEGIN")
     try:
-        conn.execute(
-            """
-            INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover)
-            SELECT date, code, open, high, low, close, volume, turnover
-            FROM raw_prices
-            WHERE date >= ? AND date <= ?
-              AND open IS NOT NULL AND open > 0
-              AND high IS NOT NULL AND high > 0
-              AND low IS NOT NULL AND low > 0
-              AND close IS NOT NULL AND close > 0
-              AND volume IS NOT NULL
-              AND low <= high
-            ON CONFLICT (date, code) DO UPDATE SET
-                open = excluded.open,
-                high = excluded.high,
-                low = excluded.low,
-                close = excluded.close,
-                volume = excluded.volume,
-                turnover = excluded.turnover
-            """,
-            [date_from, date_to],
-        )
+        # 範囲内の行を後方補正（M(d) を掛けて）upsert する
+        upsert_adjusted_range(conn, date_from, date_to)
         row = conn.execute(
-            """
+            f"""
             SELECT COUNT(*)
             FROM raw_prices
             WHERE date >= ? AND date <= ?
-              AND open IS NOT NULL AND open > 0
-              AND high IS NOT NULL AND high > 0
-              AND low IS NOT NULL AND low > 0
-              AND close IS NOT NULL AND close > 0
-              AND volume IS NOT NULL
-              AND low <= high
+              AND ({QUALITY_FILTER})
             """,
             [date_from, date_to],
         ).fetchone()
         count = int(row[0]) if row else 0
+        # 範囲内に 1 以外の adj_factor が現れた銘柄は全期間を作り直す（過去行へ係数を反映）
+        rebuilt_codes = codes_with_factors(conn, date_from, date_to)
+        rebuilt = rebuild_codes(conn, rebuilt_codes)
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
         raise
+    if rebuilt_codes:
+        logger.info(
+            "sync_raw_prices_to_prices_daily: 分割・併合の係数がある %d 銘柄を作り直しました"
+            " codes=%s rows=%d",
+            len(rebuilt_codes),
+            ",".join(rebuilt_codes),
+            rebuilt,
+        )
     logger.info(
         "sync_raw_prices_to_prices_daily: date_from=%s date_to=%s synced=%d",
         date_from,
@@ -641,6 +641,12 @@ def run_daily_etl(
     trading_day = _adjust_to_trading_day(conn, today)
 
     # 2. 株価日足ETL
+    # 同期範囲は今回取得する全日付を含める（ETL 停止後の取得分も同期・補正する。Issue #424）
+    try:
+        prices_fetch_from: date | None = _prices_fetch_from(conn, backfill_days)
+    except Exception:
+        logger.exception("株価の取得開始日の算出に失敗")
+        prices_fetch_from = None
     try:
         fetched, saved = run_prices_etl(conn, trading_day, backfill_days=backfill_days)
         result.prices_fetched = fetched
@@ -652,6 +658,8 @@ def run_daily_etl(
     # 2b. raw_prices -> prices_daily 同期
     try:
         sync_date_from = trading_day - timedelta(days=backfill_days - 1)
+        if prices_fetch_from is not None:
+            sync_date_from = min(sync_date_from, prices_fetch_from)
         synced = sync_raw_prices_to_prices_daily(conn, sync_date_from, trading_day)
         result.prices_daily_synced = synced
     except Exception:

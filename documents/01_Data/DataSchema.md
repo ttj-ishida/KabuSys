@@ -54,7 +54,8 @@ J-Quants から取得した生の日足株価データ。差分 API・Bulk API �
   close        float    終値（調整前）
   volume       bigint   出来高（調整前）
   turnover     float    売買代金
-  adj_factor   float    分割調整係数（Bulk CSV の AdjFactor。差分APIは NULL）
+  adj_factor   float    分割・併合の調整係数（J-Quants AdjFactor。権利落ち日に分割比率の逆数。
+                        例: 1:5 分割 → 0.2、2:1 併合 → 2.0。通常日は 1.0。NULL は 1 とみなす）
   fetched_at   timestamp 取込日時
 
 主キー: `(date, code)`
@@ -66,30 +67,59 @@ J-Quants から取得した生の日足株価データ。差分 API・Bulk API �
 Bulk CSV カラムマッピング:
   Date → date, Code → code, O → open, H → high, L → low, C → close
   Vo → volume, Va → turnover, AdjFactor → adj_factor
-  ※ UL・LL・AdjO/H/L/C/Vo は Raw には保存しない（prices_daily は調整前価格を使用）
+  ※ UL・LL・AdjO/H/L/C/Vo は Raw には保存しない（prices_daily は adj_factor から自前で補正する）
+  ※ 日次の差分 API（save_daily_quotes）も AdjFactor を保存する（Issue #424。2026-06〜11 の
+    欠落分は scripts/backfill_adj_factor.py で補う）
 
 ------------------------------------------------------------------------
 
 ## prices_daily（Processed Layer）
 
-日足株価データ（整形済み）。戦略・バックテスト・research が参照する。
+日足株価データ（整形済み・**株式分割・併合で後方補正済み**）。戦略・バックテスト・research が参照する。
 
   column     type     description
   ---------- -------- -------------
   date       date     取引日
   code       string   銘柄コード
-  open       float    始値（調整前）
-  high       float    高値（調整前）
-  low        float    安値（調整前）
-  close      float    終値（調整前）
-  volume     bigint   出来高
-  turnover   float    売買代金
+  open       float    始値（補正済み）
+  high       float    高値（補正済み）
+  low        float    安値（補正済み）
+  close      float    終値（補正済み）
+  volume     bigint   出来高（補正済み）
+  turnover   float    売買代金（補正しない）
 
 主キー: `(date, code)`
 投入元: `raw_prices` からの ETL コピー（NOT NULL・low<=high を検証後に UPSERT）
 
-注: 調整価格（分割対応）は raw_prices.adj_factor を使って算出する。
-    DataPlatform §6.1 の補正ルールを参照。
+### 分割・併合の補正（Issue #424）
+
+銘柄ごとに、日付 d の補正倍率を `M(d) = Π_{t > d} f(t)`（f = raw_prices.adj_factor、
+d より後の全行の積。NULL・0 以下は 1 とみなす。1/n または n との差が 1e-5 未満の係数は
+厳密な比率にスナップする。例: 0.333333 → 1/3）とし、
+
+- open / high / low / close = raw × M(d)
+- volume = round(raw ÷ M(d))
+- turnover = raw（売買代金は補正しない）
+
+最新日は M = 1 なので、直近の株価は実際の株価と一致する。
+実装は `kabusys.data.price_adjustment`（DuckDB のウィンドウ関数で集合演算）。
+
+- 日次 ETL の同期範囲は「今回取得した raw の全日付」と「trading_day - backfill」の早い方から
+  始まる（ETL 停止後の取得分も同期される）。
+- 日次同期（`pipeline.sync_raw_prices_to_prices_daily`）は範囲内の行に M(d) を掛けて書き込み、
+  範囲内に 1 以外の adj_factor が現れた銘柄は `rebuild_adjusted_prices(codes)` で全期間を作り直す。
+- Bootstrap（`data/bootstrap/runner.py`）は株価ファイルのロード後に全銘柄を作り直す。
+- 品質フィルタ（OHLC > 0、volume NOT NULL、low <= high）は同期・再構築で共通。
+- **絶対水準が必要な箇所は補正前の株価を使う:** バリュー指標（PER/PBR/配当利回り。
+  `research/factor_research.calc_value`）と「株価 300 円以上」の足切り
+  （`strategy/feature_engineering._load_universe_price_map`）は、prices_daily で選んだ日付の
+  `raw_prices.close` を使う（後日の分割で過去の値が変わらない）。
+- **既知のトレードオフ:** 補正に使う係数はその時点の DB にあるものだけなので、比率
+  （リターン・モメンタム・ATR 比など）は分割の影響を受けないが、過去の株価の絶対水準は後の
+  分割で変わる。影響が残るのは、バックテストでの 100 株単位の株数計算だけ（#430 で扱う）。
+- 手動保有（manual_trades）は計算時に同じ株数ベースへ換算する（数量 = floor(qty ÷ F)、
+  単価 × F。F は約定日より後の adj_factor（スナップ済み）の積）。DB の約定データは変更しない。
+- `save_daily_quotes` は再取得で AdjFactor がない場合、保存済みの係数を残す（COALESCE）。
 
 ------------------------------------------------------------------------
 

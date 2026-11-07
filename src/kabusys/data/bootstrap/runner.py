@@ -28,6 +28,7 @@ from kabusys.data.bootstrap.loaders import (
     load_prices,
     load_topix,
 )
+from kabusys.data.price_adjustment import rebuild_adjusted_prices
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +251,7 @@ def run_bootstrap(
     target_endpoints = endpoints if endpoints is not None else ENDPOINTS
     result = BootstrapResult()
     loaded_keys = _loaded_keys(conn)
+    prices_loaded = False
 
     for endpoint in target_endpoints:
         loader = _LOADER_MAP.get(endpoint)
@@ -348,6 +350,8 @@ def run_bootstrap(
                 else:
                     n = loader(conn, dest, bulk=False)
                 rows_ep += n
+                if endpoint == "/equities/bars/daily":
+                    prices_loaded = True
                 _record(conn, file_key, endpoint, file_name, "loaded", row_count=n)
                 result.loaded_files += 1
                 logger.info("ロード完了 (%s): %d 件", file_name, n)
@@ -365,6 +369,18 @@ def run_bootstrap(
                 result.failed_files += 1
 
         result.rows_by_endpoint[endpoint] = rows_ep
+
+    if prices_loaded:
+        # ローダーは補正前の値を prices_daily に書くため、最後に分割補正を反映する（Issue #424）
+        print("[prices_daily] 株式分割・併合の補正を反映中...", flush=True)
+        try:
+            n = rebuild_adjusted_prices(conn)
+        except Exception:
+            logger.exception(
+                "分割補正に失敗しました。scripts/rebuild_adjusted_prices.py を実行してください"
+            )
+            raise
+        print(f"[prices_daily] 補正完了: {n:,} 件", flush=True)
 
     return result
 

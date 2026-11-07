@@ -386,6 +386,33 @@ python scripts\rebuild_features.py
 
 `prices_daily` を元に特徴量を全再計算する。
 
+### 10.5 株式分割・併合の補正（prices_daily の作り直し）
+
+`prices_daily` は株式分割・併合で後方補正した株価である（DataSchema.md「分割・併合の補正」）。
+日次の同期は、新しい調整係数（`raw_prices.adj_factor`）が出た銘柄を自動で作り直すため、
+通常は操作不要。以下の場合に手動で実行する。
+
+**前提:** DuckDB に書き込むため、スケジューラーと Execution を停止してから実行する。
+
+| 状況 | コマンド |
+|------|---------|
+| 初回の移行（Issue #424 の導入直後に 1 回。raw の全日付・全銘柄を同期し直し、未同期の日付も埋める） | `python scripts\rebuild_adjusted_prices.py` |
+| 係数のある銘柄だけ作り直す（軽い） | `python scripts\rebuild_adjusted_prices.py --factor-codes-only` |
+| 対象を確認するだけ（書き込みなし） | `python scripts\rebuild_adjusted_prices.py --dry-run` |
+| 特定銘柄だけ作り直す | `python scripts\rebuild_adjusted_prices.py --codes 83880 485A0` |
+| adj_factor が欠けた期間を補う（2026-06〜11 の日次更新分など） | `python scripts\backfill_adj_factor.py --from 2026-06-01 --to 2026-11-06` |
+| 欠けた期間の分割候補を確認（表示のみ・DB 書き込みなし） | `python scripts\detect_split_candidates.py --from 2026-06-01` |
+
+- `rebuild_adjusted_prices.py` は冪等で、何度実行しても同じ結果になる。
+- `backfill_adj_factor.py` は日付ごとに J-Quants から再取得する。プランで取得できない日付
+  （エラー・空応答）は警告を出してスキップするため、プラン変更後に再実行する。
+- 分割で過去の株価が変わるため、必要に応じて `rebuild_features.py` / `backfill_features.py`
+  で特徴量を再計算する（過去分の再計算は Issue #430 で扱う）。
+- `backfill_adj_factor.py` は market_calendar がない日付を平日として扱い、警告を出す。
+- **既知のトレードオフ:** 過去の株価の絶対水準は後の分割で変わる。バリュー指標と 300 円の
+  足切りは補正前の株価を使うため影響を受けない。影響が残るのは、バックテストでの 100 株単位
+  の株数計算だけ（#430 で扱う）。
+
 ---
 
 ## 11. 復旧確認チェックリスト

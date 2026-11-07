@@ -7,6 +7,7 @@ CLI と将来の GUI はこのモジュールを共通利用する。
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -14,6 +15,7 @@ from typing import Any
 
 import duckdb
 
+from kabusys.data.price_adjustment import snap_factor
 from kabusys.strategy.holdings import HeldPosition
 
 logger = logging.getLogger(__name__)
@@ -309,19 +311,77 @@ _TRADE_ORDER_BY = (
 )
 
 
+SplitFactors = dict[str, list[tuple[date, float]]]
+
+
+def _load_split_factors(conn: duckdb.DuckDBPyConnection, codes: set[str]) -> SplitFactors:
+    """raw_prices から 1 以外の adj_factor（分割・併合の係数）を銘柄別に読み込む（Issue #424）。
+
+    raw_prices（adj_factor 列）がない接続（テスト・最小スキーマ）では空を返す。
+    """
+    if not codes:
+        return {}
+    try:
+        rows = conn.execute(
+            """
+            SELECT code, date, CAST(adj_factor AS DOUBLE)
+            FROM raw_prices
+            WHERE list_contains(?::VARCHAR[], code)
+              AND adj_factor IS NOT NULL AND adj_factor > 0 AND adj_factor <> 1
+            ORDER BY code, date
+            """,
+            [sorted(codes)],
+        ).fetchall()
+    except (duckdb.CatalogException, duckdb.BinderException):
+        # raw_prices（または adj_factor 列）がない接続
+        logger.debug("raw_prices.adj_factor がないため分割補正なしとして扱います")
+        return {}
+    factors: SplitFactors = {}
+    for code, d, f in rows:
+        factors.setdefault(str(code), []).append((d, snap_factor(f)))
+    return factors
+
+
+def _split_multiplier(factors: SplitFactors, code: str, trade_date: date) -> float:
+    """約定日より後の分割・併合係数の積 F（約定を prices_daily と同じ株数ベースへ換算する）。"""
+    mult = 1.0
+    for d, f in factors.get(code, ()):
+        if d > trade_date:
+            mult *= f
+    return mult
+
+
 def _fold_manual_trades(
-    rows: list[tuple[Any, ...]], clamped: list[str] | None = None, *, log: bool = True
+    rows: list[tuple[Any, ...]],
+    clamped: list[str] | None = None,
+    *,
+    log: bool = True,
+    split_factors: SplitFactors | None = None,
 ) -> dict[str, dict[str, Any]]:
     """約定行 (trade_id, trade_date, code, side, qty, price, fees) を順に畳み込み、銘柄別の状態を返す。
 
     保有を超える SELL は保有数量に切り詰め、logger.warning を出す。
     clamped を渡すと、切り詰めが発生した約定の trade_id を追記する。log=False で warning を抑止する。
+
+    split_factors（Issue #424）を渡すと、各約定の数量・単価を、約定日より後の分割・併合係数の
+    積 F で換算する（数量 = round(qty / F)、単価 = price × F、手数料はそのまま）。
+    prices_daily（後方補正済み）と同じ株数ベースにそろえるため、F には DB にある
+    約定日より後の全係数を使う。DB に保存する約定の生データは変更しない。
     """
     state: dict[str, dict[str, Any]] = {}
     for trade_id, trade_date, code, side, qty, price, fees in rows:
         qty = int(qty)
         price = float(price)
         fees = float(fees)
+        if split_factors:
+            mult = _split_multiplier(split_factors, code, trade_date)
+            if mult != 1.0:
+                # ブローカーは整数株のみ保持するため端数は切り捨て。ただし 6 桁に丸められた
+                # 係数（0.909091 など）による誤差で整数をわずかに下回る場合は、最寄りの整数にする
+                x = qty / mult
+                n = round(x)
+                qty = n if abs(x - n) < 1e-4 * max(1.0, x) else math.floor(x)
+                price = price * mult
         pos = state.setdefault(
             code,
             {
@@ -387,11 +447,12 @@ def _oversold_trade_ids(
         if (row[1], 0 if row[3] == "buy" else 1) > (new.trade_date, 1):
             idx = i
             break
+    factors = _load_split_factors(conn, {new.code})
     baseline: list[str] = []
-    _fold_manual_trades(rows, baseline, log=False)
+    _fold_manual_trades(rows, baseline, log=False, split_factors=factors)
     rows.insert(idx, new_row)
     with_new: list[str] = []
-    _fold_manual_trades(rows, with_new, log=False)
+    _fold_manual_trades(rows, with_new, log=False, split_factors=factors)
     # 既に許可済みの売り過ぎ（allow_oversell）は除き、今回の登録で新たに切り詰められる約定だけ返す
     return [t for t in with_new if t not in set(baseline)]
 
@@ -429,7 +490,8 @@ def calculate_manual_positions(
             [as_of],
         )
 
-    state = _fold_manual_trades(rows)
+    factors = _load_split_factors(conn, {str(r[2]) for r in rows})
+    state = _fold_manual_trades(rows, split_factors=factors)
 
     positions: list[ManualPosition] = []
     for code, pos in state.items():

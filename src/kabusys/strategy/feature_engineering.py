@@ -98,6 +98,32 @@ _NORM_COLS: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 
+def _load_universe_price_map(
+    conn: duckdb.DuckDBPyConnection, target_date: date
+) -> dict[str, float]:
+    """ユニバースの株価フィルタ用に、target_date 以前の最新の終値 {code: close} を返す。
+
+    「株価 300 円以上」は実際の株価で判定するため、分割補正前の raw_prices.close を使う
+    （prices_daily は後日の分割で過去分が変わるため。Issue #424）。
+    raw_prices に対応行がない場合のみ prices_daily の値を使う。
+    """
+    rows = conn.execute(
+        """
+        SELECT pd.code, CAST(COALESCE(r.close, pd.close) AS DOUBLE)
+        FROM prices_daily pd
+        INNER JOIN (
+            SELECT code, MAX(date) AS max_date
+            FROM prices_daily
+            WHERE date <= ?
+            GROUP BY code
+        ) m ON pd.code = m.code AND pd.date = m.max_date
+        LEFT JOIN raw_prices r ON r.date = pd.date AND r.code = pd.code
+        """,
+        [target_date],
+    ).fetchall()
+    return {code: close for code, close in rows}
+
+
 def _apply_universe_filter(
     records: list[dict[str, Any]],
     price_map: dict[str, float],
@@ -168,20 +194,7 @@ def build_features(
 
     # 2. current close prices（ユニバースフィルタ用）
     # target_date 以前の最新価格を参照（休場日・当日欠損に対応）
-    price_rows = conn.execute(
-        """
-        SELECT pd.code, CAST(pd.close AS DOUBLE)
-        FROM prices_daily pd
-        INNER JOIN (
-            SELECT code, MAX(date) AS max_date
-            FROM prices_daily
-            WHERE date <= ?
-            GROUP BY code
-        ) m ON pd.code = m.code AND pd.date = m.max_date
-        """,
-        [target_date],
-    ).fetchall()
-    price_map: dict[str, float] = {code: close for code, close in price_rows}
+    price_map = _load_universe_price_map(conn, target_date)
 
     # 2b. 市場区分（stocks テーブル）。未整備時は空集合となりフィルタがスキップされる。
     # stocks に登録済みかつ market 確定済みで Prime/Standard/Growth 以外（ETF/REIT等）の
