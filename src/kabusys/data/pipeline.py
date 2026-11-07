@@ -27,6 +27,12 @@ import duckdb
 
 from kabusys.data import jquants_client as jq
 from kabusys.data import quality
+from kabusys.data.price_adjustment import (
+    QUALITY_FILTER,
+    codes_with_factors,
+    rebuild_codes,
+    upsert_adjusted_range,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -347,6 +353,10 @@ def sync_raw_prices_to_prices_daily(
 
     既存行は ON CONFLICT DO UPDATE で上書きする。
 
+    分割・併合の後方補正（Issue #424）:
+      - 書き込む値は raw × M(d)（volume は ÷ M(d)）。M(d) は d より後の adj_factor の積。
+      - 範囲内に 1 以外の adj_factor が現れた銘柄は、rebuild でその銘柄の全期間を作り直す。
+
     Args:
         conn:      DuckDB 接続。
         date_from: 同期開始日（含む）。
@@ -358,47 +368,33 @@ def sync_raw_prices_to_prices_daily(
     """
     conn.execute("BEGIN")
     try:
-        conn.execute(
-            """
-            INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover)
-            SELECT date, code, open, high, low, close, volume, turnover
-            FROM raw_prices
-            WHERE date >= ? AND date <= ?
-              AND open IS NOT NULL AND open > 0
-              AND high IS NOT NULL AND high > 0
-              AND low IS NOT NULL AND low > 0
-              AND close IS NOT NULL AND close > 0
-              AND volume IS NOT NULL
-              AND low <= high
-            ON CONFLICT (date, code) DO UPDATE SET
-                open = excluded.open,
-                high = excluded.high,
-                low = excluded.low,
-                close = excluded.close,
-                volume = excluded.volume,
-                turnover = excluded.turnover
-            """,
-            [date_from, date_to],
-        )
+        # 範囲内の行を後方補正（M(d) を掛けて）upsert する
+        upsert_adjusted_range(conn, date_from, date_to)
         row = conn.execute(
-            """
+            f"""
             SELECT COUNT(*)
             FROM raw_prices
             WHERE date >= ? AND date <= ?
-              AND open IS NOT NULL AND open > 0
-              AND high IS NOT NULL AND high > 0
-              AND low IS NOT NULL AND low > 0
-              AND close IS NOT NULL AND close > 0
-              AND volume IS NOT NULL
-              AND low <= high
+              AND ({QUALITY_FILTER})
             """,
             [date_from, date_to],
         ).fetchone()
         count = int(row[0]) if row else 0
+        # 範囲内に 1 以外の adj_factor が現れた銘柄は全期間を作り直す（過去行へ係数を反映）
+        rebuilt_codes = codes_with_factors(conn, date_from, date_to)
+        rebuilt = rebuild_codes(conn, rebuilt_codes)
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
         raise
+    if rebuilt_codes:
+        logger.info(
+            "sync_raw_prices_to_prices_daily: 分割・併合の係数がある %d 銘柄を作り直しました"
+            " codes=%s rows=%d",
+            len(rebuilt_codes),
+            ",".join(rebuilt_codes),
+            rebuilt,
+        )
     logger.info(
         "sync_raw_prices_to_prices_daily: date_from=%s date_to=%s synced=%d",
         date_from,
