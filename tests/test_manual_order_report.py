@@ -402,6 +402,7 @@ def test_missing_tables_read_only_file_db(tmp_path):
             gap_thresholds=GAPS,
             stop_flag_path=tmp_path / "x.flag",
             sqlite_path=tmp_path / "none.db",
+            job_runs_dir=tmp_path / "job_runs",  # 実リポジトリの artifacts を読まない
         )
     finally:
         ro.close()
