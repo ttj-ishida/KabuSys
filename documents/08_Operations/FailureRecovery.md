@@ -396,7 +396,8 @@ python scripts\rebuild_features.py
 
 | 状況 | コマンド |
 |------|---------|
-| 初回の移行（Issue #424 の導入直後に 1 回） | `python scripts\rebuild_adjusted_prices.py` |
+| 初回の移行（Issue #424 の導入直後に 1 回。raw の全日付・全銘柄を同期し直し、未同期の日付も埋める） | `python scripts\rebuild_adjusted_prices.py` |
+| 係数のある銘柄だけ作り直す（軽い） | `python scripts\rebuild_adjusted_prices.py --factor-codes-only` |
 | 対象を確認するだけ（書き込みなし） | `python scripts\rebuild_adjusted_prices.py --dry-run` |
 | 特定銘柄だけ作り直す | `python scripts\rebuild_adjusted_prices.py --codes 83880 485A0` |
 | adj_factor が欠けた期間を補う（2026-06〜11 の日次更新分など） | `python scripts\backfill_adj_factor.py --from 2026-06-01 --to 2026-11-06` |
@@ -407,8 +408,10 @@ python scripts\rebuild_features.py
   （エラー・空応答）は警告を出してスキップするため、プラン変更後に再実行する。
 - 分割で過去の株価が変わるため、必要に応じて `rebuild_features.py` / `backfill_features.py`
   で特徴量を再計算する（過去分の再計算は Issue #430 で扱う）。
-- **既知のトレードオフ:** 過去の株価の絶対水準は後の分割で変わる。「株価 300 円以上」の足切り
-  や 100 株単位の株数計算は、過去分（バックテスト）がわずかにずれる。
+- `backfill_adj_factor.py` は market_calendar がない日付を平日として扱い、警告を出す。
+- **既知のトレードオフ:** 過去の株価の絶対水準は後の分割で変わる。バリュー指標と 300 円の
+  足切りは補正前の株価を使うため影響を受けない。影響が残るのは、バックテストでの 100 株単位
+  の株数計算だけ（#430 で扱う）。
 
 ---
 

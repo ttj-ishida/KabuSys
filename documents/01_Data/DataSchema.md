@@ -94,7 +94,8 @@ Bulk CSV カラムマッピング:
 ### 分割・併合の補正（Issue #424）
 
 銘柄ごとに、日付 d の補正倍率を `M(d) = Π_{t > d} f(t)`（f = raw_prices.adj_factor、
-d より後の全行の積。NULL・0 以下は 1 とみなす）とし、
+d より後の全行の積。NULL・0 以下は 1 とみなす。1/n または n との差が 1e-5 未満の係数は
+厳密な比率にスナップする。例: 0.333333 → 1/3）とし、
 
 - open / high / low / close = raw × M(d)
 - volume = round(raw ÷ M(d))
@@ -103,15 +104,22 @@ d より後の全行の積。NULL・0 以下は 1 とみなす）とし、
 最新日は M = 1 なので、直近の株価は実際の株価と一致する。
 実装は `kabusys.data.price_adjustment`（DuckDB のウィンドウ関数で集合演算）。
 
+- 日次 ETL の同期範囲は「今回取得した raw の全日付」と「trading_day - backfill」の早い方から
+  始まる（ETL 停止後の取得分も同期される）。
 - 日次同期（`pipeline.sync_raw_prices_to_prices_daily`）は範囲内の行に M(d) を掛けて書き込み、
   範囲内に 1 以外の adj_factor が現れた銘柄は `rebuild_adjusted_prices(codes)` で全期間を作り直す。
 - Bootstrap（`data/bootstrap/runner.py`）は株価ファイルのロード後に全銘柄を作り直す。
 - 品質フィルタ（OHLC > 0、volume NOT NULL、low <= high）は同期・再構築で共通。
+- **絶対水準が必要な箇所は補正前の株価を使う:** バリュー指標（PER/PBR/配当利回り。
+  `research/factor_research.calc_value`）と「株価 300 円以上」の足切り
+  （`strategy/feature_engineering._load_universe_price_map`）は、prices_daily で選んだ日付の
+  `raw_prices.close` を使う（後日の分割で過去の値が変わらない）。
 - **既知のトレードオフ:** 補正に使う係数はその時点の DB にあるものだけなので、比率
   （リターン・モメンタム・ATR 比など）は分割の影響を受けないが、過去の株価の絶対水準は後の
-  分割で変わる。「株価 300 円以上」の足切りや 100 株単位の株数計算は、過去分がわずかにずれる。
-- 手動保有（manual_trades）は計算時に同じ株数ベースへ換算する（数量 ÷ F、単価 × F。
-  F は約定日より後の adj_factor の積）。DB の約定データは変更しない。
+  分割で変わる。影響が残るのは、バックテストでの 100 株単位の株数計算だけ（#430 で扱う）。
+- 手動保有（manual_trades）は計算時に同じ株数ベースへ換算する（数量 = floor(qty ÷ F)、
+  単価 × F。F は約定日より後の adj_factor（スナップ済み）の積）。DB の約定データは変更しない。
+- `save_daily_quotes` は再取得で AdjFactor がない場合、保存済みの係数を残す（COALESCE）。
 
 ------------------------------------------------------------------------
 
