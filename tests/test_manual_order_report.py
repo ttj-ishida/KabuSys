@@ -97,6 +97,18 @@ def _monitoring_db(tmp_path: Path, since: str | None = None) -> Path:
     return db
 
 
+_NO_JOB_RUNS = Path("__no_such_job_runs__")
+
+
+def _write_batch(base: Path, run_date: date, status: str = "success") -> None:
+    d = base / run_date.isoformat()
+    d.mkdir(parents=True, exist_ok=True)
+    for name in ("strategy_signal_job", "portfolio_construction_job"):
+        (d / f"{name}.json").write_text(
+            json.dumps({"job_name": name, "status": status}), encoding="utf-8"
+        )
+
+
 def _collect(c, phase="evening", report_date=D_SIG, **kw):
     params = dict(
         phase=phase,
@@ -107,6 +119,7 @@ def _collect(c, phase="evening", report_date=D_SIG, **kw):
         gap_thresholds=GAPS,
         now=NOW,
     )
+    params.setdefault("job_runs_dir", _NO_JOB_RUNS)
     params.update(kw)
     return collect_manual_order_report(c, **params)
 
@@ -626,3 +639,92 @@ def test_script_line_failure_ignored(conn, tmp_path):
         patch.object(mod, "log_run_end"),
     ):
         mod.main(["--phase", "morning"])  # 例外・SystemExit なし
+
+
+# --- #421: シグナル 0 件の正常日 ---
+
+D_ZERO_MORNING = date(2026, 10, 15)  # 前営業日 10/14 のバッチは成功・シグナル 0 件
+D_ZERO_EVE = date(2026, 10, 14)
+
+
+def test_morning_zero_signal_day_batch_succeeded(conn, tmp_path):
+    jr = tmp_path / "job_runs"
+    _write_batch(jr, date(2026, 10, 14))
+    r = _collect(
+        conn,
+        phase="morning",
+        report_date=D_ZERO_MORNING,
+        stop_flag_path=tmp_path / "x",
+        job_runs_dir=jr,
+        sqlite_path=_monitoring_db(tmp_path),
+        now=datetime(2026, 10, 15, 8, 5),
+    )
+    assert r.signal_date == date(2026, 10, 14)
+    assert r.buy_candidates == [] and r.skipped_buys == [] and r.sell_candidates == []
+    assert r.buy_skip_reasons == []
+    assert not any("古い" in w for w in r.warnings)
+    assert r.status == "OK"
+    assert any("シグナルは 0 件" in n for n in r.notes)
+    assert "シグナルは 0 件" in format_markdown(r)
+    assert "シグナルは 0 件" in format_line_message(r)
+    assert "シグナルは 0 件" in format_cli_summary(r)
+
+
+def test_morning_zero_signal_day_still_honours_stop_flag(conn, tmp_path):
+    jr = tmp_path / "job_runs"
+    _write_batch(jr, date(2026, 10, 14), status="warning")
+    flag = tmp_path / "stop.flag"
+    flag.write_text("x")
+    r = _collect(
+        conn,
+        phase="morning",
+        report_date=D_ZERO_MORNING,
+        stop_flag_path=flag,
+        job_runs_dir=jr,
+        now=datetime(2026, 10, 15, 8, 5),
+    )
+    assert r.status == "BUY_SKIPPED"
+    assert not any("古い" in x for x in r.buy_skip_reasons)
+    assert r.skipped_buys == []
+
+
+@pytest.mark.parametrize("variant", ["missing", "failed"])
+def test_morning_stale_kept_when_batch_not_succeeded(conn, tmp_path, variant):
+    jr = tmp_path / "job_runs"
+    if variant == "failed":
+        _write_batch(jr, date(2026, 10, 14), status="failed")
+    r = _collect(
+        conn,
+        phase="morning",
+        report_date=D_ZERO_MORNING,
+        stop_flag_path=tmp_path / "x",
+        job_runs_dir=jr,
+    )
+    assert r.signal_date == D_SIG
+    assert [b.code for b in r.skipped_buys] == ["7203", "6758"]
+    assert any("古い" in w for w in r.warnings)
+    assert r.status == "BUY_SKIPPED"
+    assert r.notes == []
+
+
+def test_evening_zero_signal_day_batch_succeeded(conn, tmp_path):
+    jr = tmp_path / "job_runs"
+    _write_batch(jr, D_ZERO_EVE)
+    r = _collect(conn, report_date=D_ZERO_EVE, job_runs_dir=jr, now=datetime(2026, 10, 14, 21, 10))
+    assert r.signal_date == D_ZERO_EVE
+    assert r.buy_candidates == [] and r.skipped_buys == [] and r.sell_candidates == []
+    assert r.buy_skip_reasons == []
+    assert not any("古い" in w for w in r.warnings)
+    assert r.status == "OK"
+    assert any("シグナルは 0 件" in n for n in r.notes)
+
+
+def test_evening_stale_kept_when_batch_missing(conn, tmp_path):
+    r = _collect(
+        conn,
+        report_date=D_ZERO_EVE,
+        job_runs_dir=tmp_path / "job_runs",
+        now=datetime(2026, 10, 14, 21, 10),
+    )
+    assert r.status == "BUY_SKIPPED"
+    assert [b.code for b in r.skipped_buys] == ["7203", "6758"]
