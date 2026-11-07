@@ -51,7 +51,7 @@ KabuSys/
 - **Language / Environment**: Python 3.11以降（運用・CI は 3.13）, Windows OS (API制限等により必須)
 - **Database**: 分析用には `DuckDB` (+ Parquet)、軽量トランザクション・監視ログ用には `SQLite`
 - **Code Rules (Recommended)**:
-  - PEP 8 に準拠。`black`, `isort`, `flake8` (または `ruff`) を用いてフォーマットとLintを徹底する。
+  - PEP 8 に準拠。`ruff`（`ruff check` と `ruff format`。バージョンは constraints.txt で固定）でフォーマットと Lint を徹底する。
   - 型ヒント(Type hints)を積極的に活用し、`mypy`等での静的解析を前提とした堅牢な実装を心がける。
 
 ## 🌿 Git & Repository Workflow
