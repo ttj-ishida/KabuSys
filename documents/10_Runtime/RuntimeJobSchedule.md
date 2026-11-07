@@ -225,7 +225,8 @@ Select-String -Path logs\scheduler.log -Pattern "REQUIRES ATTENTION|ジョブ完
 | 条件 | 判定 |
 |------|------|
 | 必須ジョブが欠落 / `failed` / `skipped` | BLOCKED |
-| `signal_queue == 0` | BLOCKED |
+| `signal_queue == 0` かつ翌営業日の BUY が 1 件以上（portfolio_construction で失われた） | BLOCKED |
+| `signal_queue == 0` かつ BUY が 0 件（必須ジョブはすべて成功） | READY_WITH_WARNINGS（警告「翌営業日の BUY シグナルは 0 件です（夜間バッチは正常終了）」） |
 | `prices_daily == 0` | BLOCKED |
 | `features == 0` | BLOCKED |
 | `signals == 0` | READY_WITH_WARNINGS |
@@ -233,7 +234,7 @@ Select-String -Path logs\scheduler.log -Pattern "REQUIRES ATTENTION|ジョブ完
 
 > `prices_daily == 0` および `features == 0` は、価格データ・特徴量なしではシグナル生成が不可能なため BLOCKED とする。`signals == 0` は Bear レジームなど戦略上ありうる正常系のため READY_WITH_WARNINGS に留める（Issue #288）。
 
-> 手動運用では、必須ジョブがすべて `success` で BUY が 0 件なだけ（例: `breadth_stop`）の `BLOCKED`（`signal_queue == 0`）は正常。ジョブ失敗の場合のみ復旧する。
+> 必須ジョブがすべて成功していて BUY が 0 件なだけ（例: `breadth_stop`）の日は BLOCKED にならず READY_WITH_WARNINGS になる（Issue #426）。ジョブ失敗、または BUY があるのに `signal_queue` が空の場合のみ BLOCKED。
 
 ---
 
@@ -275,7 +276,7 @@ Select-String -Path logs\scheduler.log -Pattern "REQUIRES ATTENTION|ジョブ完
 - ステータス: `OK` / `警告あり` / `BUY 見送り`（BUY 全件見送りの理由があれば `BUY 見送り`、警告があれば `警告あり`）
 - LINE「【KabuSys 手動注文 当日朝】」: ステータス、BUY 上位 10 件、SELL 一覧、警告。送信失敗は無視
 
-> ⚠️ **既知の誤警告（Issue #421）:** シグナル 0 件の正常な日（例: breadth_stop で BUY 全件停止）でも「シグナルが古い」と出て `BUY 見送り` になる。夜間バッチの成否は `logs/scheduler.log` と night_batch_report で確認する。
+> **シグナル 0 件の正常日（Issue #421）:** 前営業日の `strategy_signal_job` と `portfolio_construction_job` が `artifacts/job_runs/{date}/` で `success` / `warning` の場合（`operations/batch_status.py`）、シグナル日が古くても「シグナルが古い」警告は出さず、古い候補も表示せず、「夜間バッチは正常終了し、シグナルは 0 件でした」の注記を出す（ステータスは停止条件がなければ `OK`）。記録なし・失敗の場合は従来どおり警告と全件見送り。
 
 手動再実行（デバッグ時）:
 
