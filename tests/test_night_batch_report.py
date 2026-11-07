@@ -614,6 +614,13 @@ def test_status_zero_buy_success_is_ready_with_warnings():
     assert _determine_status(_all_success_jobs(), counts, nd) == "READY_WITH_WARNINGS"
 
 
+def test_status_sell_only_day_is_ready_with_warnings():
+    """SELL だけがあり BUY 0 件（queue 0）の日も READY_WITH_WARNINGS（READY にしない）。"""
+    counts = _make_counts(signals=2, signal_queue=0)
+    nd = _make_next_day(buy_count=0, sell_count=2)
+    assert _determine_status(_all_success_jobs(), counts, nd) == "READY_WITH_WARNINGS"
+
+
 def test_status_queue_zero_with_buys_is_blocked():
     counts = _make_counts(signal_queue=0)
     nd = _make_next_day(buy_count=3)

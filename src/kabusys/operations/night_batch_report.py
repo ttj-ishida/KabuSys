@@ -133,6 +133,7 @@ def _determine_status(
         or has_job_warnings
         or has_nonmandatory_skipped
         or update_counts.signals == 0
+        or update_counts.signal_queue == 0
     ):
         return STATUS_READY_WITH_WARNINGS
 
