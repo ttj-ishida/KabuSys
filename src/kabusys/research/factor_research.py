@@ -257,7 +257,11 @@ def calc_value(
 
     raw_financials テーブルから target_date 以前の最新財務データを取得し、
     prices_daily の株価と組み合わせて以下を計算する。
-      - per       : 株価 / EPS（EPS が 0 または欠損の場合は None）
+      - per       : 株価 / EPS（EPS が 0 または欠損の場合は None）。EPS は TTM（直近 4 四半期）を優先する:
+                    最新が通期（FY/4Q）ならその EPS、最新が四半期累計（1Q〜3Q）なら
+                    「最新累計 + 直近通期 − 前年同期累計」。TTM を作れない場合は 15 か月以内の
+                    直近通期 EPS、それも無ければ None（通期 EPS は 15 か月以内のもののみ使う）（四半期累計 EPS で割って PER が過大に
+                    なるのを防ぐ。#425）
       - roe       : ROE（raw_financials から直接取得）
       - pbr       : 株価 / BPS（BPS が 0 または欠損の場合は None）
       - div_yield : 直近12ヶ月の配当合計 / 株価 × 100（配当なしの場合は None）
@@ -284,6 +288,55 @@ def calc_value(
             ) t
             WHERE rn = 1
         ),
+        fin_norm AS (
+            SELECT code, report_date, fetched_at, eps,
+                   CASE upper(trim(period_type))
+                       WHEN 'Q1' THEN '1Q' WHEN 'Q2' THEN '2Q' WHEN 'Q3' THEN '3Q'
+                       WHEN 'Q4' THEN 'FY' WHEN '4Q' THEN 'FY'
+                       ELSE upper(trim(period_type))
+                   END AS ptype
+            FROM raw_financials
+            WHERE report_date <= ? AND eps IS NOT NULL
+        ),
+        latest_any AS (
+            SELECT code, report_date, ptype, eps FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY code ORDER BY report_date DESC, fetched_at DESC) AS rn
+                FROM fin_norm
+            ) t WHERE rn = 1
+        ),
+        latest_annual AS (
+            SELECT code, report_date, eps FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY code ORDER BY report_date DESC, fetched_at DESC) AS rn
+                FROM fin_norm WHERE ptype = 'FY'
+            ) t WHERE rn = 1
+        ),
+        prior_same AS (
+            SELECT code, report_date, eps FROM (
+                SELECT f.code, f.report_date, f.eps, ROW_NUMBER() OVER (
+                    PARTITION BY f.code ORDER BY f.report_date DESC, f.fetched_at DESC) AS rn
+                FROM fin_norm f
+                JOIN latest_any l ON l.code = f.code AND l.ptype = f.ptype
+                WHERE l.ptype IN ('1Q', '2Q', '3Q')
+                  AND f.report_date BETWEEN l.report_date - INTERVAL 450 DAY
+                                        AND l.report_date - INTERVAL 280 DAY
+            ) t WHERE rn = 1
+        ),
+        eps_ttm AS (
+            SELECT l.code,
+                   CASE
+                       WHEN l.ptype = 'FY' AND l.report_date >= CAST(? AS DATE) - INTERVAL 456 DAY
+                            THEN l.eps
+                       WHEN l.ptype IN ('1Q', '2Q', '3Q') AND a.report_date IS NOT NULL
+                            AND p.report_date IS NOT NULL AND a.report_date > p.report_date
+                            THEN l.eps + a.eps - p.eps
+                       WHEN a.report_date >= CAST(? AS DATE) - INTERVAL 456 DAY THEN a.eps
+                   END AS eps
+            FROM latest_any l
+            LEFT JOIN latest_annual a ON a.code = l.code
+            LEFT JOIN prior_same p ON p.code = l.code
+        ),
         price_on_date AS (
             SELECT code, close
             FROM prices_daily
@@ -299,8 +352,8 @@ def calc_value(
         SELECT
             ? AS date,
             p.code,
-            CASE WHEN f.eps IS NOT NULL AND f.eps <> 0
-                 THEN p.close / f.eps END AS per,
+            CASE WHEN e.eps IS NOT NULL AND e.eps <> 0
+                 THEN p.close / e.eps END AS per,
             f.roe,
             CASE WHEN f.bps IS NOT NULL AND f.bps > 0
                  THEN p.close / f.bps END AS pbr,
@@ -308,10 +361,11 @@ def calc_value(
                  THEN (d.annual_div / p.close) * 100 END AS div_yield
         FROM price_on_date p
         LEFT JOIN latest_fin f ON p.code = f.code
+        LEFT JOIN eps_ttm e ON p.code = e.code
         LEFT JOIN annual_div d ON p.code = d.code
         ORDER BY p.code
         """,
-        [target_date, target_date, target_date, target_date, target_date],
+        [target_date] * 8,
     ).fetchall()
 
     cols = ["date", "code", "per", "roe", "pbr", "div_yield"]

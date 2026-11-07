@@ -296,6 +296,83 @@ class TestCalcValue:
         assert row["roe"] is not None
         assert abs(float(row["roe"]) - 0.15) < 0.001
 
+    def test_per_uses_ttm_eps_when_latest_is_quarterly(self, db):
+        """最新が四半期（累計）決算なら TTM EPS = 最新累計 + 直近通期 − 前年同期累計 で PER を出す（#425）。
+
+        実例（トヨタ 72030, 2026-10-19）: 1Q 累計 120.69 + FY 295.25 − 前年 1Q 64.56 = 351.38
+        """
+        d = date(2026, 10, 19)
+        _insert_prices(db, [(d, "72030", 3102.0, 3110.0, 3090.0, 3102.0, 1000, 3102000.0)])
+        _insert_financials(
+            db,
+            [
+                ("72030", date(2025, 8, 7), "1Q", 0, 0, 0, 64.56, 0.1),
+                ("72030", date(2025, 11, 5), "2Q", 0, 0, 0, 136.07, 0.1),
+                ("72030", date(2026, 2, 6), "3Q", 0, 0, 0, 232.55, 0.1),
+                ("72030", date(2026, 5, 8), "FY", 0, 0, 0, 295.25, 0.1),
+                ("72030", date(2026, 8, 4), "1Q", 0, 0, 0, 120.69, 0.1),
+            ],
+        )
+        row = next(r for r in calc_value(db, d) if r["code"] == "72030")
+        assert row["per"] == pytest.approx(3102.0 / 351.38, rel=1e-6)
+
+    def test_per_uses_annual_eps_when_latest_is_annual(self, db):
+        d = date(2026, 6, 1)
+        _insert_prices(db, [(d, "72031", 3000.0, 3010.0, 2990.0, 3000.0, 1000, 3000000.0)])
+        _insert_financials(
+            db,
+            [
+                ("72031", date(2026, 2, 6), "3Q", 0, 0, 0, 232.55, 0.1),
+                ("72031", date(2026, 5, 8), "FY", 0, 0, 0, 300.0, 0.1),
+            ],
+        )
+        row = next(r for r in calc_value(db, d) if r["code"] == "72031")
+        assert row["per"] == pytest.approx(10.0)
+
+    def test_per_falls_back_to_annual_eps_without_prior_quarter(self, db):
+        """前年同期の四半期が無く TTM を作れない場合は直近通期 EPS を使う。"""
+        d = date(2026, 9, 1)
+        _insert_prices(db, [(d, "72032", 3000.0, 3010.0, 2990.0, 3000.0, 1000, 3000000.0)])
+        _insert_financials(
+            db,
+            [
+                ("72032", date(2026, 5, 8), "FY", 0, 0, 0, 200.0, 0.1),
+                ("72032", date(2026, 8, 4), "1Q", 0, 0, 0, 60.0, 0.1),
+            ],
+        )
+        row = next(r for r in calc_value(db, d) if r["code"] == "72032")
+        assert row["per"] == pytest.approx(15.0)
+
+    def test_per_none_with_only_quarterly_data(self, db):
+        """通期決算が無く四半期累計しか無い場合は PER を出さない（過大な PER を避ける）。"""
+        d = date(2026, 9, 1)
+        _insert_prices(db, [(d, "72033", 3000.0, 3010.0, 2990.0, 3000.0, 1000, 3000000.0)])
+        _insert_financials(db, [("72033", date(2026, 8, 4), "1Q", 0, 0, 0, 60.0, 0.1)])
+        row = next(r for r in calc_value(db, d) if r["code"] == "72033")
+        assert row["per"] is None
+
+    def test_per_ignores_stale_annual_eps(self, db):
+        """15 か月より古い通期 EPS には頼らない。"""
+        d = date(2026, 10, 1)
+        _insert_prices(db, [(d, "72034", 3000.0, 3010.0, 2990.0, 3000.0, 1000, 3000000.0)])
+        _insert_financials(db, [("72034", date(2025, 5, 8), "FY", 0, 0, 0, 200.0, 0.1)])
+        row = next(r for r in calc_value(db, d) if r["code"] == "72034")
+        assert row["per"] is None
+
+    def test_per_does_not_use_future_financials(self, db):
+        """target_date より後に発表された決算は使わない（look-ahead 防止）。"""
+        d = date(2026, 6, 1)
+        _insert_prices(db, [(d, "72035", 3000.0, 3010.0, 2990.0, 3000.0, 1000, 3000000.0)])
+        _insert_financials(
+            db,
+            [
+                ("72035", date(2026, 5, 8), "FY", 0, 0, 0, 300.0, 0.1),
+                ("72035", date(2026, 8, 4), "1Q", 0, 0, 0, 10.0, 0.1),
+            ],
+        )
+        row = next(r for r in calc_value(db, d) if r["code"] == "72035")
+        assert row["per"] == pytest.approx(10.0)
+
     def test_no_financials_returns_none_per(self, db):
         """財務データがない場合 per は None。"""
         d = date(2024, 5, 4)
