@@ -316,6 +316,30 @@ class TestCalcValue:
         row = next(r for r in calc_value(db, d) if r["code"] == "72030")
         assert row["per"] == pytest.approx(3102.0 / 351.38, rel=1e-6)
 
+    def test_per_uses_ttm_eps_for_second_quarter(self, db):
+        """2Q 累計でも TTM = 2Q 累計 + 直近通期 − 前年 2Q 累計 で計算する。"""
+        d = date(2026, 12, 1)
+        _insert_prices(db, [(d, "72036", 3000.0, 3010.0, 2990.0, 3000.0, 1000, 3000000.0)])
+        _insert_financials(
+            db,
+            [
+                ("72036", date(2025, 11, 5), "2Q", 0, 0, 0, 100.0, 0.1),
+                ("72036", date(2026, 5, 8), "FY", 0, 0, 0, 250.0, 0.1),
+                ("72036", date(2026, 11, 5), "2Q", 0, 0, 0, 150.0, 0.1),
+            ],
+        )
+        row = next(r for r in calc_value(db, d) if r["code"] == "72036")
+        assert row["per"] == pytest.approx(3000.0 / 300.0)  # 150 + 250 - 100
+
+    @pytest.mark.parametrize("annual_type", ["4Q", "Q4"])
+    def test_per_treats_4q_as_annual(self, db, annual_type):
+        d = date(2026, 6, 1)
+        code = "7204" + ("0" if annual_type == "4Q" else "1")
+        _insert_prices(db, [(d, code, 3000.0, 3010.0, 2990.0, 3000.0, 1000, 3000000.0)])
+        _insert_financials(db, [(code, date(2026, 5, 8), annual_type, 0, 0, 0, 200.0, 0.1)])
+        row = next(r for r in calc_value(db, d) if r["code"] == code)
+        assert row["per"] == pytest.approx(15.0)
+
     def test_per_uses_annual_eps_when_latest_is_annual(self, db):
         d = date(2026, 6, 1)
         _insert_prices(db, [(d, "72031", 3000.0, 3010.0, 2990.0, 3000.0, 1000, 3000000.0)])

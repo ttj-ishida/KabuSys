@@ -312,6 +312,8 @@ def calc_value(
                 FROM fin_norm WHERE ptype = 'FY'
             ) t WHERE rn = 1
         ),
+        -- 前年同期の四半期累計: 最新四半期の約 1 年前（決算発表日のずれと休日を考慮して
+        -- 280〜450 日前の幅）に発表された同じ期間種別の決算
         prior_same AS (
             SELECT code, report_date, eps FROM (
                 SELECT f.code, f.report_date, f.eps, ROW_NUMBER() OVER (
@@ -323,6 +325,8 @@ def calc_value(
                                         AND l.report_date - INTERVAL 280 DAY
             ) t WHERE rn = 1
         ),
+        -- 456 日 ≒ 15 か月: 通期決算から次の通期決算まで（約 12 か月）に発表遅延の余裕を
+        -- 加えた鮮度上限。これより古い通期 EPS は使わない
         eps_ttm AS (
             SELECT l.code,
                    CASE
