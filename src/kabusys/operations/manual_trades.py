@@ -376,8 +376,11 @@ def _fold_manual_trades(
         if split_factors:
             mult = _split_multiplier(split_factors, code, trade_date)
             if mult != 1.0:
-                # ブローカーは整数株のみ保持するため端数は切り捨て（浮動小数の誤差は吸収）
-                qty = math.floor(qty / mult + 1e-9)
+                # ブローカーは整数株のみ保持するため端数は切り捨て。ただし 6 桁に丸められた
+                # 係数（0.909091 など）による誤差で整数をわずかに下回る場合は、最寄りの整数にする
+                x = qty / mult
+                n = round(x)
+                qty = n if abs(x - n) < 1e-4 * max(1.0, x) else math.floor(x)
                 price = price * mult
         pos = state.setdefault(
             code,

@@ -871,3 +871,26 @@ def test_manual_split_with_truncated_factor_is_exact(conn):
 
     assert pos.qty == 900
     assert pos.avg_price == pytest.approx(4530.0)
+
+
+@pytest.mark.parametrize(
+    ("qty", "factor", "expected"),
+    [(100, 0.909091, 110), (300, 0.666667, 450), (100, 0.769231, 130), (100, 0.952381, 105)],
+)
+def test_manual_split_with_unsnapped_six_digit_factor_is_not_undercounted(
+    conn, qty, factor, expected
+):
+    _raw_prices_with_split(conn, factor=factor)
+    _buy(conn, date(2026, 9, 25), code="83880", qty=qty, price=1000.0)
+
+    [pos] = calculate_manual_positions(conn, as_of=date(2026, 9, 30))
+
+    assert pos.qty == expected
+
+
+def test_manual_full_sell_after_unsnapped_split_is_not_oversell(conn):
+    _raw_prices_with_split(conn, factor=0.909091)
+    _buy(conn, date(2026, 9, 25), code="83880", qty=100, price=1000.0)
+    _sell(conn, date(2026, 9, 30), code="83880", qty=110, price=950.0)
+
+    assert calculate_manual_positions(conn, as_of=date(2026, 9, 30)) == []
