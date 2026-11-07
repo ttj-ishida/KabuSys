@@ -7,6 +7,7 @@ CLI と将来の GUI はこのモジュールを共通利用する。
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -14,6 +15,7 @@ from typing import Any
 
 import duckdb
 
+from kabusys.data.price_adjustment import snap_factor
 from kabusys.strategy.holdings import HeldPosition
 
 logger = logging.getLogger(__name__)
@@ -336,7 +338,7 @@ def _load_split_factors(conn: duckdb.DuckDBPyConnection, codes: set[str]) -> Spl
         return {}
     factors: SplitFactors = {}
     for code, d, f in rows:
-        factors.setdefault(str(code), []).append((d, float(f)))
+        factors.setdefault(str(code), []).append((d, snap_factor(f)))
     return factors
 
 
@@ -374,7 +376,8 @@ def _fold_manual_trades(
         if split_factors:
             mult = _split_multiplier(split_factors, code, trade_date)
             if mult != 1.0:
-                qty = int(round(qty / mult))
+                # ブローカーは整数株のみ保持するため端数は切り捨て（浮動小数の誤差は吸収）
+                qty = math.floor(qty / mult + 1e-9)
                 price = price * mult
         pos = state.setdefault(
             code,

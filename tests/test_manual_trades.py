@@ -851,3 +851,23 @@ def test_manual_split_uses_same_share_basis_as_prices_daily_for_past_as_of(conn)
 
     assert pos.qty == 500
     assert pos.avg_price == pytest.approx(2000.0)
+
+
+def test_manual_consolidation_floors_quantity(conn):
+    """10:1 併合で 155 株は 15 株（端数は切り捨て。ブローカーは整数株のみ保持）。"""
+    _raw_prices_with_split(conn, factor=10.0)
+    _buy(conn, date(2026, 9, 25), code="83880", qty=155, price=100.0)
+
+    [pos] = calculate_manual_positions(conn, as_of=date(2026, 9, 30))
+
+    assert pos.qty == 15
+
+
+def test_manual_split_with_truncated_factor_is_exact(conn):
+    _raw_prices_with_split(conn, factor=0.333333)
+    _buy(conn, date(2026, 9, 25), code="83880", qty=300, price=13590.0)
+
+    [pos] = calculate_manual_positions(conn, as_of=date(2026, 9, 30))
+
+    assert pos.qty == 900
+    assert pos.avg_price == pytest.approx(4530.0)
