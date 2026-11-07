@@ -745,6 +745,24 @@ def test_evening_zero_signal_day_batch_succeeded(conn, tmp_path):
     assert any("シグナルは 0 件" in n for n in r.notes)
 
 
+@pytest.mark.parametrize("batch_ok", [True, False])
+def test_evening_no_signals_at_all(conn, tmp_path, batch_ok):
+    """夜でもシグナルが 1 件も無い（signal_date None）場合、当日バッチの成否で判定する。"""
+    jr = tmp_path / "job_runs"
+    d = date(2020, 1, 7)  # fixture のシグナルより前の日付（シグナルなし）
+    if batch_ok:
+        _write_batch(jr, d)
+    r = _collect(conn, report_date=d, job_runs_dir=jr, now=datetime(2020, 1, 7, 21, 10))
+    if batch_ok:
+        assert r.signal_date == d
+        assert any("シグナルは 0 件" in n for n in r.notes)
+        assert not any("シグナルがありません" in w for w in r.warnings)
+    else:
+        assert r.signal_date is None
+        assert any("シグナルがありません" in w for w in r.warnings)
+        assert r.notes == []
+
+
 def test_evening_stale_kept_when_batch_missing(conn, tmp_path):
     r = _collect(
         conn,

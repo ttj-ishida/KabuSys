@@ -409,7 +409,15 @@ def collect_manual_order_report(
         )
 
     if report.signal_date is None:
-        rd.warn(_no_signals_warning(report_date))
+        if phase == "evening" and signal_batch_succeeded(report_date, job_runs_dir):
+            # シグナルが 1 件も無くても、当日バッチが正常終了していれば「0 件の正常日」
+            _apply_zero_signal_day(
+                report,
+                report_date,
+                f"本日（{report_date}）の夜間バッチは正常終了し、シグナルは 0 件でした",
+            )
+        else:
+            rd.warn(_no_signals_warning(report_date))
     else:
         sig = report.signal_date
         names = _stock_names(rd)
