@@ -281,6 +281,41 @@ def test_build_backtest_conn_copies_prices(conn):
     bt_conn.close()
 
 
+def test_build_backtest_conn_copies_rows_exactly_within_window(conn):
+    """_build_backtest_conn → 期間内の行だけを値（NULL 含む）そのままにコピーする（#420）。"""
+    from datetime import date
+
+    from kabusys.backtest.engine import _build_backtest_conn
+
+    start, end = date(2024, 6, 3), date(2024, 6, 7)
+    _insert_price(conn, "1234", date(2024, 6, 3), open_=1000.5, close=1010.25)
+    _insert_price(conn, "1234", date(2023, 1, 4), open_=1.0, close=1.0)  # 300 日より前
+    _insert_price(conn, "1234", date(2024, 6, 10), open_=2.0, close=2.0)  # end より後
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+        "VALUES (?, ?, 499.5, 505.0, 498.0, 500.0, 12345, NULL)",
+        [date(2024, 6, 4), "5678"],
+    )
+    conn.execute(
+        "INSERT INTO market_calendar (date, is_trading_day, is_half_day, is_sq_day, holiday_name) "
+        "VALUES (?, TRUE, FALSE, FALSE, NULL)",
+        [date(2024, 6, 3)],
+    )
+
+    bt_conn = _build_backtest_conn(conn, start, end, ai_enabled=False)
+    try:
+        src = conn.execute(
+            "SELECT * FROM prices_daily WHERE date BETWEEN ? AND ? ORDER BY date, code",
+            [date(2023, 8, 8), end],
+        ).fetchall()
+        dst = bt_conn.execute("SELECT * FROM prices_daily ORDER BY date, code").fetchall()
+        assert dst == src
+        assert len(dst) == 2
+        assert bt_conn.execute("SELECT COUNT(*) FROM market_calendar").fetchone()[0] == 1
+    finally:
+        bt_conn.close()
+
+
 def test_fetch_open_and_close_prices(conn):
     """_fetch_open_prices / _fetch_close_prices → 始値・終値を辞書で返す。"""
     from datetime import date

@@ -69,6 +69,29 @@ class BacktestResult:
 # ---------------------------------------------------------------------------
 
 
+def _copy_query_into(
+    source_conn: duckdb.DuckDBPyConnection,
+    bt_conn: duckdb.DuckDBPyConnection,
+    table: str,
+    select_sql: str,
+    params: list[Any] | None = None,
+) -> None:
+    """source_conn で select_sql を実行し、結果を bt_conn の table に一括挿入する。
+
+    Python のタプル経由の executemany（1 行ずつ挿入）は数十万行で数十分かかるため、
+    Arrow のレコードバッチで受け渡して ``INSERT ... SELECT`` で一括挿入する（#420）。
+    列は select_sql の結果の列名で対応付ける。
+    """
+    reader = source_conn.execute(select_sql, params or []).arrow()
+    cols = ", ".join(f'"{name}"' for name in reader.schema.names)
+    view = "_bt_copy_src"
+    bt_conn.register(view, reader)
+    try:
+        bt_conn.execute(f"INSERT INTO {table} ({cols}) SELECT {cols} FROM {view}")
+    finally:
+        bt_conn.unregister(view)
+
+
 def _build_backtest_conn(
     source_conn: duckdb.DuckDBPyConnection,
     start_date: date,
@@ -100,17 +123,13 @@ def _build_backtest_conn(
     date_filtered_tables = _core_tables + _ai_tables
     for table in date_filtered_tables:
         try:
-            rows = source_conn.execute(
+            _copy_query_into(
+                source_conn,
+                bt_conn,
+                table,
                 f"SELECT * FROM {table} WHERE date >= ? AND date <= ?",
                 [data_start, end_date],
-            ).fetchall()
-            if not rows:
-                continue
-            result = source_conn.execute(f"SELECT * FROM {table} LIMIT 0")
-            cols = [desc[0] for desc in result.description]
-            col_list = ", ".join(cols)
-            placeholders = ", ".join(["?" for _ in cols])
-            bt_conn.executemany(f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})", rows)
+            )
         except Exception as exc:
             if table == "topix_daily":
                 logger.warning(
@@ -123,42 +142,28 @@ def _build_backtest_conn(
 
     # market_calendar は全件コピー
     try:
-        rows = source_conn.execute("SELECT * FROM market_calendar").fetchall()
-        if rows:
-            result = source_conn.execute("SELECT * FROM market_calendar LIMIT 0")
-            cols = [desc[0] for desc in result.description]
-            col_list = ", ".join(cols)
-            placeholders = ", ".join(["?" for _ in cols])
-            bt_conn.executemany(
-                f"INSERT INTO market_calendar ({col_list}) VALUES ({placeholders})",
-                rows,
-            )
+        _copy_query_into(source_conn, bt_conn, "market_calendar", "SELECT * FROM market_calendar")
     except Exception as exc:
         logger.warning("_build_backtest_conn: market_calendar のコピーをスキップ: %s", exc)
 
     # stocks は全件コピー（銘柄のセクターは日付フィルタなし）
     # TIMESTAMPTZ 型の updated_at 列は pytz 依存のため除外し、明示列のみコピーする
     try:
-        rows = source_conn.execute("SELECT code, name, market, sector FROM stocks").fetchall()
-        if rows:
-            bt_conn.executemany(
-                "INSERT INTO stocks (code, name, market, sector) VALUES (?, ?, ?, ?)",
-                rows,
-            )
+        _copy_query_into(
+            source_conn, bt_conn, "stocks", "SELECT code, name, market, sector FROM stocks"
+        )
     except Exception as exc:
         logger.warning("_build_backtest_conn: stocks のコピーをスキップ: %s", exc)
 
     # earnings_calendar は end_date 以前の全件コピー
     try:
-        rows = source_conn.execute(
+        _copy_query_into(
+            source_conn,
+            bt_conn,
+            "earnings_calendar",
             "SELECT code, announcement_date FROM earnings_calendar WHERE announcement_date <= ?",
             [end_date],
-        ).fetchall()
-        if rows:
-            bt_conn.executemany(
-                "INSERT INTO earnings_calendar (code, announcement_date) VALUES (?, ?)",
-                rows,
-            )
+        )
     except Exception as exc:
         logger.warning("_build_backtest_conn: earnings_calendar のコピーをスキップ: %s", exc)
 
