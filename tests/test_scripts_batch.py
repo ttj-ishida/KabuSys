@@ -140,10 +140,13 @@ def test_portfolio_construction_writes_signal_queue(tmp_path: Path):
     pos_cursor.fetchall.return_value = []
     pos_cursor.description = [("code",), ("size",)]
 
+    sell_cursor = MagicMock()
+    sell_cursor.fetchall.return_value = []
     mock_conn.execute.side_effect = [
         mock_cursor,  # signals query
         pos_cursor,  # positions query（保有全体、Issue #437）
         price_cursor,  # prices query
+        sell_cursor,  # SELL signals query（翌日売却予定、Issue #437）
         MagicMock(),  # BEGIN
         MagicMock(),  # DELETE portfolio_targets
         MagicMock(),  # INSERT portfolio_targets (7203)
@@ -1006,3 +1009,63 @@ def test_portfolio_construction_applies_holding_limits(tmp_path: Path):
     # 空き枠は 1（上限 3 − 保有 2）。A は 34 万円上限 → 100 株（20 万円）で残り枠 30 万円以内
     assert queue == [("A", 100)]
     assert targets == [("A", 100), ("B", 0), ("C", 0)]
+
+
+def test_portfolio_construction_excludes_sell_signal_holdings(tmp_path: Path):
+    """Issue #437: 当日 SELL シグナルの保有は翌日売却予定として枠・投資額から除く。"""
+    from datetime import date
+
+    import duckdb
+    import run_portfolio_construction
+
+    from kabusys.data.schema import init_schema
+
+    d = date(2026, 3, 27)
+    db_path = tmp_path / "kabusys.duckdb"
+    c = init_schema(str(db_path))
+    c.execute(
+        "INSERT INTO signals (date, code, side, score, signal_rank) VALUES "
+        "(?, 'A', 'buy', 0.9, 1), (?, 'B', 'buy', 0.8, 2), (?, 'X', 'sell', NULL, NULL)",
+        [d, d, d],
+    )
+    for code, close in [("A", 1000), ("B", 1000), ("X", 1000), ("Y", 1000)]:
+        c.execute(
+            "INSERT INTO prices_daily (date, code, open, high, low, close, volume) "
+            "VALUES (?, ?, ?, ?, ?, ?, 1000)",
+            [d, code, close, close, close, close],
+        )
+    c.execute(
+        "INSERT INTO positions (date, code, position_size, avg_price) VALUES "
+        "(?, 'X', 100, 1000), (?, 'Y', 100, 1000)",
+        [d, d],
+    )
+    c.close()
+
+    cfg = {
+        "allocation_method": "equal",
+        "max_positions": 3,
+        "max_position_pct": 0.34,
+        "max_utilization": 0.5,
+        "risk_pct": 0.005,
+    }
+    with (
+        patch("run_portfolio_construction.Settings") as mock_settings,
+        patch("run_portfolio_construction._sync_signal_queue_status"),
+        patch("run_portfolio_construction.load_portfolio_config", return_value=cfg),
+        patch(
+            "run_portfolio_construction._calc_paper_portfolio_value",
+            return_value=(1_000_000.0, 800_000.0),
+        ),
+        patch("run_portfolio_construction.build_notifier"),
+        patch("run_portfolio_construction.write_job_result"),
+        patch("run_portfolio_construction.register_process", return_value=None),
+    ):
+        _mock_paper_settings(mock_settings, tmp_path)
+        mock_settings.return_value.duckdb_path = db_path
+        run_portfolio_construction.main(["--date", d.isoformat()])
+
+    c = duckdb.connect(str(db_path), read_only=True)
+    queue = c.execute("SELECT code FROM signal_queue WHERE date = ? ORDER BY code", [d]).fetchall()
+    c.close()
+    # X は売却予定なので保有は Y の 1 銘柄 → 空き枠 2 で A・B とも候補になる
+    assert queue == [("A",), ("B",)]

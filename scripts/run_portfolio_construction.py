@@ -375,7 +375,16 @@ def main(argv: list[str] | None = None) -> None:
             price_codes = sorted({c["code"] for c in all_sorted} | set(current_positions))
             close_prices = _fetch_close_prices(conn, price_codes, target_date)
 
-            # 保有銘柄数・投資割合の上限は保有全体にかける（Issue #437）
+            # 保有銘柄数・投資割合の上限は保有全体にかける（Issue #437）。
+            # 当日 SELL シグナルの銘柄は翌日売却予定として除く（バックテストと同じ）。
+            # 売却代金は available_cash に含めないので、現金の範囲は超えない。
+            sell_codes = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT code FROM signals WHERE date = ? AND side = 'sell'",
+                    [target_date],
+                ).fetchall()
+            }
             candidates, capped_cash = apply_holding_limits(
                 all_sorted,
                 current_positions,
@@ -384,6 +393,7 @@ def main(argv: list[str] | None = None) -> None:
                 available_cash,
                 max_positions,
                 portfolio_cfg["max_utilization"],
+                sell_codes=sell_codes,
             )
             logger.info(
                 "保有 %d 銘柄、BUY シグナル %d 件 → 候補 %d 件、使える現金 %.0f 円",
