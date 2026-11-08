@@ -73,7 +73,7 @@ KabuSys は、**市場が閉まっている時間に翌営業日の売買候補�
 |---|---|---|
 | `READY` | 全必須ジョブ成功・`signal_queue` 作成済み | 翌朝のレポートどおりに進める |
 | `READY_WITH_WARNINGS` | 警告はあるが翌営業日の準備は完了 | 警告内容を確認する |
-| `BLOCKED` | 必須ジョブ失敗 / `signal_queue == 0` / `prices_daily == 0` / `features == 0` | ジョブ失敗なら復旧が必要。ジョブがすべて成功していて BUY が 0 件なだけ（例: `breadth_stop`）なら正常 |
+| `BLOCKED` | 必須ジョブ失敗 / BUY があるのに `signal_queue == 0` / `prices_daily == 0` / `features == 0` | 復旧が必要。ジョブがすべて成功していて BUY が 0 件なだけ（例: `breadth_stop`）の日は `READY_WITH_WARNINGS`（「BUY シグナルは 0 件です」）で、正常 |
 
 手動で再生成する場合:
 
@@ -93,7 +93,7 @@ python scripts/run_night_batch_report.py
 | `警告あり` | 警告がある（データ鮮度など） | 警告を読んでから判断する |
 | `BUY 見送り` | 停止フラグ・DD 停止・休場日・シグナルが古い のいずれか | BUY は全件「見送り候補」に移る。SELL は常に表示されるので SELL だけ対応する |
 
-> **既知の誤警告（Issue #421）:** シグナルが 0 件の正常な日（例: `breadth_stop` で BUY 全件停止）でも「シグナルが古い」と出ます。夜間バッチが本当に失敗したかどうかは `logs/scheduler.log` と night_batch_report で確認してください。
+> **シグナル 0 件の正常日:** 前営業日の夜間バッチが成功していてシグナルが 0 件の日（例: `breadth_stop` で BUY 全件停止）は、「夜間バッチは正常終了し、シグナルは 0 件でした」と表示され、古い候補は出ません（ステータスは `OK`）。バッチの記録がない・失敗の場合のみ「シグナルが古い」警告になります。
 
 **BUY 表の読み方:**
 
@@ -274,7 +274,7 @@ python -m streamlit run src/kabusys/monitoring/streamlit_dashboard.py -- --db da
 
 - 夜間バッチ失敗（データ未取得・特徴量 0 件など）
 - スケジューラー停止（PC スリープ・ログオフ）
-- 朝のレポートが `BUY 見送り`（停止フラグ・DD 停止・シグナルが古い。#421 の誤警告に注意）
+- 朝のレポートが `BUY 見送り`（停止フラグ・DD 停止・シグナルが古い = 夜間バッチの欠落・失敗）
 
 ---
 

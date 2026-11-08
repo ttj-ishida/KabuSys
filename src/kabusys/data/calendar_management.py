@@ -56,15 +56,20 @@ _SANITY_MAX_FUTURE_DAYS = 365
 
 
 def _table_exists(conn: duckdb.DuckDBPyConnection, table: str) -> bool:
-    """指定テーブルが存在するか確認する。"""
+    """指定テーブル（またはビュー）が存在するか確認する。
+
+    information_schema.tables は 1 回あたり数 ms かかり、バックテストでは
+    営業日判定のたびに呼ばれて全体の 2 割以上を占めていたため、より軽い
+    duckdb_tables() / duckdb_views() で確認する（#420）。
+    """
     row = conn.execute(
         """
-        SELECT 1 FROM information_schema.tables
-        WHERE lower(table_name) = lower(?)
-          AND table_schema NOT IN ('information_schema')
+        SELECT 1 FROM duckdb_tables() WHERE lower(table_name) = lower(?) AND NOT internal
+        UNION ALL
+        SELECT 1 FROM duckdb_views() WHERE lower(view_name) = lower(?) AND NOT internal
         LIMIT 1
         """,
-        [table],
+        [table, table],
     ).fetchone()
     return row is not None
 

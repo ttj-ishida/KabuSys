@@ -188,6 +188,7 @@ def _build_job_schedule() -> list[JobSpec]:
     enable_yahoonews = _parse_env_flag("ENABLE_YAHOONEWS")
     enable_ai = _parse_env_flag("ENABLE_AI_SENTIMENT")
     enable_tdnet = _parse_env_flag("ENABLE_TDNET")
+    enable_edinet = _parse_env_flag("ENABLE_EDINET")
     # 手動注文メイン運用では false にし、執行起動・かぶステ API 必須のレポート・執行監視を止める
     enable_auto_execution = _parse_env_flag("ENABLE_AUTO_EXECUTION", default=True)
 
@@ -236,6 +237,16 @@ def _build_job_schedule() -> list[JobSpec]:
         ),
         # --- 夜間バッチ (DuckDB 書き込みが必要 → execution を事前停止) ---
         JobSpec("tdnet_collection", "run_tdnet_collection.py", [], 15, 35, True, enable_tdnet),
+        # 適時開示（TDnet）の分類。研究用のデータ蓄積（現状、戦略・AI では未使用）
+        JobSpec(
+            "disclosure_classification",
+            "run_disclosure_classification.py",
+            [],
+            15,
+            45,
+            True,
+            enable_tdnet,
+        ),
         JobSpec("data_update", "run_data_update.py", [], 17, 30, True),
         JobSpec(
             "yahoonews_collection",
@@ -246,6 +257,8 @@ def _build_job_schedule() -> list[JobSpec]:
             True,
             enable_yahoonews,
         ),
+        # EDINET 法定開示の収集。研究用のデータ蓄積（現状、戦略・AI では未使用）
+        JobSpec("edinet_collection", "run_edinet_collection.py", [], 17, 45, True, enable_edinet),
         JobSpec("feature_gen", "run_feature_gen.py", [], 18, 30, True),
         JobSpec("ai_analysis", "run_ai_analysis.py", [], 19, 0, True, enable_ai),
         JobSpec("strategy_signal", "run_strategy_signal.py", [], 20, 0, True),

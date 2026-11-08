@@ -56,6 +56,17 @@ class TestTableExists:
     def test_missing_table_returns_false(self, mem_db):
         assert cm._table_exists(mem_db, "nonexistent_table") is False
 
+    def test_case_insensitive(self, mem_db):
+        assert cm._table_exists(mem_db, "MARKET_CALENDAR") is True
+
+    def test_view_returns_true(self, mem_db):
+        mem_db.execute("CREATE VIEW v_calendar_test AS SELECT 1 AS a")
+        assert cm._table_exists(mem_db, "v_calendar_test") is True
+
+    def test_internal_view_returns_false(self, mem_db):
+        # information_schema の内部ビューはユーザーテーブルとして扱わない
+        assert cm._table_exists(mem_db, "tables") is False
+
 
 # ---------------------------------------------------------------------------
 # _has_calendar_data
