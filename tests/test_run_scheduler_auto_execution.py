@@ -46,3 +46,16 @@ def test_auto_execution_disabled_by_flag(monkeypatch, tmp_path):
 def test_auto_execution_explicit_true(monkeypatch, tmp_path):
     jobs = _jobs(monkeypatch, tmp_path, "ENABLE_AUTO_EXECUTION=true\n")
     assert all(jobs[name].enabled for name in _AUTO_EXEC_JOBS)
+
+
+def test_performance_record_job_scheduled(monkeypatch, tmp_path):
+    """18:00 に performance_record（DuckDB 排他）が登録される（Issue #427）。"""
+    jobs = _jobs(monkeypatch, tmp_path, None)
+    job = jobs["performance_record"]
+    assert job.script == "run_performance_record.py"
+    assert (job.trigger_hour, job.trigger_minute) == (18, 0)
+    assert job.needs_exclusive_db is True
+    assert job.enabled is True
+    # 自動執行を止めても記録は続ける
+    jobs = _jobs(monkeypatch, tmp_path, "ENABLE_AUTO_EXECUTION=false\n")
+    assert jobs["performance_record"].enabled is True

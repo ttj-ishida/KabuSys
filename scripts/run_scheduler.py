@@ -259,6 +259,8 @@ def _build_job_schedule() -> list[JobSpec]:
         ),
         # EDINET 法定開示の収集。研究用のデータ蓄積（現状、戦略・AI では未使用）
         JobSpec("edinet_collection", "run_edinet_collection.py", [], 17, 45, True, enable_edinet),
+        # 当日終値が入った後に日次成績を記録（portfolio_performance へ書き込むため排他）
+        JobSpec("performance_record", "run_performance_record.py", [], 18, 0, True),
         JobSpec("feature_gen", "run_feature_gen.py", [], 18, 30, True),
         JobSpec("ai_analysis", "run_ai_analysis.py", [], 19, 0, True, enable_ai),
         JobSpec("strategy_signal", "run_strategy_signal.py", [], 20, 0, True),

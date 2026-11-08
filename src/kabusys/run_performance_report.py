@@ -42,9 +42,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--env",
-        default="live",
-        choices=["live", "paper_trading"],
-        help="対象環境 (live / paper_trading)、省略時は live",
+        default=None,
+        choices=["live", "paper_trading", "development"],
+        help="対象環境 (live / paper_trading / development)、省略時は KABUSYS_ENV",
     )
     parser.add_argument(
         "--from",
@@ -72,6 +72,8 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 
     settings = Settings()
+    if args.env is None:
+        args.env = settings.env
     conn = duckdb.connect(str(settings.duckdb_path), read_only=True)
 
     try:
