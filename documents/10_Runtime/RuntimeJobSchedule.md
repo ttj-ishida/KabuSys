@@ -25,8 +25,10 @@ excl = 実行前に Execution を停止し、DuckDB を排他利用するジョ�
 | 08:35 | `position_reconciliation_report` | `run_position_reconciliation_report.py`（kabu API 必須） | - | **無効** |
 | 09:00 | `monitoring_start` | `start_system.py --component monitoring` | - | **無効** |
 | 15:35 | `tdnet_collection`（`ENABLE_TDNET=true`） | `run_tdnet_collection.py` | YES | 実行 |
+| 15:45 | `disclosure_classification`（`ENABLE_TDNET=true`） | `run_disclosure_classification.py` | YES | 実行 |
 | 17:30 | `data_update` | `run_data_update.py` | YES | 実行 |
 | 17:33 | `yahoonews_collection`（`ENABLE_YAHOONEWS=true`） | `run_yahoonews_collection.py` | YES | 実行 |
+| 17:45 | `edinet_collection`（`ENABLE_EDINET=true`） | `run_edinet_collection.py` | YES | 実行 |
 | 18:00 | `performance_record` | `run_performance_record.py [--date]`（日次の総資産・現金を `portfolio_performance` に記録） | YES | 実行（`live` は対象外） |
 | 18:30 | `feature_gen` | `run_feature_gen.py` | YES | 実行 |
 | 19:00 | `ai_analysis`（`ENABLE_AI_SENTIMENT=true`） | `run_ai_analysis.py` | YES | 実行（ただし現在スコアが出ていない：Issue #419） |
@@ -47,7 +49,7 @@ excl = 実行前に Execution を停止し、DuckDB を排他利用するジョ�
 
 - 非営業日（土日・祝日・年末年始）は全ジョブをスキップする
 - `ENABLE_TDNET` / `ENABLE_YAHOONEWS` / `ENABLE_AI_SENTIMENT` が `true` でないジョブ、`ENABLE_AUTO_EXECUTION=false` のときの 08:30 / 08:35 / 09:00 は実行しない（`run_scheduler.py --list` で `skip` と表示される）
-- EDINET 収集（`run_edinet_collection.py`）と開示分類（`run_disclosure_classification.py`）はスケジュールに含まれていない（必要なら手動実行）
+- 15:45 開示分類（`run_disclosure_classification.py`、`ENABLE_TDNET=true` のとき）と 17:45 EDINET 収集（`run_edinet_collection.py`、`ENABLE_EDINET=true` のとき）を実行する（excl）。どちらも研究用のデータ蓄積で、現状の戦略・AI 分析では使っていない
 
 > **スケジュール設計の根拠**: J-Quants の日足株価データ（`daily_quotes`）は東証引け（15:30）直後ではなく 16:30〜17:00 頃に公開される。15:30 に data_update を実行すると当日データを取得できず feature_gen が 0 件になる。17:30 に遅延することでデータ確実取得後に実行できる。
 
@@ -226,7 +228,8 @@ Select-String -Path logs\scheduler.log -Pattern "REQUIRES ATTENTION|ジョブ完
 | 条件 | 判定 |
 |------|------|
 | 必須ジョブが欠落 / `failed` / `skipped` | BLOCKED |
-| `signal_queue == 0` | BLOCKED |
+| `signal_queue == 0` かつ翌営業日の BUY が 1 件以上（portfolio_construction で失われた） | BLOCKED |
+| `signal_queue == 0` かつ BUY が 0 件（必須ジョブはすべて成功） | READY_WITH_WARNINGS（警告「翌営業日の BUY シグナルは 0 件です（夜間バッチは正常終了）」） |
 | `prices_daily == 0` | BLOCKED |
 | `features == 0` | BLOCKED |
 | `signals == 0` | READY_WITH_WARNINGS |
@@ -234,7 +237,7 @@ Select-String -Path logs\scheduler.log -Pattern "REQUIRES ATTENTION|ジョブ完
 
 > `prices_daily == 0` および `features == 0` は、価格データ・特徴量なしではシグナル生成が不可能なため BLOCKED とする。`signals == 0` は Bear レジームなど戦略上ありうる正常系のため READY_WITH_WARNINGS に留める（Issue #288）。
 
-> 手動運用では、必須ジョブがすべて `success` で BUY が 0 件なだけ（例: `breadth_stop`）の `BLOCKED`（`signal_queue == 0`）は正常。ジョブ失敗の場合のみ復旧する。
+> 必須ジョブがすべて成功していて BUY が 0 件なだけ（例: `breadth_stop`）の日は BLOCKED にならず READY_WITH_WARNINGS になる（Issue #426）。ジョブ失敗、または BUY があるのに `signal_queue` が空の場合のみ BLOCKED。
 
 ---
 
@@ -276,7 +279,7 @@ Select-String -Path logs\scheduler.log -Pattern "REQUIRES ATTENTION|ジョブ完
 - ステータス: `OK` / `警告あり` / `BUY 見送り`（BUY 全件見送りの理由があれば `BUY 見送り`、警告があれば `警告あり`）
 - LINE「【KabuSys 手動注文 当日朝】」: ステータス、BUY 上位 10 件、SELL 一覧、警告。送信失敗は無視
 
-> ⚠️ **既知の誤警告（Issue #421）:** シグナル 0 件の正常な日（例: breadth_stop で BUY 全件停止）でも「シグナルが古い」と出て `BUY 見送り` になる。夜間バッチの成否は `logs/scheduler.log` と night_batch_report で確認する。
+> **シグナル 0 件の正常日（Issue #421）:** 前営業日の `strategy_signal_job` と `portfolio_construction_job` が `artifacts/job_runs/{date}/` で `success` / `warning` の場合（`operations/batch_status.py`）、シグナル日が古くても「シグナルが古い」警告は出さず、古い候補も表示せず、「夜間バッチは正常終了し、シグナルは 0 件でした」の注記を出す（ステータスは停止条件がなければ `OK`）。記録なし・失敗の場合は従来どおり警告と全件見送り。
 
 手動再実行（デバッグ時）:
 
@@ -450,6 +453,7 @@ Start-ScheduledTask -TaskName "KabuSys_Scheduler"
 | 時刻 | タスク名 | スクリプト |
 |---|---|---|
 | 17:30 | `KabuSys_DataUpdate` | `scripts\run_data_update.py` |
+| 18:00 | `KabuSys_PerformanceRecord` | `scripts\run_performance_record.py` |
 | 18:30 | `KabuSys_FeatureGen` | `scripts\run_feature_gen.py` |
 | 20:00 | `KabuSys_StrategySignal` | `scripts\run_strategy_signal.py` |
 | 21:00 | `KabuSys_PortfolioConstruction` | `scripts\run_portfolio_construction.py` |
@@ -467,7 +471,9 @@ Start-ScheduledTask -TaskName "KabuSys_Scheduler"
 | 時刻 | タスク名 | スクリプト | 条件 |
 |---|---|---|---|
 | 15:35 | `KabuSys_TdnetCollection` | `scripts\run_tdnet_collection.py` | `ENABLE_TDNET=true` |
+| 15:45 | `KabuSys_DisclosureClassification` | `scripts\run_disclosure_classification.py` | `ENABLE_TDNET=true` |
 | 17:33 | `KabuSys_YahooNewsCollection` | `scripts\run_yahoonews_collection.py` | `ENABLE_YAHOONEWS=true` |
+| 17:45 | `KabuSys_EdinetCollection` | `scripts\run_edinet_collection.py` | `ENABLE_EDINET=true` |
 | 19:00 | `KabuSys_AiAnalysis` | `scripts\run_ai_analysis.py` | `ENABLE_AI_SENTIMENT=true` |
 
 ---

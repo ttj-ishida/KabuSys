@@ -36,6 +36,7 @@ $EnvFile = Join-Path $WorkDir ".env"
 $EnableYahooNews    = (Get-EnvValue $EnvFile "ENABLE_YAHOONEWS")    -eq "true"
 $EnableAiSentiment  = (Get-EnvValue $EnvFile "ENABLE_AI_SENTIMENT") -eq "true"
 $EnableTdnet        = (Get-EnvValue $EnvFile "ENABLE_TDNET")        -eq "true"
+$EnableEdinet       = (Get-EnvValue $EnvFile "ENABLE_EDINET")       -eq "true"
 
 Write-Host "KabuSys Task Scheduler: registration start"
 Write-Host "  WorkDir            : $WorkDir"
@@ -129,6 +130,18 @@ if ($EnableTdnet) {
     Register-KabuSysTask -TaskName "KabuSys_TdnetCollection" -Script "run_tdnet_collection.py" -TriggerTime "15:35"
 } else {
     Write-Host "  [SKIPPED] KabuSys_TdnetCollection (ENABLE_TDNET != true)"
+}
+
+if ($EnableTdnet) {
+    Register-KabuSysTask -TaskName "KabuSys_DisclosureClassification" -Script "run_disclosure_classification.py" -TriggerTime "15:45"
+} else {
+    Write-Host "  [SKIPPED] KabuSys_DisclosureClassification (ENABLE_TDNET != true)"
+}
+
+if ($EnableEdinet) {
+    Register-KabuSysTask -TaskName "KabuSys_EdinetCollection" -Script "run_edinet_collection.py" -TriggerTime "17:45"
+} else {
+    Write-Host "  [SKIPPED] KabuSys_EdinetCollection (ENABLE_EDINET != true)"
 }
 
 # ---------------------------------------------------------------------------

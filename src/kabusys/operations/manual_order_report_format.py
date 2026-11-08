@@ -137,6 +137,7 @@ def format_markdown(report: ManualOrderReport) -> str:
         f"- シグナル日: {r.signal_date.isoformat() if r.signal_date else 'なし'}",
         f"- ステータス: {STATUS_LABELS[r.status]}",
         "- KabuSys は発注しません。証券画面で手動注文してください。",
+        *[f"- 情報: {n}" for n in r.notes],
         "",
         "## 資金・上限",
         "",
@@ -231,6 +232,7 @@ def format_cli_summary(report: ManualOrderReport) -> str:
         f" / SELL {len(r.sell_candidates)} 件",
         f"  想定投下額: {_yen(r.total_buy_amount)}（利用率 {_pct(r.utilization)}）",
     ]
+    lines += [f"  [情報] {n}" for n in r.notes]
     lines += [f"  [警告] {w}" for w in r.warnings]
     return "\n".join(lines)
 
@@ -242,6 +244,7 @@ def format_line_message(report: ManualOrderReport, *, max_buys: int = 10) -> str
         f"ステータス: {STATUS_LABELS[r.status]}",
         f"シグナル日: {r.signal_date.isoformat() if r.signal_date else 'なし'}",
         "───────────────",
+        *[f"※{n}" for n in r.notes],
         f"BUY {len(r.buy_candidates)}件" + (":" if r.buy_candidates else ""),
     ]
     for b in r.buy_candidates[:max_buys]:

@@ -72,7 +72,7 @@ python scripts\run_scheduler.py --list
 |------|------|------|
 | `READY` | 全必須ジョブ成功・`signal_queue` 作成済み | 翌朝のレポートどおりに進める |
 | `READY_WITH_WARNINGS` | 警告あり・翌日準備は完了 | 内容確認の上で判断 |
-| `BLOCKED` | 必須ジョブ失敗 / `signal_queue == 0` / 価格・特徴量未生成 | ジョブ失敗なら復旧する。ジョブがすべて成功していて BUY が 0 件なだけなら正常 |
+| `BLOCKED` | 必須ジョブ失敗 / BUY があるのに `signal_queue == 0` / 価格・特徴量未生成 | 復旧する。ジョブがすべて成功していて BUY が 0 件なだけの日は `READY_WITH_WARNINGS`（「BUY シグナルは 0 件です」）で正常 |
 
 手動で再生成する場合:
 
@@ -100,7 +100,7 @@ Select-String -Path logs\scheduler.log -Pattern "REQUIRES ATTENTION|ジョブ完
 | `警告あり` | 警告あり | 警告を確認してから判断 |
 | `BUY 見送り` | 停止フラグ・DD 停止・休場日・シグナルが古い | BUY は全件見送り候補へ。SELL は常に表示されるので対応する |
 
-> **既知の誤警告（Issue #421）:** シグナル 0 件の正常な日でも「シグナルが古い」と出ます。夜間バッチの成否は `logs\scheduler.log` と night_batch_report で確認してください。
+> **シグナル 0 件の正常日:** 前営業日の夜間バッチが成功していてシグナルが 0 件の日は、「夜間バッチは正常終了し、シグナルは 0 件でした」と表示され、古い候補は出ません。バッチの記録がない・失敗の場合のみ「シグナルが古い」警告になります。
 
 **BUY 表:** コード・銘柄名・株数・参考価格（前日終値）・想定金額・スコア・「この価格以下なら買付可（上限）」・「この価格以上なら買付可（下限）」・備考（新規／買い増し）。
 
@@ -357,7 +357,7 @@ Paper での E2E 検証は [C_PaperTrading.md](./C_PaperTrading.md) と `documen
 
 個別タスク方式（`scripts\setup_task_scheduler.ps1` で `KabuSys_DataUpdate` などを個別登録）は従来方式で、現在は使っていません。個別タスク方式は `ENABLE_AUTO_EXECUTION` を参照しないため、手動運用中に使うと 08:30 の Execution 起動なども登録されます。
 
-> EDINET 法定開示収集（`run_edinet_collection.py`）と開示分類（`run_disclosure_classification.py`）は、どちらの方式でもスケジュール登録されていません。必要な場合は手動で実行します。
+> 開示分類（`run_disclosure_classification.py`）は 15:45、EDINET 法定開示収集（`run_edinet_collection.py`）は 17:45 に、それぞれ `ENABLE_TDNET` / `ENABLE_EDINET` が `true` のときに実行されます（研究用のデータ蓄積。現状の戦略・AI 分析では未使用）。
 
 ---
 
