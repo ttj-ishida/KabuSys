@@ -264,7 +264,6 @@ python -m kabusys.run_performance_report --type daily --env paper_trading
 | Issue | 内容 | 運用上の扱い |
 |---|---|---|
 | #419 | AI 分析のスコアが出ていない（ニューススコア 0 件・レジーム常に neutral） | `ai_analysis` ジョブ自体は成功する。AI の影響がない状態で候補が出ていると理解する |
-| #422 | `requirements.txt` / `constraints.txt` が Python 3.13 と非互換 | 運用 `.venv` は動作確認済みのバージョンを暫定的に入れている。`pip install -c constraints.txt -r requirements.txt` は失敗する |
 
 ---
 

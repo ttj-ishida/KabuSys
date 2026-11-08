@@ -58,11 +58,13 @@ python -m venv .venv
 # 仮想環境を有効化（PowerShell）
 .venv\Scripts\Activate.ps1
 
-# 依存パッケージをインストール
-pip install -e .
+# 依存パッケージをインストール（constraints.txt の固定版を使う）
+pip install -c constraints.txt -r requirements-dev.txt -r requirements-extras.txt
+# kabusys パッケージ本体を登録（依存は上で入れたものを使う）
+pip install -e . --no-deps
 ```
 
-> ⚠️ **Issue #422:** `requirements.txt` / `constraints.txt` は Python 3.13 と非互換です（上限・固定値のバージョンに Python 3.13 用の wheel がない）。`pip install -c constraints.txt -r requirements.txt` は失敗します。運用 `.venv` には動作確認済みのバージョン（numpy 2.4.4、pandas 2.3.3、pyarrow 23.0.1、duckdb 1.5.0、streamlit 1.55.0、openai 1.109.1、pytest 9.0.2、ruff 0.15.11 など）を暫定的に入れています。
+> ℹ️ `constraints.txt` は Python 3.13 で動作確認した固定版（#422）。CI も Python 3.13 で同じ固定版を使って検証する。Python は 3.11 以上（運用は 3.13）。
 
 > ⚠️ PowerShell でスクリプト実行が禁止されている場合は、管理者権限で以下を実行してください。
 > ```powershell

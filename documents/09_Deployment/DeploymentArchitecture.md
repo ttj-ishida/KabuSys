@@ -289,10 +289,7 @@ OS
 
 -   Python 3.13.5
 -   運用用の仮想環境: `C:\Projects\KabuSys\.venv`
--   `requirements.txt` / `constraints.txt` は Python 3.13 と非互換（**Issue #422**）。
-    `pip install -c constraints.txt -r requirements.txt` は失敗するため、運用 `.venv` には
-    動作確認済みのバージョン（numpy 2.4.4、pandas 2.3.3、pyarrow 23.0.1、duckdb 1.5.0、
-    streamlit 1.55.0、openai 1.109.1、pytest 9.0.2、ruff 0.15.11 など）を暫定的に入れている
+-   `requirements.txt` / `constraints.txt` は Python 3.13 用に更新済み（#422）。`pip install -c constraints.txt -r requirements-dev.txt -r requirements-extras.txt` でインストールできる（CI も Python 3.13 で同じ固定版を使って検証）。Python は 3.11 以上（運用は 3.13）。
 -   現状、`KabuSys_Scheduler` タスクの実行ファイルは `python`（グローバルの `C:\Python313`）。
     `.venv` への切り替えは予定（管理者 PowerShell で `Set-ScheduledTask` によりアクションを変更）
 
