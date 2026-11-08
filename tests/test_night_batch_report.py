@@ -601,3 +601,67 @@ def test_save_report_invalid_run_date_raises(tmp_path):
 
     with pytest.raises(ValueError, match="Invalid run_date"):
         save_report(report, output_dir=tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# #426: BUY 0 件の正常日
+# ---------------------------------------------------------------------------
+
+
+def test_status_zero_buy_success_is_ready_with_warnings():
+    counts = _make_counts(signals=0, signal_queue=0)
+    nd = _make_next_day(buy_count=0, sell_count=0)
+    assert _determine_status(_all_success_jobs(), counts, nd) == "READY_WITH_WARNINGS"
+
+
+def test_status_sell_only_day_is_ready_with_warnings():
+    """SELL だけがあり BUY 0 件（queue 0）の日も READY_WITH_WARNINGS（READY にしない）。"""
+    counts = _make_counts(signals=2, signal_queue=0)
+    nd = _make_next_day(buy_count=0, sell_count=2)
+    assert _determine_status(_all_success_jobs(), counts, nd) == "READY_WITH_WARNINGS"
+
+
+def test_status_queue_zero_with_buys_is_blocked():
+    counts = _make_counts(signal_queue=0)
+    nd = _make_next_day(buy_count=3)
+    assert _determine_status(_all_success_jobs(), counts, nd) == "BLOCKED"
+
+
+def test_status_zero_buy_but_job_failed_still_blocked():
+    jobs = [_make_job(name="strategy_signal_job", status="failed")]
+    nd = _make_next_day(buy_count=0)
+    assert _determine_status(jobs, _make_counts(signal_queue=0), nd) == "BLOCKED"
+
+
+def test_status_zero_buy_with_prices_zero_still_blocked():
+    counts = _make_counts(signal_queue=0, prices_daily=0)
+    nd = _make_next_day(buy_count=0)
+    assert _determine_status(_all_success_jobs(), counts, nd) == "BLOCKED"
+
+
+def test_build_report_zero_buy_day_warning_text():
+    report = build_report(
+        _all_success_jobs(),
+        _make_counts(signals=0, signal_queue=0),
+        _make_next_day(buy_count=0, sell_count=0, expected_orders=0),
+        run_date=date(2026, 4, 26),
+        target_date=date(2026, 4, 27),
+    )
+    assert report.status == "READY_WITH_WARNINGS"
+    assert any("BUY シグナルは 0 件です（夜間バッチは正常終了）" in w for w in report.warnings)
+    assert not any("自動執行は不可" in w for w in report.warnings)
+    md = format_markdown(report)
+    assert "BUY シグナルは 0 件" in md
+    assert "signal_queue が空のため" not in md
+
+
+def test_build_report_queue_zero_with_buys_blocked_and_warns():
+    report = build_report(
+        _all_success_jobs(),
+        _make_counts(signal_queue=0),
+        _make_next_day(buy_count=2),
+        run_date=date(2026, 4, 26),
+        target_date=date(2026, 4, 27),
+    )
+    assert report.status == "BLOCKED"
+    assert any("signal_queue が空です" in w for w in report.warnings)

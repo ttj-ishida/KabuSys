@@ -6,6 +6,8 @@ DuckDB から読み取り専用で集める。発注はしない。kabu API / Ex
 - evening: 夜間バッチ直後（21:10）。signal_date は通常 report_date 当日。
 - morning: 寄り前（08:05）。signal_date は通常 report_date の前営業日。
   休場日・停止フラグ・DD 停止・シグナル欠落時は BUY 候補をすべて見送り候補に移す。
+- 夜間バッチが正常終了したがシグナル 0 件の日（signal_date が古いまま）は、古い候補を
+  表示せず「シグナル 0 件」の注記だけを出す（job_runs の記録で欠落と区別する）。
 - シグナル生成後に手動約定があった銘柄の BUY は個別に見送り候補に移す。
 
 Look-ahead 防止: すべてのクエリは date <= report_date（価格は <= signal_date）に限定する。
@@ -23,6 +25,7 @@ from pathlib import Path
 import duckdb
 
 from kabusys.data.calendar_management import is_trading_day, prev_trading_day
+from kabusys.operations.batch_status import signal_batch_succeeded
 from kabusys.operations.manual_order_report_checks import (
     HOLDINGS_CHANGED_REASON,
     SafeReader,
@@ -99,6 +102,8 @@ class ManualOrderReport:
     dd_stop: bool | None = None
     dd_stop_since: str | None = None
     warnings: list[str] = field(default_factory=list)
+    # 警告ではない情報（例: 夜間バッチ正常終了・シグナル 0 件の日）
+    notes: list[str] = field(default_factory=list)
 
     @property
     def total_buy_amount(self) -> float:
@@ -248,6 +253,19 @@ def _collect_sells(
     ]
 
 
+def _no_signals_warning(report_date: date) -> str:
+    return f"{report_date} 以前のシグナルがありません"
+
+
+def _apply_zero_signal_day(report: ManualOrderReport, batch_date: date, note: str) -> None:
+    """正常終了・シグナル 0 件の日: 古いバッチの候補を捨て、注記を付ける。"""
+    report.buy_candidates = []
+    report.skipped_buys = []
+    report.sell_candidates = []
+    report.signal_date = batch_date
+    report.notes.append(note)
+
+
 def _skip_all_buys(rd: SafeReader, report: ManualOrderReport, reasons: list[str]) -> None:
     """全 BUY 候補を見送りに移す。BUY が 0 件でも理由は警告・見送り理由として残す。"""
     if not reasons:
@@ -268,6 +286,7 @@ def _apply_morning_checks(
     report: ManualOrderReport,
     stop_flag_path: Path | None,
     sqlite_path: Path | None,
+    job_runs_dir: Path | None = None,
 ) -> None:
     conn, report_date = rd.conn, report.report_date
     try:
@@ -291,13 +310,37 @@ def _apply_morning_checks(
     if report.dd_stop:
         reasons.append(f"DD 停止中です（{report.dd_stop_since} から）")
     expected = prev_trading_day(conn, report_date)
-    if report.signal_date is not None and report.signal_date < expected:
-        rd.warn(
-            f"シグナルが古い可能性があります（シグナル日 {report.signal_date}、"
-            f"期待値 {expected} 以降）。夜間バッチの欠落を確認してください"
-        )
-        reasons.append(f"シグナル日 {report.signal_date} が前営業日 {expected} より古い")
+    if report.signal_date is None:
+        # シグナルが 1 件も無い場合も、前営業日のバッチが正常終了していれば「0 件の正常日」
+        if signal_batch_succeeded(expected, job_runs_dir):
+            report.warnings[:] = [
+                w for w in report.warnings if w != _no_signals_warning(report_date)
+            ]
+            _apply_zero_signal_day(
+                report,
+                expected,
+                f"前営業日 {expected} の夜間バッチは正常終了し、シグナルは 0 件でした",
+            )
+    elif report.signal_date < expected:
+        if signal_batch_succeeded(expected, job_runs_dir):
+            _apply_zero_signal_day(
+                report,
+                expected,
+                f"前営業日 {expected} の夜間バッチは正常終了し、シグナルは 0 件でした",
+            )
+        else:
+            _warn_stale_signal(rd, report, expected, reasons)
     _skip_all_buys(rd, report, reasons)
+
+
+def _warn_stale_signal(
+    rd: SafeReader, report: ManualOrderReport, expected: date, reasons: list[str]
+) -> None:
+    rd.warn(
+        f"シグナルが古い可能性があります（シグナル日 {report.signal_date}、"
+        f"期待値 {expected} 以降）。夜間バッチの欠落を確認してください"
+    )
+    reasons.append(f"シグナル日 {report.signal_date} が前営業日 {expected} より古い")
 
 
 def _warn_missing_queue(rd: SafeReader, signal_date: date, has_buys: bool) -> None:
@@ -329,6 +372,7 @@ def collect_manual_order_report(
     sqlite_path: Path | None = None,
     gap_thresholds: tuple[float, float] | None = None,
     now: datetime | None = None,
+    job_runs_dir: Path | None = None,
 ) -> ManualOrderReport:
     """手動注文候補レポートを収集する（DuckDB は読み取りのみ）。"""
     if phase not in PHASES:
@@ -365,7 +409,15 @@ def collect_manual_order_report(
         )
 
     if report.signal_date is None:
-        rd.warn(f"{report_date} 以前のシグナルがありません")
+        if phase == "evening" and signal_batch_succeeded(report_date, job_runs_dir):
+            # シグナルが 1 件も無くても、当日バッチが正常終了していれば「0 件の正常日」
+            _apply_zero_signal_day(
+                report,
+                report_date,
+                f"本日（{report_date}）の夜間バッチは正常終了し、シグナルは 0 件でした",
+            )
+        else:
+            rd.warn(_no_signals_warning(report_date))
     else:
         sig = report.signal_date
         names = _stock_names(rd)
@@ -385,12 +437,19 @@ def collect_manual_order_report(
         if missing_price:
             rd.warn(f"参考価格を取得できない BUY 候補があります: {', '.join(missing_price)}")
         if phase == "evening" and sig != report_date:
-            _skip_all_buys(
-                rd,
-                report,
-                [f"本日（{report_date}）のシグナルがありません。シグナル日 {sig} は古い"],
-            )
+            if signal_batch_succeeded(report_date, job_runs_dir):
+                _apply_zero_signal_day(
+                    report,
+                    report_date,
+                    f"本日（{report_date}）の夜間バッチは正常終了し、シグナルは 0 件でした",
+                )
+            else:
+                _skip_all_buys(
+                    rd,
+                    report,
+                    [f"本日（{report_date}）のシグナルがありません。シグナル日 {sig} は古い"],
+                )
 
     if phase == "morning":
-        _apply_morning_checks(rd, report, stop_flag_path, sqlite_path)
+        _apply_morning_checks(rd, report, stop_flag_path, sqlite_path, job_runs_dir)
     return report

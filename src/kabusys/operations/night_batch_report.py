@@ -23,6 +23,8 @@ MANDATORY_JOBS: list[str] = [
     "portfolio_construction_job",
 ]
 
+ZERO_BUY_WARNING = "翌営業日の BUY シグナルは 0 件です（夜間バッチは正常終了）"
+
 STATUS_READY = "READY"
 STATUS_READY_WITH_WARNINGS = "READY_WITH_WARNINGS"
 STATUS_BLOCKED = "BLOCKED"
@@ -83,13 +85,15 @@ class NightBatchReport:
 def _determine_status(
     job_results: list[JobRunResult],
     update_counts: UpdateCounts,
+    next_day_summary: NextDaySummary | None = None,
 ) -> str:
     """READY / READY_WITH_WARNINGS / BLOCKED を判定する。
 
     BLOCKED 条件（いずれかが真）:
       - 必須ジョブのいずれかが job_results に存在しない（未実行）
       - 必須ジョブのいずれかが failed または skipped
-      - signal_queue == 0
+      - signal_queue == 0 かつ翌営業日の BUY が 1 件以上（portfolio_construction で失われた）
+        （next_day_summary 未指定時は BUY の有無が不明なため保守的に BLOCKED）
       - prices_daily == 0（価格データなしではシグナル生成不可）
       - features == 0（特徴量なしではシグナル生成不可）
 
@@ -98,6 +102,7 @@ def _determine_status(
       - いずれかのジョブの warnings リストが空でない
       - 非必須ジョブのいずれかが skipped
       - signals == 0
+      - signal_queue == 0 かつ BUY が 0 件（全ジョブ正常・BUY シグナルなしの日。#426）
 
     それ以外: READY
     """
@@ -106,10 +111,13 @@ def _determine_status(
     has_blocked_mandatory = any(
         j.job_name in MANDATORY_JOBS and j.status in ("failed", "skipped") for j in job_results
     )
+    queue_lost = update_counts.signal_queue == 0 and (
+        next_day_summary is None or next_day_summary.buy_count > 0
+    )
     if (
         has_missing_mandatory
         or has_blocked_mandatory
-        or update_counts.signal_queue == 0
+        or queue_lost
         or update_counts.prices_daily == 0
         or update_counts.features == 0
     ):
@@ -125,6 +133,7 @@ def _determine_status(
         or has_job_warnings
         or has_nonmandatory_skipped
         or update_counts.signals == 0
+        or update_counts.signal_queue == 0
     ):
         return STATUS_READY_WITH_WARNINGS
 
@@ -134,6 +143,7 @@ def _determine_status(
 def _generate_warnings(
     job_results: list[JobRunResult],
     update_counts: UpdateCounts,
+    next_day_summary: NextDaySummary | None = None,
 ) -> list[str]:
     """警告メッセージのリストを生成する。"""
     warnings: list[str] = []
@@ -157,7 +167,10 @@ def _generate_warnings(
     if update_counts.signals == 0:
         warnings.append("signals が生成されていません")
     if update_counts.signal_queue == 0:
-        warnings.append("signal_queue が空です（翌営業日の自動執行は不可）")
+        if next_day_summary is not None and next_day_summary.buy_count == 0:
+            warnings.append(ZERO_BUY_WARNING)
+        else:
+            warnings.append("signal_queue が空です（翌営業日の自動執行は不可）")
     # prices_daily == 0 および features == 0 は BLOCKED 判定のため警告は生成しない
     # （BLOCKED ステータス自体が問題を伝達する）
 
@@ -184,8 +197,8 @@ def build_report(
     Returns:
         NightBatchReport インスタンス。
     """
-    warnings = _generate_warnings(job_results, update_counts)
-    status = _determine_status(job_results, update_counts)
+    warnings = _generate_warnings(job_results, update_counts, next_day_summary)
+    status = _determine_status(job_results, update_counts, next_day_summary)
     return NightBatchReport(
         run_date=run_date.isoformat(),
         target_date=target_date.isoformat(),
@@ -376,13 +389,21 @@ def format_markdown(report: NightBatchReport) -> str:
             f"**{STATUS_READY_WITH_WARNINGS}** — 警告を確認した上で、執行開始を判断してください。",
             "",
             "- 基本的な処理は完了していますが、警告があります。",
+            *(
+                ["- 翌営業日の BUY シグナルは 0 件です（発注対象なし。夜間バッチは正常終了）。"]
+                if report.next_day_summary is not None
+                and report.next_day_summary.buy_count == 0
+                and report.update_counts.signal_queue == 0
+                else []
+            ),
             "- 上記 Warnings を確認し、問題がなければ自動執行を開始できます。",
         ]
     else:  # BLOCKED
         lines += [
             f"**{STATUS_BLOCKED}** — 翌営業日の自動執行を **開始しないでください**。",
             "",
-            "- 必須ジョブの失敗または signal_queue が空のため、自動執行は安全ではありません。",
+            "- 必須ジョブの失敗、または BUY シグナルがあるのに signal_queue が空のため、"
+            "自動執行は安全ではありません。",
             "- 上記 Warnings を確認し、手動で問題を解消してから再実行してください。",
         ]
     lines.append("")
