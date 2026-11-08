@@ -1089,3 +1089,38 @@ def test_quote_ident_escapes_double_quotes():
 
     assert _quote_ident("prices_daily") == '"prices_daily"'
     assert _quote_ident('a"b') == '"a""b"'
+
+
+def test_run_backtest_applies_holding_limits_to_whole_portfolio(conn):
+    """Issue #437: 保有全体の上限（apply_holding_limits）に保有・総資産・設定値が渡る。"""
+    from datetime import date
+    from unittest.mock import patch
+
+    from kabusys.backtest import engine
+    from kabusys.portfolio.portfolio_builder import apply_holding_limits
+
+    _setup_minimal_backtest(conn)
+    calls: list[tuple] = []
+
+    def spy(*args, **kwargs):
+        calls.append((args, kwargs))
+        return apply_holding_limits(*args, **kwargs)
+
+    with patch.object(engine, "apply_holding_limits", side_effect=spy):
+        engine.run_backtest(
+            conn=conn,
+            start_date=date(2024, 1, 4),
+            end_date=date(2024, 1, 9),
+            allocation_method="equal",
+            max_positions=3,
+            max_utilization=0.5,
+        )
+
+    assert calls, "apply_holding_limits が呼ばれていない"
+    for args, kwargs in calls:
+        _cands, positions, _prices, pv, cash, max_pos, util = args
+        assert isinstance(positions, dict)
+        assert pv > 0 and cash >= 0
+        assert max_pos == 3
+        assert util == 0.5
+        assert "sell_codes" in kwargs

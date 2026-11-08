@@ -136,7 +136,7 @@ def main(argv: list[str] | None = None) -> None:
             )
         except Exception:
             logger.warning("JobRunResult の書き出しに失敗しました", exc_info=True)
-        log_run_end(_APP_NAME, status="failed" if failed else "success", started_at=started_at)
+        log_run_end(_APP_NAME, status=job_status, started_at=started_at)
     if failed:
         sys.exit(1)
 

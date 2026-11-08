@@ -35,6 +35,11 @@ def main() -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
+    from kabusys.portfolio.portfolio_builder import load_portfolio_config
+
+    # 資金配分の既定値は本番（run_portfolio_construction）と同じ strategy_config.yaml に従う
+    portfolio_cfg = load_portfolio_config()
+
     parser = argparse.ArgumentParser(
         description="KabuSys Backtest Runner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -59,20 +64,23 @@ def main() -> None:
     parser.add_argument(
         "--max-position-pct",
         type=float,
-        default=0.10,
-        help="Max position size as %% of portfolio per security [default: 0.10]",
+        default=portfolio_cfg["max_position_pct"],
+        help="Max position size as %% of portfolio per security"
+        " [default: strategy_config.yaml portfolio.max_position_pct = %(default)s]",
     )
     parser.add_argument(
         "--allocation-method",
-        default="risk_based",
+        default=portfolio_cfg["allocation_method"],
         choices=["equal", "score", "risk_based"],
-        help="Capital allocation method [default: risk_based]",
+        help="Capital allocation method"
+        " [default: strategy_config.yaml portfolio.allocation_method = %(default)s]",
     )
     parser.add_argument(
         "--max-utilization",
         type=float,
-        default=0.70,
-        help="Max fraction of portfolio to deploy [default: 0.70]",
+        default=portfolio_cfg["max_utilization"],
+        help="Max fraction of portfolio invested across all holdings"
+        " [default: strategy_config.yaml portfolio.max_utilization = %(default)s]",
     )
     parser.add_argument(
         "--vol-target",
@@ -89,14 +97,16 @@ def main() -> None:
     parser.add_argument(
         "--max-positions",
         type=int,
-        default=10,
-        help="Max number of concurrent positions [default: 10]",
+        default=portfolio_cfg["max_positions"],
+        help="Max number of concurrent positions (all holdings)"
+        " [default: strategy_config.yaml portfolio.max_positions = %(default)s]",
     )
     parser.add_argument(
         "--risk-pct",
         type=float,
-        default=0.005,
-        help="Risk per trade as fraction of portfolio (risk_based only) [default: 0.005]",
+        default=portfolio_cfg["risk_pct"],
+        help="Risk per trade as fraction of portfolio (risk_based only)"
+        " [default: strategy_config.yaml portfolio.risk_pct = %(default)s]",
     )
     parser.add_argument(
         "--stop-loss-pct",

@@ -16,7 +16,6 @@ Look-ahead 防止: すべてのクエリは date <= report_date（価格は <= s
 
 from __future__ import annotations
 
-import inspect
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -37,16 +36,14 @@ from kabusys.operations.manual_order_report_checks import (
 )
 from kabusys.operations.manual_trades import calc_manual_portfolio_value, manual_position_qty_map
 from kabusys.operations.pre_market_collector import check_data_freshness, check_stop_flag
-from kabusys.portfolio.position_sizing import calc_position_sizes
+from kabusys.portfolio.portfolio_builder import load_portfolio_config
 
 logger = logging.getLogger(__name__)
 
 PHASES = ("evening", "morning")
 
-# calc_position_sizes の既定 1 銘柄上限（総資産比）に追従する
-MAX_POSITION_PCT: float = float(
-    inspect.signature(calc_position_sizes).parameters["max_position_pct"].default
-)
+# 株数が 0 になった BUY シグナルの見送り理由（Issue #437）
+UNSIZED_REASON = "株数 0（資金・保有銘柄数・投資割合・1 銘柄の上限による）"
 
 STATUS_OK = "OK"
 STATUS_WARN = "WARN"
@@ -94,6 +91,8 @@ class ManualOrderReport:
     max_position_amount: float
     buy_candidates: list[BuyCandidate] = field(default_factory=list)
     skipped_buys: list[BuyCandidate] = field(default_factory=list)
+    # 夜間バッチで株数が 0 になり、注文候補にならなかった BUY シグナル（情報、Issue #437）
+    unsized_buys: list[BuyCandidate] = field(default_factory=list)
     buy_skip_reasons: list[str] = field(default_factory=list)
     sell_candidates: list[SellCandidate] = field(default_factory=list)
     # morning のみ（evening は None）。dd_stop=None は「不明」
@@ -222,6 +221,59 @@ def _collect_buys(
     return out
 
 
+def _collect_unsized_buys(
+    rd: SafeReader,
+    signal_date: date,
+    names: dict[str, str],
+    held: dict[str, int],
+    gaps: tuple[float, float],
+) -> list[BuyCandidate]:
+    """BUY シグナルのうち、signal_queue に BUY が無い（株数 0 で見送られた）銘柄を返す。"""
+    queued = {
+        r[0]
+        for r in rd.fetch(
+            "signal_queue",
+            "SELECT DISTINCT code FROM signal_queue WHERE date = ? AND side = 'buy'",
+            [signal_date],
+        )
+    }
+    signals = [
+        r
+        for r in rd.fetch(
+            "signals",
+            "SELECT code, score, signal_rank FROM signals WHERE date = ? AND side = 'buy'",
+            [signal_date],
+        )
+        if r[0] not in queued
+    ]
+    if not signals:
+        return []
+    closes = _latest_closes(rd, [r[0] for r in signals], signal_date)
+    out: list[BuyCandidate] = []
+    for code, score, rank in signals:
+        ref = closes.get(code)
+        qty = held.get(code, 0)
+        upper, lower = buy_price_bounds(ref, gaps)
+        out.append(
+            BuyCandidate(
+                code=code,
+                name=names.get(code, code),
+                size=0,
+                ref_price=ref,
+                amount=None,
+                score=float(score) if score is not None else None,
+                rank=int(rank) if rank is not None else None,
+                held_qty=qty,
+                add_on=qty > 0,
+                buy_max_price=upper,
+                buy_min_price=lower,
+                skip_reason=UNSIZED_REASON,
+            )
+        )
+    out.sort(key=lambda b: (b.rank is None, b.rank or 0, b.code))
+    return out
+
+
 def _collect_sells(
     rd: SafeReader, signal_date: date, names: dict[str, str], auto: dict[str, int]
 ) -> list[SellCandidate]:
@@ -261,6 +313,7 @@ def _apply_zero_signal_day(report: ManualOrderReport, batch_date: date, note: st
     """正常終了・シグナル 0 件の日: 古いバッチの候補を捨て、注記を付ける。"""
     report.buy_candidates = []
     report.skipped_buys = []
+    report.unsized_buys = []
     report.sell_candidates = []
     report.signal_date = batch_date
     report.notes.append(note)
@@ -344,9 +397,21 @@ def _warn_stale_signal(
 
 
 def _warn_missing_queue(rd: SafeReader, signal_date: date, has_buys: bool) -> None:
-    """signals に BUY があるのに signal_queue に pending BUY がない場合に警告する。"""
+    """signals に BUY があるのに signal_queue に pending BUY がない場合に警告する。
+
+    portfolio_targets にその日の行があれば、portfolio_construction は動いており、
+    全銘柄が株数 0 だっただけなので警告しない（Issue #437）。
+    """
     if has_buys:
         return
+    if rd.has_table("portfolio_targets"):
+        targets = rd.fetch(
+            "portfolio_targets",
+            "SELECT COUNT(*) FROM portfolio_targets WHERE date = ?",
+            [signal_date],
+        )
+        if targets and targets[0][0]:
+            return
     rows = rd.fetch(
         "signals",
         "SELECT COUNT(*) FROM signals WHERE date = ? AND side = 'buy'",
@@ -373,6 +438,7 @@ def collect_manual_order_report(
     gap_thresholds: tuple[float, float] | None = None,
     now: datetime | None = None,
     job_runs_dir: Path | None = None,
+    max_position_pct: float | None = None,
 ) -> ManualOrderReport:
     """手動注文候補レポートを収集する（DuckDB は読み取りのみ）。"""
     if phase not in PHASES:
@@ -381,6 +447,9 @@ def collect_manual_order_report(
     rd = SafeReader(conn, warnings)
     gaps = gap_thresholds if gap_thresholds is not None else load_gap_thresholds()
     now = now or datetime.now()
+    if max_position_pct is None:
+        # 夜間バッチの株数計算と同じ strategy_config.yaml の 1 銘柄上限
+        max_position_pct = float(load_portfolio_config()["max_position_pct"])
 
     available_cash: float | None = None
     if manual_trading_enabled:
@@ -398,8 +467,8 @@ def collect_manual_order_report(
         manual_trading_enabled=manual_trading_enabled,
         portfolio_value=float(portfolio_value),
         available_cash=available_cash,
-        max_position_pct=MAX_POSITION_PCT,
-        max_position_amount=float(portfolio_value) * MAX_POSITION_PCT,
+        max_position_pct=max_position_pct,
+        max_position_amount=float(portfolio_value) * max_position_pct,
         warnings=warnings,
     )
     if report_date < now.date():
@@ -431,6 +500,7 @@ def collect_manual_order_report(
         report.skipped_buys = [b for b in buys if b.skip_reason is not None]
         if report.skipped_buys:
             rd.warn(f"{HOLDINGS_CHANGED_REASON}: " + ", ".join(b.code for b in report.skipped_buys))
+        report.unsized_buys = _collect_unsized_buys(rd, sig, names, held, gaps)
         report.sell_candidates = _collect_sells(rd, sig, names, _auto_positions(rd, report_date))
         _warn_missing_queue(rd, sig, bool(buys))
         missing_price = [b.code for b in buys if b.ref_price is None]

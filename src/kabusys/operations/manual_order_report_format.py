@@ -107,6 +107,18 @@ def _skipped_section(r: ManualOrderReport, heading: str) -> list[str]:
     return lines + _buy_table(r.skipped_buys, with_reason=True)
 
 
+def _unsized_section(r: ManualOrderReport, heading: str) -> list[str]:
+    if not r.unsized_buys:
+        return []
+    return [
+        f"{heading}（{len(r.unsized_buys)} 件）",
+        "",
+        "BUY シグナルは出ましたが、資金や上限のため株数が 0 になり、注文候補にしていない銘柄です。",
+        "",
+        *_buy_table(r.unsized_buys, with_reason=True),
+    ]
+
+
 def _sell_table(sells: list[SellCandidate]) -> list[str]:
     if not sells:
         return ["候補なし", ""]
@@ -174,6 +186,7 @@ def format_markdown(report: ManualOrderReport) -> str:
             *_sell_table(r.sell_candidates),
         ]
         lines += _skipped_section(r, "## 見送り候補") or ["## 見送り候補（0 件）", "", "なし", ""]
+        lines += _unsized_section(r, "## 株数 0 の BUY シグナル")
     else:
         lines += [
             f"## BUY 候補（{len(r.buy_candidates)} 件）",
@@ -183,6 +196,7 @@ def format_markdown(report: ManualOrderReport) -> str:
             "",
             *_sell_table(r.sell_candidates),
             *_skipped_section(r, "## BUY 見送り候補"),
+            *_unsized_section(r, "## 株数 0 の BUY シグナル"),
         ]
     lines += [
         "## 見送りルール",
@@ -229,7 +243,7 @@ def format_cli_summary(report: ManualOrderReport) -> str:
         f"  ステータス: {STATUS_LABELS[r.status]}",
         f"  シグナル日: {r.signal_date.isoformat() if r.signal_date else 'なし'}",
         f"  BUY {len(r.buy_candidates)} 件 / 見送り {len(r.skipped_buys)} 件"
-        f" / SELL {len(r.sell_candidates)} 件",
+        f" / 株数 0 {len(r.unsized_buys)} 件 / SELL {len(r.sell_candidates)} 件",
         f"  想定投下額: {_yen(r.total_buy_amount)}（利用率 {_pct(r.utilization)}）",
     ]
     lines += [f"  [情報] {n}" for n in r.notes]
@@ -259,6 +273,10 @@ def format_line_message(report: ManualOrderReport, *, max_buys: int = 10) -> str
         for b in r.skipped_buys:
             if b.skip_reason and b.skip_reason not in " / ".join(r.buy_skip_reasons):
                 lines.append(f"  {b.code} {b.name}: {b.skip_reason}")
+    if r.unsized_buys:
+        codes = ", ".join(b.code for b in r.unsized_buys[:max_buys])
+        more = f" 他 {len(r.unsized_buys) - max_buys} 件" if len(r.unsized_buys) > max_buys else ""
+        lines.append(f"株数 0 で見送り {len(r.unsized_buys)}件: {codes}{more}")
     lines.append(f"SELL {len(r.sell_candidates)}件" + (":" if r.sell_candidates else ""))
     for s in r.sell_candidates:
         line = f"  {s.code} {s.name}"

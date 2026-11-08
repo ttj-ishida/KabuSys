@@ -42,7 +42,6 @@ from kabusys.operations.line_reports import (
 from kabusys.operations.manual_trades import (
     calc_manual_portfolio_value,
     manual_position_qty_map,
-    merge_current_positions,
 )
 from kabusys.operations.night_batch_report import JobRunResult
 from kabusys.operations.notifier import build_notifier
@@ -57,6 +56,8 @@ from kabusys.operations.performance_collector import (
 from kabusys.operations.performance_report import build_report
 from kabusys.operations.process_registry import register_process, update_process
 from kabusys.portfolio.portfolio_builder import (
+    apply_holding_limits,
+    calc_equal_weights,
     calc_score_weights,
     load_portfolio_config,
     select_candidates,
@@ -96,6 +97,25 @@ def _sync_signal_queue_status(conn: duckdb.DuckDBPyConnection, settings: Setting
             "signal_queue_status の DuckDB 同期に失敗しました（処理は続行します）", exc_info=True
         )
         return 0
+
+
+def _load_all_positions(conn: duckdb.DuckDBPyConnection, as_of: date) -> dict[str, int]:
+    """as_of 以前で最新日の positions（自動保有）をすべて返す {code: shares}。
+
+    テーブルが無ければ空。manual_order_report の保有の取り方と同じ。
+    """
+    try:
+        rows = conn.execute(
+            """
+            SELECT code, position_size FROM positions
+            WHERE date = (SELECT MAX(date) FROM positions WHERE date <= ?)
+              AND position_size > 0
+            """,
+            [as_of],
+        ).fetchall()
+    except duckdb.CatalogException:
+        return {}
+    return {r[0]: int(r[1]) for r in rows}
 
 
 def _calc_live_portfolio_value(
@@ -335,89 +355,106 @@ def main(argv: list[str] | None = None) -> None:
 
         portfolio_cfg = load_portfolio_config()
         max_positions = portfolio_cfg["max_positions"]
-        logger.info("最大保有銘柄数: %d", max_positions)
+        logger.info(
+            "資金配分: 方式=%s, 保有銘柄数の上限=%d, 1 銘柄上限=%.0f%%, 投資割合の上限=%.0f%%",
+            portfolio_cfg["allocation_method"],
+            max_positions,
+            portfolio_cfg["max_position_pct"] * 100,
+            portfolio_cfg["max_utilization"] * 100,
+        )
 
         if not buy_signals:
             logger.info("本日の BUY シグナルが 0 件です。signal_queue を更新しません。")
             _updated_rows["signal_queue"] = 0
         else:
-            candidates = select_candidates(buy_signals, max_positions=max_positions)
-            if not candidates:
-                logger.info("銘柄選定結果が 0 件です。signal_queue を更新しません。")
-                _updated_rows["signal_queue"] = 0
+            all_sorted = select_candidates(buy_signals, max_positions=len(buy_signals))
+            current_positions = _load_all_positions(conn, target_date)
+            for code, qty in manual_qty.items():
+                if qty > 0:
+                    current_positions[code] = current_positions.get(code, 0) + qty
+            price_codes = sorted({c["code"] for c in all_sorted} | set(current_positions))
+            close_prices = _fetch_close_prices(conn, price_codes, target_date)
+
+            # 保有銘柄数・投資割合の上限は保有全体にかける（Issue #437）
+            candidates, capped_cash = apply_holding_limits(
+                all_sorted,
+                current_positions,
+                close_prices,
+                portfolio_value,
+                available_cash,
+                max_positions,
+                portfolio_cfg["max_utilization"],
+            )
+            logger.info(
+                "保有 %d 銘柄、BUY シグナル %d 件 → 候補 %d 件、使える現金 %.0f 円",
+                sum(1 for q in current_positions.values() if q > 0),
+                len(all_sorted),
+                len(candidates),
+                capped_cash,
+            )
+            if portfolio_cfg["allocation_method"] == "equal":
+                weights = calc_equal_weights(candidates)
             else:
                 weights = calc_score_weights(candidates)
-                if not weights:
-                    logger.info("重み計算結果が 0 件です。signal_queue を更新しません。")
-                    _updated_rows["signal_queue"] = 0
-                else:
-                    codes = [c["code"] for c in candidates]
-                    code_params = ",".join(["?"] * len(codes))
-                    close_prices = _fetch_close_prices(conn, codes, target_date)
 
-                    pos_cur = conn.execute(
-                        "SELECT code, position_size FROM positions WHERE code IN ("
-                        + code_params
-                        + ")",
-                        codes,
+            sizes = (
+                calc_position_sizes(
+                    weights=weights,
+                    candidates=candidates,
+                    portfolio_value=portfolio_value,
+                    available_cash=capped_cash,
+                    current_positions=current_positions,
+                    open_prices=close_prices,
+                    allocation_method=portfolio_cfg["allocation_method"],
+                    risk_pct=portfolio_cfg["risk_pct"],
+                    max_position_pct=portfolio_cfg["max_position_pct"],
+                    max_utilization=portfolio_cfg["max_utilization"],
+                )
+                if candidates
+                else {}
+            )
+
+            conn.execute("BEGIN")
+            try:
+                # 株数 0 になった BUY シグナルも target_size=0 で残す（レポートで見送りを表示するため）
+                conn.execute("DELETE FROM portfolio_targets WHERE date = ?", [target_date])
+                for c in all_sorted:
+                    code = c["code"]
+                    conn.execute(
+                        "INSERT INTO portfolio_targets (date, code, target_weight, target_size) VALUES (?,?,?,?)",
+                        [target_date, code, weights.get(code, 0.0), sizes.get(code, 0)],
                     )
-                    current_positions = {r[0]: int(r[1]) for r in pos_cur.fetchall()}
-                    current_positions = merge_current_positions(
-                        current_positions, manual_qty, codes
+
+                conn.execute(
+                    "DELETE FROM signal_queue WHERE date = ? AND status = 'pending'",
+                    [target_date],
+                )
+                for code, shares in sizes.items():
+                    if shares <= 0:
+                        continue
+                    price = close_prices.get(code)
+                    if price is None:
+                        logger.warning("価格不明のため銘柄 %s をスキップします。", code)
+                        continue
+                    conn.execute(
+                        """INSERT INTO signal_queue
+                           (signal_id, date, code, side, size, order_type, price, status)
+                           VALUES (?, ?, ?, 'buy', ?, 'market', ?, 'pending')""",
+                        [str(uuid.uuid4()), target_date, code, shares, price],
                     )
+                    inserted += 1
 
-                    sizes = calc_position_sizes(
-                        weights=weights,
-                        candidates=candidates,
-                        portfolio_value=portfolio_value,
-                        available_cash=available_cash,
-                        current_positions=current_positions,
-                        open_prices=close_prices,
-                    )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
 
-                    conn.execute("BEGIN")
-                    try:
-                        conn.execute(
-                            "DELETE FROM portfolio_targets WHERE date = ?",
-                            [target_date],
-                        )
-                        for code, weight in weights.items():
-                            size = sizes.get(code, 0)
-                            conn.execute(
-                                "INSERT INTO portfolio_targets (date, code, target_weight, target_size) VALUES (?,?,?,?)",
-                                [target_date, code, weight, size],
-                            )
-
-                        conn.execute(
-                            "DELETE FROM signal_queue WHERE date = ? AND status = 'pending'",
-                            [target_date],
-                        )
-                        for code, shares in sizes.items():
-                            if shares <= 0:
-                                continue
-                            price = close_prices.get(code)
-                            if price is None:
-                                logger.warning("価格不明のため銘柄 %s をスキップします。", code)
-                                continue
-                            conn.execute(
-                                """INSERT INTO signal_queue
-                                   (signal_id, date, code, side, size, order_type, price, status)
-                                   VALUES (?, ?, ?, 'buy', ?, 'market', ?, 'pending')""",
-                                [str(uuid.uuid4()), target_date, code, shares, price],
-                            )
-                            inserted += 1
-
-                        conn.execute("COMMIT")
-                    except Exception:
-                        conn.execute("ROLLBACK")
-                        raise
-
-                    _updated_rows["signal_queue"] = inserted
-                    logger.info(
-                        "ポートフォリオ構築完了: %d 銘柄を signal_queue に挿入 (date=%s)",
-                        inserted,
-                        target_date,
-                    )
+            _updated_rows["signal_queue"] = inserted
+            logger.info(
+                "ポートフォリオ構築完了: %d 銘柄を signal_queue に挿入 (date=%s)",
+                inserted,
+                target_date,
+            )
 
         # LINE 通知（失敗しても例外を伝播させない）
         try:
