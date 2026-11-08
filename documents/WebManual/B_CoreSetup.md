@@ -322,7 +322,7 @@ powershell -File scripts\remove_task_scheduler.ps1
 | 21:10 | 手動注文候補レポート（夜） | `scripts/run_manual_order_report.py --phase evening` | Core | 実行 |
 | 21:15 | 夜間バッチ結果レポート | `scripts/run_night_batch_report.py` | Core | 実行 |
 
-> ℹ️ 方式 B（個別タスク）でも同じ時刻で登録されます（Addon は `.env` フラグが `true` のときのみ）。EDINET 収集（`run_edinet_collection.py`）と開示分類（`run_disclosure_classification.py`）は、どちらの方式でもスケジュール登録されません。
+> ℹ️ 方式 B（個別タスク）でも同じ時刻で登録されます（Addon は `.env` フラグが `true` のときのみ）。開示分類（`run_disclosure_classification.py`）は 15:45（`ENABLE_TDNET=true` のとき）、EDINET 収集（`run_edinet_collection.py`）は 17:45（`ENABLE_EDINET=true` のとき）に、どちらの方式でも登録されます。
 
 > ℹ️ **スケジュール設計の根拠**: J-Quants の日足データは東証引け（15:30）直後ではなく 16:30〜17:00 頃に公開されます。17:30 に data_update を実行することで当日データを確実に取得してから feature_gen（18:30）を起動できます。
 
@@ -402,7 +402,7 @@ ENABLE_TDNET=true
 | 時刻 | 処理 | 保存先 | スケジュール |
 |---|---|---|---|
 | 15:35 | TDnet から当日の開示一覧を取得・保存（`run_tdnet_collection.py`） | `raw_disclosures` | 自動実行 |
-| — | 開示タイトルを分類してイベントスコアを付与（`run_disclosure_classification.py`） | `disclosure_events` | **スケジュール未登録**（必要なら手動実行） |
+| — | 開示タイトルを分類してイベントスコアを付与（`run_disclosure_classification.py`） | `disclosure_events` | 15:45（`ENABLE_TDNET=true` のとき） |
 
 > ℹ️ `ENABLE_TDNET=false`（デフォルト）の場合、両ジョブは即座にスキップされ Core 機能に影響しません。
 
@@ -426,7 +426,7 @@ EDINET_API_KEY=your_subscription_key
 
 | 時刻 | 処理 | 保存先 | スケジュール |
 |---|---|---|---|
-| — | EDINET から当日の法定開示一覧を取得・保存（`run_edinet_collection.py`） | `raw_disclosures`（source='edinet'） | **スケジュール未登録**（スケジューラーデーモン・個別タスクのどちらにも登録されていない。必要なら手動実行） |
+| — | EDINET から当日の法定開示一覧を取得・保存（`run_edinet_collection.py`） | `raw_disclosures`（source='edinet'） | 17:45（`ENABLE_EDINET=true` のとき） |
 
 **収集対象書類種別:**
 - 有価証券報告書（120）

@@ -356,7 +356,7 @@ Paper での E2E 検証は [C_PaperTrading.md](./C_PaperTrading.md) と `documen
 
 個別タスク方式（`scripts\setup_task_scheduler.ps1` で `KabuSys_DataUpdate` などを個別登録）は従来方式で、現在は使っていません。個別タスク方式は `ENABLE_AUTO_EXECUTION` を参照しないため、手動運用中に使うと 08:30 の Execution 起動なども登録されます。
 
-> EDINET 法定開示収集（`run_edinet_collection.py`）と開示分類（`run_disclosure_classification.py`）は、どちらの方式でもスケジュール登録されていません。必要な場合は手動で実行します。
+> 開示分類（`run_disclosure_classification.py`）は 15:45、EDINET 法定開示収集（`run_edinet_collection.py`）は 17:45 に、それぞれ `ENABLE_TDNET` / `ENABLE_EDINET` が `true` のときに実行されます（研究用のデータ蓄積。現状の戦略・AI 分析では未使用）。
 
 ---
 
