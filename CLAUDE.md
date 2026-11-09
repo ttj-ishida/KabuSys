@@ -64,7 +64,8 @@ KabuSys/
 | 運用環境 | `C:\Projects\KabuSys` | スケジューラー・運用 DB（`data\kabusys.duckdb`）・ログを置く。main を取り込んで使うだけ |
 
 - 運用環境ではブランチの切り替え・コードの編集・テスト実行をしない（テストのログが運用ログに混ざるため）。
-- 運用環境の更新は、PR を main にマージした後に次の手順で行う。
+- 運用環境では `git clean` を実行しない（運用 DB・ログ・`.env` は git 管理外のため消えてしまう）。
+- 運用環境の更新は、PR を main にマージした後に次の手順で行う。スケジューラー（`KabuSys_Scheduler`）が動いているときは、先に止めてから更新し、終わったら再開する。
   ```bash
   cd C:\Projects\KabuSys
   git pull --ff-only
