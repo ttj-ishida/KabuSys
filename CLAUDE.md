@@ -54,6 +54,26 @@ KabuSys/
   - PEP 8 に準拠。`ruff`（`ruff check` と `ruff format`。バージョンは constraints.txt で固定）でフォーマットと Lint を徹底する。
   - 型ヒント(Type hints)を積極的に活用し、`mypy`等での静的解析を前提とした堅牢な実装を心がける。
 
+### 開発環境と運用環境の使い分け
+
+同じ PC 上に 2 つのクローンを置き、役割を分けて管理する。
+
+| 環境 | 場所 | 用途 |
+|---|---|---|
+| 開発環境 | `C:\Users\tetsu\Projects\KabuSys` | 開発・テスト・ブランチ作業・PR 作成はすべてここで行う |
+| 運用環境 | `C:\Projects\KabuSys` | スケジューラー・運用 DB（`data\kabusys.duckdb`）・ログを置く。main を取り込んで使うだけ |
+
+- 運用環境ではブランチの切り替え・コードの編集・テスト実行をしない（テストのログが運用ログに混ざるため）。
+- 運用環境では `git clean` を実行しない（運用 DB・ログ・`.env` は git 管理外のため消えてしまう）。
+- 運用環境の更新は、PR を main にマージした後に次の手順で行う。スケジューラー（`KabuSys_Scheduler`）が動いているときは、先に止めてから更新し、終わったら再開する。
+  ```bash
+  cd C:\Projects\KabuSys
+  git pull --ff-only
+  .venv\Scripts\python.exe -m pip install -r requirements.txt -c constraints.txt
+  ```
+- 運用 DB は、分析やバックテストで使うときは読み取り専用（`duckdb.connect(..., read_only=True)`）で開く。書き込みが必要な作業（データ移行など）は、事前にバックアップを取ってから行う。
+- 開発環境の `data\` にある DB は古い時点のコピーで、検証用に残している。運用判断には使わない。
+
 ## 🌿 Git & Repository Workflow
 
 - **Branching Strategy**: シンプルな GitHub Flow または Git Flow をベースとする。
