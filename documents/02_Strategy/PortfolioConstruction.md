@@ -158,7 +158,7 @@ alloc_i  = 総資産 × weight_i × max_utilization（0.70）
 | パラメータ | デフォルト | 説明 |
 |------------|------------|------|
 | max_position_pct | 0.10 | 1銘柄への投資上限（総資産の10%） |
-| max_utilization | 0.70 | 全ポジション合計の投資上限（総資産の70%） |
+| max_utilization | 0.70 | 全ポジション合計の投資上限（総資産の70%）。保有全体にかかる（7.5 参照） |
 | lot_size | 100 | 単元株数のデフォルト値。`lot_map` が `None` または当該銘柄の指定がない場合に適用される。 |
 | lot_map | None | 銘柄別の単元株数 `{code: lot_size}`。指定した銘柄はこの値を使用し、未指定銘柄は `lot_size` にフォールバックする。`None` の場合は全銘柄に `lot_size` を適用する（Issue #291）。 |
 
@@ -178,6 +178,38 @@ calc_position_sizes(
 `lot_map` が渡されない場合（`None`）は従来どおり全銘柄に `lot_size` を適用する。
 
 実装モジュール: `src/kabusys/portfolio/position_sizing.py`
+
+## 7.5 保有全体の上限（Issue #437）
+
+保有銘柄数（`max_positions`）と投資割合（`max_utilization`）は、**保有全体**にかかる上限である。
+`apply_holding_limits()`（`portfolio_builder.py`）が、株数計算の前に次を行う。
+
+- 保有銘柄数: 保有中の銘柄（翌日売却予定を除く）を数え、空き枠（`max_positions − 保有数`）の数だけ新規銘柄を候補に残す。保有中の銘柄の候補（買い増し）は枠を使わない。
+- 投資割合: 使える現金を `総資産 × max_utilization − 保有時価` 以下にする（0 未満にはしない）。
+- 保有銘柄の価格が分からない場合は、投資額を見積もれないため新規の買付をすべて見送る（保守側）。
+
+以前は `max_positions` が「その日の新規候補数」、`max_utilization` が「その日の新規買付額」にしかかかっておらず、
+保有が設定を超えて増えていた（元手 1,000 万円・既定設定のバックテストで保有が平均 18〜22 銘柄）。
+
+### 設定ファイル
+
+本番の夜間バッチ（`scripts/run_portfolio_construction.py`）とバックテスト CLI の既定値は、
+`config/strategy_config.yaml` の `portfolio` セクションから読む（`load_portfolio_config()`）。
+
+| キー | 現在値 | 説明 |
+|---|---|---|
+| allocation_method | equal | 配分方式（equal / score / risk_based） |
+| max_positions | 3 | 保有銘柄数の上限 |
+| max_position_pct | 0.34 | 1 銘柄の上限（総資産比） |
+| max_utilization | 0.50 | 保有全体の投資割合の上限（総資産比） |
+| risk_pct | 0.005 | risk_based 時の 1 トレード許容リスク率 |
+
+現在値は元手 100 万円向け（Issue #437、2026-11-09 決定）。risk_based（損切り幅から株数を決める方式）では、
+100 株単位の制約から株価が数百円の銘柄しか買えなかったため、均等配分・少数銘柄に変更した。
+`config/risk_config.yaml`（執行時のリスクチェック）の 1 銘柄上限・投資割合の上限も同じ値にそろえる。
+
+株数が 0 になった BUY シグナルは `portfolio_targets` に `target_size = 0` で残り、
+手動注文候補レポートの「株数 0 の BUY シグナル」に表示される。
 
 ---
 
@@ -351,9 +383,11 @@ adjusted_score =
 ```
 generate_signals() → signals テーブル
       ↓
-select_candidates()        # 銘柄選定（上位 max_positions 銘柄）
+select_candidates()        # スコア順に並べる
       ↓
-apply_sector_cap()         # セクター集中チェック
+apply_sector_cap()         # セクター集中チェック（バックテスト）
+      ↓
+apply_holding_limits()     # 保有全体の上限（保有銘柄数・投資割合）
       ↓
 calc_*_weights()           # 配分重み計算（allocation_method に応じて選択）
       ↓

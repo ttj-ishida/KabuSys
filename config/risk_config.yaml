@@ -1,8 +1,8 @@
 # risk_config.yaml — リスク管理設定
 # キー名は RiskConfig データクラスのフィールド名に対応する
 risk:
-  max_position_pct: 0.22           # 1銘柄最大投資比率（総資産比）— W1_08 採用設定
-  max_utilization: 0.40            # 全ポジション投下上限 — W1_08 採用設定（Group R: 40%）
+  max_position_pct: 0.34           # 1銘柄最大投資比率（総資産比）— strategy_config.yaml portfolio と揃える（#437）
+  max_utilization: 0.50            # 全ポジション投下上限 — strategy_config.yaml portfolio と揃える（#437）
   rate_limit_per_sec: 5            # API レート制限（毎秒）
   circuit_breaker_errors: 10       # サーキットブレーカー発動エラー数上限
   circuit_breaker_window_sec: 60   # サーキットブレーカーカウントウィンドウ（秒）

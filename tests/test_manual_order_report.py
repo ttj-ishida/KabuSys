@@ -118,6 +118,7 @@ def _collect(c, phase="evening", report_date=D_SIG, **kw):
         portfolio_value=10_000_000,
         gap_thresholds=GAPS,
         now=NOW,
+        max_position_pct=0.10,
     )
     params.setdefault("job_runs_dir", _NO_JOB_RUNS)
     params.update(kw)
@@ -779,3 +780,66 @@ def test_evening_stale_kept_when_batch_missing(conn, tmp_path):
     )
     assert r.status == "BUY_SKIPPED"
     assert [b.code for b in r.skipped_buys] == ["7203", "6758"]
+
+
+# --- #437: 株数 0 になった BUY シグナルの表示・1 銘柄上限は設定ファイルから ---
+
+
+def _add_unsized_signal(conn) -> None:
+    conn.execute("INSERT INTO stocks (code, name) VALUES ('4502', '武田薬品')")
+    conn.execute(
+        "INSERT INTO signals (date, code, side, score, signal_rank) VALUES (?, '4502', 'buy', 0.6, 3)",
+        [D_SIG],
+    )
+    conn.execute(
+        "INSERT INTO prices_daily (date, code, open, high, low, close, volume) "
+        "VALUES (?, '4502', 4400, 4400, 4400, 4400, 1000)",
+        [D_SIG],
+    )
+
+
+def test_unsized_buy_signals_listed(conn):
+    _add_unsized_signal(conn)
+    r = _collect(conn)
+    assert [b.code for b in r.buy_candidates] == ["7203", "6758"]
+    assert [b.code for b in r.unsized_buys] == ["4502"]
+    u = r.unsized_buys[0]
+    assert u.size == 0 and u.ref_price == 4400 and u.rank == 3 and u.amount is None
+    assert u.skip_reason and "株数 0" in u.skip_reason
+    # 見送り（skipped_buys）やステータスには影響しない
+    assert r.skipped_buys == []
+    assert r.status == "OK"
+    md = format_markdown(r)
+    assert "## 株数 0 の BUY シグナル（1 件）" in md
+    assert "武田薬品" in md
+    assert "株数 0 で見送り 1件: 4502" in format_line_message(r)
+    assert "株数 0 1 件" in format_cli_summary(r)
+
+
+def test_unsized_buys_cleared_on_zero_signal_day(conn, tmp_path):
+    _add_unsized_signal(conn)
+    _write_batch(tmp_path, D_NEXT)
+    r = _collect(conn, report_date=D_NEXT, job_runs_dir=tmp_path)
+    assert r.unsized_buys == []
+
+
+def test_no_missing_queue_warning_when_all_buys_unsized(conn):
+    conn.execute("DELETE FROM signal_queue WHERE date = DATE '2026-10-13'")
+    conn.execute(
+        "INSERT INTO portfolio_targets (date, code, target_weight, target_size) VALUES "
+        "(?, '7203', 0.5, 0), (?, '6758', 0.5, 0)",
+        [D_SIG, D_SIG],
+    )
+    r = _collect(conn)
+    assert not any("portfolio_construction" in w for w in r.warnings)
+    assert [b.code for b in r.unsized_buys] == ["7203", "6758"]
+
+
+def test_max_position_pct_defaults_to_strategy_config(conn):
+    with patch(
+        "kabusys.operations.manual_order_report.load_portfolio_config",
+        return_value={"max_position_pct": 0.34},
+    ):
+        r = _collect(conn, max_position_pct=None)
+    assert r.max_position_pct == 0.34
+    assert r.max_position_amount == pytest.approx(1_035_000 * 0.34)

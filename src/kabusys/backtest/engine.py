@@ -21,6 +21,7 @@ from kabusys.backtest.metrics import BacktestMetrics, calc_metrics
 from kabusys.backtest.simulator import DailySnapshot, PortfolioSimulator, TradeRecord
 from kabusys.core.interfaces import build_regime_provider
 from kabusys.portfolio import (
+    apply_holding_limits,
     apply_sector_cap,
     calc_equal_weights,
     calc_position_sizes,
@@ -466,8 +467,8 @@ def run_backtest(
         slippage_rate:     スリッページ率（デフォルト 0.1%）。
         commission_rate:   手数料率（デフォルト 0.055%）。
         max_position_pct:  1銘柄あたりの最大ポートフォリオ比率（デフォルト 10%）。
-        max_utilization:   全ポジション投下上限（デフォルト 70%）。
-        max_positions:     最大保有銘柄数（デフォルト 10）。
+        max_utilization:   保有全体の投資割合の上限（総資産比、デフォルト 70%）。
+        max_positions:     保有銘柄数の上限（保有全体、デフォルト 10）。
         allocation_method: 資金配分方式: "equal" | "score" | "risk_based"（デフォルト）。
         risk_pct:          1トレード許容リスク率（risk_based 時、デフォルト 0.5%）。
         stop_loss_pct:     損切り率（株数計算用、risk_based 時、デフォルト 8%）。
@@ -761,9 +762,7 @@ def run_backtest(
                             max_utilization,
                         )
                     )
-            available_cash = min(simulator.cash * multiplier, current_pv * effective_util)
-
-            # セクター制限を全候補に先行適用し、除外後に上位 max_positions を選ぶ
+            # セクター制限を全候補に先行適用し、除外後に保有全体の上限を反映する
             # （従来の select → filter では除外後の補充がなかった）
             sell_codes = {s["code"] for s in sell_signals}
             all_sorted = select_candidates(buy_signals, max_positions=len(buy_signals))
@@ -775,7 +774,18 @@ def run_backtest(
                 close_prices,
                 sell_codes=sell_codes,
             )
-            candidates = filtered[:max_positions]
+            # 保有銘柄数・投資割合の上限は保有全体にかける（Issue #437）。
+            # 以前は当日の新規候補数と当日の新規買付額にしか掛かっていなかった。
+            candidates, available_cash = apply_holding_limits(
+                filtered,
+                simulator.positions,
+                close_prices,
+                current_pv,
+                simulator.cash * multiplier,
+                max_positions,
+                effective_util,
+                sell_codes=sell_codes,
+            )
 
             if allocation_method == "equal":
                 weights = calc_equal_weights(candidates)

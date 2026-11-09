@@ -54,6 +54,15 @@ regime:
   topix_size_multiplier_strong_bear: 1.0
 
 portfolio:
-  # 最大保有銘柄数（select_candidates() に渡される上限値、1 以上の整数）
-  # W1_08 採用設定（Group R: util=40%, pos=7）
-  max_positions: 7
+  # 資金配分（Issue #437: 元手 100 万円向けに C-50 を採用。2026-11-09 ユーザー判断）
+  # 上限はすべて保有全体にかかる（run_portfolio_construction / バックテスト共通）
+  # 配分方式: equal（均等）| score（スコア比例）| risk_based（損切り幅から株数を決める）
+  allocation_method: equal
+  # 保有銘柄数の上限（1 以上の整数）
+  max_positions: 3
+  # 1 銘柄の上限（総資産比）
+  max_position_pct: 0.34
+  # 保有全体の投資割合の上限（総資産比）
+  max_utilization: 0.50
+  # risk_based 時の 1 トレード許容リスク率（equal では使わない）
+  risk_pct: 0.005
