@@ -146,9 +146,9 @@ FOMC・日銀決定会合・米CPI等の主要イベント前後はボラティ�
 
 | 項目                         | 設定値 | 設定キー (`risk_config.yaml`) |
 | ---------------------------- | ------ | ----------------------------- |
-| 1銘柄最大投資比率            | 20%    | `risk.max_position_pct`       |
-| 全ポジション投下上限         | 80%    | `risk.max_utilization`        |
-| キャッシュ最低比率           | 20%    | （`max_utilization` の裏面）  |
+| 1銘柄最大投資比率            | 10%    | `risk.max_position_pct`       |
+| 全ポジション投下上限         | 70%    | `risk.max_utilization`        |
+| キャッシュ最低比率           | 30%    | （`max_utilization` の裏面）  |
 | キルスイッチ発動DD閾値       | 20%    | `risk.max_drawdown`           |
 | API レート制限（毎秒）       | 5      | `risk.rate_limit_per_sec`     |
 | CB発動エラー数上限           | 10     | `risk.circuit_breaker_errors` |

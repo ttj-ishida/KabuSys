@@ -310,9 +310,9 @@ def main(argv: list[str] | None = None) -> None:
             use_ma200_filter=True,
             adaptive_threshold_vol_regime=True,
             topix_vol_low_threshold=0.12,
-            dynamic_trailing_stop=True,
-            trail_stage2_mult=1.8,
-            trail_stage3_mult=1.5,
+            # Issue #430: 段階式トレーリングストップをやめ、strategy_config.yaml の
+            # trailing_stop_atr_mult（2.5）で固定する
+            dynamic_trailing_stop=False,
             entry_blocked=entry_blocked,
             block_entries_by_regime=False,
             sqlite_conn=sqlite_conn,
