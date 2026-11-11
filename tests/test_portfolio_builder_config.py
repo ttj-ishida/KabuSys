@@ -189,14 +189,14 @@ class TestLoadPortfolioSizingConfig:
             assert r[key] == DEFAULT_PORTFOLIO_CONFIG[key]
 
     def test_repo_config_is_valid(self):
-        """リポジトリの strategy_config.yaml は C-50（均等・3 銘柄・34%・50%）。"""
+        """リポジトリの strategy_config.yaml は案 A（均等・7 銘柄・10%・70%、Issue #430）。"""
         from kabusys.portfolio.portfolio_builder import load_portfolio_config
 
         r = load_portfolio_config()
         assert r["allocation_method"] == "equal"
-        assert r["max_positions"] == 3
-        assert r["max_position_pct"] == 0.34
-        assert r["max_utilization"] == 0.5
+        assert r["max_positions"] == 7
+        assert r["max_position_pct"] == 0.10
+        assert r["max_utilization"] == 0.70
 
 
 class TestApplyHoldingLimits:

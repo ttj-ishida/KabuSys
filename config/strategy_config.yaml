@@ -16,9 +16,11 @@ strategy:
   # 最低保有営業日数（スコア低下による SELL を抑制する日数）
   min_holding_days: 5
   # 最大保有営業日数（これを超えると time_exit SELL を発動）
-  max_holding_days: 60
-  # トレーリングストップの ATR 乗数
-  trailing_stop_atr_mult: 2.0
+  # Issue #430: 60 → 120（2026-11-11 ユーザー判断。案 A）
+  max_holding_days: 120
+  # トレーリングストップの ATR 乗数（最高終値 − N×ATR20 を終値が下回ったら SELL）
+  # Issue #430: 段階式（2.0→1.8→1.5）をやめ 2.5 で固定（2026-11-11 ユーザー判断。案 A）
+  trailing_stop_atr_mult: 2.5
   # 同一銘柄の再エントリー禁止期間（営業日数）
   reentry_cooldown_days: 5
   # ギャップアップ閾値（この比率を超えた寄り高は BUY 抑制）
@@ -54,15 +56,16 @@ regime:
   topix_size_multiplier_strong_bear: 1.0
 
 portfolio:
-  # 資金配分（Issue #437: 元手 100 万円向けに C-50 を採用。2026-11-09 ユーザー判断）
+  # 資金配分（Issue #430: 7 銘柄・1 銘柄 10%・投資割合 70% に変更。2026-11-11 ユーザー判断。案 A）
+  # 旧設定は Issue #437 の 3 銘柄・34%・50%
   # 上限はすべて保有全体にかかる（run_portfolio_construction / バックテスト共通）
   # 配分方式: equal（均等）| score（スコア比例）| risk_based（損切り幅から株数を決める）
   allocation_method: equal
   # 保有銘柄数の上限（1 以上の整数）
-  max_positions: 3
+  max_positions: 7
   # 1 銘柄の上限（総資産比）
-  max_position_pct: 0.34
+  max_position_pct: 0.10
   # 保有全体の投資割合の上限（総資産比）
-  max_utilization: 0.50
+  max_utilization: 0.70
   # risk_based 時の 1 トレード許容リスク率（equal では使わない）
   risk_pct: 0.005
