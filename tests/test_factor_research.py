@@ -434,6 +434,180 @@ class TestCalcValue:
         assert result[0]["code"] == "3005"
 
 
+def _insert_raw_prices(conn, code: str, rows: list[tuple]):
+    """(date, close, adj_factor) を raw_prices と prices_daily の両方に入れる。"""
+    for d, close, f in rows:
+        conn.execute(
+            "INSERT INTO raw_prices (date, code, open, high, low, close, volume, turnover, "
+            "adj_factor) VALUES (?, ?, ?, ?, ?, ?, 1000, ?, ?)",
+            [d, code, close, close, close, close, close * 1000, f],
+        )
+        conn.execute(
+            "INSERT INTO prices_daily (date, code, open, high, low, close, volume, turnover) "
+            "VALUES (?, ?, ?, ?, ?, ?, 1000, ?)",
+            [d, code, close, close, close, close, close * 1000],
+        )
+
+
+def _value_row(conn, code: str, d: date) -> dict:
+    return next(r for r in calc_value(conn, d) if r["code"] == code)
+
+
+class TestCalcValueSplitAdjustment:
+    """決算発表日（配当は権利落ち日）より後の株式分割で 1 株あたり値を補正する（#441）。"""
+
+    def test_per_is_continuous_across_split(self, db):
+        """1:2 分割の前後で株価が半分になっても PER は変わらない。"""
+        _insert_financials(db, [("5001", date(2024, 5, 10), "FY", 0, 0, 0, 100.0, 0.1)])
+        _insert_raw_prices(
+            db,
+            "5001",
+            [(date(2024, 6, 3), 2000.0, 1.0), (date(2024, 6, 4), 1000.0, 0.5)],
+        )
+        before = _value_row(db, "5001", date(2024, 6, 3))["per"]
+        after = _value_row(db, "5001", date(2024, 6, 4))["per"]
+        assert before == pytest.approx(20.0)
+        assert after == pytest.approx(20.0)
+
+    def test_split_after_target_date_is_not_used(self, db):
+        """基準日より後の分割係数は使わない（ルックアヘッド防止）。"""
+        _insert_financials(db, [("5002", date(2024, 5, 10), "FY", 0, 0, 0, 100.0, 0.1)])
+        _insert_raw_prices(
+            db,
+            "5002",
+            [(date(2024, 6, 3), 2000.0, 1.0), (date(2024, 6, 4), 1000.0, 0.5)],
+        )
+        assert _value_row(db, "5002", date(2024, 6, 3))["per"] == pytest.approx(20.0)
+
+    def test_split_before_report_date_is_not_applied(self, db):
+        """決算発表日以前の分割は EPS にすでに反映済みとみなし、補正しない。"""
+        _insert_raw_prices(
+            db,
+            "5003",
+            [(date(2024, 5, 1), 1000.0, 0.5), (date(2024, 6, 3), 1000.0, 1.0)],
+        )
+        _insert_financials(db, [("5003", date(2024, 5, 10), "FY", 0, 0, 0, 50.0, 0.1)])
+        assert _value_row(db, "5003", date(2024, 6, 3))["per"] == pytest.approx(20.0)
+
+    def test_report_before_effective_date_is_adjusted(self, db):
+        """権利落ち日当日〜効力発生日前の決算は分割前の基準なので補正する。"""
+        # 2024-06-04（火）権利落ち → 効力発生日 2024-06-06（木）
+        _insert_raw_prices(
+            db,
+            "5007",
+            [(date(2024, 6, 4), 1000.0, 0.5), (date(2024, 6, 10), 1000.0, 1.0)],
+        )
+        _insert_financials(db, [("5007", date(2024, 6, 5), "FY", 0, 0, 0, 100.0, 0.1)])
+        assert _value_row(db, "5007", date(2024, 6, 10))["per"] == pytest.approx(20.0)
+
+    def test_report_on_or_after_effective_date_is_not_adjusted(self, db):
+        """効力発生日以降の決算は分割後の基準で開示されるので補正しない。"""
+        # 2024-06-06（木）権利落ち → 週末をまたいで効力発生日 2024-06-10（月）
+        _insert_raw_prices(
+            db,
+            "5008",
+            [(date(2024, 6, 6), 1000.0, 0.5), (date(2024, 6, 12), 1000.0, 1.0)],
+        )
+        _insert_financials(db, [("5008", date(2024, 6, 10), "FY", 0, 0, 0, 50.0, 0.1)])
+        assert _value_row(db, "5008", date(2024, 6, 12))["per"] == pytest.approx(20.0)
+
+    def test_dividend_with_same_ex_date_as_split_is_adjusted(self, db):
+        """配当と分割の権利落ち日が同じなら、配当は分割前の株数に対するものとして補正する。"""
+        db.execute(
+            "INSERT INTO dividends (code, pub_date, ref_no, ex_date, div_rate) "
+            "VALUES ('5009', DATE '2024-02-01', 'r1', DATE '2024-03-27', 40.0)"
+        )
+        _insert_raw_prices(
+            db,
+            "5009",
+            [(date(2024, 3, 27), 500.0, 0.5), (date(2024, 4, 1), 500.0, 1.0)],
+        )
+        assert _value_row(db, "5009", date(2024, 4, 1))["div_yield"] == pytest.approx(4.0)
+
+    def test_dividend_ignores_split_after_target_date(self, db):
+        """配当でも基準日より後の分割係数は使わない（ルックアヘッド防止）。"""
+        db.execute(
+            "INSERT INTO dividends (code, pub_date, ref_no, ex_date, div_rate) "
+            "VALUES ('5010', DATE '2024-02-01', 'r1', DATE '2024-03-27', 40.0)"
+        )
+        _insert_raw_prices(
+            db,
+            "5010",
+            [(date(2024, 6, 3), 1000.0, 1.0), (date(2024, 6, 4), 500.0, 0.5)],
+        )
+        assert _value_row(db, "5010", date(2024, 6, 3))["div_yield"] == pytest.approx(4.0)
+
+    def test_reverse_split_after_report_raises_eps(self, db):
+        """決算後の株式併合（係数 > 1）でも PER・配当利回りが途切れない。"""
+        _insert_financials(db, [("5011", date(2024, 5, 10), "FY", 0, 0, 0, 10.0, 0.1)])
+        db.execute(
+            "INSERT INTO dividends (code, pub_date, ref_no, ex_date, div_rate) "
+            "VALUES ('5011', DATE '2024-02-01', 'r1', DATE '2024-03-27', 4.0)"
+        )
+        _insert_raw_prices(
+            db,
+            "5011",
+            [(date(2024, 6, 3), 200.0, 1.0), (date(2024, 6, 4), 2000.0, 10.0)],  # 10:1 併合
+        )
+        before = _value_row(db, "5011", date(2024, 6, 3))
+        after = _value_row(db, "5011", date(2024, 6, 4))
+        assert before["per"] == pytest.approx(20.0)
+        assert after["per"] == pytest.approx(20.0)
+        assert before["div_yield"] == pytest.approx(2.0)
+        assert after["div_yield"] == pytest.approx(2.0)
+
+    def test_multiple_splits_are_compounded(self, db):
+        """決算後に複数回分割した場合は係数の積で補正する。"""
+        _insert_financials(db, [("5004", date(2024, 5, 10), "FY", 0, 0, 0, 600.0, 0.1)])
+        _insert_raw_prices(
+            db,
+            "5004",
+            [
+                (date(2024, 6, 3), 2000.0, 0.5),
+                (date(2024, 7, 1), 666.6667, 0.333333),  # 1:3（スナップで 1/3 とみなす）
+            ],
+        )
+        # EPS 600 × 1/2 × 1/3 = 100
+        assert _value_row(db, "5004", date(2024, 7, 1))["per"] == pytest.approx(6.666667)
+
+    def test_ttm_components_are_adjusted_by_their_own_report_dates(self, db):
+        """TTM の各要素はそれぞれの発表日以降の分割で補正してから合算する。"""
+        _insert_financials(
+            db,
+            [
+                ("5005", date(2023, 8, 10), "1Q", 0, 0, 0, 30.0, 0.1),  # 前年同期（分割前）
+                ("5005", date(2024, 5, 10), "FY", 0, 0, 0, 120.0, 0.1),  # 通期（分割前）
+                ("5005", date(2024, 8, 9), "1Q", 0, 0, 0, 20.0, 0.1),  # 最新（分割後の基準）
+            ],
+        )
+        _insert_raw_prices(
+            db,
+            "5005",
+            [(date(2024, 6, 3), 1300.0, 0.5), (date(2024, 8, 20), 1300.0, 1.0)],
+        )
+        # TTM = 20 + 120×0.5 − 30×0.5 = 65 → PER = 1300 / 65 = 20
+        assert _value_row(db, "5005", date(2024, 8, 20))["per"] == pytest.approx(20.0)
+
+    def test_pbr_and_div_yield_are_adjusted(self, db):
+        """BPS（発表日基準）と 1 株配当（権利落ち日基準）も分割で補正する。"""
+        _insert_financials(db, [("5006", date(2024, 5, 10), "FY", 0, 0, 0, 100.0, 0.1, 1000.0)])
+        db.execute(
+            "INSERT INTO dividends (code, pub_date, ref_no, ex_date, div_rate) "
+            "VALUES ('5006', DATE '2024-02-01', 'r1', DATE '2024-03-28', 40.0)"
+        )
+        _insert_raw_prices(
+            db,
+            "5006",
+            [(date(2024, 6, 3), 1000.0, 1.0), (date(2024, 6, 4), 500.0, 0.5)],
+        )
+        before = _value_row(db, "5006", date(2024, 6, 3))
+        after = _value_row(db, "5006", date(2024, 6, 4))
+        assert before["pbr"] == pytest.approx(1.0)
+        assert after["pbr"] == pytest.approx(1.0)
+        assert before["div_yield"] == pytest.approx(4.0)
+        assert after["div_yield"] == pytest.approx(4.0)
+
+
 # ---------------------------------------------------------------------------
 # zscore_normalize
 # ---------------------------------------------------------------------------

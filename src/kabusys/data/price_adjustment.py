@@ -52,6 +52,9 @@ _FACTOR_EXPR = f"""
     END
 """
 
+# 他モジュール（バリュー指標の 1 株あたり値の補正。#441）から使う公開名
+SNAPPED_FACTOR_EXPR = _FACTOR_EXPR
+
 
 def snap_factor(f: float | None) -> float:
     """調整係数を正規化する（_FACTOR_EXPR と同じ規則。手動保有の換算で使う）。
