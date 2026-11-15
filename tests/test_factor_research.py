@@ -524,6 +524,19 @@ class TestCalcValueSplitAdjustment:
         )
         assert _value_row(db, "5009", date(2024, 4, 1))["div_yield"] == pytest.approx(4.0)
 
+    def test_dividend_ignores_split_after_target_date(self, db):
+        """配当でも基準日より後の分割係数は使わない（ルックアヘッド防止）。"""
+        db.execute(
+            "INSERT INTO dividends (code, pub_date, ref_no, ex_date, div_rate) "
+            "VALUES ('5010', DATE '2024-02-01', 'r1', DATE '2024-03-27', 40.0)"
+        )
+        _insert_raw_prices(
+            db,
+            "5010",
+            [(date(2024, 6, 3), 1000.0, 1.0), (date(2024, 6, 4), 500.0, 0.5)],
+        )
+        assert _value_row(db, "5010", date(2024, 6, 3))["div_yield"] == pytest.approx(4.0)
+
     def test_multiple_splits_are_compounded(self, db):
         """決算後に複数回分割した場合は係数の積で補正する。"""
         _insert_financials(db, [("5004", date(2024, 5, 10), "FY", 0, 0, 0, 600.0, 0.1)])
