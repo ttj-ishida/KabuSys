@@ -1,0 +1,12 @@
+{
+  "job_name": "data_update_job",
+  "status": "failed",
+  "started_at": "2026-11-15T06:16:10.845855+00:00",
+  "finished_at": "2026-11-15T06:16:10.851576+00:00",
+  "duration_sec": 0.005721,
+  "updated_rows": {},
+  "warnings": [],
+  "errors": [
+    "fail"
+  ]
+}

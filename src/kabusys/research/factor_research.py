@@ -25,6 +25,8 @@ from typing import Any
 
 import duckdb
 
+from kabusys.data.price_adjustment import NONTRIVIAL_FACTOR_PRED, SNAPPED_FACTOR_EXPR
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -267,6 +269,16 @@ def calc_value(
       - pbr       : 株価 / BPS（BPS が 0 または欠損の場合は None）
       - div_yield : 直近12ヶ月の配当合計 / 株価 × 100（配当なしの場合は None）
 
+    株価は当日の実際の値（分割後の基準）なので、1 株あたりの財務値は当日と同じ基準に
+    そろえる（#441）。target_date 以前の ``raw_prices.adj_factor``（日付は分割の権利落ち日）
+    のうち、次の条件に合うものの積を掛ける（例: 1:10 分割なら × 0.1）。target_date より
+    後の係数は使わない（ルックアヘッド防止）。
+      - EPS・BPS: 分割の効力発生日が決算発表日より後のもの。効力発生日は権利落ち日の
+        2 営業日後（基準日の翌営業日）で、平日だけ数えて近似する（祝日は考慮しない）。
+        効力発生日以降に出た決算は分割後の基準で開示されるため補正しない。
+      - 1 株配当: 分割の権利落ち日が配当の権利落ち日以降のもの（同日なら配当の基準日の
+        株主は分割前の株数なので補正する）。
+
     Args:
         conn:        DuckDB 接続。prices_daily / raw_financials / dividends テーブルを参照。
         target_date: 計算基準日。
@@ -276,16 +288,41 @@ def calc_value(
           "pbr": float|None, "div_yield": float|None}, ...] のリスト。
     """
     rows = conn.execute(
-        """
-        WITH latest_fin AS (
+        f"""
+        WITH split_events AS (
+            -- target_date 以前の株式分割・併合（係数の対数。積を EXP(SUM()) で出す）
+            SELECT code, date,
+                   -- 効力発生日 ≒ 権利落ち日の 2 営業日後（木・金の権利落ちは週末をまたぐ）
+                   date + CASE WHEN isodow(date) IN (4, 5) THEN 4 ELSE 2 END AS effective_date,
+                   LN({SNAPPED_FACTOR_EXPR}) AS log_f
+            FROM raw_prices
+            WHERE date <= ? AND {NONTRIVIAL_FACTOR_PRED}
+        ),
+        fin_split AS (
+            -- 決算発表日より後に効力が生じた分割の倍率（EPS・BPS を当日の株価と同じ基準に
+            -- そろえる。#441）
+            SELECT f.code, f.report_date, EXP(SUM(s.log_f)) AS mult
+            FROM (SELECT DISTINCT code, report_date FROM raw_financials
+                  WHERE report_date <= ?) f
+            JOIN split_events s ON s.code = f.code AND s.effective_date > f.report_date
+            GROUP BY f.code, f.report_date
+        ),
+        fin_adj AS (
+            SELECT r.code, r.report_date, r.fetched_at, r.period_type, r.roe,
+                   r.eps * COALESCE(m.mult, 1.0) AS eps,
+                   r.bps * COALESCE(m.mult, 1.0) AS bps
+            FROM raw_financials r
+            LEFT JOIN fin_split m ON m.code = r.code AND m.report_date = r.report_date
+            WHERE r.report_date <= ?
+        ),
+        latest_fin AS (
             SELECT code, eps, roe, bps
             FROM (
                 SELECT code, eps, roe, bps,
                        ROW_NUMBER() OVER (
                            PARTITION BY code ORDER BY report_date DESC, fetched_at DESC
                        ) AS rn
-                FROM raw_financials
-                WHERE report_date <= ?
+                FROM fin_adj
             ) t
             WHERE rn = 1
         ),
@@ -296,8 +333,8 @@ def calc_value(
                        WHEN 'Q4' THEN 'FY' WHEN '4Q' THEN 'FY'
                        ELSE upper(trim(period_type))
                    END AS ptype
-            FROM raw_financials
-            WHERE report_date <= ? AND eps IS NOT NULL
+            FROM fin_adj
+            WHERE eps IS NOT NULL
         ),
         latest_any AS (
             SELECT code, report_date, ptype, eps FROM (
@@ -352,12 +389,24 @@ def calc_value(
             LEFT JOIN raw_prices r ON r.date = p.date AND r.code = p.code
             WHERE p.date = (SELECT MAX(date) FROM prices_daily WHERE date <= ?)
         ),
-        annual_div AS (
-            SELECT code, SUM(div_rate) AS annual_div
+        div_in_window AS (
+            SELECT code, ex_date, div_rate
             FROM dividends
             WHERE code IN (SELECT code FROM price_on_date)
               AND ex_date BETWEEN (CAST(? AS DATE) - INTERVAL 1 YEAR) AND ?
-            GROUP BY code
+        ),
+        div_split AS (
+            -- 配当の権利落ち日以降の分割倍率（1 株配当を当日の株価と同じ基準にそろえる。#441）
+            SELECT d.code, d.ex_date, EXP(SUM(s.log_f)) AS mult
+            FROM (SELECT DISTINCT code, ex_date FROM div_in_window) d
+            JOIN split_events s ON s.code = d.code AND s.date >= d.ex_date
+            GROUP BY d.code, d.ex_date
+        ),
+        annual_div AS (
+            SELECT d.code, SUM(d.div_rate * COALESCE(m.mult, 1.0)) AS annual_div
+            FROM div_in_window d
+            LEFT JOIN div_split m ON m.code = d.code AND m.ex_date = d.ex_date
+            GROUP BY d.code
         )
         SELECT
             ? AS date,
@@ -375,7 +424,7 @@ def calc_value(
         LEFT JOIN annual_div d ON p.code = d.code
         ORDER BY p.code
         """,
-        [target_date] * 9,
+        [target_date] * 10,
     ).fetchall()
 
     cols = ["date", "code", "per", "roe", "pbr", "div_yield"]

@@ -1,0 +1,12 @@
+{
+  "job_name": "portfolio_construction_job",
+  "status": "success",
+  "started_at": "2026-11-15T06:16:11.398677+00:00",
+  "finished_at": "2026-11-15T06:16:11.417443+00:00",
+  "duration_sec": 0.018766,
+  "updated_rows": {
+    "signal_queue": 0
+  },
+  "warnings": [],
+  "errors": []
+}
