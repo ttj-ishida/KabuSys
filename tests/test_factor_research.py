@@ -537,6 +537,25 @@ class TestCalcValueSplitAdjustment:
         )
         assert _value_row(db, "5010", date(2024, 6, 3))["div_yield"] == pytest.approx(4.0)
 
+    def test_reverse_split_after_report_raises_eps(self, db):
+        """決算後の株式併合（係数 > 1）でも PER・配当利回りが途切れない。"""
+        _insert_financials(db, [("5011", date(2024, 5, 10), "FY", 0, 0, 0, 10.0, 0.1)])
+        db.execute(
+            "INSERT INTO dividends (code, pub_date, ref_no, ex_date, div_rate) "
+            "VALUES ('5011', DATE '2024-02-01', 'r1', DATE '2024-03-27', 4.0)"
+        )
+        _insert_raw_prices(
+            db,
+            "5011",
+            [(date(2024, 6, 3), 200.0, 1.0), (date(2024, 6, 4), 2000.0, 10.0)],  # 10:1 併合
+        )
+        before = _value_row(db, "5011", date(2024, 6, 3))
+        after = _value_row(db, "5011", date(2024, 6, 4))
+        assert before["per"] == pytest.approx(20.0)
+        assert after["per"] == pytest.approx(20.0)
+        assert before["div_yield"] == pytest.approx(2.0)
+        assert after["div_yield"] == pytest.approx(2.0)
+
     def test_multiple_splits_are_compounded(self, db):
         """決算後に複数回分割した場合は係数の積で補正する。"""
         _insert_financials(db, [("5004", date(2024, 5, 10), "FY", 0, 0, 0, 600.0, 0.1)])

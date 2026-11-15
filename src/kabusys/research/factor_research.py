@@ -292,7 +292,8 @@ def calc_value(
         WITH split_events AS (
             -- target_date 以前の株式分割・併合（係数の対数。積を EXP(SUM()) で出す）
             SELECT code, date,
-                   -- 効力発生日 ≒ 権利落ち日の 2 営業日後（木・金の権利落ちは週末をまたぐ）
+                   -- 効力発生日 ≒ 権利落ち日の 2 営業日後（木・金の権利落ちは週末をまたぐ）。
+                   -- 祝日は考慮しない近似のため、祝日をまたぐと 1 日ずれることがある
                    date + CASE WHEN EXTRACT(ISODOW FROM date) IN (4, 5) THEN 4 ELSE 2 END AS effective_date,
                    LN({SNAPPED_FACTOR_EXPR}) AS log_f
             FROM raw_prices
